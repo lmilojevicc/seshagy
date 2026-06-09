@@ -354,6 +354,7 @@ func (m Model) renderPreviewPane(width, height int) string {
 func (m Model) renderFooter() string {
 	s := m.styles
 	var input string
+	inputStyle := s.muted
 	switch m.inputMode {
 	case modeSearch:
 		input = m.searchInput.View()
@@ -364,11 +365,7 @@ func (m Model) renderFooter() string {
 		if input == "" {
 			input = "ready"
 		}
-		if m.err != nil {
-			input = s.danger.Render(input)
-		} else {
-			input = s.muted.Render(input)
-		}
+		inputStyle = footerStatusStyle(s, input, m.err != nil)
 	}
 	statusLeft := []string{}
 	if sessionmgr.InTmux() {
@@ -403,9 +400,34 @@ func (m Model) renderFooter() string {
 	// the terminal width to avoid terminal auto-wrap at the right edge.
 	footerW := max(1, m.width-1)
 	contentW := max(1, footerW-2)
-	line1 := composeLine(left, input, contentW, s.muted)
+	line1 := composeLine(left, input, contentW, inputStyle)
 	line2 := clampText(help, contentW)
 	return s.status.Width(footerW).Render(line1 + "\n" + line2)
+}
+
+func footerStatusStyle(s styles, status string, hasError bool) lipgloss.Style {
+	if hasError {
+		return s.danger
+	}
+	if isWarningStatus(status) {
+		return s.warning
+	}
+	return s.muted
+}
+
+func isWarningStatus(status string) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "no integrations selected",
+		"hook installation skipped",
+		"rename cancelled",
+		"yazi closed without a directory",
+		"nothing selected",
+		"delete only applies to sessions and agents",
+		"rename only applies to sessions":
+		return true
+	default:
+		return false
+	}
 }
 
 func titleForMode(mode sessionmgr.SourceMode) string {

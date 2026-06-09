@@ -69,6 +69,42 @@ func TestFooterKeepsStatusOnOneLine(t *testing.T) {
 	}
 }
 
+func TestFooterWarningStatusesUseWarningStyle(t *testing.T) {
+	s := defaultStyles()
+	warnings := []string{
+		"no integrations selected",
+		"hook installation skipped",
+		"rename cancelled",
+		"yazi closed without a directory",
+		"nothing selected",
+		"delete only applies to sessions and agents",
+		"rename only applies to sessions",
+	}
+	for _, status := range warnings {
+		style := footerStatusStyle(s, status, false)
+		if style.GetForeground() != s.warning.GetForeground() || !style.GetBold() {
+			t.Fatalf("footerStatusStyle(%q) = foreground %v bold %v, want warning foreground %v bold true", status, style.GetForeground(), style.GetBold(), s.warning.GetForeground())
+		}
+		m := New()
+		m.width = 80
+		m.status = status
+		m.showHelp = false
+		if clean := sessionmgr.StripANSI(m.renderFooter()); !strings.Contains(strings.Split(clean, "\n")[0], status) {
+			t.Fatalf("footer did not render warning status %q on first line:\n%s", status, clean)
+		}
+	}
+}
+
+func TestFooterStatusStylesKeepErrorsRedAndNormalMuted(t *testing.T) {
+	s := defaultStyles()
+	if style := footerStatusStyle(s, "loaded 1171 items", false); style.GetForeground() != s.muted.GetForeground() || style.GetBold() != s.muted.GetBold() {
+		t.Fatalf("normal status style = foreground %v bold %v, want muted foreground %v bold %v", style.GetForeground(), style.GetBold(), s.muted.GetForeground(), s.muted.GetBold())
+	}
+	if style := footerStatusStyle(s, "nothing selected", true); style.GetForeground() != s.danger.GetForeground() || style.GetBold() != s.danger.GetBold() {
+		t.Fatalf("error status style = foreground %v bold %v, want danger foreground %v bold %v", style.GetForeground(), style.GetBold(), s.danger.GetForeground(), s.danger.GetBold())
+	}
+}
+
 func TestDefaultStylesUseTerminalPalette(t *testing.T) {
 	s := defaultStyles()
 	if _, ok := s.app.GetForeground().(lipgloss.NoColor); !ok {
