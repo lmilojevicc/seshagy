@@ -32,6 +32,10 @@ type styles struct {
 	muted       lipgloss.Style
 	emphasis    lipgloss.Style
 	key         lipgloss.Style
+	iconSession lipgloss.Style
+	iconZoxide  lipgloss.Style
+	iconFD      lipgloss.Style
+	iconAgent   lipgloss.Style
 	selectedBG  lipgloss.Style
 	bar         lipgloss.Style
 	status      lipgloss.Style
@@ -69,6 +73,10 @@ func defaultStyles() styles {
 	s.muted = lipgloss.NewStyle().Foreground(p.muted)
 	s.emphasis = lipgloss.NewStyle().Foreground(p.mauve).Bold(true)
 	s.key = lipgloss.NewStyle().Foreground(p.peach).Bold(true)
+	s.iconSession = lipgloss.NewStyle().Foreground(p.green).Bold(true)
+	s.iconZoxide = lipgloss.NewStyle().Foreground(p.sky).Bold(true)
+	s.iconFD = lipgloss.NewStyle().Foreground(p.peach).Bold(true)
+	s.iconAgent = lipgloss.NewStyle().Foreground(p.mauve).Bold(true)
 	s.selectedBG = lipgloss.NewStyle().Background(p.selected)
 	s.bar = lipgloss.NewStyle().Foreground(p.mauve)
 	s.status = lipgloss.NewStyle().Foreground(p.fg).Background(p.bgAlt).Padding(0, 1)

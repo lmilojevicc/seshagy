@@ -8,7 +8,7 @@ import (
 func FormatLine(i Item) string {
 	switch i.Kind {
 	case KindSession:
-		return fmt.Sprintf("%s %s", IconSession, i.Name)
+		return fmt.Sprintf("%s %s", colorIcon(KindSession), i.Name)
 	case KindAgent:
 		suffix := ""
 		if i.AgentMessage != "" {
@@ -18,14 +18,64 @@ func FormatLine(i Item) string {
 		} else if i.AgentUpdated != "" {
 			suffix = " — updated " + i.AgentUpdated
 		}
-		return fmt.Sprintf("%s [%s]\t%s\t%s\t%s%s", IconAgent, agentStateLabel(i.AgentState), i.AgentName, i.Location, i.Path, suffix)
+		return fmt.Sprintf("%s [%s]\t%s\t%s\t%s%s", colorIcon(KindAgent), agentStateLabel(i.AgentState), i.AgentName, i.Location, i.Path, suffix)
 	case KindZoxide:
-		return fmt.Sprintf("%s %s", IconZoxide, i.Path)
+		return fmt.Sprintf("%s %s", colorIcon(KindZoxide), i.Path)
 	case KindFD:
-		return fmt.Sprintf("%s %s", IconFD, i.Path)
+		return fmt.Sprintf("%s %s", colorIcon(KindFD), i.Path)
 	default:
 		return i.DisplayName()
 	}
+}
+
+func colorIcon(kind Kind) string {
+	icon, hex := iconAndColor(kind)
+	if icon == "" || hex == "" {
+		return icon
+	}
+	r, g, b := hexToRGB(hex)
+	return fmt.Sprintf("\x1b[38;2;%d;%d;%dm%s\x1b[0m", r, g, b, icon)
+}
+
+func iconAndColor(kind Kind) (string, string) {
+	switch kind {
+	case KindSession:
+		return IconSession, "a6e3a1" // Catppuccin Mocha green.
+	case KindZoxide:
+		return IconZoxide, "89dceb" // Sky pairs cleanly with green for jump history.
+	case KindFD:
+		return IconFD, "fab387" // Peach gives fd a warm contrasting source color.
+	case KindAgent:
+		return IconAgent, "cba6f7" // Mauve matches the ccmux/seshagy accent.
+	default:
+		return "", ""
+	}
+}
+
+func hexToRGB(hex string) (int, int, int) {
+	if strings.HasPrefix(hex, "#") {
+		hex = strings.TrimPrefix(hex, "#")
+	}
+	if len(hex) != 6 {
+		return 255, 255, 255
+	}
+	return hexByte(hex[0:2]), hexByte(hex[2:4]), hexByte(hex[4:6])
+}
+
+func hexByte(s string) int {
+	n := 0
+	for _, r := range s {
+		n *= 16
+		switch {
+		case r >= '0' && r <= '9':
+			n += int(r - '0')
+		case r >= 'a' && r <= 'f':
+			n += int(r-'a') + 10
+		case r >= 'A' && r <= 'F':
+			n += int(r-'A') + 10
+		}
+	}
+	return n
 }
 
 func ParseActionLine(raw string) (Item, bool) {

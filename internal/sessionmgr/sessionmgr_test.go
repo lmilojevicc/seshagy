@@ -81,3 +81,17 @@ func TestAgentPaneFromLine(t *testing.T) {
 		t.Fatalf("pane = %q", got)
 	}
 }
+
+func TestFormatLineColorsIconsButKeepsParseableText(t *testing.T) {
+	line := FormatLine(Item{Kind: KindSession, Name: "demo"})
+	if !strings.Contains(line, "\x1b[38;2;166;227;161m"+IconSession+"\x1b[0m") {
+		t.Fatalf("session icon is not Catppuccin green: %q", line)
+	}
+	if clean := StripANSI(line); clean != IconSession+" demo" {
+		t.Fatalf("StripANSI(%q) = %q", line, clean)
+	}
+	item, ok := ParseActionLine(line)
+	if !ok || item.Kind != KindSession || item.Name != "demo" {
+		t.Fatalf("ParseActionLine(%q) = %#v, %v", line, item, ok)
+	}
+}

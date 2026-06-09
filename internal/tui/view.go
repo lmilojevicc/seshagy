@@ -144,7 +144,7 @@ func (m Model) rowParts(item sessionmgr.Item) (string, string) {
 			state = s.success.Render("●")
 		}
 		name := s.tabActive.Render(item.Name)
-		return fmt.Sprintf("%s %s %s", sessionmgr.IconSession, state, name), ago(item.Activity)
+		return fmt.Sprintf("%s %s %s", m.iconFor(item.Kind), state, name), ago(item.Activity)
 	case sessionmgr.KindAgent:
 		state := renderAgentState(s, item.AgentState)
 		message := item.AgentMessage
@@ -158,13 +158,29 @@ func (m Model) rowParts(item sessionmgr.Item) (string, string) {
 		if message != "" {
 			secondary += " · " + message
 		}
-		return fmt.Sprintf("%s %s %s", sessionmgr.IconAgent, state, s.tabActive.Render(item.AgentName)), secondary
+		return fmt.Sprintf("%s %s %s", m.iconFor(item.Kind), state, s.tabActive.Render(item.AgentName)), secondary
 	case sessionmgr.KindZoxide:
-		return fmt.Sprintf("%s %s", sessionmgr.IconZoxide, item.Path), "zoxide"
+		return fmt.Sprintf("%s %s", m.iconFor(item.Kind), item.Path), "zoxide"
 	case sessionmgr.KindFD:
-		return fmt.Sprintf("%s %s", sessionmgr.IconFD, item.Path), "fd"
+		return fmt.Sprintf("%s %s", m.iconFor(item.Kind), item.Path), "fd"
 	default:
 		return item.DisplayName(), ""
+	}
+}
+
+func (m Model) iconFor(kind sessionmgr.Kind) string {
+	s := m.styles
+	switch kind {
+	case sessionmgr.KindSession:
+		return s.iconSession.Render(sessionmgr.IconSession)
+	case sessionmgr.KindZoxide:
+		return s.iconZoxide.Render(sessionmgr.IconZoxide)
+	case sessionmgr.KindFD:
+		return s.iconFD.Render(sessionmgr.IconFD)
+	case sessionmgr.KindAgent:
+		return s.iconAgent.Render(sessionmgr.IconAgent)
+	default:
+		return ""
 	}
 }
 
