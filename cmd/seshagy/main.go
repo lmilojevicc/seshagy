@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lmilojevicc/seshagy/internal/integrations"
 	"github.com/lmilojevicc/seshagy/internal/sessionmgr"
 	"github.com/lmilojevicc/seshagy/internal/tui"
 )
@@ -34,6 +35,8 @@ func run(args []string) error {
 	case "--version", "version":
 		fmt.Println(version)
 		return nil
+	case "integration", "integrations", "hook", "hooks":
+		return runIntegration(args[1:])
 	case "--get-sessions":
 		return printItems(ctx, sessionmgr.ModeSessions)
 	case "--get-agents":
@@ -66,6 +69,46 @@ func run(args []string) error {
 	default:
 		return tui.Run()
 	}
+}
+
+func runIntegration(args []string) error {
+	if len(args) == 0 || args[0] == "status" {
+		for _, rec := range integrations.Scan() {
+			availability := "not found"
+			if rec.AgentAvailable {
+				availability = "found"
+			}
+			state := string(rec.State)
+			if rec.State == integrations.StatusCurrent {
+				state = fmt.Sprintf("current (v%d)", rec.Version)
+			}
+			if !rec.Installable && rec.AgentAvailable {
+				state += "; " + rec.Reason
+			}
+			fmt.Printf("%-18s %-9s %-18s %s\n", rec.Target, availability, state, rec.InstallPath)
+		}
+		return nil
+	}
+	if len(args) != 2 || (args[0] != "install" && args[0] != "uninstall") {
+		return errors.New("usage: seshagy integration status|install <target>|uninstall <target>")
+	}
+	target, err := integrations.ParseTarget(args[1])
+	if err != nil {
+		return err
+	}
+	var messages []string
+	if args[0] == "install" {
+		messages, err = integrations.Install(target)
+	} else {
+		messages, err = integrations.Uninstall(target)
+	}
+	if err != nil {
+		return err
+	}
+	for _, message := range messages {
+		fmt.Println(message)
+	}
+	return nil
 }
 
 func printItems(ctx context.Context, mode sessionmgr.SourceMode) error {
@@ -205,6 +248,9 @@ Usage:
   seshagy --delete-item <line>    kill a rendered session/agent line
   seshagy --report-agent [flags]  set tmux pane @agent_* metadata
   seshagy --release-agent [flags] clear tmux pane @agent_* metadata
+  seshagy integration status      list detected agents and hook status
+  seshagy integration install pi  install one hook/plugin integration
+  seshagy integration uninstall pi
 
 TUI keys:
   enter attach/create/focus   q quit   / filter   r refresh   R rename
@@ -216,5 +262,11 @@ Agent flags:
   --state/--status <state>    working|blocked|aborted|done|idle|unknown
   --message <text>            optional status message; empty clears
   --source <text>             optional owner/source token; empty clears
+
+Hook integrations:
+  Supported targets: pi, claude, codex, copilot, droid, opencode, qodercli, cursor.
+  The TUI asks before installing missing hooks for detected agents. Hooks report
+  state directly with --report-agent; seshagy no longer infers agent state by
+  inspecting foreground process names or pane text.
 `
 }

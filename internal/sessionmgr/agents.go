@@ -14,7 +14,7 @@ const paneSep = "\x1f"
 
 var ansiRE = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 
-const agentFormat = "#{pane_id}" + paneSep + "#{session_name}" + paneSep + "#{window_index}" + paneSep + "#{window_name}" + paneSep + "#{pane_index}" + paneSep + "#{pane_current_command}" + paneSep + "#{pane_current_path}" + paneSep + "#{pane_active}" + paneSep + "#{window_active}" + paneSep + "#{session_attached}" + paneSep + "#{pane_dead}" + paneSep + "#{pane_title}" + paneSep + "#{@agent_name}" + paneSep + "#{@agent_state}" + paneSep + "#{@agent_message}" + paneSep + "#{@agent_updated}" + paneSep + "#{@agent_source}"
+const agentFormat = "#{pane_id}" + paneSep + "#{session_name}" + paneSep + "#{window_index}" + paneSep + "#{pane_index}" + paneSep + "#{pane_current_path}" + paneSep + "#{pane_active}" + paneSep + "#{window_active}" + paneSep + "#{session_attached}" + paneSep + "#{pane_dead}" + paneSep + "#{@agent_name}" + paneSep + "#{@agent_state}" + paneSep + "#{@agent_message}" + paneSep + "#{@agent_updated}" + paneSep + "#{@agent_source}"
 
 func ListAgents(ctx context.Context, sessionFilter string) ([]Item, error) {
 	out, err := tmuxCommand(ctx, "list-panes", "-a", "-F", agentFormat).Output()
@@ -42,31 +42,24 @@ func ParseAgents(raw []byte, sessionFilter string) []Item {
 	var items []Item
 	for _, line := range strings.Split(text, "\n") {
 		parts := strings.Split(line, paneSep)
-		if len(parts) < 17 {
+		if len(parts) < 14 {
 			continue
 		}
-		if parts[10] == "1" {
+		if parts[8] == "1" {
 			continue
 		}
 		if sessionFilter != "" && parts[1] != sessionFilter {
 			continue
 		}
-		name := parts[12]
+		name := parts[9]
 		if name == "" {
-			var ok bool
-			name, ok = DetectAgentName(parts[5], parts[11])
-			if !ok {
-				continue
-			}
+			continue
 		}
-		state := NormalizeAgentState(parts[13])
-		if state == AgentUnknown && parts[13] == "" {
-			state = DetectAgentStateTextFallback(parts[0], name)
-		}
-		message := cleanField(parts[14])
-		source := cleanField(parts[16])
-		path := ContractHome(parts[6])
-		location := fmt.Sprintf("%s:%s.%s", parts[1], parts[2], parts[4])
+		state := NormalizeAgentState(parts[10])
+		message := cleanField(parts[11])
+		source := cleanField(parts[13])
+		path := ContractHome(parts[4])
+		location := fmt.Sprintf("%s:%s.%s", parts[1], parts[2], parts[3])
 		items = append(items, Item{
 			Kind:         KindAgent,
 			Name:         name,
@@ -74,69 +67,18 @@ func ParseAgents(raw []byte, sessionFilter string) []Item {
 			PaneID:       parts[0],
 			Session:      parts[1],
 			Window:       parts[2],
-			Pane:         parts[4],
+			Pane:         parts[3],
 			Path:         path,
 			Location:     location,
 			AgentName:    name,
 			AgentState:   state,
 			AgentMessage: message,
-			AgentUpdated: cleanField(parts[15]),
+			AgentUpdated: cleanField(parts[12]),
 			AgentSource:  source,
-			Visible:      parts[7] == "1" && parts[8] == "1" && parts[9] != "0",
+			Visible:      parts[5] == "1" && parts[6] == "1" && parts[7] != "0",
 		})
 	}
 	return items
-}
-
-func DetectAgentName(command, title string) (string, bool) {
-	command = strings.ToLower(command)
-	titleLower := strings.ToLower(title)
-	base := command
-	if i := strings.LastIndex(base, "/"); i >= 0 {
-		base = base[i+1:]
-	}
-	for _, suffix := range []string{".exe", ".cmd", ".bat", ".ps1", ".js"} {
-		base = strings.TrimSuffix(base, suffix)
-	}
-	nonShell := !isShellCommand(base)
-	switch {
-	case base == "pi" || strings.HasPrefix(title, "π") && nonShell:
-		return "pi", true
-	case base == "claude" || base == "claude-code" || strings.Contains(titleLower, "claude code") && nonShell:
-		return "claude", true
-	case base == "opencode" || base == "open-code" || strings.Contains(titleLower, "opencode") && nonShell:
-		return "opencode", true
-	case base == "codex" || strings.HasPrefix(base, "codex-") || nonShell && (titleLower == "codex" || strings.HasPrefix(titleLower, "codex - ")):
-		return "codex", true
-	case base == "droid" || strings.HasPrefix(base, "droid-") || nonShell && (titleLower == "droid" || strings.HasPrefix(titleLower, "droid - ")):
-		return "droid", true
-	case base == "gemini" || nonShell && (titleLower == "gemini" || strings.HasPrefix(titleLower, "gemini - ")):
-		return "gemini", true
-	case base == "cursor" || base == "cursor-agent" || strings.Contains(titleLower, "cursor") && nonShell:
-		return "cursor", true
-	case base == "agy" || base == "antigravity" || base == "antigravity-cli":
-		return "agy", true
-	case base == "cline":
-		return "cline", true
-	case base == "copilot" || base == "github-copilot" || base == "ghcs":
-		return "copilot", true
-	case base == "kimi" || base == "kimi-code":
-		return "kimi", true
-	case base == "kiro" || base == "kiro-cli":
-		return "kiro", true
-	case base == "amp" || base == "amp-local":
-		return "amp", true
-	case base == "grok" || base == "grok-build":
-		return "grok", true
-	case base == "hermes" || base == "hermes-agent":
-		return "hermes", true
-	case base == "kilo" || base == "kilo-code":
-		return "kilo", true
-	case base == "qodercli" || base == "qoderclicn" || base == "qoder" || base == "qodercn":
-		return "qodercli", true
-	default:
-		return "", false
-	}
 }
 
 func NormalizeAgentState(state string) AgentState {
@@ -221,41 +163,6 @@ func MarkAgentSeen(ctx context.Context, pane string) {
 	_ = setPaneOption(ctx, pane, "@agent_last_seen", fmt.Sprintf("%d", time.Now().Unix()))
 }
 
-func DetectAgentStateTextFallback(pane, _ string) AgentState {
-	if os.Getenv("TMUX_SESSION_MANAGER_AGENT_TEXT_FALLBACK") != "1" || pane == "" {
-		return AgentUnknown
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
-	defer cancel()
-	out, err := tmuxCommand(ctx, "capture-pane", "-p", "-S", "-80", "-t", pane).Output()
-	if err != nil {
-		return AgentUnknown
-	}
-	capture := strings.ToLower(string(out))
-	lines := strings.Split(capture, "\n")
-	if len(lines) > 20 {
-		lines = lines[len(lines)-20:]
-	}
-	recent := strings.Join(lines, "\n")
-	checks := []struct {
-		re *regexp.Regexp
-		st AgentState
-	}{
-		{regexp.MustCompile(`(?i)(^|[\s[:punct:]])(aborted by user|operation aborted|request aborted|cancelled by user|canceled by user|interrupted by user)([\s[:punct:]]|$)|^[\s[:punct:]]*(aborted|cancelled|canceled|interrupted)[\s[:punct:]]*$`), AgentAborted},
-		{regexp.MustCompile(`(?im)^[^[:alnum:]]*(working|thinking|processing|running|busy)([\s.……-]*|$)`), AgentWorking},
-		{regexp.MustCompile(`(?i)permission (requested|required|needed|asked)|waiting for (confirmation|input|permission)|confirm(ation)? (required|needed|requested)|question (asked|pending)|^[\s[:punct:]]*(blocked|waiting for input|waiting for confirmation)[\s[:punct:]]*$`), AgentBlocked},
-	}
-	for _, check := range checks {
-		if check.re.MatchString(recent) {
-			return check.st
-		}
-	}
-	if strings.TrimSpace(capture) != "" {
-		return AgentIdle
-	}
-	return AgentUnknown
-}
-
 func FocusAgentCommand(pane string) *exec.Cmd {
 	// Keep the whole focus flow in one foreground process so Bubble Tea can suspend once.
 	script := `set -e
@@ -324,14 +231,7 @@ func ReportAgent(ctx context.Context, opts AgentReport) error {
 		name, _ = showPaneOption(ctx, pane, "@agent_name")
 	}
 	if name == "" {
-		cmdRaw, _ := displayPane(ctx, pane, "#{pane_current_command}")
-		title, _ := displayPane(ctx, pane, "#{pane_title}")
-		if detected, ok := DetectAgentName(cmdRaw, title); ok {
-			name = detected
-		}
-	}
-	if name == "" {
-		return fmt.Errorf("--agent/--name is required when the pane is not recognizable")
+		return fmt.Errorf("--agent/--name is required for hook-based agent reporting")
 	}
 	state := opts.State
 	if state == "" {
@@ -416,15 +316,6 @@ func paneVisibleNow(ctx context.Context, pane string) bool {
 	}
 	parts := strings.Fields(out)
 	return len(parts) >= 3 && parts[0] == "1" && parts[1] == "1" && parts[2] != "0"
-}
-
-func isShellCommand(command string) bool {
-	switch command {
-	case "", "sh", "bash", "zsh", "fish", "tmux":
-		return true
-	default:
-		return false
-	}
 }
 
 func cleanField(s string) string {

@@ -34,26 +34,6 @@ func TestParseSessions(t *testing.T) {
 	}
 }
 
-func TestDetectAgentName(t *testing.T) {
-	tests := []struct{ cmd, title, want string }{
-		{"pi", "π seshagy", "pi"},
-		{"claude", "", "claude"},
-		{"zsh", "Claude Code", ""},
-		{"codex", "", "codex"},
-		{"cursor-agent", "", "cursor"},
-		{"antigravity-cli", "", "agy"},
-	}
-	for _, tt := range tests {
-		got, ok := DetectAgentName(tt.cmd, tt.title)
-		if tt.want == "" && ok {
-			t.Fatalf("DetectAgentName(%q,%q) = %q, true; want false", tt.cmd, tt.title, got)
-		}
-		if tt.want != "" && (!ok || got != tt.want) {
-			t.Fatalf("DetectAgentName(%q,%q) = %q,%v; want %q,true", tt.cmd, tt.title, got, ok, tt.want)
-		}
-	}
-}
-
 func TestNormalizeAgentState(t *testing.T) {
 	tests := map[string]AgentState{"busy": AgentWorking, "permission": AgentBlocked, "cancelled": AgentAborted, "finished": AgentDone, "ready": AgentIdle, "weird": AgentUnknown}
 	for in, want := range tests {
@@ -64,7 +44,7 @@ func TestNormalizeAgentState(t *testing.T) {
 }
 
 func TestParseAgentsSkipsNonAgentsAndFormatsLocation(t *testing.T) {
-	fields := []string{"%3", "work", "1", "editor", "0", "claude", "/Users/milo/Projects/seshagy", "1", "1", "1", "0", "", "", "busy", "needs ok", "123", "hook"}
+	fields := []string{"%3", "work", "1", "0", "/Users/milo/Projects/seshagy", "1", "1", "1", "0", "claude", "busy", "needs ok", "123", "hook"}
 	raw := []byte(strings.Join(fields, paneSep) + "\n")
 	got := ParseAgents(raw, "")
 	if len(got) != 1 {
@@ -72,6 +52,14 @@ func TestParseAgentsSkipsNonAgentsAndFormatsLocation(t *testing.T) {
 	}
 	if got[0].AgentName != "claude" || got[0].AgentState != AgentWorking || got[0].Location != "work:1.0" || got[0].AgentMessage != "needs ok" {
 		t.Fatalf("unexpected agent: %#v", got[0])
+	}
+}
+
+func TestParseAgentsRequiresHookReportedAgentName(t *testing.T) {
+	fields := []string{"%3", "work", "1", "0", "/Users/milo/Projects/seshagy", "1", "1", "1", "0", "", "busy", "needs ok", "123", "hook"}
+	raw := []byte(strings.Join(fields, paneSep) + "\n")
+	if got := ParseAgents(raw, ""); len(got) != 0 {
+		t.Fatalf("expected unreported pane to be ignored, got %#v", got)
 	}
 }
 

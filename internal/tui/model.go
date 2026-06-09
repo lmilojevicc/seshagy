@@ -13,6 +13,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/lmilojevicc/seshagy/internal/integrations"
 	"github.com/lmilojevicc/seshagy/internal/sessionmgr"
 )
 
@@ -47,6 +48,12 @@ type Model struct {
 	loading     bool
 	status      string
 	err         error
+
+	integrationPrompt   bool
+	integrationRows     []integrations.Recommendation
+	integrationSelected map[integrations.Target]bool
+	integrationCursor   int
+	integrationMessages []string
 }
 
 type refreshMsg struct {
@@ -79,6 +86,16 @@ type yaziDoneMsg struct {
 
 type tickMsg time.Time
 
+type integrationsMsg struct {
+	recs []integrations.Recommendation
+	err  error
+}
+
+type integrationsInstalledMsg struct {
+	messages []string
+	err      error
+}
+
 func New() Model {
 	search := textinput.New()
 	search.Placeholder = "filter sessions, agents, directories"
@@ -89,12 +106,13 @@ func New() Model {
 	rename.Prompt = "rename > "
 	rename.CharLimit = 128
 	return Model{
-		styles:      defaultStyles(),
-		source:      sessionmgr.ModeAll,
-		showPreview: true,
-		showHelp:    true,
-		searchInput: search,
-		renameInput: rename,
+		styles:              defaultStyles(),
+		source:              sessionmgr.ModeAll,
+		showPreview:         true,
+		showHelp:            true,
+		searchInput:         search,
+		renameInput:         rename,
+		integrationSelected: map[integrations.Target]bool{},
 	}
 }
 
@@ -106,7 +124,7 @@ func Run() error {
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(refreshCmd(m.source), tickCmd())
+	return tea.Batch(refreshCmd(m.source), integrationsCmd(), tickCmd())
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -119,6 +137,42 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.previewForSelection()
 	case tickMsg:
 		return m, tea.Batch(refreshCmd(m.source), tickCmd())
+	case integrationsMsg:
+		if msg.err != nil {
+			m.status = msg.err.Error()
+			return m, nil
+		}
+		m.integrationRows = msg.recs
+		m.integrationSelected = map[integrations.Target]bool{}
+		for _, rec := range msg.recs {
+			m.integrationSelected[rec.Target] = rec.AgentAvailable && rec.Installable && rec.State != integrations.StatusCurrent
+		}
+		if m.integrationCursor >= len(m.integrationRows) {
+			m.integrationCursor = max(0, len(m.integrationRows)-1)
+		}
+		if len(msg.recs) > 0 {
+			m.integrationPrompt = true
+			m.status = "install hook integrations for detected agents"
+		} else if m.integrationPrompt {
+			m.integrationPrompt = false
+			m.status = "no missing hook integrations for detected agents"
+		}
+		return m, nil
+	case integrationsInstalledMsg:
+		m.integrationMessages = msg.messages
+		if msg.err != nil {
+			m.err = msg.err
+			m.status = msg.err.Error()
+			return m, integrationsCmd()
+		}
+		m.err = nil
+		if len(msg.messages) == 0 {
+			m.status = "no integrations selected"
+		} else {
+			m.status = strings.Join(msg.messages, " · ")
+		}
+		m.integrationPrompt = false
+		return m, tea.Batch(integrationsCmd(), refreshCmd(m.source))
 	case refreshMsg:
 		m.loading = false
 		if msg.err != nil {
@@ -183,6 +237,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, createSessionCmd(msg.path)
 	case tea.KeyMsg:
+		if m.integrationPrompt {
+			return m.handleIntegrationKey(msg)
+		}
 		return m.handleKey(msg)
 	}
 	return m, nil
@@ -287,6 +344,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "p", "alt+p":
 		m.showPreview = !m.showPreview
 		return m, m.previewForSelection()
+	case "i":
+		m.integrationPrompt = true
+		m.status = "scanning hook integrations"
+		return m, integrationsCmd()
 	case "?", "h", "alt+h":
 		m.showHelp = !m.showHelp
 		return m, nil
@@ -304,6 +365,49 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.switchSource(sessionmgr.ModeFD)
 	case "y", "ctrl+y":
 		return m.startYazi()
+	}
+	return m, nil
+}
+
+func (m Model) handleIntegrationKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "ctrl+c", "q":
+		return m, tea.Quit
+	case "esc", "s":
+		m.integrationPrompt = false
+		m.status = "hook installation skipped"
+		return m, nil
+	case "up", "k":
+		if m.integrationCursor > 0 {
+			m.integrationCursor--
+		}
+		return m, nil
+	case "down", "j":
+		if m.integrationCursor < len(m.integrationRows)-1 {
+			m.integrationCursor++
+		}
+		return m, nil
+	case " ":
+		if len(m.integrationRows) == 0 {
+			return m, nil
+		}
+		rec := m.integrationRows[m.integrationCursor]
+		if rec.AgentAvailable && rec.Installable && rec.State != integrations.StatusCurrent {
+			m.integrationSelected[rec.Target] = !m.integrationSelected[rec.Target]
+		}
+		return m, nil
+	case "enter":
+		var targets []integrations.Target
+		for _, rec := range m.integrationRows {
+			if m.integrationSelected[rec.Target] {
+				targets = append(targets, rec.Target)
+			}
+		}
+		m.status = "installing selected hook integrations"
+		return m, installIntegrationsCmd(targets)
+	case "r":
+		m.status = "rescanning hook integrations"
+		return m, integrationsCmd()
 	}
 	return m, nil
 }
@@ -452,6 +556,26 @@ func refreshCmd(source sessionmgr.SourceMode) tea.Cmd {
 		defer cancel()
 		items, err := sessionmgr.Load(ctx, source)
 		return refreshMsg{items: items, err: err}
+	}
+}
+
+func integrationsCmd() tea.Cmd {
+	return func() tea.Msg {
+		return integrationsMsg{recs: integrations.RecommendedForPrompt()}
+	}
+}
+
+func installIntegrationsCmd(targets []integrations.Target) tea.Cmd {
+	return func() tea.Msg {
+		var messages []string
+		for _, target := range targets {
+			installed, err := integrations.Install(target)
+			if err != nil {
+				return integrationsInstalledMsg{messages: messages, err: err}
+			}
+			messages = append(messages, installed...)
+		}
+		return integrationsInstalledMsg{messages: messages}
 	}
 }
 

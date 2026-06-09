@@ -7,6 +7,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/lmilojevicc/seshagy/internal/integrations"
 	"github.com/lmilojevicc/seshagy/internal/sessionmgr"
 )
 
@@ -16,6 +17,9 @@ func (m Model) View() string {
 	}
 	s := m.styles
 	availableH := max(8, m.height)
+	if m.integrationPrompt {
+		return s.app.Width(m.width).Height(availableH).Render(m.renderIntegrationPrompt(availableH))
+	}
 	header := m.renderTabs()
 	footer := m.renderFooter()
 	bodyH := availableH - lipgloss.Height(header) - lipgloss.Height(footer)
@@ -53,6 +57,69 @@ func (m Model) renderTabs() string {
 		parts = append(parts, s.muted.Render("· "+cwd))
 	}
 	return lipgloss.NewStyle().Padding(0, 1).Render(strings.Join(parts, "  "))
+}
+
+func (m Model) renderIntegrationPrompt(height int) string {
+	s := m.styles
+	width := max(40, m.width-4)
+	innerW := max(36, width-4)
+	innerH := max(8, height-6)
+	lines := []string{
+		s.title.Render("Install agent state hooks?"),
+		s.muted.Render("seshagy now uses hook/plugin reports for agent state instead of pane text or process inspection."),
+		s.muted.Render("Toggle the detected integrations you want to install, then press enter."),
+		"",
+	}
+	if len(m.integrationRows) == 0 {
+		lines = append(lines, s.muted.Render("No missing hook integrations found for installed agents."))
+	} else {
+		for i, rec := range m.integrationRows {
+			lines = append(lines, m.renderIntegrationRow(rec, i == m.integrationCursor, innerW))
+		}
+	}
+	if len(m.integrationMessages) > 0 {
+		lines = append(lines, "")
+		for _, message := range m.integrationMessages {
+			lines = append(lines, s.muted.Render(clampText(message, innerW)))
+		}
+	}
+	lines = append(lines, "", clampText(strings.Join([]string{
+		s.key.Render("space") + " toggle",
+		s.key.Render("enter") + " install selected",
+		s.key.Render("s/esc") + " skip",
+		s.key.Render("r") + " rescan",
+		s.key.Render("q") + " quit",
+	}, s.muted.Render(" · ")), innerW))
+	content := trimHeight(strings.Join(lines, "\n"), innerH)
+	box := s.paneFocus.Width(width - 2).Height(innerH).Render(content)
+	return lipgloss.Place(m.width, height, lipgloss.Center, lipgloss.Center, box)
+}
+
+func (m Model) renderIntegrationRow(rec integrations.Recommendation, selected bool, width int) string {
+	s := m.styles
+	prefix := "  "
+	if selected {
+		prefix = s.bar.Render("▌") + " "
+	}
+	box := "[ ]"
+	if m.integrationSelected[rec.Target] {
+		box = s.success.Render("[x]")
+	}
+	if !rec.AgentAvailable || !rec.Installable || rec.State == integrations.StatusCurrent {
+		box = s.muted.Render("[-]")
+	}
+	state := string(rec.State)
+	if rec.State == integrations.StatusCurrent {
+		state = "current"
+	} else if rec.Reason != "" {
+		state = rec.Reason
+	}
+	left := fmt.Sprintf("%s %-18s", box, rec.Label)
+	line := prefix + composeLine(left, state, max(1, width-2), s.muted)
+	if selected {
+		line = s.selectedBG.Render(pad(line, width))
+	}
+	return line
 }
 
 func (m Model) renderBody(height int) string {
@@ -325,6 +392,7 @@ func (m Model) renderFooter() string {
 			s.key.Render("R") + " rename",
 			s.key.Render("x") + " kill",
 			s.key.Render("y") + " yazi",
+			s.key.Render("i") + " hooks",
 			s.key.Render("p") + " preview",
 		}, s.muted.Render(" · "))
 	} else {
