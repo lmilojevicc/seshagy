@@ -6,6 +6,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/lmilojevicc/seshagy/internal/integrations"
 	"github.com/lmilojevicc/seshagy/internal/sessionmgr"
@@ -39,6 +40,37 @@ func TestFilterVisibleItems(t *testing.T) {
 	got := m.visibleItems()
 	if len(got) != 2 {
 		t.Fatalf("len = %d, want 2: %#v", len(got), got)
+	}
+}
+
+func TestDefaultStylesUseTerminalPalette(t *testing.T) {
+	s := defaultStyles()
+	if _, ok := s.app.GetForeground().(lipgloss.NoColor); !ok {
+		t.Fatalf("app foreground should use terminal default, got %T", s.app.GetForeground())
+	}
+	if _, ok := s.app.GetBackground().(lipgloss.NoColor); !ok {
+		t.Fatalf("app background should use terminal default, got %T", s.app.GetBackground())
+	}
+	if _, ok := s.status.GetBackground().(lipgloss.NoColor); !ok {
+		t.Fatalf("status background should use terminal default, got %T", s.status.GetBackground())
+	}
+	if !s.selectedBG.GetReverse() {
+		t.Fatal("selected rows should use reverse video so selection follows terminal colors")
+	}
+
+	for name, color := range map[string]lipgloss.TerminalColor{
+		"session": s.p.green,
+		"zoxide":  s.p.sky,
+		"fd":      s.p.peach,
+		"agent":   s.p.mauve,
+	} {
+		value, ok := color.(lipgloss.Color)
+		if !ok {
+			t.Fatalf("%s icon color should come from ANSI terminal palette, got %T", name, color)
+		}
+		if strings.HasPrefix(string(value), "#") {
+			t.Fatalf("%s icon color should not be fixed truecolor: %s", name, value)
+		}
 	}
 }
 

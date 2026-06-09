@@ -29,53 +29,26 @@ func FormatLine(i Item) string {
 }
 
 func colorIcon(kind Kind) string {
-	icon, hex := iconAndColor(kind)
-	if icon == "" || hex == "" {
+	icon, sgr := iconAndColor(kind)
+	if icon == "" || sgr == "" {
 		return icon
 	}
-	r, g, b := hexToRGB(hex)
-	return fmt.Sprintf("\x1b[38;2;%d;%d;%dm%s\x1b[0m", r, g, b, icon)
+	return fmt.Sprintf("\x1b[%sm%s\x1b[0m", sgr, icon)
 }
 
 func iconAndColor(kind Kind) (string, string) {
 	switch kind {
 	case KindSession:
-		return IconSession, "a6e3a1" // Catppuccin Mocha green.
+		return IconSession, "92" // Bright green from the user's terminal palette.
 	case KindZoxide:
-		return IconZoxide, "89dceb" // Sky pairs cleanly with green for jump history.
+		return IconZoxide, "96" // Bright cyan pairs cleanly with green for jump history.
 	case KindFD:
-		return IconFD, "fab387" // Peach gives fd a warm contrasting source color.
+		return IconFD, "93" // Bright yellow gives fd a warm contrasting source color.
 	case KindAgent:
-		return IconAgent, "cba6f7" // Mauve matches the ccmux/seshagy accent.
+		return IconAgent, "95" // Bright magenta matches the ccmux/seshagy accent.
 	default:
 		return "", ""
 	}
-}
-
-func hexToRGB(hex string) (int, int, int) {
-	if strings.HasPrefix(hex, "#") {
-		hex = strings.TrimPrefix(hex, "#")
-	}
-	if len(hex) != 6 {
-		return 255, 255, 255
-	}
-	return hexByte(hex[0:2]), hexByte(hex[2:4]), hexByte(hex[4:6])
-}
-
-func hexByte(s string) int {
-	n := 0
-	for _, r := range s {
-		n *= 16
-		switch {
-		case r >= '0' && r <= '9':
-			n += int(r - '0')
-		case r >= 'a' && r <= 'f':
-			n += int(r-'a') + 10
-		case r >= 'A' && r <= 'F':
-			n += int(r-'A') + 10
-		}
-	}
-	return n
 }
 
 func ParseActionLine(raw string) (Item, bool) {

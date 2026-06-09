@@ -72,8 +72,8 @@ func TestAgentPaneFromLine(t *testing.T) {
 
 func TestFormatLineColorsIconsButKeepsParseableText(t *testing.T) {
 	line := FormatLine(Item{Kind: KindSession, Name: "demo"})
-	if !strings.Contains(line, "\x1b[38;2;166;227;161m"+IconSession+"\x1b[0m") {
-		t.Fatalf("session icon is not Catppuccin green: %q", line)
+	if !strings.Contains(line, "\x1b[92m"+IconSession+"\x1b[0m") {
+		t.Fatalf("session icon does not use terminal bright green: %q", line)
 	}
 	if clean := StripANSI(line); clean != IconSession+" demo" {
 		t.Fatalf("StripANSI(%q) = %q", line, clean)

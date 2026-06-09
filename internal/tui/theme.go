@@ -3,20 +3,19 @@ package tui
 import "github.com/charmbracelet/lipgloss"
 
 type palette struct {
-	bg       lipgloss.Color
-	bgAlt    lipgloss.Color
-	fg       lipgloss.Color
-	muted    lipgloss.Color
-	border   lipgloss.Color
-	selected lipgloss.Color
-	mauve    lipgloss.Color
-	peach    lipgloss.Color
-	green    lipgloss.Color
-	teal     lipgloss.Color
-	sky      lipgloss.Color
-	red      lipgloss.Color
-	yellow   lipgloss.Color
-	lavender lipgloss.Color
+	bg       lipgloss.TerminalColor
+	bgAlt    lipgloss.TerminalColor
+	fg       lipgloss.TerminalColor
+	muted    lipgloss.TerminalColor
+	border   lipgloss.TerminalColor
+	mauve    lipgloss.TerminalColor
+	peach    lipgloss.TerminalColor
+	green    lipgloss.TerminalColor
+	teal     lipgloss.TerminalColor
+	sky      lipgloss.TerminalColor
+	red      lipgloss.TerminalColor
+	yellow   lipgloss.TerminalColor
+	lavender lipgloss.TerminalColor
 }
 
 type styles struct {
@@ -46,21 +45,23 @@ type styles struct {
 }
 
 func defaultStyles() styles {
+	// Use terminal-default foreground/background plus the terminal's ANSI color
+	// palette for accents. This lets seshagy follow the user's terminal theme
+	// instead of painting a fixed Catppuccin surface over it.
 	p := palette{
-		bg:       "#1e1e2e",
-		bgAlt:    "#181825",
-		fg:       "#cdd6f4",
-		muted:    "#7f849c",
-		border:   "#45475a",
-		selected: "#313244",
-		mauve:    "#cba6f7",
-		peach:    "#fab387",
-		green:    "#a6e3a1",
-		teal:     "#94e2d5",
-		sky:      "#89dceb",
-		red:      "#f38ba8",
-		yellow:   "#f9e2af",
-		lavender: "#b4befe",
+		bg:       lipgloss.NoColor{},
+		bgAlt:    lipgloss.NoColor{},
+		fg:       lipgloss.NoColor{},
+		muted:    lipgloss.Color("8"),
+		border:   lipgloss.Color("8"),
+		mauve:    lipgloss.Color("13"),
+		peach:    lipgloss.Color("11"),
+		green:    lipgloss.Color("10"),
+		teal:     lipgloss.Color("6"),
+		sky:      lipgloss.Color("14"),
+		red:      lipgloss.Color("9"),
+		yellow:   lipgloss.Color("11"),
+		lavender: lipgloss.Color("12"),
 	}
 	s := styles{p: p}
 	s.app = lipgloss.NewStyle().Foreground(p.fg).Background(p.bg)
@@ -77,7 +78,7 @@ func defaultStyles() styles {
 	s.iconZoxide = lipgloss.NewStyle().Foreground(p.sky).Bold(true)
 	s.iconFD = lipgloss.NewStyle().Foreground(p.peach).Bold(true)
 	s.iconAgent = lipgloss.NewStyle().Foreground(p.mauve).Bold(true)
-	s.selectedBG = lipgloss.NewStyle().Background(p.selected)
+	s.selectedBG = lipgloss.NewStyle().Reverse(true)
 	s.bar = lipgloss.NewStyle().Foreground(p.mauve)
 	s.status = lipgloss.NewStyle().Foreground(p.fg).Background(p.bgAlt).Padding(0, 1)
 	s.success = lipgloss.NewStyle().Foreground(p.green).Bold(true)

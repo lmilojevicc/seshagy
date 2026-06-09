@@ -16,6 +16,8 @@ pane, a live preview pane, and a compact help/status bar.
 - Detect installed hook-capable coding agents and ask before installing state
   hooks/plugins for each one. The prompt is toggle-based, so every detected
   integration can be enabled or skipped independently.
+- Use terminal-default foreground/background colors and ANSI palette accents so
+  the TUI follows the active terminal theme instead of forcing a fixed surface.
 - List agent panes only after hooks/plugins report `@agent_*` metadata. seshagy
   does **not** infer agent state by inspecting foreground process names or pane
   text.
@@ -104,3 +106,11 @@ Supported hook/plugin targets are `pi`, `claude`, `codex`, `copilot`, `droid`,
 agents by command or config directory and asks before installing any missing
 integration. Space toggles each detected agent; Enter installs the selected
 hooks/plugins; `s` or Esc skips.
+
+## Theme behavior
+
+The dashboard intentionally avoids hard-coded app foreground/background colors.
+It renders on top of the terminal's default colors, uses reverse video for the
+selected row, and uses the terminal's ANSI accent palette for source icons,
+borders, status labels, and state markers. Changing the terminal color scheme is
+therefore enough to retheme seshagy.
