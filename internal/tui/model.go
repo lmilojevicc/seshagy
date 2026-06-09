@@ -35,6 +35,8 @@ type Model struct {
 	items  []sessionmgr.Item
 	cursor int
 
+	agentStateFilter sessionmgr.AgentState
+
 	query       string
 	searchInput textinput.Model
 	renameInput textinput.Model
@@ -344,6 +346,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "p", "alt+p":
 		m.showPreview = !m.showPreview
 		return m, m.previewForSelection()
+	case "s":
+		return m.cycleAgentStateFilter()
+	case "S":
+		return m.clearAgentStateFilter()
 	case "i":
 		m.integrationPrompt = true
 		m.status = "scanning hook integrations"
@@ -418,6 +424,30 @@ func (m Model) switchSource(source sessionmgr.SourceMode) (tea.Model, tea.Cmd) {
 	m.loading = true
 	m.status = "loading " + modeName(source)
 	return m, refreshCmd(source)
+}
+
+func (m Model) cycleAgentStateFilter() (tea.Model, tea.Cmd) {
+	if !isAgentSource(m.source) {
+		m.status = "state filter only applies to agent panes"
+		return m, nil
+	}
+	m.agentStateFilter = nextAgentStateFilter(m.agentStateFilter)
+	m.cursor = 0
+	m.clampCursor()
+	m.status = "agent state filter: " + agentStateFilterLabel(m.agentStateFilter)
+	return m, m.previewForSelection()
+}
+
+func (m Model) clearAgentStateFilter() (tea.Model, tea.Cmd) {
+	if !isAgentSource(m.source) {
+		m.status = "state filter only applies to agent panes"
+		return m, nil
+	}
+	m.agentStateFilter = ""
+	m.cursor = 0
+	m.clampCursor()
+	m.status = "agent state filter: all"
+	return m, m.previewForSelection()
 }
 
 func (m Model) activateSelected() (tea.Model, tea.Cmd) {
@@ -509,18 +539,58 @@ func (m *Model) clampCursor() {
 }
 
 func (m Model) visibleItems() []sessionmgr.Item {
-	if m.query == "" {
+	if m.query == "" && !m.agentStateFilteringActive() {
 		return m.items
 	}
 	query := strings.ToLower(m.query)
 	out := make([]sessionmgr.Item, 0, len(m.items))
 	for _, item := range m.items {
-		haystack := strings.ToLower(strings.Join([]string{string(item.Kind), item.Name, item.Path, item.AgentName, string(item.AgentState), item.Location, item.AgentMessage, item.AgentSource}, " "))
-		if strings.Contains(haystack, query) {
-			out = append(out, item)
+		if m.agentStateFilteringActive() && (item.Kind != sessionmgr.KindAgent || item.AgentState != m.agentStateFilter) {
+			continue
 		}
+		if query != "" {
+			haystack := strings.ToLower(strings.Join([]string{string(item.Kind), item.Name, item.Path, item.AgentName, string(item.AgentState), item.Location, item.AgentMessage, item.AgentSource}, " "))
+			if !strings.Contains(haystack, query) {
+				continue
+			}
+		}
+		out = append(out, item)
 	}
 	return out
+}
+
+func (m Model) agentStateFilteringActive() bool {
+	return isAgentSource(m.source) && m.agentStateFilter != ""
+}
+
+func isAgentSource(mode sessionmgr.SourceMode) bool {
+	return mode == sessionmgr.ModeAgents || mode == sessionmgr.ModeCurrentAgents
+}
+
+func nextAgentStateFilter(current sessionmgr.AgentState) sessionmgr.AgentState {
+	switch current {
+	case "":
+		return sessionmgr.AgentWorking
+	case sessionmgr.AgentWorking:
+		return sessionmgr.AgentBlocked
+	case sessionmgr.AgentBlocked:
+		return sessionmgr.AgentAborted
+	case sessionmgr.AgentAborted:
+		return sessionmgr.AgentDone
+	case sessionmgr.AgentDone:
+		return sessionmgr.AgentIdle
+	case sessionmgr.AgentIdle:
+		return sessionmgr.AgentUnknown
+	default:
+		return ""
+	}
+}
+
+func agentStateFilterLabel(state sessionmgr.AgentState) string {
+	if state == "" {
+		return "all"
+	}
+	return string(state)
 }
 
 func (m Model) selectedItem() (sessionmgr.Item, bool) {

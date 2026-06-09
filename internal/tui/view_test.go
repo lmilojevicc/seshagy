@@ -43,6 +43,111 @@ func TestFilterVisibleItems(t *testing.T) {
 	}
 }
 
+func TestAgentStateFilterOnlyAppliesInAgentSources(t *testing.T) {
+	m := New()
+	m.items = []sessionmgr.Item{
+		{Kind: sessionmgr.KindAgent, AgentName: "pi", AgentState: sessionmgr.AgentWorking, PaneID: "%1"},
+		{Kind: sessionmgr.KindAgent, AgentName: "claude", AgentState: sessionmgr.AgentBlocked, PaneID: "%2"},
+		{Kind: sessionmgr.KindAgent, AgentName: "codex", AgentState: sessionmgr.AgentIdle, PaneID: "%3"},
+		{Kind: sessionmgr.KindSession, Name: "api"},
+	}
+	m.source = sessionmgr.ModeAgents
+	m.agentStateFilter = sessionmgr.AgentWorking
+	got := m.visibleItems()
+	if len(got) != 1 || got[0].AgentName != "pi" {
+		t.Fatalf("agent state filtered items = %#v, want only pi", got)
+	}
+
+	m.source = sessionmgr.ModeCurrentAgents
+	m.agentStateFilter = sessionmgr.AgentBlocked
+	got = m.visibleItems()
+	if len(got) != 1 || got[0].AgentName != "claude" {
+		t.Fatalf("current-agent state filtered items = %#v, want only claude", got)
+	}
+
+	m.source = sessionmgr.ModeAll
+	m.agentStateFilter = sessionmgr.AgentWorking
+	got = m.visibleItems()
+	if len(got) != 4 {
+		t.Fatalf("all mode should ignore state filter, got %#v", got)
+	}
+}
+
+func TestAgentStateFilterCombinesWithTextQuery(t *testing.T) {
+	m := New()
+	m.source = sessionmgr.ModeAgents
+	m.agentStateFilter = sessionmgr.AgentWorking
+	m.query = "api"
+	m.items = []sessionmgr.Item{
+		{Kind: sessionmgr.KindAgent, AgentName: "pi", AgentState: sessionmgr.AgentWorking, Location: "api:1.1", PaneID: "%1"},
+		{Kind: sessionmgr.KindAgent, AgentName: "claude", AgentState: sessionmgr.AgentWorking, Location: "web:1.1", PaneID: "%2"},
+		{Kind: sessionmgr.KindAgent, AgentName: "codex", AgentState: sessionmgr.AgentBlocked, Location: "api:1.2", PaneID: "%3"},
+	}
+	got := m.visibleItems()
+	if len(got) != 1 || got[0].AgentName != "pi" {
+		t.Fatalf("combined filtered items = %#v, want only working api agent", got)
+	}
+}
+
+func TestAgentStateFilterKeyCyclesAndClears(t *testing.T) {
+	m := New()
+	m.source = sessionmgr.ModeAgents
+	m.items = []sessionmgr.Item{{Kind: sessionmgr.KindAgent, AgentName: "pi", AgentState: sessionmgr.AgentWorking, PaneID: "%1"}}
+
+	model, _ := m.handleKey(keyMsg("s"))
+	m = model.(Model)
+	if m.agentStateFilter != sessionmgr.AgentWorking || m.status != "agent state filter: working" {
+		t.Fatalf("after s filter/status = %q/%q, want working", m.agentStateFilter, m.status)
+	}
+	model, _ = m.handleKey(keyMsg("s"))
+	m = model.(Model)
+	if m.agentStateFilter != sessionmgr.AgentBlocked || m.status != "agent state filter: blocked" {
+		t.Fatalf("after second s filter/status = %q/%q, want blocked", m.agentStateFilter, m.status)
+	}
+	model, _ = m.handleKey(keyMsg("S"))
+	m = model.(Model)
+	if m.agentStateFilter != "" || m.status != "agent state filter: all" {
+		t.Fatalf("after S filter/status = %q/%q, want all", m.agentStateFilter, m.status)
+	}
+}
+
+func TestAgentStateFilterKeyWarnsOutsideAgentPane(t *testing.T) {
+	m := New()
+	m.source = sessionmgr.ModeSessions
+	model, _ := m.handleKey(keyMsg("s"))
+	m = model.(Model)
+	if m.agentStateFilter != "" {
+		t.Fatalf("filter changed outside agent source: %q", m.agentStateFilter)
+	}
+	if m.status != "state filter only applies to agent panes" {
+		t.Fatalf("status = %q, want state filter warning", m.status)
+	}
+	if !isWarningStatus(m.status) {
+		t.Fatalf("state filter warning should render as warning")
+	}
+}
+
+func TestAgentStateFilterRendersTitleHelpAndEmptyState(t *testing.T) {
+	m := New()
+	model, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 28})
+	m = model.(Model)
+	m.source = sessionmgr.ModeAgents
+	m.agentStateFilter = sessionmgr.AgentBlocked
+	m.items = []sessionmgr.Item{{Kind: sessionmgr.KindAgent, AgentName: "pi", AgentState: sessionmgr.AgentWorking, PaneID: "%1"}}
+	out := sessionmgr.StripANSI(m.View())
+	for _, want := range []string{"Agents · blocked", "no agent panes with state blocked", "state:blocked", "s state", "S all"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("filtered agent view missing %q\n%s", want, out)
+		}
+	}
+
+	m.source = sessionmgr.ModeSessions
+	out = sessionmgr.StripANSI(m.renderFooter())
+	if strings.Contains(out, "s state") || strings.Contains(out, "S all") {
+		t.Fatalf("agent state filter help should not render outside agent panes\n%s", out)
+	}
+}
+
 func TestFooterKeepsStatusOnOneLine(t *testing.T) {
 	m := New()
 	m.width = 80
@@ -79,6 +184,7 @@ func TestFooterWarningStatusesUseWarningStyle(t *testing.T) {
 		"nothing selected",
 		"delete only applies to sessions and agents",
 		"rename only applies to sessions",
+		"state filter only applies to agent panes",
 	}
 	for _, status := range warnings {
 		style := footerStatusStyle(s, status, false)
@@ -93,6 +199,10 @@ func TestFooterWarningStatusesUseWarningStyle(t *testing.T) {
 			t.Fatalf("footer did not render warning status %q on first line:\n%s", status, clean)
 		}
 	}
+}
+
+func keyMsg(s string) tea.KeyMsg {
+	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}
 }
 
 func TestFooterStatusStylesKeepErrorsRedAndNormalMuted(t *testing.T) {

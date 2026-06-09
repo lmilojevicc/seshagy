@@ -150,7 +150,11 @@ func (m Model) renderListPane(width, height int) string {
 	innerH := max(3, height-2)
 	items := m.visibleItems()
 	counts := sortedCounts(m.items)
-	title := fmt.Sprintf("%s (%d", titleForMode(m.source), len(items))
+	titleName := titleForMode(m.source)
+	if m.agentStateFilteringActive() {
+		titleName += " · " + agentStateFilterLabel(m.agentStateFilter)
+	}
+	title := fmt.Sprintf("%s (%d", titleName, len(items))
 	if m.query != "" {
 		title += fmt.Sprintf("/%d match", len(m.items))
 		if len(items) != 1 {
@@ -169,6 +173,8 @@ func (m Model) renderListPane(width, height int) string {
 		empty := "no items"
 		if m.query != "" {
 			empty = "no matches for " + m.query
+		} else if m.agentStateFilteringActive() {
+			empty = "no agent panes with state " + agentStateFilterLabel(m.agentStateFilter)
 		}
 		lines = append(lines, "", s.muted.Render(empty))
 	} else {
@@ -374,24 +380,36 @@ func (m Model) renderFooter() string {
 		statusLeft = append(statusLeft, s.warning.Render("outside tmux"))
 	}
 	statusLeft = append(statusLeft, s.info.Render(modeName(m.source)))
+	if m.agentStateFilteringActive() {
+		statusLeft = append(statusLeft, s.emphasis.Render("state:"+agentStateFilterLabel(m.agentStateFilter)))
+	}
 	if m.query != "" {
 		statusLeft = append(statusLeft, s.emphasis.Render("/"+m.query))
 	}
 	left := strings.Join(statusLeft, "  ")
 	help := ""
 	if m.showHelp {
-		help = strings.Join([]string{
+		helpParts := []string{
 			s.key.Render("?") + " help",
 			s.key.Render("q") + " quit",
 			s.key.Render("enter") + " attach/create/focus",
 			s.key.Render("/") + " filter",
-			s.key.Render("r") + " refresh",
-			s.key.Render("R") + " rename",
-			s.key.Render("x") + " kill",
-			s.key.Render("y") + " yazi",
-			s.key.Render("i") + " hooks",
-			s.key.Render("p") + " preview",
-		}, s.muted.Render(" · "))
+		}
+		if isAgentSource(m.source) {
+			helpParts = append(helpParts,
+				s.key.Render("s")+" state",
+				s.key.Render("S")+" all",
+			)
+		}
+		helpParts = append(helpParts,
+			s.key.Render("r")+" refresh",
+			s.key.Render("R")+" rename",
+			s.key.Render("x")+" kill",
+			s.key.Render("y")+" yazi",
+			s.key.Render("i")+" hooks",
+			s.key.Render("p")+" preview",
+		)
+		help = strings.Join(helpParts, s.muted.Render(" · "))
 	} else {
 		help = s.muted.Render("? help")
 	}
@@ -423,7 +441,8 @@ func isWarningStatus(status string) bool {
 		"yazi closed without a directory",
 		"nothing selected",
 		"delete only applies to sessions and agents",
-		"rename only applies to sessions":
+		"rename only applies to sessions",
+		"state filter only applies to agent panes":
 		return true
 	default:
 		return false
