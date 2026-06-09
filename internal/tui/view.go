@@ -398,9 +398,14 @@ func (m Model) renderFooter() string {
 	} else {
 		help = s.muted.Render("? help")
 	}
-	line1 := composeLine(left, input, max(1, m.width-2), s.muted)
-	line2 := clampText(help, max(1, m.width-2))
-	return s.status.Width(m.width - 2).Render(line1 + "\n" + line2)
+	// The status style has one column of horizontal padding on each side. Keep
+	// the composed text inside that content area, and render one column shy of
+	// the terminal width to avoid terminal auto-wrap at the right edge.
+	footerW := max(1, m.width-1)
+	contentW := max(1, footerW-2)
+	line1 := composeLine(left, input, contentW, s.muted)
+	line2 := clampText(help, contentW)
+	return s.status.Width(footerW).Render(line1 + "\n" + line2)
 }
 
 func titleForMode(mode sessionmgr.SourceMode) string {

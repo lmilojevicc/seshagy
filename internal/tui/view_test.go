@@ -43,6 +43,32 @@ func TestFilterVisibleItems(t *testing.T) {
 	}
 }
 
+func TestFooterKeepsStatusOnOneLine(t *testing.T) {
+	m := New()
+	m.width = 80
+	m.source = sessionmgr.ModeAll
+	m.status = "loaded 1171 items"
+	m.showHelp = false
+
+	footer := m.renderFooter()
+	if height := lipgloss.Height(footer); height != 2 {
+		t.Fatalf("footer height = %d, want 2\n%s", height, sessionmgr.StripANSI(footer))
+	}
+	clean := sessionmgr.StripANSI(footer)
+	lines := strings.Split(clean, "\n")
+	if len(lines) != 2 {
+		t.Fatalf("footer lines = %d, want 2\n%s", len(lines), clean)
+	}
+	if !strings.Contains(lines[0], "loaded 1171 items") {
+		t.Fatalf("status wrapped or disappeared from first line:\n%s", clean)
+	}
+	for i, line := range lines {
+		if width := lipgloss.Width(line); width >= m.width {
+			t.Fatalf("footer line %d width = %d, want less than terminal width %d", i, width, m.width)
+		}
+	}
+}
+
 func TestDefaultStylesUseTerminalPalette(t *testing.T) {
 	s := defaultStyles()
 	if _, ok := s.app.GetForeground().(lipgloss.NoColor); !ok {
