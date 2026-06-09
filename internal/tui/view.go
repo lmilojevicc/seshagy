@@ -1,0 +1,424 @@
+package tui
+
+import (
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/charmbracelet/lipgloss"
+
+	"github.com/lmilojevicc/seshagy/internal/sessionmgr"
+)
+
+func (m Model) View() string {
+	if m.width == 0 {
+		return "loading…"
+	}
+	s := m.styles
+	availableH := max(8, m.height)
+	header := m.renderTabs()
+	footer := m.renderFooter()
+	bodyH := availableH - lipgloss.Height(header) - lipgloss.Height(footer)
+	if bodyH < 6 {
+		bodyH = 6
+	}
+	body := m.renderBody(bodyH)
+	return s.app.Width(m.width).Height(availableH).Render(lipgloss.JoinVertical(lipgloss.Left, header, body, footer))
+}
+
+func (m Model) renderTabs() string {
+	s := m.styles
+	tabs := []struct {
+		key  string
+		name string
+		mode sessionmgr.SourceMode
+	}{
+		{"1", "All", sessionmgr.ModeAll},
+		{"2", "Sessions", sessionmgr.ModeSessions},
+		{"3", "Agents", sessionmgr.ModeAgents},
+		{"4", "Zoxide", sessionmgr.ModeZoxide},
+		{"5", "fd", sessionmgr.ModeFD},
+	}
+	parts := []string{s.emphasis.Render("seshagy")}
+	for _, tab := range tabs {
+		label := fmt.Sprintf("[%s] %s", tab.key, tab.name)
+		if tab.mode == m.source {
+			parts = append(parts, s.tabActive.Render(label))
+		} else {
+			parts = append(parts, s.tabInactive.Render(label))
+		}
+	}
+	parts = append(parts, s.tabInactive.Render("[o] Current agents"))
+	if cwd := cwdLabel(); cwd != "" {
+		parts = append(parts, s.muted.Render("· "+cwd))
+	}
+	return lipgloss.NewStyle().Padding(0, 1).Render(strings.Join(parts, "  "))
+}
+
+func (m Model) renderBody(height int) string {
+	gap := 2
+	if m.width < 80 || !m.showPreview {
+		gap = 0
+	}
+	leftW := m.width
+	rightW := 0
+	if m.showPreview && m.width >= 80 {
+		leftW = max(34, (m.width-gap)/2)
+		if leftW > 72 {
+			leftW = 72
+		}
+		rightW = m.width - leftW - gap
+	}
+	left := m.renderListPane(leftW, height)
+	if rightW <= 0 {
+		return left
+	}
+	right := m.renderRightPane(rightW, height)
+	return lipgloss.JoinHorizontal(lipgloss.Top, left, strings.Repeat(" ", gap), right)
+}
+
+func (m Model) renderListPane(width, height int) string {
+	s := m.styles
+	innerW := max(10, width-4)
+	innerH := max(3, height-2)
+	items := m.visibleItems()
+	counts := sortedCounts(m.items)
+	title := fmt.Sprintf("%s (%d", titleForMode(m.source), len(items))
+	if m.query != "" {
+		title += fmt.Sprintf("/%d match", len(m.items))
+		if len(items) != 1 {
+			title += "es"
+		}
+	}
+	title += ")"
+	if m.source == sessionmgr.ModeAll {
+		title = fmt.Sprintf("All (%d · %d sessions · %d agents · %d dirs)", len(items), counts[sessionmgr.KindSession], counts[sessionmgr.KindAgent], counts[sessionmgr.KindZoxide]+counts[sessionmgr.KindFD])
+	}
+	lines := []string{s.title.Render(title)}
+	if m.loading {
+		lines = append(lines, s.muted.Render("refreshing…"))
+	}
+	if len(items) == 0 {
+		empty := "no items"
+		if m.query != "" {
+			empty = "no matches for " + m.query
+		}
+		lines = append(lines, "", s.muted.Render(empty))
+	} else {
+		start, end := visibleWindow(len(items), m.cursor, max(1, innerH-2))
+		if start > 0 {
+			lines = append(lines, s.muted.Render(fmt.Sprintf("  ↑ %d more", start)))
+		}
+		for idx := start; idx < end; idx++ {
+			lines = append(lines, m.renderRow(items[idx], idx == m.cursor, innerW))
+		}
+		if end < len(items) {
+			lines = append(lines, s.muted.Render(fmt.Sprintf("  ↓ %d more", len(items)-end)))
+		}
+	}
+	content := trimHeight(strings.Join(lines, "\n"), innerH)
+	return s.paneFocus.Width(width - 2).Height(height - 2).Render(content)
+}
+
+func (m Model) renderRow(item sessionmgr.Item, selected bool, width int) string {
+	s := m.styles
+	prefix := "  "
+	if selected {
+		prefix = s.bar.Render("▌") + " "
+	}
+	primary, trailing := m.rowParts(item)
+	bodyW := max(1, width-2)
+	line := prefix + composeLine(primary, trailing, bodyW, s.muted)
+	if selected {
+		line = s.selectedBG.Render(pad(line, width))
+	}
+	return line
+}
+
+func (m Model) rowParts(item sessionmgr.Item) (string, string) {
+	s := m.styles
+	switch item.Kind {
+	case sessionmgr.KindSession:
+		state := s.info.Render("◌")
+		if item.Attached {
+			state = s.success.Render("●")
+		}
+		name := s.tabActive.Render(item.Name)
+		return fmt.Sprintf("%s %s %s", sessionmgr.IconSession, state, name), ago(item.Activity)
+	case sessionmgr.KindAgent:
+		state := renderAgentState(s, item.AgentState)
+		message := item.AgentMessage
+		if message == "" {
+			message = item.AgentSource
+		}
+		secondary := item.Location
+		if item.Path != "" {
+			secondary += " · " + item.Path
+		}
+		if message != "" {
+			secondary += " · " + message
+		}
+		return fmt.Sprintf("%s %s %s", sessionmgr.IconAgent, state, s.tabActive.Render(item.AgentName)), secondary
+	case sessionmgr.KindZoxide:
+		return fmt.Sprintf("%s %s", sessionmgr.IconZoxide, item.Path), "zoxide"
+	case sessionmgr.KindFD:
+		return fmt.Sprintf("%s %s", sessionmgr.IconFD, item.Path), "fd"
+	default:
+		return item.DisplayName(), ""
+	}
+}
+
+func (m Model) renderRightPane(width, height int) string {
+	detailH := min(10, max(7, height/3))
+	if !m.showPreview {
+		detailH = height
+	}
+	detail := m.renderDetailPane(width, detailH)
+	if !m.showPreview {
+		return detail
+	}
+	previewH := height - lipgloss.Height(detail) - 1
+	if previewH < 5 {
+		previewH = 5
+	}
+	preview := m.renderPreviewPane(width, previewH)
+	return lipgloss.JoinVertical(lipgloss.Left, detail, "", preview)
+}
+
+func (m Model) renderDetailPane(width, height int) string {
+	s := m.styles
+	innerW := max(10, width-4)
+	innerH := max(4, height-2)
+	item, ok := m.selectedItem()
+	var lines []string
+	if !ok {
+		lines = []string{s.title.Render("Details"), "", s.muted.Render("select an item")}
+	} else {
+		lines = m.detailLines(item, innerW)
+	}
+	content := trimHeight(strings.Join(lines, "\n"), innerH)
+	return s.pane.Width(width - 2).Height(height - 2).Render(content)
+}
+
+func (m Model) detailLines(item sessionmgr.Item, width int) []string {
+	s := m.styles
+	switch item.Kind {
+	case sessionmgr.KindSession:
+		attached := "no"
+		if item.Attached {
+			attached = s.success.Render("yes")
+		}
+		return []string{
+			s.title.Render(item.Name),
+			s.muted.Render("tmux session"),
+			"",
+			kv(s, "path", sessionmgr.ContractHome(item.Path)),
+			kv(s, "attached", attached),
+			kv(s, "windows", fmt.Sprint(item.Windows)),
+			kv(s, "activity", ago(item.Activity)),
+			kv(s, "created", ago(item.Created)),
+		}
+	case sessionmgr.KindAgent:
+		suffix := item.AgentMessage
+		if suffix == "" {
+			suffix = item.AgentSource
+		}
+		lines := []string{
+			s.title.Render(item.AgentName),
+			s.muted.Render("agent pane"),
+			"",
+			kv(s, "state", renderAgentState(s, item.AgentState)+" "+string(item.AgentState)),
+			kv(s, "pane", item.PaneID),
+			kv(s, "where", item.Location),
+			kv(s, "path", item.Path),
+		}
+		if suffix != "" {
+			lines = append(lines, kv(s, "note", clampText(suffix, width-8)))
+		}
+		return lines
+	case sessionmgr.KindZoxide, sessionmgr.KindFD:
+		return []string{
+			s.title.Render(sessionmgr.SessionNameFromDir(item.Path)),
+			s.muted.Render(string(item.Kind) + " directory"),
+			"",
+			kv(s, "path", item.Path),
+			kv(s, "enter", "create/switch tmux session"),
+		}
+	default:
+		return []string{s.title.Render(item.DisplayName())}
+	}
+}
+
+func (m Model) renderPreviewPane(width, height int) string {
+	s := m.styles
+	innerW := max(10, width-4)
+	innerH := max(4, height-2)
+	title := "Preview"
+	if item, ok := m.selectedItem(); ok {
+		title = "Preview · " + item.DisplayName()
+	}
+	content := m.preview
+	if content == "" {
+		content = s.muted.Render("preview loading…")
+	}
+	lines := []string{s.title.Render(clampText(title, innerW)), ""}
+	for _, line := range strings.Split(content, "\n") {
+		lines = append(lines, clampText(line, innerW))
+	}
+	return s.pane.Width(width - 2).Height(height - 2).Render(trimHeight(strings.Join(lines, "\n"), innerH))
+}
+
+func (m Model) renderFooter() string {
+	s := m.styles
+	var input string
+	switch m.inputMode {
+	case modeSearch:
+		input = m.searchInput.View()
+	case modeRename:
+		input = m.renameInput.View()
+	default:
+		input = m.status
+		if input == "" {
+			input = "ready"
+		}
+		if m.err != nil {
+			input = s.danger.Render(input)
+		} else {
+			input = s.muted.Render(input)
+		}
+	}
+	statusLeft := []string{}
+	if sessionmgr.InTmux() {
+		statusLeft = append(statusLeft, s.success.Render("✓ tmux"))
+	} else {
+		statusLeft = append(statusLeft, s.warning.Render("outside tmux"))
+	}
+	statusLeft = append(statusLeft, s.info.Render(modeName(m.source)))
+	if m.query != "" {
+		statusLeft = append(statusLeft, s.emphasis.Render("/"+m.query))
+	}
+	left := strings.Join(statusLeft, "  ")
+	help := ""
+	if m.showHelp {
+		help = strings.Join([]string{
+			s.key.Render("?") + " help",
+			s.key.Render("q") + " quit",
+			s.key.Render("enter") + " attach/create/focus",
+			s.key.Render("/") + " filter",
+			s.key.Render("r") + " refresh",
+			s.key.Render("R") + " rename",
+			s.key.Render("x") + " kill",
+			s.key.Render("y") + " yazi",
+			s.key.Render("p") + " preview",
+		}, s.muted.Render(" · "))
+	} else {
+		help = s.muted.Render("? help")
+	}
+	line1 := composeLine(left, input, max(1, m.width-2), s.muted)
+	line2 := clampText(help, max(1, m.width-2))
+	return s.status.Width(m.width - 2).Render(line1 + "\n" + line2)
+}
+
+func titleForMode(mode sessionmgr.SourceMode) string {
+	switch mode {
+	case sessionmgr.ModeSessions:
+		return "Sessions"
+	case sessionmgr.ModeAgents:
+		return "Agents"
+	case sessionmgr.ModeCurrentAgents:
+		return "Current session agents"
+	case sessionmgr.ModeZoxide:
+		return "Zoxide"
+	case sessionmgr.ModeFD:
+		return "fd"
+	default:
+		return "All"
+	}
+}
+
+func renderAgentState(s styles, state sessionmgr.AgentState) string {
+	switch state {
+	case sessionmgr.AgentWorking:
+		return s.success.Render("▶")
+	case sessionmgr.AgentBlocked:
+		return s.warning.Render("◆")
+	case sessionmgr.AgentAborted:
+		return s.danger.Render("■")
+	case sessionmgr.AgentDone:
+		return s.success.Render("✓")
+	case sessionmgr.AgentIdle:
+		return s.info.Render("◌")
+	default:
+		return s.muted.Render("?")
+	}
+}
+
+func kv(s styles, key, value string) string {
+	return fmt.Sprintf("%-9s %s", s.muted.Render(key), value)
+}
+
+func composeLine(left, right string, width int, rightStyle lipgloss.Style) string {
+	if right == "" {
+		return clampText(left, width)
+	}
+	right = rightStyle.Render(right)
+	leftW := lipgloss.Width(left)
+	rightW := lipgloss.Width(right)
+	if leftW+rightW+1 > width {
+		return clampText(left, width)
+	}
+	return left + strings.Repeat(" ", width-leftW-rightW) + right
+}
+
+func pad(line string, width int) string {
+	if lipgloss.Width(line) >= width {
+		return line
+	}
+	return line + strings.Repeat(" ", width-lipgloss.Width(line))
+}
+
+func trimHeight(s string, height int) string {
+	lines := strings.Split(s, "\n")
+	if len(lines) > height {
+		lines = lines[:height]
+	}
+	for len(lines) < height {
+		lines = append(lines, "")
+	}
+	return strings.Join(lines, "\n")
+}
+
+func visibleWindow(total, cursor, height int) (int, int) {
+	if total <= height {
+		return 0, total
+	}
+	half := height / 2
+	start := cursor - half
+	if start < 0 {
+		start = 0
+	}
+	if start+height > total {
+		start = total - height
+	}
+	return start, start + height
+}
+
+func ago(t time.Time) string {
+	if t.IsZero() {
+		return "unknown"
+	}
+	d := time.Since(t)
+	if d < 0 {
+		d = 0
+	}
+	switch {
+	case d < time.Minute:
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	default:
+		return fmt.Sprintf("%dd", int(d.Hours()/24))
+	}
+}
