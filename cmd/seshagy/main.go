@@ -265,8 +265,9 @@ Agent flags:
 
 Hook integrations:
   Supported targets: pi, claude, codex, copilot, droid, opencode, qodercli, cursor.
-  The TUI asks before installing missing hooks for detected agents. Hooks report
-  state directly with --report-agent; seshagy no longer infers agent state by
-  inspecting foreground process names or pane text.
+  The TUI asks before installing missing hooks for detected agents only on the
+  first launch. After that, use the TUI's i key or this integration command.
+  Hooks report state directly with --report-agent; seshagy no longer infers
+  agent state by inspecting foreground process names or pane text.
 `
 }

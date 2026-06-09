@@ -14,8 +14,9 @@ pane, a live preview pane, and a compact help/status bar.
   `.config` -> `dot_config`).
 - Attach to sessions when outside tmux; `switch-client` when already inside tmux.
 - Detect installed hook-capable coding agents and ask before installing state
-  hooks/plugins for each one. The prompt is toggle-based, so every detected
-  integration can be enabled or skipped independently.
+  hooks/plugins for each one on the first TUI launch only. The prompt is
+  toggle-based, so every detected integration can be enabled or skipped
+  independently.
 - Use terminal-default foreground/background colors and ANSI palette accents so
   the TUI follows the active terminal theme instead of forcing a fixed surface.
 - List agent panes only after hooks/plugins report `@agent_*` metadata. seshagy
@@ -70,7 +71,7 @@ Runtime tools:
 | `R` | Rename selected session |
 | `x` | Kill selected session or agent pane |
 | `y` | Open yazi and create/switch from its exit directory |
-| `i` | Reopen the hook integration installation prompt |
+| `i` | Open the hook integration installation prompt manually |
 | `p` | Toggle preview pane |
 | `?`/`h` | Toggle compact help |
 | `q`/`esc`/`ctrl-c` | Quit |
@@ -102,10 +103,13 @@ Recognized states are normalized to `working`, `blocked`, `aborted`, `done`,
 `idle`, or `unknown`.
 
 Supported hook/plugin targets are `pi`, `claude`, `codex`, `copilot`, `droid`,
-`opencode`, `qodercli`, and `cursor`. On startup, the TUI scans for these
-agents by command or config directory and asks before installing any missing
-integration. Space toggles each detected agent; Enter installs the selected
-hooks/plugins; `s` or Esc skips.
+`opencode`, `qodercli`, and `cursor`. On the first TUI launch, seshagy scans for
+these agents by command or config directory and asks before installing any
+missing integration. That first-launch prompt is recorded under the user's XDG
+state directory and is not shown again automatically. After that, use `i` in the
+TUI or `seshagy integration install <target>` to install integrations manually.
+Space toggles each detected agent; Enter installs the selected hooks/plugins;
+`s` or Esc skips.
 
 ## Theme behavior
 

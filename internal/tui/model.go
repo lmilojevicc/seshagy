@@ -124,7 +124,7 @@ func Run() error {
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(refreshCmd(m.source), integrationsCmd(), tickCmd())
+	return tea.Batch(refreshCmd(m.source), startupIntegrationsCmd(), tickCmd())
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -561,6 +561,19 @@ func refreshCmd(source sessionmgr.SourceMode) tea.Cmd {
 
 func integrationsCmd() tea.Cmd {
 	return func() tea.Msg {
+		return integrationsMsg{recs: integrations.RecommendedForPrompt()}
+	}
+}
+
+func startupIntegrationsCmd() tea.Cmd {
+	return func() tea.Msg {
+		shouldPrompt, err := claimStartupIntegrationPrompt()
+		if err != nil {
+			return integrationsMsg{err: fmt.Errorf("record first-launch hook prompt: %w", err)}
+		}
+		if !shouldPrompt {
+			return integrationsMsg{}
+		}
 		return integrationsMsg{recs: integrations.RecommendedForPrompt()}
 	}
 }
