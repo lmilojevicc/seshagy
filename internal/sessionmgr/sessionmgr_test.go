@@ -86,7 +86,7 @@ func TestFormatLineColorsIconsButKeepsParseableText(t *testing.T) {
 
 func TestFormatLineWithASCIIIcons(t *testing.T) {
 	icons := DefaultIconSet()
-	icons.Enabled = false
+	icons.ASCII = true
 	icons.Session.ASCII = "S"
 	icons.Session.Color = "9"
 	line := FormatLineWithIcons(Item{Kind: KindSession, Name: "demo"}, icons)
@@ -95,6 +95,44 @@ func TestFormatLineWithASCIIIcons(t *testing.T) {
 	}
 	item, ok := ParseActionLineWithIcons(line, icons)
 	if !ok || item.Kind != KindSession || item.Name != "demo" {
+		t.Fatalf("ParseActionLineWithIcons(%q) = %#v, %v", line, item, ok)
+	}
+}
+
+func TestFormatLineWithHexIconColor(t *testing.T) {
+	icons := DefaultIconSet()
+	icons.Session.Color = "#a6e3a1"
+	line := FormatLineWithIcons(Item{Kind: KindSession, Name: "demo"}, icons)
+	if !strings.Contains(line, "\x1b[38;2;166;227;161m"+IconSession+"\x1b[0m demo") {
+		t.Fatalf("line does not use truecolor hex escape: %q", line)
+	}
+}
+
+func TestFormatLineWithNoIconsOmitsSourcePrefixes(t *testing.T) {
+	icons := DefaultIconSet()
+	icons.Enabled = false
+	line := FormatLineWithIcons(Item{Kind: KindSession, Name: "demo"}, icons)
+	if line != "demo" {
+		t.Fatalf("no-icons session line = %q, want demo", line)
+	}
+	item, ok := ParseActionLineWithIcons(line, icons)
+	if !ok || item.Kind != KindSession || item.Name != "demo" {
+		t.Fatalf("ParseActionLineWithIcons(%q) = %#v, %v", line, item, ok)
+	}
+
+	line = FormatLineWithIcons(Item{Kind: KindSession, Name: "Sdemo"}, icons)
+	item, ok = ParseActionLineWithIcons(line, icons)
+	if !ok || item.Kind != KindSession || item.Name != "Sdemo" {
+		t.Fatalf("ParseActionLineWithIcons(%q) = %#v, %v, want full session name", line, item, ok)
+	}
+
+	agent := Item{Kind: KindAgent, AgentName: "pi", AgentState: AgentWorking, Location: "work:2.1", Path: "~/Projects/x"}
+	line = FormatLineWithIcons(agent, icons)
+	if !strings.HasPrefix(line, "[working]\tpi\twork:2.1") {
+		t.Fatalf("no-icons agent line = %q, want state label without source prefix", line)
+	}
+	item, ok = ParseActionLineWithIcons(line, icons)
+	if !ok || item.Kind != KindAgent || item.PaneID != "work:2.1" {
 		t.Fatalf("ParseActionLineWithIcons(%q) = %#v, %v", line, item, ok)
 	}
 }

@@ -8,6 +8,7 @@ import (
 
 type IconSet struct {
 	Enabled bool
+	ASCII   bool
 	Session IconStyle
 	Zoxide  IconStyle
 	FD      IconStyle
@@ -24,6 +25,7 @@ type IconStyle struct {
 func DefaultIconSet() IconSet {
 	return IconSet{
 		Enabled: true,
+		ASCII:   false,
 		Session: IconStyle{Icon: IconSession, ASCII: "S", Color: "10"},
 		Zoxide:  IconStyle{Icon: IconZoxide, ASCII: "Z", Color: "14"},
 		FD:      IconStyle{Icon: IconFD, ASCII: "F", Color: "11"},
@@ -33,14 +35,19 @@ func DefaultIconSet() IconSet {
 
 func (set IconSet) For(kind Kind) IconStyle {
 	style := set.raw(kind)
-	text := style.Icon
 	if !set.Enabled {
-		text = style.ASCII
+		style.Text = ""
+	} else if set.ASCII {
+		style.Text = style.ASCII
+		if style.Text == "" {
+			style.Text = defaultIconText(kind, true)
+		}
+	} else {
+		style.Text = style.Icon
+		if style.Text == "" {
+			style.Text = defaultIconText(kind, false)
+		}
 	}
-	if text == "" {
-		text = defaultIconText(kind, set.Enabled)
-	}
-	style.Text = text
 	if style.Color == "" {
 		style.Color = DefaultIconSet().raw(kind).Color
 	}
@@ -62,12 +69,12 @@ func (set IconSet) raw(kind Kind) IconStyle {
 	}
 }
 
-func defaultIconText(kind Kind, enabled bool) string {
+func defaultIconText(kind Kind, ascii bool) string {
 	defaults := DefaultIconSet().raw(kind)
-	if enabled {
-		return defaults.Icon
+	if ascii {
+		return defaults.ASCII
 	}
-	return defaults.ASCII
+	return defaults.Icon
 }
 
 func FormatLine(i Item) string {
@@ -77,7 +84,7 @@ func FormatLine(i Item) string {
 func FormatLineWithIcons(i Item, icons IconSet) string {
 	switch i.Kind {
 	case KindSession:
-		return fmt.Sprintf("%s %s", colorIcon(KindSession, icons), i.Name)
+		return joinNonEmpty(" ", colorIcon(KindSession, icons), i.Name)
 	case KindAgent:
 		suffix := ""
 		if i.AgentMessage != "" {
@@ -87,11 +94,12 @@ func FormatLineWithIcons(i Item, icons IconSet) string {
 		} else if i.AgentUpdated != "" {
 			suffix = " — updated " + i.AgentUpdated
 		}
-		return fmt.Sprintf("%s [%s]\t%s\t%s\t%s%s", colorIcon(KindAgent, icons), agentStateLabel(i.AgentState), i.AgentName, i.Location, i.Path, suffix)
+		prefix := joinNonEmpty(" ", colorIcon(KindAgent, icons), "["+agentStateLabel(i.AgentState)+"]")
+		return fmt.Sprintf("%s\t%s\t%s\t%s%s", prefix, i.AgentName, i.Location, i.Path, suffix)
 	case KindZoxide:
-		return fmt.Sprintf("%s %s", colorIcon(KindZoxide, icons), i.Path)
+		return joinNonEmpty(" ", colorIcon(KindZoxide, icons), i.Path)
 	case KindFD:
-		return fmt.Sprintf("%s %s", colorIcon(KindFD, icons), i.Path)
+		return joinNonEmpty(" ", colorIcon(KindFD, icons), i.Path)
 	default:
 		return i.DisplayName()
 	}
@@ -105,6 +113,16 @@ func colorIcon(kind Kind, icons IconSet) string {
 	return fmt.Sprintf("\x1b[%sm%s\x1b[0m", ansiColorSequence(style.Color), style.Text)
 }
 
+func joinNonEmpty(sep string, parts ...string) string {
+	kept := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part != "" {
+			kept = append(kept, part)
+		}
+	}
+	return strings.Join(kept, sep)
+}
+
 func iconAndColor(kind Kind) (string, string) {
 	style := DefaultIconSet().For(kind)
 	return style.Text, style.Color
@@ -116,11 +134,20 @@ func ParseActionLine(raw string) (Item, bool) {
 
 func ParseActionLineWithIcons(raw string, icons IconSet) (Item, bool) {
 	clean := strings.TrimSpace(StripANSI(raw))
+	if clean == "" {
+		return Item{}, false
+	}
+	if !icons.Enabled {
+		return parseNoIconActionLine(clean)
+	}
 	switch {
 	case hasIconPrefix(clean, icons, KindSession):
 		name := strings.TrimSpace(strings.TrimPrefix(clean, matchedIconPrefix(clean, icons, KindSession)))
 		return Item{Kind: KindSession, Name: name, Target: name}, name != ""
 	case hasIconPrefix(clean, icons, KindAgent):
+		pane := AgentPaneFromLine(clean)
+		return Item{Kind: KindAgent, PaneID: pane, Target: pane}, pane != ""
+	case strings.HasPrefix(clean, "["):
 		pane := AgentPaneFromLine(clean)
 		return Item{Kind: KindAgent, PaneID: pane, Target: pane}, pane != ""
 	case hasIconPrefix(clean, icons, KindZoxide):
@@ -134,23 +161,53 @@ func ParseActionLineWithIcons(raw string, icons IconSet) (Item, bool) {
 	}
 }
 
+func parseNoIconActionLine(clean string) (Item, bool) {
+	if strings.HasPrefix(clean, "[") {
+		pane := AgentPaneFromLine(clean)
+		if pane != "" {
+			return Item{Kind: KindAgent, PaneID: pane, Target: pane}, true
+		}
+	}
+	if looksPathLine(clean) {
+		return Item{Kind: KindZoxide, Path: clean, Target: ExpandHome(clean)}, clean != ""
+	}
+	return Item{Kind: KindSession, Name: clean, Target: clean}, true
+}
+
+func looksPathLine(s string) bool {
+	return strings.HasPrefix(s, "/") || strings.HasPrefix(s, "~/") || strings.HasPrefix(s, "./") || strings.HasPrefix(s, "../")
+}
+
 func hasIconPrefix(clean string, icons IconSet, kind Kind) bool {
 	return matchedIconPrefix(clean, icons, kind) != ""
 }
 
 func matchedIconPrefix(clean string, icons IconSet, kind Kind) string {
-	if strings.HasPrefix(clean, icons.For(kind).Text) {
-		return icons.For(kind).Text
+	configured := icons.For(kind).Text
+	if hasPrefixToken(clean, configured) {
+		return configured
 	}
 	defaults := DefaultIconSet()
-	if strings.HasPrefix(clean, defaults.For(kind).Text) {
-		return defaults.For(kind).Text
+	defaultIcon := defaults.For(kind).Text
+	if hasPrefixToken(clean, defaultIcon) {
+		return defaultIcon
 	}
-	ascii := defaultIconText(kind, false)
-	if strings.HasPrefix(clean, ascii) {
+	ascii := defaultIconText(kind, true)
+	if hasPrefixToken(clean, ascii) {
 		return ascii
 	}
 	return ""
+}
+
+func hasPrefixToken(clean, prefix string) bool {
+	if prefix == "" || !strings.HasPrefix(clean, prefix) {
+		return false
+	}
+	if len(clean) == len(prefix) {
+		return true
+	}
+	next := clean[len(prefix)]
+	return next == ' ' || next == '\t'
 }
 
 func ansiColorSequence(color string) string {

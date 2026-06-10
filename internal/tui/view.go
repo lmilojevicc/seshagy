@@ -260,9 +260,13 @@ func (m Model) rowParts(item sessionmgr.Item) (string, string) {
 			state = s.success.Render("●")
 		}
 		name := s.tabActive.Render(item.Name)
-		return fmt.Sprintf("%s %s %s", m.iconFor(item.Kind), state, name), ago(item.Activity)
+		return rowText(m.iconFor(item.Kind), state, name), ago(item.Activity)
 	case sessionmgr.KindAgent:
+		icons := m.config.IconSet()
 		state := renderAgentState(s, item.AgentState)
+		if !icons.Enabled {
+			state = renderAgentStateLabel(s, item.AgentState)
+		}
 		message := item.AgentMessage
 		if message == "" {
 			message = item.AgentSource
@@ -274,11 +278,11 @@ func (m Model) rowParts(item sessionmgr.Item) (string, string) {
 		if message != "" {
 			secondary += " · " + message
 		}
-		return fmt.Sprintf("%s %s %s", m.iconFor(item.Kind), state, s.tabActive.Render(item.AgentName)), secondary
+		return rowText(m.iconFor(item.Kind), state, s.tabActive.Render(item.AgentName)), secondary
 	case sessionmgr.KindZoxide:
-		return fmt.Sprintf("%s %s", m.iconFor(item.Kind), item.Path), "zoxide"
+		return rowText(m.iconFor(item.Kind), item.Path), "zoxide"
 	case sessionmgr.KindFD:
-		return fmt.Sprintf("%s %s", m.iconFor(item.Kind), item.Path), "fd"
+		return rowText(m.iconFor(item.Kind), item.Path), "fd"
 	default:
 		return item.DisplayName(), ""
 	}
@@ -294,6 +298,16 @@ func (m Model) iconFor(kind sessionmgr.Kind) string {
 		style = style.Foreground(lipgloss.Color(icon.Color))
 	}
 	return style.Render(icon.Text)
+}
+
+func rowText(parts ...string) string {
+	kept := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part != "" {
+			kept = append(kept, part)
+		}
+	}
+	return strings.Join(kept, " ")
 }
 
 func (m Model) renderRightPane(width, height int) string {
@@ -538,6 +552,29 @@ func renderAgentState(s styles, state sessionmgr.AgentState) string {
 	default:
 		return s.muted.Render("?")
 	}
+}
+
+func renderAgentStateLabel(s styles, state sessionmgr.AgentState) string {
+	label := "[" + agentStateText(state) + "]"
+	switch state {
+	case sessionmgr.AgentWorking, sessionmgr.AgentDone:
+		return s.success.Render(label)
+	case sessionmgr.AgentBlocked:
+		return s.warning.Render(label)
+	case sessionmgr.AgentAborted:
+		return s.danger.Render(label)
+	case sessionmgr.AgentIdle:
+		return s.info.Render(label)
+	default:
+		return s.muted.Render(label)
+	}
+}
+
+func agentStateText(state sessionmgr.AgentState) string {
+	if state == "" {
+		return string(sessionmgr.AgentUnknown)
+	}
+	return string(state)
 }
 
 func kv(s styles, key, value string) string {

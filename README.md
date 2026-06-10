@@ -19,8 +19,9 @@ pane, a live preview pane, and a compact help/status bar.
   independently.
 - Use terminal-default foreground/background colors and ANSI palette accents so
   the TUI follows the active terminal theme instead of forcing a fixed surface.
-- Configure source icons, icon colors, and whether to use Nerd Font icons or
-  plain ASCII labels (`S`, `Z`, `F`, `A`) through the user config file.
+- Configure source icons, icon colors, and whether to use Nerd Font icons,
+  plain ASCII labels (`S`, `Z`, `F`, `A`), or no source icons through the user
+  config file.
 - Optional type-first mode starts filtering as soon as you type; app actions are
   then run by pressing a configurable prefix first (`ctrl+x` by default).
 - List agent panes only after hooks/plugins report `@agent_*` metadata. seshagy
@@ -138,6 +139,7 @@ Default config:
 ```toml
 [icons]
 enabled = true
+ascii = false
 
 [icons.session]
 icon = ""
@@ -167,10 +169,12 @@ prefix = "ctrl+x"
 type_first_prompt_seen = false
 ```
 
-Set `icons.enabled` to `false` to render the ASCII labels instead of Nerd Font
-icons. Each `color` is a terminal color value understood by Lip Gloss/ANSI
-rendering: ANSI palette indexes such as `10`, bright SGR values such as `92`, or
-truecolor hex values such as `#a6e3a1`.
+Set `icons.ascii` to `true` to render the configured ASCII labels instead of
+Nerd Font icons. Set `icons.enabled` to `false` for true no-icons mode; no source
+icons or ASCII labels are shown, and agent rows use text state labels such as
+`[working] pi`. Each `color` is a terminal color value understood by Lip
+Gloss/ANSI rendering: ANSI palette indexes such as `10`, bright SGR values such
+as `92`, or truecolor hex values such as `#a6e3a1`.
 
 On first TUI startup, seshagy asks whether to enable type-first mode and records
 the answer in this config file. After that, edit `type_first.enabled` or

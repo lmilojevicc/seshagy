@@ -53,7 +53,7 @@ func TestFilterVisibleItems(t *testing.T) {
 func TestConfiguredASCIIIconsRenderInTUI(t *testing.T) {
 	m := newTestModel(t)
 	cfg := appconfig.Default()
-	cfg.Icons.Enabled = false
+	cfg.Icons.ASCII = true
 	cfg.Icons.Session.ASCII = "S"
 	cfg.Icons.Zoxide.ASCII = "Z"
 	cfg.Icons.FD.ASCII = "F"
@@ -74,7 +74,28 @@ func TestConfiguredASCIIIconsRenderInTUI(t *testing.T) {
 		}
 	}
 	if strings.Contains(out, sessionmgr.IconSession) || strings.Contains(out, sessionmgr.IconZoxide) {
-		t.Fatalf("nerd font icons should not render when icons are disabled\n%s", out)
+		t.Fatalf("nerd font icons should not render in ascii mode\n%s", out)
+	}
+}
+
+func TestNoIconsAgentRowsRenderStateLabel(t *testing.T) {
+	m := newTestModel(t)
+	cfg := appconfig.Default()
+	cfg.Icons.Enabled = false
+	cfg.Icons.ASCII = true
+	m.config = cfg
+
+	sessionPrimary, _ := m.rowParts(sessionmgr.Item{Kind: sessionmgr.KindSession, Name: "demo"})
+	if got := sessionmgr.StripANSI(sessionPrimary); got != "◌ demo" {
+		t.Fatalf("no-icons session primary = %q, want no source prefix", got)
+	}
+	zoxidePrimary, _ := m.rowParts(sessionmgr.Item{Kind: sessionmgr.KindZoxide, Path: "~/code/demo"})
+	if got := sessionmgr.StripANSI(zoxidePrimary); got != "~/code/demo" {
+		t.Fatalf("no-icons zoxide primary = %q, want no source prefix", got)
+	}
+	agentPrimary, _ := m.rowParts(sessionmgr.Item{Kind: sessionmgr.KindAgent, AgentName: "pi", AgentState: sessionmgr.AgentWorking})
+	if got := sessionmgr.StripANSI(agentPrimary); got != "[working] pi" {
+		t.Fatalf("no-icons agent primary = %q, want [working] pi", got)
 	}
 }
 

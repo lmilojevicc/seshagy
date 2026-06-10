@@ -27,6 +27,7 @@ type Config struct {
 
 type IconsConfig struct {
 	Enabled bool       `toml:"enabled"`
+	ASCII   bool       `toml:"ascii"`
 	Session IconConfig `toml:"session"`
 	Zoxide  IconConfig `toml:"zoxide"`
 	FD      IconConfig `toml:"fd"`
@@ -52,6 +53,7 @@ func Default() Config {
 	return Config{
 		Icons: IconsConfig{
 			Enabled: true,
+			ASCII:   false,
 			Session: IconConfig{Icon: sessionmgr.IconSession, ASCII: "S", Color: "10"},
 			Zoxide:  IconConfig{Icon: sessionmgr.IconZoxide, ASCII: "Z", Color: "14"},
 			FD:      IconConfig{Icon: sessionmgr.IconFD, ASCII: "F", Color: "11"},
@@ -156,6 +158,7 @@ func (c Config) IconSet() sessionmgr.IconSet {
 	c.Normalize()
 	return sessionmgr.IconSet{
 		Enabled: c.Icons.Enabled,
+		ASCII:   c.Icons.ASCII,
 		Session: sessionmgr.IconStyle{Icon: c.Icons.Session.Icon, ASCII: c.Icons.Session.ASCII, Color: c.Icons.Session.Color},
 		Zoxide:  sessionmgr.IconStyle{Icon: c.Icons.Zoxide.Icon, ASCII: c.Icons.Zoxide.ASCII, Color: c.Icons.Zoxide.Color},
 		FD:      sessionmgr.IconStyle{Icon: c.Icons.FD.Icon, ASCII: c.Icons.FD.ASCII, Color: c.Icons.FD.Color},
