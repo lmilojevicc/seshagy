@@ -150,11 +150,11 @@ func runIntegration(args []string) error {
 }
 
 func printItems(ctx context.Context, mode sessionmgr.SourceMode) error {
-	items, err := sessionmgr.Load(ctx, mode)
+	cfg, err := appconfig.Load()
 	if err != nil {
 		return err
 	}
-	cfg, err := appconfig.Load()
+	items, err := sessionmgr.LoadWithOptions(ctx, mode, cfg.LoadOptions())
 	if err != nil {
 		return err
 	}
@@ -310,8 +310,8 @@ TUI keys:
 Config:
   Config lives at $XDG_CONFIG_HOME/seshagy/config.toml, or
   ~/.config/seshagy/config.toml when XDG_CONFIG_HOME is unset. It controls
-  source order/default source, Nerd Font icons, text label mode, no-icons mode,
-  icon colors, type-first mode, and the action prefix key.
+  source order/default source, fd command, Nerd Font icons, text label mode,
+  no-icons mode, icon colors, type-first mode, and the action prefix key.
   In type-first mode, enter and arrow/page/home/end navigation keys do not need a prefix.
 
 Agent flags:

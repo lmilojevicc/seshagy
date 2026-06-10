@@ -145,7 +145,7 @@ func Run() error {
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(refreshCmd(m.source), startupSetupCmd(m.config), tickCmd())
+	return tea.Batch(refreshCmd(m.source, m.config.LoadOptions()), startupSetupCmd(m.config), tickCmd())
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -157,7 +157,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.renameInput.Width = max(20, msg.Width/3)
 		return m, m.previewForSelection()
 	case tickMsg:
-		return m, tea.Batch(refreshCmd(m.source), tickCmd())
+		return m, tea.Batch(refreshCmd(m.source, m.config.LoadOptions()), tickCmd())
 	case integrationsMsg:
 		if msg.err != nil {
 			m.status = msg.err.Error()
@@ -193,7 +193,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.status = strings.Join(msg.messages, " · ")
 		}
 		m.integrationPrompt = false
-		return m, tea.Batch(integrationsCmd(), refreshCmd(m.source))
+		return m, tea.Batch(integrationsCmd(), refreshCmd(m.source, m.config.LoadOptions()))
 	case setupMsg:
 		if msg.err != nil {
 			m.err = msg.err
@@ -248,7 +248,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.status = "returned from tmux"
 		}
-		return m, tea.Batch(refreshCmd(m.source), m.previewForSelection())
+		return m, tea.Batch(refreshCmd(m.source, m.config.LoadOptions()), m.previewForSelection())
 	case actionDoneMsg:
 		if msg.err != nil {
 			m.err = msg.err
@@ -257,7 +257,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.err = nil
 		m.status = msg.status
-		return m, tea.Batch(refreshCmd(m.source), m.previewForSelection())
+		return m, tea.Batch(refreshCmd(m.source, m.config.LoadOptions()), m.previewForSelection())
 	case yaziDoneMsg:
 		if msg.err != nil {
 			m.status = msg.err.Error()
@@ -380,7 +380,7 @@ func (m Model) handleActionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "r", "ctrl+r":
 		m.loading = true
 		m.status = "refreshing"
-		return m, refreshCmd(m.source)
+		return m, refreshCmd(m.source, m.config.LoadOptions())
 	case "x", "ctrl+x":
 		return m.deleteSelected()
 	case "R":
@@ -649,7 +649,7 @@ func (m Model) switchSource(source sessionmgr.SourceMode) (tea.Model, tea.Cmd) {
 	m.cursor = 0
 	m.loading = true
 	m.status = "loading " + modeName(source)
-	return m, refreshCmd(source)
+	return m, refreshCmd(source, m.config.LoadOptions())
 }
 
 func (m Model) cycleAgentStateFilter() (tea.Model, tea.Cmd) {
@@ -846,11 +846,11 @@ func (m Model) previewForSelection() tea.Cmd {
 	return previewCmd(item)
 }
 
-func refreshCmd(source sessionmgr.SourceMode) tea.Cmd {
+func refreshCmd(source sessionmgr.SourceMode, opts sessionmgr.LoadOptions) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 		defer cancel()
-		items, err := sessionmgr.Load(ctx, source)
+		items, err := sessionmgr.LoadWithOptions(ctx, source, opts)
 		return refreshMsg{items: items, err: err}
 	}
 }

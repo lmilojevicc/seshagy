@@ -137,6 +137,18 @@ func TestConfiguredSourceOrderAndDefault(t *testing.T) {
 	}
 }
 
+func TestRefreshUsesConfiguredFDCommand(t *testing.T) {
+	m := newTestModel(t)
+	m.config.Directories.FDCommand = `printf '%s\n' /tmp/seshagy-tui-fd`
+	msg, ok := refreshCmd(sessionmgr.ModeFD, m.config.LoadOptions())().(refreshMsg)
+	if !ok || msg.err != nil {
+		t.Fatalf("refreshCmd = %#v, ok=%v", msg, ok)
+	}
+	if len(msg.items) != 1 || msg.items[0].Kind != sessionmgr.KindFD || msg.items[0].Path != "/tmp/seshagy-tui-fd" {
+		t.Fatalf("configured fd refresh items = %#v", msg.items)
+	}
+}
+
 func TestConfiguredASCIIIconsRenderInTUI(t *testing.T) {
 	m := newTestModel(t)
 	cfg := appconfig.Default()

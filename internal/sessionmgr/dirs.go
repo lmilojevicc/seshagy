@@ -11,6 +11,8 @@ import (
 	"strings"
 )
 
+const DefaultFDCommand = `fd -H -a -d 2 -t d -E .Trash . "$HOME"`
+
 func ListZoxideDirs(ctx context.Context) ([]Item, error) {
 	if _, err := exec.LookPath("zoxide"); err != nil {
 		return nil, nil
@@ -23,14 +25,15 @@ func ListZoxideDirs(ctx context.Context) ([]Item, error) {
 }
 
 func ListFDirs(ctx context.Context) ([]Item, error) {
-	if _, err := exec.LookPath("fd"); err != nil {
-		return nil, nil
+	return ListFDirsWithCommand(ctx, DefaultFDCommand)
+}
+
+func ListFDirsWithCommand(ctx context.Context, command string) ([]Item, error) {
+	command = strings.TrimSpace(command)
+	if command == "" {
+		command = DefaultFDCommand
 	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return nil, nil
-	}
-	out, err := plainCommand(ctx, "fd", "-H", "-a", "-d", "2", "-t", "d", "-E", ".Trash", ".", home).Output()
+	out, err := shellCommand(ctx, command).Output()
 	if err != nil {
 		return nil, nil
 	}

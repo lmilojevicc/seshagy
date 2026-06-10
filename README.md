@@ -8,7 +8,7 @@ pane, a live preview pane, and a compact help/status bar.
 ## Features
 
 - List existing tmux sessions.
-- Discover project directories from `zoxide query -l` and `fd -H -a -d 2 -t d`.
+- Discover project directories from `zoxide query -l` and a configurable fd command.
 - Create/switch to a tmux session from a selected directory using the same
   basename-derived naming convention as the shell script (`foo.bar` -> `foo_bar`,
   `.config` -> `dot_config`).
@@ -144,6 +144,9 @@ Default config:
 default = "all"
 order = ["all", "sessions", "agents", "current-agents", "zoxide", "fd"]
 
+[directories]
+fd_command = 'fd -H -a -d 2 -t d -E .Trash . "$HOME"'
+
 [icons]
 mode = "icons"
 
@@ -179,6 +182,9 @@ Set `sources.order` to change the tab order. Number keys follow that order, so
 the first source is `1`, the second is `2`, and so on. Source names are `all`,
 `sessions`, `agents`, `current-agents`, `zoxide`, and `fd`. Set
 `sources.default` to choose the source seshagy loads on startup.
+
+Set `directories.fd_command` to change which directories populate the fd source.
+The command should print one directory path per line.
 
 Set `icons.mode` to `"text"` to render the configured plain labels instead of
 Nerd Font icons, or `"none"` for true no-icons mode. In no-icons mode, no source

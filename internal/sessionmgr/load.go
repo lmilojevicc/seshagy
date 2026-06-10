@@ -4,6 +4,10 @@ import "context"
 
 type SourceMode int
 
+type LoadOptions struct {
+	FDCommand string
+}
+
 const (
 	ModeAll SourceMode = iota
 	ModeSessions
@@ -14,6 +18,10 @@ const (
 )
 
 func Load(ctx context.Context, mode SourceMode) ([]Item, error) {
+	return LoadWithOptions(ctx, mode, LoadOptions{})
+}
+
+func LoadWithOptions(ctx context.Context, mode SourceMode, opts LoadOptions) ([]Item, error) {
 	switch mode {
 	case ModeSessions:
 		return ListSessions(ctx)
@@ -28,7 +36,7 @@ func Load(ctx context.Context, mode SourceMode) ([]Item, error) {
 	case ModeZoxide:
 		return ListZoxideDirs(ctx)
 	case ModeFD:
-		return ListFDirs(ctx)
+		return ListFDirsWithCommand(ctx, opts.FDCommand)
 	case ModeAll:
 		fallthrough
 	default:
@@ -42,7 +50,7 @@ func Load(ctx context.Context, mode SourceMode) ([]Item, error) {
 			return nil, err
 		}
 		zoxide, _ := ListZoxideDirs(ctx)
-		fd, _ := ListFDirs(ctx)
+		fd, _ := ListFDirsWithCommand(ctx, opts.FDCommand)
 		out = append(out, sessions...)
 		out = append(out, agents...)
 		out = append(out, zoxide...)

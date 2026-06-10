@@ -1,6 +1,7 @@
 package sessionmgr
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -60,6 +61,24 @@ func TestParseAgentsRequiresHookReportedAgentName(t *testing.T) {
 	raw := []byte(strings.Join(fields, paneSep) + "\n")
 	if got := ParseAgents(raw, ""); len(got) != 0 {
 		t.Fatalf("expected unreported pane to be ignored, got %#v", got)
+	}
+}
+
+func TestListFDirsWithCustomCommand(t *testing.T) {
+	got, err := ListFDirsWithCommand(context.Background(), `printf '%s\n' /tmp/seshagy-fd-b /tmp/seshagy-fd-a`)
+	if err != nil {
+		t.Fatalf("ListFDirsWithCommand() error = %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("len = %d, want 2: %#v", len(got), got)
+	}
+	if got[0].Path != "/tmp/seshagy-fd-a" || got[1].Path != "/tmp/seshagy-fd-b" {
+		t.Fatalf("custom fd dirs not sorted/parsed: %#v", got)
+	}
+	for _, item := range got {
+		if item.Kind != KindFD || item.Target != item.Path {
+			t.Fatalf("custom fd item = %#v", item)
+		}
 	}
 }
 

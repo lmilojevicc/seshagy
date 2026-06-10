@@ -19,6 +19,12 @@ func plainCommand(ctx context.Context, name string, args ...string) *exec.Cmd {
 	return cmd
 }
 
+func shellCommand(ctx context.Context, command string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, "sh", "-c", command)
+	cmd.Env = withLocale(os.Environ())
+	return cmd
+}
+
 func withLocale(env []string) []string {
 	for _, e := range env {
 		if strings.HasPrefix(e, "LC_ALL=") || strings.HasPrefix(e, "LC_CTYPE=") || strings.HasPrefix(e, "LANG=") {

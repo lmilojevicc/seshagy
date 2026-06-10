@@ -23,15 +23,20 @@ const (
 )
 
 type Config struct {
-	Sources   SourcesConfig   `toml:"sources"`
-	Icons     IconsConfig     `toml:"icons"`
-	TypeFirst TypeFirstConfig `toml:"type_first"`
-	Setup     SetupConfig     `toml:"setup"`
+	Sources     SourcesConfig     `toml:"sources"`
+	Directories DirectoriesConfig `toml:"directories"`
+	Icons       IconsConfig       `toml:"icons"`
+	TypeFirst   TypeFirstConfig   `toml:"type_first"`
+	Setup       SetupConfig       `toml:"setup"`
 }
 
 type SourcesConfig struct {
 	Default string   `toml:"default"`
 	Order   []string `toml:"order"`
+}
+
+type DirectoriesConfig struct {
+	FDCommand string `toml:"fd_command"`
 }
 
 type IconsConfig struct {
@@ -62,7 +67,8 @@ type SetupConfig struct {
 
 func Default() Config {
 	return Config{
-		Sources: SourcesConfig{Default: "all", Order: defaultSourceOrderNames()},
+		Sources:     SourcesConfig{Default: "all", Order: defaultSourceOrderNames()},
+		Directories: DirectoriesConfig{FDCommand: sessionmgr.DefaultFDCommand},
 		Icons: IconsConfig{
 			Mode:    IconModeIcons,
 			Session: IconConfig{Icon: sessionmgr.IconSession, Label: "S", Color: "10"},
@@ -129,6 +135,9 @@ func (c *Config) Normalize() {
 		c.Sources.Default = SourceModeName(mode)
 	} else {
 		c.Sources.Default = defaults.Sources.Default
+	}
+	if strings.TrimSpace(c.Directories.FDCommand) == "" {
+		c.Directories.FDCommand = defaults.Directories.FDCommand
 	}
 	c.Icons.Mode = normalizeIconMode(c.Icons.Mode)
 	if c.Icons.Enabled != nil && !*c.Icons.Enabled {
@@ -248,6 +257,11 @@ func (c Config) DefaultSource() sessionmgr.SourceMode {
 		return mode
 	}
 	return sessionmgr.ModeAll
+}
+
+func (c Config) LoadOptions() sessionmgr.LoadOptions {
+	c.Normalize()
+	return sessionmgr.LoadOptions{FDCommand: c.Directories.FDCommand}
 }
 
 func SourceModeName(mode sessionmgr.SourceMode) string {

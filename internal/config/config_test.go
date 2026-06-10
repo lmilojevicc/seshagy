@@ -21,6 +21,9 @@ func TestLoadDefaultWhenMissing(t *testing.T) {
 	if cfg.DefaultSource() != sessionmgr.ModeAll {
 		t.Fatalf("default source = %v, want all", cfg.DefaultSource())
 	}
+	if cfg.LoadOptions().FDCommand != sessionmgr.DefaultFDCommand {
+		t.Fatalf("default fd command = %q", cfg.LoadOptions().FDCommand)
+	}
 	if got := cfg.Sources.Order; strings.Join(got, ",") != "all,sessions,agents,current-agents,zoxide,fd" {
 		t.Fatalf("default source order = %#v", got)
 	}
@@ -41,6 +44,7 @@ func TestSaveAndLoadConfig(t *testing.T) {
 	cfg.Icons.Session.Color = "#a6e3a1"
 	cfg.Sources.Default = "current-agents"
 	cfg.Sources.Order = []string{"sessions", "agents", "current-agents", "zoxide", "fd", "all"}
+	cfg.Directories.FDCommand = `printf '%s\n' /tmp/project`
 	cfg.TypeFirst.Enabled = true
 	cfg.TypeFirst.Prefix = "alt+x"
 	cfg.Setup.TypeFirstPromptSeen = true
@@ -66,6 +70,9 @@ func TestSaveAndLoadConfig(t *testing.T) {
 	if !strings.Contains(string(data), `[sources]`) || !strings.Contains(string(data), `current-agents`) {
 		t.Fatalf("saved config missing source config: %s", data)
 	}
+	if !strings.Contains(string(data), `[directories]`) || !strings.Contains(string(data), `fd_command`) {
+		t.Fatalf("saved config missing directory config: %s", data)
+	}
 	loaded, err := Load()
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
@@ -75,6 +82,9 @@ func TestSaveAndLoadConfig(t *testing.T) {
 	}
 	if order := loaded.SourceOrder(); len(order) != 6 || order[0] != sessionmgr.ModeSessions || order[2] != sessionmgr.ModeCurrentAgents || order[5] != sessionmgr.ModeAll {
 		t.Fatalf("loaded source order = %#v", order)
+	}
+	if loaded.LoadOptions().FDCommand != `printf '%s\n' /tmp/project` {
+		t.Fatalf("loaded fd command = %q", loaded.LoadOptions().FDCommand)
 	}
 	if !loaded.TypeFirst.Enabled || loaded.PrefixKey() != "alt+x" || !loaded.Setup.TypeFirstPromptSeen {
 		t.Fatalf("loaded config = %#v", loaded)
