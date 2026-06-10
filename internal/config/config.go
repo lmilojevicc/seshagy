@@ -20,9 +20,15 @@ const (
 )
 
 type Config struct {
+	Sources   SourcesConfig   `toml:"sources"`
 	Icons     IconsConfig     `toml:"icons"`
 	TypeFirst TypeFirstConfig `toml:"type_first"`
 	Setup     SetupConfig     `toml:"setup"`
+}
+
+type SourcesConfig struct {
+	Default string   `toml:"default"`
+	Order   []string `toml:"order"`
 }
 
 type IconsConfig struct {
@@ -51,6 +57,7 @@ type SetupConfig struct {
 
 func Default() Config {
 	return Config{
+		Sources: SourcesConfig{Default: "all", Order: defaultSourceOrderNames()},
 		Icons: IconsConfig{
 			Enabled: true,
 			ASCII:   false,
@@ -113,6 +120,12 @@ func Marshal(cfg Config) ([]byte, error) {
 
 func (c *Config) Normalize() {
 	defaults := Default()
+	c.Sources.Order = normalizeSourceOrder(c.Sources.Order)
+	if mode, ok := sourceModeFromName(c.Sources.Default); ok {
+		c.Sources.Default = SourceModeName(mode)
+	} else {
+		c.Sources.Default = defaults.Sources.Default
+	}
 	if strings.TrimSpace(c.Icons.Session.Icon) == "" {
 		c.Icons.Session.Icon = defaults.Icons.Session.Icon
 	}
@@ -172,6 +185,107 @@ func (c Config) PrefixKey() string {
 		return DefaultPrefix
 	}
 	return prefix
+}
+
+func (c Config) SourceOrder() []sessionmgr.SourceMode {
+	c.Normalize()
+	modes := make([]sessionmgr.SourceMode, 0, len(c.Sources.Order))
+	for _, name := range c.Sources.Order {
+		if mode, ok := sourceModeFromName(name); ok {
+			modes = append(modes, mode)
+		}
+	}
+	if len(modes) == 0 {
+		return defaultSourceOrder()
+	}
+	return modes
+}
+
+func (c Config) DefaultSource() sessionmgr.SourceMode {
+	c.Normalize()
+	if mode, ok := sourceModeFromName(c.Sources.Default); ok {
+		return mode
+	}
+	return sessionmgr.ModeAll
+}
+
+func SourceModeName(mode sessionmgr.SourceMode) string {
+	switch mode {
+	case sessionmgr.ModeSessions:
+		return "sessions"
+	case sessionmgr.ModeAgents:
+		return "agents"
+	case sessionmgr.ModeCurrentAgents:
+		return "current-agents"
+	case sessionmgr.ModeZoxide:
+		return "zoxide"
+	case sessionmgr.ModeFD:
+		return "fd"
+	default:
+		return "all"
+	}
+}
+
+func normalizeSourceOrder(names []string) []string {
+	seen := map[sessionmgr.SourceMode]bool{}
+	order := make([]string, 0, len(defaultSourceOrderNames()))
+	for _, name := range names {
+		mode, ok := sourceModeFromName(name)
+		if !ok || seen[mode] {
+			continue
+		}
+		seen[mode] = true
+		order = append(order, SourceModeName(mode))
+	}
+	for _, mode := range defaultSourceOrder() {
+		if seen[mode] {
+			continue
+		}
+		order = append(order, SourceModeName(mode))
+	}
+	return order
+}
+
+func defaultSourceOrder() []sessionmgr.SourceMode {
+	return []sessionmgr.SourceMode{
+		sessionmgr.ModeAll,
+		sessionmgr.ModeSessions,
+		sessionmgr.ModeAgents,
+		sessionmgr.ModeCurrentAgents,
+		sessionmgr.ModeZoxide,
+		sessionmgr.ModeFD,
+	}
+}
+
+func defaultSourceOrderNames() []string {
+	modes := defaultSourceOrder()
+	names := make([]string, 0, len(modes))
+	for _, mode := range modes {
+		names = append(names, SourceModeName(mode))
+	}
+	return names
+}
+
+func sourceModeFromName(name string) (sessionmgr.SourceMode, bool) {
+	normalized := strings.ToLower(strings.TrimSpace(name))
+	normalized = strings.ReplaceAll(normalized, "_", "-")
+	normalized = strings.ReplaceAll(normalized, " ", "-")
+	switch normalized {
+	case "all":
+		return sessionmgr.ModeAll, true
+	case "sessions", "session":
+		return sessionmgr.ModeSessions, true
+	case "agents", "agent":
+		return sessionmgr.ModeAgents, true
+	case "current-agents", "current-agent", "current", "current-session-agents":
+		return sessionmgr.ModeCurrentAgents, true
+	case "zoxide", "z":
+		return sessionmgr.ModeZoxide, true
+	case "fd", "f":
+		return sessionmgr.ModeFD, true
+	default:
+		return sessionmgr.ModeAll, false
+	}
 }
 
 func configHome() string {

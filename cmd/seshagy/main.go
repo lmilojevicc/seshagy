@@ -309,8 +309,8 @@ TUI keys:
 Config:
   Config lives at $XDG_CONFIG_HOME/seshagy/config.toml, or
   ~/.config/seshagy/config.toml when XDG_CONFIG_HOME is unset. It controls
-  Nerd Font icons, ASCII label mode, no-icons mode, icon colors, type-first
-  mode, and the action prefix key.
+  source order/default source, Nerd Font icons, ASCII label mode, no-icons
+  mode, icon colors, type-first mode, and the action prefix key.
   In type-first mode, enter and arrow/page/home/end navigation keys do not need a prefix.
 
 Agent flags:

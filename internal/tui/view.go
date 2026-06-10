@@ -75,20 +75,8 @@ func (m Model) renderSetupPrompt(height int) string {
 
 func (m Model) renderTabs() string {
 	s := m.styles
-	tabs := []struct {
-		key  string
-		name string
-		mode sessionmgr.SourceMode
-	}{
-		{"1", "All", sessionmgr.ModeAll},
-		{"2", "Sessions", sessionmgr.ModeSessions},
-		{"3", "Agents", sessionmgr.ModeAgents},
-		{"4", "Current agents", sessionmgr.ModeCurrentAgents},
-		{"5", "Zoxide", sessionmgr.ModeZoxide},
-		{"6", "fd", sessionmgr.ModeFD},
-	}
 	parts := []string{s.emphasis.Render("seshagy")}
-	for _, tab := range tabs {
+	for _, tab := range m.sourceTabs() {
 		label := fmt.Sprintf("[%s] %s", tab.key, tab.name)
 		if tab.mode == m.source {
 			parts = append(parts, s.tabActive.Render(label))
@@ -97,6 +85,42 @@ func (m Model) renderTabs() string {
 		}
 	}
 	return lipgloss.NewStyle().Padding(0, 1).Render(strings.Join(parts, "  "))
+}
+
+type sourceTab struct {
+	key  string
+	name string
+	mode sessionmgr.SourceMode
+}
+
+func (m Model) sourceTabs() []sourceTab {
+	order := m.config.SourceOrder()
+	tabs := make([]sourceTab, 0, len(order))
+	for i, mode := range order {
+		tabs = append(tabs, sourceTab{
+			key:  fmt.Sprintf("%d", i+1),
+			name: tabNameForMode(mode),
+			mode: mode,
+		})
+	}
+	return tabs
+}
+
+func tabNameForMode(mode sessionmgr.SourceMode) string {
+	switch mode {
+	case sessionmgr.ModeSessions:
+		return "Sessions"
+	case sessionmgr.ModeAgents:
+		return "Agents"
+	case sessionmgr.ModeCurrentAgents:
+		return "Current agents"
+	case sessionmgr.ModeZoxide:
+		return "Zoxide"
+	case sessionmgr.ModeFD:
+		return "fd"
+	default:
+		return "All"
+	}
 }
 
 func (m Model) renderIntegrationPrompt(height int) string {

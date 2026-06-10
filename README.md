@@ -64,12 +64,13 @@ Runtime tools:
 | --- | --- |
 | `enter` | Attach/switch to a session, create/switch from a directory, or focus an agent pane |
 | `j/k`, arrows | Move selection |
-| `1`/`a` | All sources |
-| `2`/`t` | Sessions only |
-| `3`/`g` | Agent panes |
-| `4`/`o` | Agents in the current tmux session |
-| `5`/`z` | Zoxide directories |
-| `6`/`f` | fd directories |
+| `1`..`6` | Select the source at that position in `sources.order` |
+| `a` | All sources |
+| `t` | Sessions only |
+| `g` | Agent panes |
+| `o` | Agents in the current tmux session |
+| `z` | Zoxide directories |
+| `f` | fd directories |
 | `s` | Cycle agent state filter in agent panes |
 | `S` | Clear agent state filter in agent panes |
 | `/` | Filter visible rows |
@@ -137,6 +138,10 @@ effective config, and `seshagy config init` to write the default file.
 Default config:
 
 ```toml
+[sources]
+default = "all"
+order = ["all", "sessions", "agents", "current-agents", "zoxide", "fd"]
+
 [icons]
 enabled = true
 ascii = false
@@ -168,6 +173,11 @@ prefix = "ctrl+x"
 [setup]
 type_first_prompt_seen = false
 ```
+
+Set `sources.order` to change the tab order. Number keys follow that order, so
+the first source is `1`, the second is `2`, and so on. Source names are `all`,
+`sessions`, `agents`, `current-agents`, `zoxide`, and `fd`. Set
+`sources.default` to choose the source seshagy loads on startup.
 
 Set `icons.ascii` to `true` to render the configured ASCII labels instead of
 Nerd Font icons. Set `icons.enabled` to `false` for true no-icons mode; no source

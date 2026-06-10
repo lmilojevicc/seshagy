@@ -82,6 +82,37 @@ func TestDefaultSourceNumberKeys(t *testing.T) {
 	}
 }
 
+func TestConfiguredSourceOrderAndDefault(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	cfg := appconfig.Default()
+	cfg.Sources.Default = "current-agents"
+	cfg.Sources.Order = []string{"sessions", "agents", "current-agents", "zoxide", "fd", "all"}
+	if err := appconfig.Save(cfg); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	m := New()
+	if m.source != sessionmgr.ModeCurrentAgents {
+		t.Fatalf("New() source = %v, want configured current agents", m.source)
+	}
+	out := sessionmgr.StripANSI(m.renderTabs())
+	for _, want := range []string{"[1] Sessions", "[2] Agents", "[3] Current agents", "[4] Zoxide", "[5] fd", "[6] All"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("configured tabs missing %q\n%s", want, out)
+		}
+	}
+	model, _ := m.handleKey(keyMsg("1"))
+	m = model.(Model)
+	if m.source != sessionmgr.ModeSessions {
+		t.Fatalf("configured key 1 source = %v, want sessions", m.source)
+	}
+	model, _ = m.handleKey(keyMsg("6"))
+	m = model.(Model)
+	if m.source != sessionmgr.ModeAll {
+		t.Fatalf("configured key 6 source = %v, want all", m.source)
+	}
+}
+
 func TestConfiguredASCIIIconsRenderInTUI(t *testing.T) {
 	m := newTestModel(t)
 	cfg := appconfig.Default()

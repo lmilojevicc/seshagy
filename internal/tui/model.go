@@ -121,7 +121,7 @@ func New() Model {
 	m := Model{
 		styles:              defaultStyles(),
 		config:              cfg,
-		source:              sessionmgr.ModeAll,
+		source:              cfg.DefaultSource(),
 		showPreview:         true,
 		showHelp:            true,
 		searchInput:         search,
@@ -336,6 +336,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleActionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if source, ok := m.sourceForNumberKey(msg.String()); ok {
+		return m.switchSource(source)
+	}
 	switch msg.String() {
 	case "ctrl+c", "q", "esc":
 		return m, tea.Quit
@@ -397,22 +400,34 @@ func (m Model) handleActionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "?", "h", "alt+h":
 		m.showHelp = !m.showHelp
 		return m, nil
-	case "a", "1", "ctrl+a":
+	case "a", "ctrl+a":
 		return m.switchSource(sessionmgr.ModeAll)
-	case "t", "2", "ctrl+t":
+	case "t", "ctrl+t":
 		return m.switchSource(sessionmgr.ModeSessions)
-	case "g", "3", "ctrl+g":
+	case "g", "ctrl+g":
 		return m.switchSource(sessionmgr.ModeAgents)
-	case "o", "4", "ctrl+o":
+	case "o", "ctrl+o":
 		return m.switchSource(sessionmgr.ModeCurrentAgents)
-	case "z", "5", "ctrl+z":
+	case "z", "ctrl+z":
 		return m.switchSource(sessionmgr.ModeZoxide)
-	case "f", "6", "ctrl+f":
+	case "f", "ctrl+f":
 		return m.switchSource(sessionmgr.ModeFD)
 	case "y", "ctrl+y":
 		return m.startYazi()
 	}
 	return m, nil
+}
+
+func (m Model) sourceForNumberKey(key string) (sessionmgr.SourceMode, bool) {
+	if len(key) != 1 || key[0] < '1' || key[0] > '9' {
+		return sessionmgr.ModeAll, false
+	}
+	idx := int(key[0] - '1')
+	order := m.config.SourceOrder()
+	if idx < 0 || idx >= len(order) {
+		return sessionmgr.ModeAll, false
+	}
+	return order[idx], true
 }
 
 func (m Model) handleTypeFirstKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
