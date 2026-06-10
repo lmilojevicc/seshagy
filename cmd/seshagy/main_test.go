@@ -19,8 +19,10 @@ func TestParseReportArgsSessionIDAndSeq(t *testing.T) {
 }
 
 func TestParseReportArgsRejectsInvalidSeq(t *testing.T) {
-	if _, err := parseReportArgs([]string{"--seq", "not-an-int"}); err == nil {
-		t.Fatal("parseReportArgs should reject non-integer seq")
+	for _, seq := range []string{"not-an-int", "-1"} {
+		if _, err := parseReportArgs([]string{"--seq", seq}); err == nil {
+			t.Fatalf("parseReportArgs should reject seq %q", seq)
+		}
 	}
 }
 
@@ -38,7 +40,9 @@ func TestParseReleaseArgsSeq(t *testing.T) {
 }
 
 func TestParseReleaseArgsRejectsInvalidSeq(t *testing.T) {
-	if _, err := parseReleaseArgs([]string{"--seq", "bad"}); err == nil {
-		t.Fatal("parseReleaseArgs should reject non-integer seq")
+	for _, seq := range []string{"bad", "-1"} {
+		if _, err := parseReleaseArgs([]string{"--seq", seq}); err == nil {
+			t.Fatalf("parseReleaseArgs should reject seq %q", seq)
+		}
 	}
 }

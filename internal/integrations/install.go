@@ -24,7 +24,17 @@ func installClaude(binaryPath string) ([]string, error) {
 }
 
 func installDroid(binaryPath string) ([]string, error) {
-	return installNestedSessionHook(TargetDroid, droidDir(), filepath.Join(droidDir(), "settings.json"), binaryPath, true)
+	messages, err := installNestedSessionHook(TargetDroid, droidDir(), filepath.Join(droidDir(), "settings.json"), binaryPath, true)
+	if err != nil {
+		return nil, err
+	}
+	hooksPath := filepath.Join(droidDir(), "hooks.json")
+	if updated, err := removeCommandsFromJSON(hooksPath, shellHookName, removeNestedCommands); err != nil {
+		return nil, err
+	} else if updated {
+		messages = append(messages, fmt.Sprintf("removed stale seshagy hook entries from %s", hooksPath))
+	}
+	return messages, nil
 }
 
 func installQodercli(binaryPath string) ([]string, error) {

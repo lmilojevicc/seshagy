@@ -309,8 +309,8 @@ func parseReleaseArgs(args []string) (sessionmgr.AgentRelease, error) {
 
 func parseSeqFlag(raw, flag string) (int64, error) {
 	seq, err := strconv.ParseInt(raw, 10, 64)
-	if err != nil {
-		return 0, fmt.Errorf("%s requires an integer", flag)
+	if err != nil || seq < 0 {
+		return 0, fmt.Errorf("%s requires a non-negative integer", flag)
 	}
 	return seq, nil
 }
@@ -369,7 +369,9 @@ Hook integrations:
   Supported targets: pi, claude, codex, copilot, droid, opencode, qodercli, cursor.
   The TUI asks before installing missing hooks for detected agents only on the
   first launch. After that, use the TUI's i key or this integration command.
-  Hooks report state directly with --report-agent; seshagy no longer infers
-  agent state by inspecting foreground process names or pane text.
+  Pi and OpenCode report lifecycle state directly. Claude, Codex, Copilot,
+  Droid, Qoder CLI, and Cursor report session/presence as unknown with optional
+  native session ids. seshagy no longer infers agent state by inspecting
+  foreground process names or pane text.
 `
 }

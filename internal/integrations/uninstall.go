@@ -17,7 +17,17 @@ func uninstallClaude() ([]string, error) {
 }
 
 func uninstallDroid() ([]string, error) {
-	return uninstallNestedSettingsHook(TargetDroid, droidDir(), filepath.Join(droidDir(), "settings.json"))
+	messages, err := uninstallNestedSettingsHook(TargetDroid, droidDir(), filepath.Join(droidDir(), "settings.json"))
+	if err != nil {
+		return nil, err
+	}
+	hooksPath := filepath.Join(droidDir(), "hooks.json")
+	if updated, err := removeCommandsFromJSON(hooksPath, shellHookName, removeNestedCommands); err != nil {
+		return nil, err
+	} else if updated {
+		messages = append(messages, fmt.Sprintf("removed seshagy hook entries from %s", hooksPath))
+	}
+	return messages, nil
 }
 
 func uninstallQodercli() ([]string, error) {

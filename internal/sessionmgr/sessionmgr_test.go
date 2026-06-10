@@ -127,6 +127,13 @@ func TestAgentPaneOptionsIncludeSessionMetadata(t *testing.T) {
 	}
 }
 
+func TestAgentLockPathIsPaneSpecificAndSafe(t *testing.T) {
+	got := agentLockPath("%1:2.3")
+	if !strings.Contains(got, "seshagy-agent-p1_2_3.lock") {
+		t.Fatalf("agentLockPath() = %q, want sanitized pane id", got)
+	}
+}
+
 func TestDetectTmuxPopup(t *testing.T) {
 	tests := []struct {
 		name        string

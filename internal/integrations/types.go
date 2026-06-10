@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	installVersion = 1
+	installVersion = 2
 	markerPrefix   = "SESHAGY_INTEGRATION_"
 )
 
@@ -214,6 +214,6 @@ func specs() []spec {
 		{TargetDroid, "Factory Droid", []string{"droid"}, droidDir, func() string { return filepath.Join(droidDir(), "hooks", shellHookName) }, installDroid, uninstallDroid},
 		{TargetOpencode, "OpenCode", []string{"opencode", "open-code"}, opencodeDir, func() string { return filepath.Join(opencodeDir(), "plugins", "seshagy-agent-state.js") }, installOpencode, uninstallOpencode},
 		{TargetQodercli, "Qoder CLI", []string{"qodercli", "qoder", "qoderclicn", "qodercn"}, qoderDir, func() string { return filepath.Join(qoderDir(), "hooks", shellHookName) }, installQodercli, uninstallQodercli},
-		{TargetCursor, "Cursor Agent", []string{"cursor", "cursor-agent"}, cursorDir, func() string { return filepath.Join(cursorDir(), shellHookName) }, installCursor, uninstallCursor},
+		{TargetCursor, "Cursor Agent", []string{"cursor-agent"}, cursorDir, func() string { return filepath.Join(cursorDir(), shellHookName) }, installCursor, uninstallCursor},
 	}
 }

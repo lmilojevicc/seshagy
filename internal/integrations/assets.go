@@ -20,6 +20,11 @@ state="${2:-idle}"
 message="${3:-}"
 session_id=""
 
+next_seq() {
+  now="$(date +%%s 2>/dev/null || echo 0)"
+  echo $((now * 1000 + ($$ %% 1000)))
+}
+
 read_session_id() {
   [ ! -t 0 ] || return 0
   payload="$(cat 2>/dev/null || true)"
@@ -49,6 +54,7 @@ fi
 [ -n "$bin" ] || exit 0
 
 source="seshagy:$agent"
+seq="$(next_seq)"
 case "$state" in
   session|start)
     state="unknown"
@@ -56,20 +62,20 @@ case "$state" in
     ;;
   idle|working|blocked|done|aborted|unknown) ;;
   release|end|shutdown)
-    "$bin" --release-agent --source "$source" >/dev/null 2>&1 || true
+    "$bin" --release-agent --source "$source" --seq "$seq" >/dev/null 2>&1 || true
     exit 0
     ;;
   *) exit 0 ;;
 esac
 
 if [ -n "$message" ] && [ -n "$session_id" ]; then
-  "$bin" --report-agent --agent "$agent" --state "$state" --source "$source" --message "$message" --session-id "$session_id" >/dev/null 2>&1 || true
+  "$bin" --report-agent --agent "$agent" --state "$state" --source "$source" --message "$message" --session-id "$session_id" --seq "$seq" >/dev/null 2>&1 || true
 elif [ -n "$message" ]; then
-  "$bin" --report-agent --agent "$agent" --state "$state" --source "$source" --message "$message" >/dev/null 2>&1 || true
+  "$bin" --report-agent --agent "$agent" --state "$state" --source "$source" --message "$message" --seq "$seq" >/dev/null 2>&1 || true
 elif [ -n "$session_id" ]; then
-  "$bin" --report-agent --agent "$agent" --state "$state" --source "$source" --session-id "$session_id" >/dev/null 2>&1 || true
+  "$bin" --report-agent --agent "$agent" --state "$state" --source "$source" --session-id "$session_id" --seq "$seq" >/dev/null 2>&1 || true
 else
-  "$bin" --report-agent --agent "$agent" --state "$state" --source "$source" >/dev/null 2>&1 || true
+  "$bin" --report-agent --agent "$agent" --state "$state" --source "$source" --seq "$seq" >/dev/null 2>&1 || true
 fi
 `, target, installVersion, target, shellQuoteLiteral(binaryPath))
 }
@@ -283,6 +289,11 @@ function report(state, sessionID) {
   return run(args);
 }
 
+function reportSession(sessionID) {
+  if (!sessionID) return Promise.resolve();
+  return run(["--report-agent", "--agent", "opencode", "--source", SOURCE, "--session-id", sessionID, "--seq", nextReportSeq()]);
+}
+
 function release() {
   return run(["--release-agent", "--source", SOURCE, "--seq", nextReportSeq()]);
 }
@@ -303,16 +314,19 @@ function stateFromStatus(status) {
 export const SeshagyAgentStatePlugin = async () => {
   if (!process.env.TMUX_PANE) return {};
   return {
-    "chat.message": async ({ event } = {}) => report("working", sessionIDFromProperties(event?.properties)),
+    "chat.message": async ({ sessionID, event } = {}) => report("working", sessionID || sessionIDFromProperties(event?.properties)),
     event: async ({ event }) => {
       const type = event?.type;
       const sessionID = sessionIDFromProperties(event?.properties);
       const status = stateFromStatus(event?.properties?.status);
+      if (type === "session.status") {
+        return status ? report(status, sessionID) : reportSession(sessionID);
+      }
       if (status) return report(status, sessionID);
       switch (type) {
         case "session.created":
         case "session.updated":
-          return sessionID ? report("idle", sessionID) : undefined;
+          return reportSession(sessionID);
         case "tool.execute.before":
         case "tool.execute.after":
         case "permission.replied":

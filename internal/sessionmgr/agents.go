@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -237,6 +239,12 @@ func ReportAgent(ctx context.Context, opts AgentReport) error {
 	if err != nil {
 		return err
 	}
+	return withAgentPaneLock(pane, func() error {
+		return reportAgentLocked(ctx, pane, opts)
+	})
+}
+
+func reportAgentLocked(ctx context.Context, pane string, opts AgentReport) error {
 	name := opts.Name
 	if name == "" {
 		name, _ = showPaneOption(ctx, pane, "@agent_name")
@@ -251,41 +259,56 @@ func ReportAgent(ctx context.Context, opts AgentReport) error {
 	} else {
 		state = NormalizeAgentState(string(state))
 	}
-	if opts.SeqSeen {
-		existingSeq, _ := showPaneOption(ctx, pane, "@agent_seq")
-		if !shouldApplyAgentSeq(existingSeq, opts.Seq, true) {
-			return nil
-		}
+	if !agentSeqStillCurrent(ctx, pane, opts.Seq, opts.SeqSeen) {
+		return nil
+	}
+	if opts.SeqSeen && !setAgentPaneOptionIfCurrent(ctx, pane, "@agent_seq", strconv.FormatInt(opts.Seq, 10), opts.Seq, opts.SeqSeen) {
+		return nil
+	}
+	if !agentSeqStillCurrent(ctx, pane, opts.Seq, opts.SeqSeen) {
+		return nil
 	}
 	visible := paneVisibleNow(ctx, pane)
 	_, _ = UpdateAgentStatusTracking(ctx, pane, state, visible)
+	if !agentSeqStillCurrent(ctx, pane, opts.Seq, opts.SeqSeen) {
+		return nil
+	}
 	updated := fmt.Sprintf("%d", time.Now().Unix())
-	_ = setPaneOption(ctx, pane, "@agent_name", name)
-	_ = setPaneOption(ctx, pane, "@agent_state", string(semanticAgentState(state)))
-	_ = setPaneOption(ctx, pane, "@agent_updated", updated)
+	if !setAgentPaneOptionIfCurrent(ctx, pane, "@agent_name", name, opts.Seq, opts.SeqSeen) {
+		return nil
+	}
+	if !setAgentPaneOptionIfCurrent(ctx, pane, "@agent_state", string(semanticAgentState(state)), opts.Seq, opts.SeqSeen) {
+		return nil
+	}
+	if !setAgentPaneOptionIfCurrent(ctx, pane, "@agent_updated", updated, opts.Seq, opts.SeqSeen) {
+		return nil
+	}
 	if opts.MessageSeen {
 		if opts.Message != "" {
-			_ = setPaneOption(ctx, pane, "@agent_message", cleanField(opts.Message))
-		} else {
-			_ = unsetPaneOption(ctx, pane, "@agent_message")
+			if !setAgentPaneOptionIfCurrent(ctx, pane, "@agent_message", cleanField(opts.Message), opts.Seq, opts.SeqSeen) {
+				return nil
+			}
+		} else if !unsetAgentPaneOptionIfCurrent(ctx, pane, "@agent_message", opts.Seq, opts.SeqSeen) {
+			return nil
 		}
 	}
 	if opts.SourceSeen {
 		if opts.Source != "" {
-			_ = setPaneOption(ctx, pane, "@agent_source", cleanField(opts.Source))
-		} else {
-			_ = unsetPaneOption(ctx, pane, "@agent_source")
+			if !setAgentPaneOptionIfCurrent(ctx, pane, "@agent_source", cleanField(opts.Source), opts.Seq, opts.SeqSeen) {
+				return nil
+			}
+		} else if !unsetAgentPaneOptionIfCurrent(ctx, pane, "@agent_source", opts.Seq, opts.SeqSeen) {
+			return nil
 		}
 	}
 	if opts.SessionIDSeen {
 		if opts.SessionID != "" {
-			_ = setPaneOption(ctx, pane, "@agent_session_id", cleanField(opts.SessionID))
-		} else {
-			_ = unsetPaneOption(ctx, pane, "@agent_session_id")
+			if !setAgentPaneOptionIfCurrent(ctx, pane, "@agent_session_id", cleanField(opts.SessionID), opts.Seq, opts.SeqSeen) {
+				return nil
+			}
+		} else if !unsetAgentPaneOptionIfCurrent(ctx, pane, "@agent_session_id", opts.Seq, opts.SeqSeen) {
+			return nil
 		}
-	}
-	if opts.SeqSeen {
-		_ = setPaneOption(ctx, pane, "@agent_seq", strconv.FormatInt(opts.Seq, 10))
 	}
 	return nil
 }
@@ -317,6 +340,12 @@ func ReleaseAgent(ctx context.Context, opts AgentRelease) error {
 	if err != nil {
 		return err
 	}
+	return withAgentPaneLock(resolved, func() error {
+		return releaseAgentLocked(ctx, resolved, opts)
+	})
+}
+
+func releaseAgentLocked(ctx context.Context, resolved string, opts AgentRelease) error {
 	if opts.SourceSeen {
 		source := cleanField(opts.Source)
 		existing, _ := showPaneOption(ctx, resolved, "@agent_source")
@@ -324,20 +353,66 @@ func ReleaseAgent(ctx context.Context, opts AgentRelease) error {
 			return nil
 		}
 	}
-	if opts.SeqSeen {
-		existingSeq, _ := showPaneOption(ctx, resolved, "@agent_seq")
-		if !shouldApplyAgentSeq(existingSeq, opts.Seq, true) {
-			return nil
-		}
+	if !agentSeqStillCurrent(ctx, resolved, opts.Seq, opts.SeqSeen) {
+		return nil
 	}
 	for _, opt := range agentPaneOptions() {
-		_ = unsetPaneOption(ctx, resolved, opt)
+		if !unsetAgentPaneOptionIfCurrent(ctx, resolved, opt, opts.Seq, opts.SeqSeen) {
+			return nil
+		}
 	}
 	return nil
 }
 
+func withAgentPaneLock(pane string, fn func() error) error {
+	path := agentLockPath(pane)
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX); err != nil {
+		return err
+	}
+	defer syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
+	return fn()
+}
+
+func agentLockPath(pane string) string {
+	replacer := strings.NewReplacer("/", "_", "\\", "_", ":", "_", ".", "_", "%", "p")
+	name := replacer.Replace(cleanField(pane))
+	if name == "" {
+		name = "unknown"
+	}
+	return filepath.Join(os.TempDir(), "seshagy-agent-"+name+".lock")
+}
+
 func agentPaneOptions() []string {
 	return []string{"@agent_name", "@agent_state", "@agent_message", "@agent_updated", "@agent_source", "@agent_session_id", "@agent_seq", "@agent_last_state", "@agent_last_status", "@agent_last_seen"}
+}
+
+func agentSeqStillCurrent(ctx context.Context, pane string, seq int64, seqSeen bool) bool {
+	if !seqSeen {
+		return true
+	}
+	existingSeq, _ := showPaneOption(ctx, pane, "@agent_seq")
+	return shouldApplyAgentSeq(existingSeq, seq, true)
+}
+
+func setAgentPaneOptionIfCurrent(ctx context.Context, pane, opt, value string, seq int64, seqSeen bool) bool {
+	if !agentSeqStillCurrent(ctx, pane, seq, seqSeen) {
+		return false
+	}
+	_ = setPaneOption(ctx, pane, opt, value)
+	return true
+}
+
+func unsetAgentPaneOptionIfCurrent(ctx context.Context, pane, opt string, seq int64, seqSeen bool) bool {
+	if !agentSeqStillCurrent(ctx, pane, seq, seqSeen) {
+		return false
+	}
+	_ = unsetPaneOption(ctx, pane, opt)
+	return true
 }
 
 func shouldApplyAgentSeq(existing string, incoming int64, incomingSeen bool) bool {

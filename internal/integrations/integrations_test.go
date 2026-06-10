@@ -8,6 +8,34 @@ import (
 	"testing"
 )
 
+func TestInstalledV1ManagedHookIsOutdated(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "seshagy-agent-state.sh")
+	data := []byte("# SESHAGY_INTEGRATION_ID=pi\n# SESHAGY_INTEGRATION_VERSION=1\n")
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	state, version := installedState(path, TargetPi)
+	if state != StatusOutdated || version != 1 {
+		t.Fatalf("installedState(v1) = %s/%d, want outdated/1", state, version)
+	}
+}
+
+func TestScanCursorRequiresCursorAgentCommand(t *testing.T) {
+	home := t.TempDir()
+	binDir := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", binDir)
+	writeExecutable(t, filepath.Join(binDir, "cursor"))
+	if rec := findRec(t, Scan(), TargetCursor); rec.AgentAvailable {
+		t.Fatalf("cursor editor command should not make Cursor Agent available: %#v", rec)
+	}
+
+	writeExecutable(t, filepath.Join(binDir, "cursor-agent"))
+	if rec := findRec(t, Scan(), TargetCursor); !rec.AgentAvailable {
+		t.Fatalf("cursor-agent command should make Cursor Agent available: %#v", rec)
+	}
+}
+
 func TestScanDetectsAvailableMissingAndInstalledPi(t *testing.T) {
 	home := t.TempDir()
 	binDir := t.TempDir()
@@ -94,6 +122,70 @@ func TestInstallNestedSessionTargetsWriteSessionHookOnlyAndCleanLifecycle(t *tes
 				t.Fatalf("user hook not preserved: %#v", userCommands)
 			}
 		})
+	}
+}
+
+func TestInstallDroidCleansLegacyHooksJSON(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	droid := filepath.Join(home, ".factory")
+	if err := os.MkdirAll(droid, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	legacyPath := filepath.Join(droid, "hooks.json")
+	root := map[string]any{"hooks": map[string]any{
+		"UserPromptSubmit": []any{map[string]any{"hooks": []any{
+			map[string]any{"type": "command", "command": "bash /old/seshagy-agent-state.sh droid working"},
+			map[string]any{"type": "command", "command": "echo keep"},
+		}}},
+	}}
+	if err := writeJSONObject(legacyPath, root); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := installDroid("/bin/seshagy"); err != nil {
+		t.Fatal(err)
+	}
+	hooks := readJSON(t, legacyPath)["hooks"].(map[string]any)
+	commands := nestedHookCommandsOnly(t, hooks, "UserPromptSubmit")
+	if managedCommandPresent(commands) || len(commands) != 1 || commands[0] != "echo keep" {
+		t.Fatalf("legacy hooks.json cleanup = %#v, want only user hook", hooks)
+	}
+}
+
+func TestUninstallDroidCleansLegacyHooksJSON(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	droid := filepath.Join(home, ".factory")
+	if err := os.MkdirAll(filepath.Join(droid, "hooks"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(droid, "hooks", shellHookName), []byte("hook"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	settingsPath := filepath.Join(droid, "settings.json")
+	legacyPath := filepath.Join(droid, "hooks.json")
+	for _, path := range []string{settingsPath, legacyPath} {
+		root := map[string]any{"hooks": map[string]any{
+			"Stop": []any{map[string]any{"hooks": []any{
+				map[string]any{"type": "command", "command": "bash /old/seshagy-agent-state.sh droid done"},
+				map[string]any{"type": "command", "command": "echo keep"},
+			}}},
+		}}
+		if err := writeJSONObject(path, root); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if _, err := uninstallDroid(); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{settingsPath, legacyPath} {
+		hooks := readJSON(t, path)["hooks"].(map[string]any)
+		commands := nestedHookCommandsOnly(t, hooks, "Stop")
+		if managedCommandPresent(commands) || len(commands) != 1 || commands[0] != "echo keep" {
+			t.Fatalf("%s cleanup = %#v, want only user hook", path, hooks)
+		}
 	}
 }
 
@@ -253,9 +345,9 @@ func TestUninstallRemovesManagedHookEntriesOnly(t *testing.T) {
 	}
 }
 
-func TestShellHookSessionActionReportsUnknownWithSessionID(t *testing.T) {
+func TestShellHookSessionActionReportsUnknownWithSessionIDAndSeq(t *testing.T) {
 	asset := shellHookAsset(TargetCursor, "/bin/seshagy")
-	for _, want := range []string{"session_id", "sessionId", "conversation_id", "conversationId", `state="unknown"`, `--state "$state"`, `--session-id "$session_id"`} {
+	for _, want := range []string{"next_seq()", `seq="$(next_seq)"`, "session_id", "sessionId", "conversation_id", "conversationId", `state="unknown"`, `--state "$state"`, `--session-id "$session_id"`, `--seq "$seq"`, `--release-agent --source "$source" --seq "$seq"`} {
 		if !strings.Contains(asset, want) {
 			t.Fatalf("shell hook asset missing %q:\n%s", want, asset)
 		}
@@ -301,10 +393,15 @@ func TestOpenCodePluginReportsIdleSessionIDAndSeq(t *testing.T) {
 		"properties?.sessionID",
 		"let reportSeq = Date.now() * 1000",
 		"function nextReportSeq()",
+		"function reportSession(sessionID)",
 		`"--seq", nextReportSeq()`,
 		`"--session-id", sessionID`,
+		`"chat.message": async ({ sessionID, event } = {}) => report("working", sessionID || sessionIDFromProperties(event?.properties))`,
+		`if (type === "session.status")`,
+		`return status ? report(status, sessionID) : reportSession(sessionID)`,
 		`case "session.created":`,
 		`case "session.updated":`,
+		`return reportSession(sessionID)`,
 		`case "session.idle":`,
 		`return report("idle", sessionID)`,
 		`return run(["--release-agent", "--source", SOURCE, "--seq", nextReportSeq()])`,
@@ -315,6 +412,11 @@ func TestOpenCodePluginReportsIdleSessionIDAndSeq(t *testing.T) {
 	}
 	if strings.Contains(asset, `report("done")`) {
 		t.Fatalf("OpenCode plugin should report idle, not done:\n%s", asset)
+	}
+	if strings.Contains(asset, `case "session.created":
+        case "session.updated":
+          return sessionID ? report("idle", sessionID) : undefined;`) {
+		t.Fatalf("OpenCode session identity events should not report idle state:\n%s", asset)
 	}
 }
 
