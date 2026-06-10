@@ -17,6 +17,9 @@ const (
 	appDirName     = "seshagy"
 	configFileName = "config.toml"
 	DefaultPrefix  = "ctrl+x"
+	IconModeIcons  = "icons"
+	IconModeText   = "text"
+	IconModeNone   = "none"
 )
 
 type Config struct {
@@ -32,8 +35,9 @@ type SourcesConfig struct {
 }
 
 type IconsConfig struct {
-	Enabled bool       `toml:"enabled"`
-	ASCII   bool       `toml:"ascii"`
+	Mode    string     `toml:"mode"`
+	Enabled *bool      `toml:"enabled,omitempty"`
+	ASCII   bool       `toml:"ascii,omitempty"`
 	Session IconConfig `toml:"session"`
 	Zoxide  IconConfig `toml:"zoxide"`
 	FD      IconConfig `toml:"fd"`
@@ -42,7 +46,8 @@ type IconsConfig struct {
 
 type IconConfig struct {
 	Icon  string `toml:"icon"`
-	ASCII string `toml:"ascii"`
+	Label string `toml:"label"`
+	ASCII string `toml:"ascii,omitempty"`
 	Color string `toml:"color"`
 }
 
@@ -59,12 +64,11 @@ func Default() Config {
 	return Config{
 		Sources: SourcesConfig{Default: "all", Order: defaultSourceOrderNames()},
 		Icons: IconsConfig{
-			Enabled: true,
-			ASCII:   false,
-			Session: IconConfig{Icon: sessionmgr.IconSession, ASCII: "S", Color: "10"},
-			Zoxide:  IconConfig{Icon: sessionmgr.IconZoxide, ASCII: "Z", Color: "14"},
-			FD:      IconConfig{Icon: sessionmgr.IconFD, ASCII: "F", Color: "11"},
-			Agent:   IconConfig{Icon: sessionmgr.IconAgent, ASCII: "A", Color: "13"},
+			Mode:    IconModeIcons,
+			Session: IconConfig{Icon: sessionmgr.IconSession, Label: "S", Color: "10"},
+			Zoxide:  IconConfig{Icon: sessionmgr.IconZoxide, Label: "Z", Color: "14"},
+			FD:      IconConfig{Icon: sessionmgr.IconFD, Label: "F", Color: "11"},
+			Agent:   IconConfig{Icon: sessionmgr.IconAgent, Label: "A", Color: "13"},
 		},
 		TypeFirst: TypeFirstConfig{Enabled: false, Prefix: DefaultPrefix},
 	}
@@ -126,39 +130,75 @@ func (c *Config) Normalize() {
 	} else {
 		c.Sources.Default = defaults.Sources.Default
 	}
+	c.Icons.Mode = normalizeIconMode(c.Icons.Mode)
+	if c.Icons.Enabled != nil && !*c.Icons.Enabled {
+		c.Icons.Mode = IconModeNone
+	} else if c.Icons.ASCII {
+		c.Icons.Mode = IconModeText
+	}
+	c.Icons.Enabled = nil
+	c.Icons.ASCII = false
 	if strings.TrimSpace(c.Icons.Session.Icon) == "" {
 		c.Icons.Session.Icon = defaults.Icons.Session.Icon
 	}
-	if strings.TrimSpace(c.Icons.Session.ASCII) == "" {
-		c.Icons.Session.ASCII = defaults.Icons.Session.ASCII
+	if legacy := strings.TrimSpace(c.Icons.Session.ASCII); legacy != "" && (strings.TrimSpace(c.Icons.Session.Label) == "" || c.Icons.Session.Label == defaults.Icons.Session.Label) {
+		c.Icons.Session.Label = legacy
 	}
+	if strings.TrimSpace(c.Icons.Session.Label) == "" {
+		c.Icons.Session.Label = strings.TrimSpace(c.Icons.Session.ASCII)
+	}
+	if strings.TrimSpace(c.Icons.Session.Label) == "" {
+		c.Icons.Session.Label = defaults.Icons.Session.Label
+	}
+	c.Icons.Session.ASCII = ""
 	if strings.TrimSpace(c.Icons.Session.Color) == "" {
 		c.Icons.Session.Color = defaults.Icons.Session.Color
 	}
 	if strings.TrimSpace(c.Icons.Zoxide.Icon) == "" {
 		c.Icons.Zoxide.Icon = defaults.Icons.Zoxide.Icon
 	}
-	if strings.TrimSpace(c.Icons.Zoxide.ASCII) == "" {
-		c.Icons.Zoxide.ASCII = defaults.Icons.Zoxide.ASCII
+	if legacy := strings.TrimSpace(c.Icons.Zoxide.ASCII); legacy != "" && (strings.TrimSpace(c.Icons.Zoxide.Label) == "" || c.Icons.Zoxide.Label == defaults.Icons.Zoxide.Label) {
+		c.Icons.Zoxide.Label = legacy
 	}
+	if strings.TrimSpace(c.Icons.Zoxide.Label) == "" {
+		c.Icons.Zoxide.Label = strings.TrimSpace(c.Icons.Zoxide.ASCII)
+	}
+	if strings.TrimSpace(c.Icons.Zoxide.Label) == "" {
+		c.Icons.Zoxide.Label = defaults.Icons.Zoxide.Label
+	}
+	c.Icons.Zoxide.ASCII = ""
 	if strings.TrimSpace(c.Icons.Zoxide.Color) == "" {
 		c.Icons.Zoxide.Color = defaults.Icons.Zoxide.Color
 	}
 	if strings.TrimSpace(c.Icons.FD.Icon) == "" {
 		c.Icons.FD.Icon = defaults.Icons.FD.Icon
 	}
-	if strings.TrimSpace(c.Icons.FD.ASCII) == "" {
-		c.Icons.FD.ASCII = defaults.Icons.FD.ASCII
+	if legacy := strings.TrimSpace(c.Icons.FD.ASCII); legacy != "" && (strings.TrimSpace(c.Icons.FD.Label) == "" || c.Icons.FD.Label == defaults.Icons.FD.Label) {
+		c.Icons.FD.Label = legacy
 	}
+	if strings.TrimSpace(c.Icons.FD.Label) == "" {
+		c.Icons.FD.Label = strings.TrimSpace(c.Icons.FD.ASCII)
+	}
+	if strings.TrimSpace(c.Icons.FD.Label) == "" {
+		c.Icons.FD.Label = defaults.Icons.FD.Label
+	}
+	c.Icons.FD.ASCII = ""
 	if strings.TrimSpace(c.Icons.FD.Color) == "" {
 		c.Icons.FD.Color = defaults.Icons.FD.Color
 	}
 	if strings.TrimSpace(c.Icons.Agent.Icon) == "" {
 		c.Icons.Agent.Icon = defaults.Icons.Agent.Icon
 	}
-	if strings.TrimSpace(c.Icons.Agent.ASCII) == "" {
-		c.Icons.Agent.ASCII = defaults.Icons.Agent.ASCII
+	if legacy := strings.TrimSpace(c.Icons.Agent.ASCII); legacy != "" && (strings.TrimSpace(c.Icons.Agent.Label) == "" || c.Icons.Agent.Label == defaults.Icons.Agent.Label) {
+		c.Icons.Agent.Label = legacy
 	}
+	if strings.TrimSpace(c.Icons.Agent.Label) == "" {
+		c.Icons.Agent.Label = strings.TrimSpace(c.Icons.Agent.ASCII)
+	}
+	if strings.TrimSpace(c.Icons.Agent.Label) == "" {
+		c.Icons.Agent.Label = defaults.Icons.Agent.Label
+	}
+	c.Icons.Agent.ASCII = ""
 	if strings.TrimSpace(c.Icons.Agent.Color) == "" {
 		c.Icons.Agent.Color = defaults.Icons.Agent.Color
 	}
@@ -169,13 +209,14 @@ func (c *Config) Normalize() {
 
 func (c Config) IconSet() sessionmgr.IconSet {
 	c.Normalize()
+	enabled := c.Icons.Mode != IconModeNone
 	return sessionmgr.IconSet{
-		Enabled: c.Icons.Enabled,
-		ASCII:   c.Icons.ASCII,
-		Session: sessionmgr.IconStyle{Icon: c.Icons.Session.Icon, ASCII: c.Icons.Session.ASCII, Color: c.Icons.Session.Color},
-		Zoxide:  sessionmgr.IconStyle{Icon: c.Icons.Zoxide.Icon, ASCII: c.Icons.Zoxide.ASCII, Color: c.Icons.Zoxide.Color},
-		FD:      sessionmgr.IconStyle{Icon: c.Icons.FD.Icon, ASCII: c.Icons.FD.ASCII, Color: c.Icons.FD.Color},
-		Agent:   sessionmgr.IconStyle{Icon: c.Icons.Agent.Icon, ASCII: c.Icons.Agent.ASCII, Color: c.Icons.Agent.Color},
+		Enabled: enabled,
+		ASCII:   c.Icons.Mode == IconModeText,
+		Session: sessionmgr.IconStyle{Icon: c.Icons.Session.Icon, ASCII: c.Icons.Session.Label, Color: c.Icons.Session.Color},
+		Zoxide:  sessionmgr.IconStyle{Icon: c.Icons.Zoxide.Icon, ASCII: c.Icons.Zoxide.Label, Color: c.Icons.Zoxide.Color},
+		FD:      sessionmgr.IconStyle{Icon: c.Icons.FD.Icon, ASCII: c.Icons.FD.Label, Color: c.Icons.FD.Color},
+		Agent:   sessionmgr.IconStyle{Icon: c.Icons.Agent.Icon, ASCII: c.Icons.Agent.Label, Color: c.Icons.Agent.Color},
 	}
 }
 
@@ -285,6 +326,19 @@ func sourceModeFromName(name string) (sessionmgr.SourceMode, bool) {
 		return sessionmgr.ModeFD, true
 	default:
 		return sessionmgr.ModeAll, false
+	}
+}
+
+func normalizeIconMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "", "icon", "icons", "nerd", "nerd-font", "nerdfont":
+		return IconModeIcons
+	case "text", "label", "labels", "plain", "letters", "ascii":
+		return IconModeText
+	case "none", "off", "disabled", "disable", "no-icons", "noicons":
+		return IconModeNone
+	default:
+		return IconModeIcons
 	}
 }
 

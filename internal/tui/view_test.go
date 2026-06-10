@@ -116,11 +116,11 @@ func TestConfiguredSourceOrderAndDefault(t *testing.T) {
 func TestConfiguredASCIIIconsRenderInTUI(t *testing.T) {
 	m := newTestModel(t)
 	cfg := appconfig.Default()
-	cfg.Icons.ASCII = true
-	cfg.Icons.Session.ASCII = "S"
-	cfg.Icons.Zoxide.ASCII = "Z"
-	cfg.Icons.FD.ASCII = "F"
-	cfg.Icons.Agent.ASCII = "A"
+	cfg.Icons.Mode = appconfig.IconModeText
+	cfg.Icons.Session.Label = "S"
+	cfg.Icons.Zoxide.Label = "Z"
+	cfg.Icons.FD.Label = "F"
+	cfg.Icons.Agent.Label = "A"
 	m.config = cfg
 	m.items = []sessionmgr.Item{
 		{Kind: sessionmgr.KindSession, Name: "demo", Activity: time.Now(), Created: time.Now()},
@@ -144,13 +144,16 @@ func TestConfiguredASCIIIconsRenderInTUI(t *testing.T) {
 func TestNoIconsAgentRowsRenderStateLabel(t *testing.T) {
 	m := newTestModel(t)
 	cfg := appconfig.Default()
-	cfg.Icons.Enabled = false
-	cfg.Icons.ASCII = true
+	cfg.Icons.Mode = appconfig.IconModeNone
 	m.config = cfg
 
 	sessionPrimary, _ := m.rowParts(sessionmgr.Item{Kind: sessionmgr.KindSession, Name: "demo"})
-	if got := sessionmgr.StripANSI(sessionPrimary); got != "◌ demo" {
-		t.Fatalf("no-icons session primary = %q, want no source prefix", got)
+	if got := sessionmgr.StripANSI(sessionPrimary); got != "demo" {
+		t.Fatalf("no-icons session primary = %q, want no source or state prefix", got)
+	}
+	attachedPrimary, _ := m.rowParts(sessionmgr.Item{Kind: sessionmgr.KindSession, Name: "attached", Attached: true})
+	if got := sessionmgr.StripANSI(attachedPrimary); got != "attached" {
+		t.Fatalf("no-icons attached session primary = %q, want no source or state prefix", got)
 	}
 	zoxidePrimary, _ := m.rowParts(sessionmgr.Item{Kind: sessionmgr.KindZoxide, Path: "~/code/demo"})
 	if got := sessionmgr.StripANSI(zoxidePrimary); got != "~/code/demo" {

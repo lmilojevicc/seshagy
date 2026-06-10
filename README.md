@@ -143,27 +143,26 @@ default = "all"
 order = ["all", "sessions", "agents", "current-agents", "zoxide", "fd"]
 
 [icons]
-enabled = true
-ascii = false
+mode = "icons"
 
 [icons.session]
 icon = ""
-ascii = "S"
+label = "S"
 color = "10"
 
 [icons.zoxide]
 icon = "󰉖"
-ascii = "Z"
+label = "Z"
 color = "14"
 
 [icons.fd]
 icon = "󰥩"
-ascii = "F"
+label = "F"
 color = "11"
 
 [icons.agent]
 icon = "󰚩"
-ascii = "A"
+label = "A"
 color = "13"
 
 [type_first]
@@ -179,12 +178,12 @@ the first source is `1`, the second is `2`, and so on. Source names are `all`,
 `sessions`, `agents`, `current-agents`, `zoxide`, and `fd`. Set
 `sources.default` to choose the source seshagy loads on startup.
 
-Set `icons.ascii` to `true` to render the configured ASCII labels instead of
-Nerd Font icons. Set `icons.enabled` to `false` for true no-icons mode; no source
-icons or ASCII labels are shown, and agent rows use text state labels such as
-`[working] pi`. Each `color` is a terminal color value understood by Lip
-Gloss/ANSI rendering: ANSI palette indexes such as `10`, bright SGR values such
-as `92`, or truecolor hex values such as `#a6e3a1`.
+Set `icons.mode` to `"text"` to render the configured plain labels instead of
+Nerd Font icons, or `"none"` for true no-icons mode. In no-icons mode, no source
+icons, session state glyphs, or text labels are shown; agent rows still use state
+labels such as `[working] pi`. Each `color` is a terminal color value understood
+by Lip Gloss/ANSI rendering: ANSI palette indexes such as `10`, bright SGR
+values such as `92`, or truecolor hex values such as `#a6e3a1`.
 
 On first TUI startup, seshagy asks whether to enable type-first mode and records
 the answer in this config file. After that, edit `type_first.enabled` or

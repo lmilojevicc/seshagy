@@ -24,8 +24,8 @@ func TestLoadDefaultWhenMissing(t *testing.T) {
 	if got := cfg.Sources.Order; strings.Join(got, ",") != "all,sessions,agents,current-agents,zoxide,fd" {
 		t.Fatalf("default source order = %#v", got)
 	}
-	if !cfg.Icons.Enabled || cfg.Icons.ASCII {
-		t.Fatalf("icon mode defaults = enabled:%v ascii:%v, want nerd font icons", cfg.Icons.Enabled, cfg.Icons.ASCII)
+	if cfg.Icons.Mode != IconModeIcons {
+		t.Fatalf("icon mode default = %q, want %q", cfg.Icons.Mode, IconModeIcons)
 	}
 	icons := cfg.IconSet()
 	if got := icons.For(sessionmgr.KindSession).Text; got != sessionmgr.IconSession {
@@ -36,8 +36,8 @@ func TestLoadDefaultWhenMissing(t *testing.T) {
 func TestSaveAndLoadConfig(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	cfg := Default()
-	cfg.Icons.ASCII = true
-	cfg.Icons.Session.ASCII = "X"
+	cfg.Icons.Mode = IconModeText
+	cfg.Icons.Session.Label = "X"
 	cfg.Icons.Session.Color = "#a6e3a1"
 	cfg.Sources.Default = "current-agents"
 	cfg.Sources.Order = []string{"sessions", "agents", "current-agents", "zoxide", "fd", "all"}
@@ -57,8 +57,11 @@ func TestSaveAndLoadConfig(t *testing.T) {
 	if !strings.Contains(string(data), `[type_first]`) {
 		t.Fatalf("saved config missing type_first: %s", data)
 	}
-	if !strings.Contains(string(data), `ascii = true`) || !strings.Contains(string(data), `#a6e3a1`) {
-		t.Fatalf("saved config missing ascii mode or hex color: %s", data)
+	if strings.Contains(string(data), `ascii`) {
+		t.Fatalf("saved config should not contain ascii keys: %s", data)
+	}
+	if !strings.Contains(string(data), `mode = "text"`) || !strings.Contains(string(data), `label = "X"`) || !strings.Contains(string(data), `#a6e3a1`) {
+		t.Fatalf("saved config missing text mode, label, or hex color: %s", data)
 	}
 	if !strings.Contains(string(data), `[sources]`) || !strings.Contains(string(data), `current-agents`) {
 		t.Fatalf("saved config missing source config: %s", data)
@@ -76,8 +79,8 @@ func TestSaveAndLoadConfig(t *testing.T) {
 	if !loaded.TypeFirst.Enabled || loaded.PrefixKey() != "alt+x" || !loaded.Setup.TypeFirstPromptSeen {
 		t.Fatalf("loaded config = %#v", loaded)
 	}
-	if !loaded.Icons.Enabled || !loaded.Icons.ASCII {
-		t.Fatalf("loaded icon mode = enabled:%v ascii:%v, want ascii mode", loaded.Icons.Enabled, loaded.Icons.ASCII)
+	if loaded.Icons.Mode != IconModeText {
+		t.Fatalf("loaded icon mode = %q, want text", loaded.Icons.Mode)
 	}
 	if got := loaded.IconSet().For(sessionmgr.KindSession).Text; got != "X" {
 		t.Fatalf("ascii session icon = %q", got)
@@ -107,13 +110,48 @@ func TestIconModes(t *testing.T) {
 		t.Fatalf("default agent icon = %q", got)
 	}
 
-	cfg.Icons.ASCII = true
+	cfg.Icons.Mode = IconModeText
 	if got := cfg.IconSet().For(sessionmgr.KindAgent).Text; got != "A" {
-		t.Fatalf("ascii agent icon = %q", got)
+		t.Fatalf("text-mode agent label = %q", got)
 	}
 
-	cfg.Icons.Enabled = false
+	cfg.Icons.Mode = IconModeNone
 	if got := cfg.IconSet().For(sessionmgr.KindAgent).Text; got != "" {
 		t.Fatalf("no-icons agent text = %q, want empty", got)
+	}
+}
+
+func TestLoadMigratesLegacyASCIIConfig(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	path := Path()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	data := []byte(`
+[icons]
+enabled = true
+ascii = true
+
+[icons.session]
+ascii = "X"
+color = "#a6e3a1"
+`)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("write legacy config: %v", err)
+	}
+	loaded, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if loaded.Icons.Mode != IconModeText || loaded.Icons.Session.Label != "X" {
+		t.Fatalf("legacy ascii config migrated to mode=%q label=%q", loaded.Icons.Mode, loaded.Icons.Session.Label)
+	}
+	saved, err := Marshal(loaded)
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+	if strings.Contains(string(saved), "ascii") || strings.Contains(string(saved), "[icons]\n  enabled") {
+		t.Fatalf("migrated config should omit legacy ascii/enabled keys: %s", saved)
 	}
 }

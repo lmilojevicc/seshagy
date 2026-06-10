@@ -276,9 +276,13 @@ func (m Model) rowParts(item sessionmgr.Item) (string, string) {
 	s := m.styles
 	switch item.Kind {
 	case sessionmgr.KindSession:
-		state := s.info.Render("◌")
-		if item.Attached {
-			state = s.success.Render("●")
+		icons := m.config.IconSet()
+		state := ""
+		if icons.Enabled {
+			state = s.info.Render("◌")
+			if item.Attached {
+				state = s.success.Render("●")
+			}
 		}
 		name := s.tabActive.Render(item.Name)
 		return rowText(m.iconFor(item.Kind), state, name), ago(item.Activity)
