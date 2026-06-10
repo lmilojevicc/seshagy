@@ -109,6 +109,8 @@ type setupMsg struct {
 	err    error
 }
 
+var checkTmuxPopup = sessionmgr.InTmuxPopup
+
 func New() Model {
 	cfg, cfgErr := appconfig.Load()
 	search := textinput.New()
@@ -731,6 +733,20 @@ func (m Model) startRename() (tea.Model, tea.Cmd) {
 }
 
 func (m Model) startYazi() (tea.Model, tea.Cmd) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	inPopup, err := checkTmuxPopup(ctx)
+	if err != nil {
+		m.status = fmt.Sprintf("checking tmux popup: %v", err)
+		m.err = err
+		return m, nil
+	}
+	if inPopup {
+		err := fmt.Errorf("cannot open yazi inside a tmux popup")
+		m.status = err.Error()
+		m.err = err
+		return m, nil
+	}
 	file, err := os.CreateTemp("", "seshagy-yazi-*")
 	if err != nil {
 		m.status = err.Error()

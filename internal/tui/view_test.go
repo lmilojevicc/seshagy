@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -283,6 +284,22 @@ func TestTypeFirstAllowsArrowNavigationWithoutPrefix(t *testing.T) {
 	m = model.(Model)
 	if m.cursor != 1 || m.prefixArmed || m.query != "" {
 		t.Fatalf("down arrow should navigate without prefix, cursor=%d armed=%v query=%q", m.cursor, m.prefixArmed, m.query)
+	}
+}
+
+func TestYaziBlockedInsideTmuxPopup(t *testing.T) {
+	m := newTestModel(t)
+	old := checkTmuxPopup
+	checkTmuxPopup = func(context.Context) (bool, error) { return true, nil }
+	t.Cleanup(func() { checkTmuxPopup = old })
+
+	model, cmd := m.startYazi()
+	m = model.(Model)
+	if cmd != nil {
+		t.Fatal("yazi should not launch inside tmux popup")
+	}
+	if m.err == nil || m.status != "cannot open yazi inside a tmux popup" {
+		t.Fatalf("popup yazi status/err = %q/%v", m.status, m.err)
 	}
 }
 

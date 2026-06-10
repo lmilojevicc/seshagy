@@ -82,6 +82,27 @@ func TestListFDirsWithCustomCommand(t *testing.T) {
 	}
 }
 
+func TestDetectTmuxPopup(t *testing.T) {
+	tests := []struct {
+		name        string
+		envPane     string
+		currentPane string
+		want        bool
+	}{
+		{name: "normal pane", envPane: "%1", currentPane: "%1", want: false},
+		{name: "popup has no pane env", envPane: "", currentPane: "%2", want: true},
+		{name: "popup differs from inherited pane env", envPane: "%1", currentPane: "%2", want: true},
+		{name: "empty current pane is inconclusive", envPane: "%1", currentPane: "", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := detectTmuxPopup(tt.envPane, tt.currentPane); got != tt.want {
+				t.Fatalf("detectTmuxPopup(%q, %q) = %v, want %v", tt.envPane, tt.currentPane, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestAgentPaneFromLine(t *testing.T) {
 	line := IconAgent + " [idle]\tpi\twork:2.1\t~/Projects/x"
 	if got := AgentPaneFromLine(line); got != "work:2.1" {

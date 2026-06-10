@@ -36,6 +36,29 @@ func withLocale(env []string) []string {
 
 func InTmux() bool { return os.Getenv("TMUX") != "" }
 
+func InTmuxPopup(ctx context.Context) (bool, error) {
+	if !InTmux() {
+		return false, nil
+	}
+	out, err := tmuxCommand(ctx, "display-message", "-p", "#{pane_id}").Output()
+	if err != nil {
+		return false, err
+	}
+	return detectTmuxPopup(os.Getenv("TMUX_PANE"), strings.TrimSpace(string(out))), nil
+}
+
+func detectTmuxPopup(envPane, currentPane string) bool {
+	envPane = strings.TrimSpace(envPane)
+	currentPane = strings.TrimSpace(currentPane)
+	if currentPane == "" {
+		return false
+	}
+	if envPane == "" {
+		return true
+	}
+	return envPane != currentPane
+}
+
 func CurrentTmuxSession(ctx context.Context) (string, error) {
 	out, err := tmuxCommand(ctx, "display-message", "-p", "#S").Output()
 	if err != nil {

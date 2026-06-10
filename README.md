@@ -31,7 +31,8 @@ pane, a live preview pane, and a compact help/status bar.
   the original script.
 - Kill sessions or agent panes.
 - Rename sessions in-place.
-- Open `yazi`, then create/switch to a session from the directory it exits in.
+- Open `yazi`, then create/switch to a session from the directory it exits in;
+  yazi is blocked with an error when seshagy is running inside a tmux popup.
 - CLI compatibility helpers for scripting/fzf-style integrations:
   `--get-*`, `--delete-item`, `--report-agent`, and `--release-agent`.
 - Herdr-style integration commands: `seshagy integration status`,
