@@ -13,7 +13,7 @@ pane, a live preview pane, and a compact help/status bar.
   basename-derived naming convention as the shell script (`foo.bar` -> `foo_bar`,
   `.config` -> `dot_config`).
 - Attach to sessions when outside tmux; `switch-client` when already inside tmux.
-- Detect installed hook-capable coding agents and ask before installing state
+- Detect installed hook-capable coding agents and ask before installing
   hooks/plugins for each one on the first TUI launch only. The prompt is
   toggle-based, so every detected integration can be enabled or skipped
   independently.
@@ -126,13 +126,18 @@ releases from overwriting newer state. Hooks without `--seq` still apply for
 backward compatibility.
 
 Supported hook/plugin targets are `pi`, `claude`, `codex`, `copilot`, `droid`,
-`opencode`, `qodercli`, and `cursor`. On the first TUI launch, seshagy scans for
-these agents by command or config directory and asks before installing any
-missing integration. That first-launch prompt is recorded under the user's XDG
-state directory and is not shown again automatically. After that, use `i` in the
-TUI or `seshagy integration install <target>` to install integrations manually.
-Space toggles each detected agent; Enter installs the selected hooks/plugins;
-`s` or Esc skips.
+`opencode`, `qodercli`, and `cursor`. Pi and OpenCode integrations report
+lifecycle state directly. Claude, Codex, Copilot, Droid, Qoder CLI, and Cursor
+hooks are Herdr-style session/presence integrations: they install only a
+session-start hook, report `unknown` plus native `--session-id` when the hook
+payload provides one, and do not claim lifecycle state authority from incomplete
+agent hook events. On the first TUI launch, seshagy scans for these agents by
+command or config directory and asks before installing any missing integration.
+That first-launch prompt is recorded under the user's XDG state directory and is
+not shown again automatically. After that, use `i` in the TUI or `seshagy
+integration install <target>` to install integrations manually. Space toggles
+each detected agent; Enter installs the selected hooks/plugins; `s` or Esc
+skips.
 
 ## Configuration
 

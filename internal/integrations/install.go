@@ -7,37 +7,6 @@ import (
 	"strings"
 )
 
-var nestedLifecycle = []struct{ event, state string }{
-	{"SessionStart", "idle"},
-	{"UserPromptSubmit", "working"},
-	{"PreToolUse", "working"},
-	{"PostToolUse", "working"},
-	{"PermissionRequest", "blocked"},
-	{"Notification", "blocked"},
-	{"Stop", "done"},
-	{"SessionEnd", "release"},
-}
-
-var directLifecycle = []struct{ event, state string }{
-	{"SessionStart", "idle"},
-	{"UserPromptSubmit", "working"},
-	{"PreToolUse", "working"},
-	{"PostToolUse", "working"},
-	{"notification", "blocked"},
-	{"Stop", "done"},
-	{"SessionEnd", "release"},
-}
-
-var cursorLifecycle = []struct{ event, state string }{
-	{"sessionStart", "idle"},
-	{"beforeSubmitPrompt", "working"},
-	{"beforeShellExecution", "working"},
-	{"beforeMCPExecution", "working"},
-	{"notification", "blocked"},
-	{"stop", "done"},
-	{"sessionEnd", "release"},
-}
-
 func installPi(binaryPath string) ([]string, error) {
 	dir := filepath.Join(piDir(), "extensions")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -51,15 +20,15 @@ func installPi(binaryPath string) ([]string, error) {
 }
 
 func installClaude(binaryPath string) ([]string, error) {
-	return installNestedSettingsHook(TargetClaude, claudeDir(), filepath.Join(claudeDir(), "settings.json"), binaryPath, true)
+	return installNestedSessionHook(TargetClaude, claudeDir(), filepath.Join(claudeDir(), "settings.json"), binaryPath, true)
 }
 
 func installDroid(binaryPath string) ([]string, error) {
-	return installNestedSettingsHook(TargetDroid, droidDir(), filepath.Join(droidDir(), "settings.json"), binaryPath, false)
+	return installNestedSessionHook(TargetDroid, droidDir(), filepath.Join(droidDir(), "settings.json"), binaryPath, true)
 }
 
 func installQodercli(binaryPath string) ([]string, error) {
-	return installNestedSettingsHook(TargetQodercli, qoderDir(), filepath.Join(qoderDir(), "settings.json"), binaryPath, false)
+	return installNestedSessionHook(TargetQodercli, qoderDir(), filepath.Join(qoderDir(), "settings.json"), binaryPath, true)
 }
 
 func installCodex(binaryPath string) ([]string, error) {
@@ -80,10 +49,9 @@ func installCodex(binaryPath string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	for _, item := range nestedLifecycle {
-		if err := ensureNestedCommandHook(hooks, item.event, hookCommand(hookPath, TargetCodex, item.state), ""); err != nil {
-			return nil, err
-		}
+	removeNestedCommands(hooks, shellHookName)
+	if err := ensureNestedCommandHook(hooks, "SessionStart", hookCommand(hookPath, TargetCodex, "session"), ""); err != nil {
+		return nil, err
 	}
 	if err := writeJSONObject(hooksPath, root); err != nil {
 		return nil, err
@@ -113,10 +81,9 @@ func installCopilot(binaryPath string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	for _, item := range directLifecycle {
-		if err := ensureDirectCommandHook(hooks, item.event, hookCommand(hookPath, TargetCopilot, item.state)); err != nil {
-			return nil, err
-		}
+	removeDirectCommands(hooks, shellHookName)
+	if err := ensureDirectCommandHook(hooks, "SessionStart", hookCommand(hookPath, TargetCopilot, "session")); err != nil {
+		return nil, err
 	}
 	if err := writeJSONObject(settingsPath, root); err != nil {
 		return nil, err
@@ -158,10 +125,12 @@ func installCursor(binaryPath string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	for _, item := range cursorLifecycle {
-		if err := ensureSimpleCommandHook(hooks, item.event, hookCommand(hookPath, TargetCursor, item.state)); err != nil {
-			return nil, err
-		}
+	removeSimpleCommands(hooks, shellHookName)
+	if _, ok := root["version"]; !ok {
+		root["version"] = float64(1)
+	}
+	if err := ensureSimpleCommandHook(hooks, "sessionStart", hookCommand(hookPath, TargetCursor, "session")); err != nil {
+		return nil, err
 	}
 	if err := writeJSONObject(hooksPath, root); err != nil {
 		return nil, err
@@ -169,7 +138,7 @@ func installCursor(binaryPath string) ([]string, error) {
 	return []string{fmt.Sprintf("installed Cursor hook to %s", hookPath), fmt.Sprintf("updated %s", hooksPath)}, nil
 }
 
-func installNestedSettingsHook(target Target, dir, settingsPath, binaryPath string, matcherStar bool) ([]string, error) {
+func installNestedSessionHook(target Target, dir, settingsPath, binaryPath string, matcherStar bool) ([]string, error) {
 	if !configDirExists(dir) {
 		return nil, fmt.Errorf("%s config directory not found at %s", TargetLabel(target), dir)
 	}
@@ -185,14 +154,13 @@ func installNestedSettingsHook(target Target, dir, settingsPath, binaryPath stri
 	if err != nil {
 		return nil, err
 	}
+	removeNestedCommands(hooks, shellHookName)
 	matcher := ""
 	if matcherStar {
 		matcher = "*"
 	}
-	for _, item := range nestedLifecycle {
-		if err := ensureNestedCommandHook(hooks, item.event, hookCommand(hookPath, target, item.state), matcher); err != nil {
-			return nil, err
-		}
+	if err := ensureNestedCommandHook(hooks, "SessionStart", hookCommand(hookPath, target, "session"), matcher); err != nil {
+		return nil, err
 	}
 	if err := writeJSONObject(settingsPath, root); err != nil {
 		return nil, err
@@ -230,8 +198,13 @@ func ensureCodexHooksEnabled(path string) error {
 func buildCodexConfigWithHooks(content string) string {
 	lines := strings.Split(content, "\n")
 	filtered := lines[:0]
+	section := ""
 	for _, line := range lines {
-		if strings.HasPrefix(strings.TrimSpace(line), "codex_hooks") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
+			section = strings.TrimSpace(strings.Trim(trimmed, "[]"))
+		}
+		if section == "features" && strings.HasPrefix(trimmed, "codex_hooks") {
 			continue
 		}
 		filtered = append(filtered, line)

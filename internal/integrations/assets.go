@@ -18,6 +18,25 @@ set -eu
 agent="${1:-%s}"
 state="${2:-idle}"
 message="${3:-}"
+session_id=""
+
+read_session_id() {
+  [ ! -t 0 ] || return 0
+  payload="$(cat 2>/dev/null || true)"
+  [ -n "$payload" ] || return 0
+  command -v python3 >/dev/null 2>&1 || return 0
+  session_id="$(printf '%%s' "$payload" | python3 -c 'import json, sys
+try:
+    data = json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+for key in ("session_id", "sessionId", "conversation_id", "conversationId"):
+    value = data.get(key)
+    if isinstance(value, str) and value:
+        print(value)
+        break
+' 2>/dev/null || true)"
+}
 
 [ -n "${TMUX_PANE:-}" ] || exit 0
 bin="${SESHAGY_BIN:-}"
@@ -31,7 +50,10 @@ fi
 
 source="seshagy:$agent"
 case "$state" in
-  session|start) state="idle" ;;
+  session|start)
+    state="unknown"
+    read_session_id
+    ;;
   idle|working|blocked|done|aborted|unknown) ;;
   release|end|shutdown)
     "$bin" --release-agent --source "$source" >/dev/null 2>&1 || true
@@ -40,8 +62,12 @@ case "$state" in
   *) exit 0 ;;
 esac
 
-if [ -n "$message" ]; then
+if [ -n "$message" ] && [ -n "$session_id" ]; then
+  "$bin" --report-agent --agent "$agent" --state "$state" --source "$source" --message "$message" --session-id "$session_id" >/dev/null 2>&1 || true
+elif [ -n "$message" ]; then
   "$bin" --report-agent --agent "$agent" --state "$state" --source "$source" --message "$message" >/dev/null 2>&1 || true
+elif [ -n "$session_id" ]; then
+  "$bin" --report-agent --agent "$agent" --state "$state" --source "$source" --session-id "$session_id" >/dev/null 2>&1 || true
 else
   "$bin" --report-agent --agent "$agent" --state "$state" --source "$source" >/dev/null 2>&1 || true
 fi
