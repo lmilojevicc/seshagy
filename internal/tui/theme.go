@@ -84,6 +84,10 @@ func stylesFromConfig(cfg appconfig.Config) styles {
 	title := themeColor(colors.Title, p.lavender)
 	accent := themeColor(colors.Accent, p.mauve)
 	key := themeColor(colors.Key, p.peach)
+	success := themeColor(colors.Success, p.green)
+	info := themeColor(colors.Info, p.sky)
+	warning := themeColor(colors.Warning, p.yellow)
+	danger := themeColor(colors.Danger, p.red)
 
 	s := styles{p: p}
 	s.app = lipgloss.NewStyle().Foreground(p.fg).Background(p.bg)
@@ -103,10 +107,10 @@ func stylesFromConfig(cfg appconfig.Config) styles {
 	s.selectedBG = lipgloss.NewStyle().Reverse(true)
 	s.bar = lipgloss.NewStyle().Foreground(accent)
 	s.status = lipgloss.NewStyle().Foreground(p.fg).Background(p.bgAlt).Padding(0, 1)
-	s.success = lipgloss.NewStyle().Foreground(p.green).Bold(true)
-	s.info = lipgloss.NewStyle().Foreground(p.sky).Bold(true)
-	s.warning = lipgloss.NewStyle().Foreground(p.yellow).Bold(true)
-	s.danger = lipgloss.NewStyle().Foreground(p.red).Bold(true)
+	s.success = lipgloss.NewStyle().Foreground(success).Bold(true)
+	s.info = lipgloss.NewStyle().Foreground(info).Bold(true)
+	s.warning = lipgloss.NewStyle().Foreground(warning).Bold(true)
+	s.danger = lipgloss.NewStyle().Foreground(danger).Bold(true)
 	return s
 }
 

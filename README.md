@@ -157,6 +157,10 @@ title = "12"
 accent = "13"
 key = "11"
 muted = "8"
+success = "10"
+info = "14"
+warning = "11"
+danger = "9"
 
 [icons]
 mode = "icons"
@@ -200,8 +204,8 @@ The command should print one directory path per line.
 Set `theme.colors.focused_border` to change the highlighted pane/prompt border,
 `theme.colors.active_tab` to change the currently selected source tab, and the
 other theme colors to tune unfocused borders, inactive tabs, titles, accent
-chips/markers, key hints, and muted secondary text. Use `"default"` for the
-terminal default foreground.
+chips/markers, key hints, muted secondary text, and semantic success/info/
+warning/error states. Use `"default"` for the terminal default foreground.
 
 Set `icons.mode` to `"text"` to render the configured plain labels instead of
 Nerd Font icons, or `"none"` for true no-icons mode. In no-icons mode, no source

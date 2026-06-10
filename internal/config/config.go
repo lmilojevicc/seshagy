@@ -53,6 +53,10 @@ type ThemeColorsConfig struct {
 	Accent        string `toml:"accent"`
 	Key           string `toml:"key"`
 	Muted         string `toml:"muted"`
+	Success       string `toml:"success"`
+	Info          string `toml:"info"`
+	Warning       string `toml:"warning"`
+	Danger        string `toml:"danger"`
 }
 
 type IconsConfig struct {
@@ -94,6 +98,10 @@ func Default() Config {
 			Accent:        "13",
 			Key:           "11",
 			Muted:         "8",
+			Success:       "10",
+			Info:          "14",
+			Warning:       "11",
+			Danger:        "9",
 		}},
 		Icons: IconsConfig{
 			Mode:    IconModeIcons,
@@ -267,6 +275,18 @@ func normalizeThemeColors(colors *ThemeColorsConfig, defaults ThemeColorsConfig)
 	}
 	if strings.TrimSpace(colors.Muted) == "" {
 		colors.Muted = defaults.Muted
+	}
+	if strings.TrimSpace(colors.Success) == "" {
+		colors.Success = defaults.Success
+	}
+	if strings.TrimSpace(colors.Info) == "" {
+		colors.Info = defaults.Info
+	}
+	if strings.TrimSpace(colors.Warning) == "" {
+		colors.Warning = defaults.Warning
+	}
+	if strings.TrimSpace(colors.Danger) == "" {
+		colors.Danger = defaults.Danger
 	}
 }
 

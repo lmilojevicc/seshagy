@@ -740,6 +740,10 @@ func TestConfiguredThemeColorsApply(t *testing.T) {
 	cfg.Theme.Colors.Accent = "#cba6f7"
 	cfg.Theme.Colors.Key = "#f9e2af"
 	cfg.Theme.Colors.Muted = "#7f849c"
+	cfg.Theme.Colors.Success = "#a6e3a1"
+	cfg.Theme.Colors.Info = "#89dceb"
+	cfg.Theme.Colors.Warning = "#f9e2af"
+	cfg.Theme.Colors.Danger = "#f38ba8"
 	s := stylesFromConfig(cfg)
 
 	wantBorder := lipgloss.Color("#ff79c6")
@@ -779,6 +783,18 @@ func TestConfiguredThemeColorsApply(t *testing.T) {
 	}
 	if got := s.subtitle.GetForeground(); got != lipgloss.Color("#7f849c") {
 		t.Fatalf("subtitle color = %v, want #7f849c", got)
+	}
+	if got := s.success.GetForeground(); got != lipgloss.Color("#a6e3a1") {
+		t.Fatalf("success color = %v, want #a6e3a1", got)
+	}
+	if got := s.info.GetForeground(); got != lipgloss.Color("#89dceb") {
+		t.Fatalf("info color = %v, want #89dceb", got)
+	}
+	if got := s.warning.GetForeground(); got != lipgloss.Color("#f9e2af") {
+		t.Fatalf("warning color = %v, want #f9e2af", got)
+	}
+	if got := s.danger.GetForeground(); got != lipgloss.Color("#f38ba8") {
+		t.Fatalf("danger color = %v, want #f38ba8", got)
 	}
 
 	cfg.Theme.Colors.ActiveTab = "default"
