@@ -67,9 +67,9 @@ Runtime tools:
 | `1`/`a` | All sources |
 | `2`/`t` | Sessions only |
 | `3`/`g` | Agent panes |
-| `4`/`z` | Zoxide directories |
-| `5`/`f` | fd directories |
-| `o` | Agents in the current tmux session |
+| `4`/`o` | Agents in the current tmux session |
+| `5`/`z` | Zoxide directories |
+| `6`/`f` | fd directories |
 | `s` | Cycle agent state filter in agent panes |
 | `S` | Clear agent state filter in agent panes |
 | `/` | Filter visible rows |

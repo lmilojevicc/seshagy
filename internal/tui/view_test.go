@@ -50,6 +50,38 @@ func TestFilterVisibleItems(t *testing.T) {
 	}
 }
 
+func TestTabsUseCurrentAgentsFourthAndNoTrailingCWD(t *testing.T) {
+	m := newTestModel(t)
+	out := sessionmgr.StripANSI(m.renderTabs())
+	for _, want := range []string{"[1] All", "[2] Sessions", "[3] Agents", "[4] Current agents", "[5] Zoxide", "[6] fd"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("tabs missing %q\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "·") {
+		t.Fatalf("tabs should not render trailing cwd label\n%s", out)
+	}
+}
+
+func TestDefaultSourceNumberKeys(t *testing.T) {
+	m := newTestModel(t)
+	model, _ := m.handleKey(keyMsg("4"))
+	m = model.(Model)
+	if m.source != sessionmgr.ModeCurrentAgents {
+		t.Fatalf("4 source = %v, want current agents", m.source)
+	}
+	model, _ = m.handleKey(keyMsg("5"))
+	m = model.(Model)
+	if m.source != sessionmgr.ModeZoxide {
+		t.Fatalf("5 source = %v, want zoxide", m.source)
+	}
+	model, _ = m.handleKey(keyMsg("6"))
+	m = model.(Model)
+	if m.source != sessionmgr.ModeFD {
+		t.Fatalf("6 source = %v, want fd", m.source)
+	}
+}
+
 func TestConfiguredASCIIIconsRenderInTUI(t *testing.T) {
 	m := newTestModel(t)
 	cfg := appconfig.Default()

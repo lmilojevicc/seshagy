@@ -83,8 +83,9 @@ func (m Model) renderTabs() string {
 		{"1", "All", sessionmgr.ModeAll},
 		{"2", "Sessions", sessionmgr.ModeSessions},
 		{"3", "Agents", sessionmgr.ModeAgents},
-		{"4", "Zoxide", sessionmgr.ModeZoxide},
-		{"5", "fd", sessionmgr.ModeFD},
+		{"4", "Current agents", sessionmgr.ModeCurrentAgents},
+		{"5", "Zoxide", sessionmgr.ModeZoxide},
+		{"6", "fd", sessionmgr.ModeFD},
 	}
 	parts := []string{s.emphasis.Render("seshagy")}
 	for _, tab := range tabs {
@@ -94,10 +95,6 @@ func (m Model) renderTabs() string {
 		} else {
 			parts = append(parts, s.tabInactive.Render(label))
 		}
-	}
-	parts = append(parts, s.tabInactive.Render("[o] Current agents"))
-	if cwd := cwdLabel(); cwd != "" {
-		parts = append(parts, s.muted.Render("· "+cwd))
 	}
 	return lipgloss.NewStyle().Padding(0, 1).Render(strings.Join(parts, "  "))
 }

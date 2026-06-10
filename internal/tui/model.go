@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -404,11 +403,11 @@ func (m Model) handleActionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.switchSource(sessionmgr.ModeSessions)
 	case "g", "3", "ctrl+g":
 		return m.switchSource(sessionmgr.ModeAgents)
-	case "o", "ctrl+o":
+	case "o", "4", "ctrl+o":
 		return m.switchSource(sessionmgr.ModeCurrentAgents)
-	case "z", "4", "ctrl+z":
+	case "z", "5", "ctrl+z":
 		return m.switchSource(sessionmgr.ModeZoxide)
-	case "f", "5", "ctrl+f":
+	case "f", "6", "ctrl+f":
 		return m.switchSource(sessionmgr.ModeFD)
 	case "y", "ctrl+y":
 		return m.startYazi()
@@ -999,12 +998,4 @@ func SortItems(items []sessionmgr.Item) {
 		}
 		return strings.ToLower(items[i].DisplayName()) < strings.ToLower(items[j].DisplayName())
 	})
-}
-
-func cwdLabel() string {
-	wd, err := os.Getwd()
-	if err != nil {
-		return ""
-	}
-	return filepath.Base(wd)
 }
