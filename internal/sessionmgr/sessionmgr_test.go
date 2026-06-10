@@ -2,6 +2,8 @@ package sessionmgr
 
 import (
 	"context"
+	"fmt"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -132,6 +134,126 @@ func TestAgentLockPathIsPaneSpecificAndSafe(t *testing.T) {
 	if !strings.Contains(got, "seshagy-agent-p1_2_3.lock") {
 		t.Fatalf("agentLockPath() = %q, want sanitized pane id", got)
 	}
+}
+
+func TestReleaseAgentWithSeqLeavesTombstoneForStaleReports(t *testing.T) {
+	ctx, pane := requireTestTmuxPane(t)
+	if err := ReportAgent(ctx, AgentReport{Pane: pane, Name: "pi", State: AgentWorking, Source: "hook", SourceSeen: true, Seq: 100, SeqSeen: true}); err != nil {
+		t.Fatal(err)
+	}
+	if got := paneOptionValue(ctx, pane, "@agent_seq"); got != "100" {
+		t.Fatalf("initial @agent_seq = %q, want 100", got)
+	}
+	if err := ReleaseAgent(ctx, AgentRelease{Pane: pane, Source: "hook", SourceSeen: true, Seq: 101, SeqSeen: true}); err != nil {
+		t.Fatal(err)
+	}
+	if got := paneOptionValue(ctx, pane, "@agent_seq"); got != "101" {
+		t.Fatalf("release @agent_seq = %q, want tombstone 101", got)
+	}
+	if got := paneOptionValue(ctx, pane, "@agent_name"); got != "" {
+		t.Fatalf("release @agent_name = %q, want cleared", got)
+	}
+	if got := paneOptionValue(ctx, pane, "@agent_state"); got != "" {
+		t.Fatalf("release @agent_state = %q, want cleared", got)
+	}
+	if err := ReleaseAgent(ctx, AgentRelease{Pane: pane, Source: "hook", SourceSeen: true, Seq: 102, SeqSeen: true}); err != nil {
+		t.Fatal(err)
+	}
+	if got := paneOptionValue(ctx, pane, "@agent_seq"); got != "102" {
+		t.Fatalf("release after cleared pane @agent_seq = %q, want tombstone 102", got)
+	}
+	if err := ReportAgent(ctx, AgentReport{Pane: pane, Name: "pi", State: AgentWorking, Source: "hook", SourceSeen: true, Seq: 101, SeqSeen: true}); err != nil {
+		t.Fatal(err)
+	}
+	if got := paneOptionValue(ctx, pane, "@agent_name"); got != "" {
+		t.Fatalf("stale report resurrected @agent_name = %q, want cleared", got)
+	}
+	if got := paneOptionValue(ctx, pane, "@agent_state"); got != "" {
+		t.Fatalf("stale report resurrected @agent_state = %q, want cleared", got)
+	}
+	if got := paneOptionValue(ctx, pane, "@agent_seq"); got != "102" {
+		t.Fatalf("stale report changed @agent_seq = %q, want 102", got)
+	}
+}
+
+func TestReleaseAgentWithSeqDoesNotTombstoneDifferentActiveSource(t *testing.T) {
+	ctx, pane := requireTestTmuxPane(t)
+	if err := ReportAgent(ctx, AgentReport{Pane: pane, Name: "pi", State: AgentWorking, Source: "active", SourceSeen: true, Seq: 200, SeqSeen: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ReleaseAgent(ctx, AgentRelease{Pane: pane, Source: "stale", SourceSeen: true, Seq: 201, SeqSeen: true}); err != nil {
+		t.Fatal(err)
+	}
+	if got := paneOptionValue(ctx, pane, "@agent_name"); got != "pi" {
+		t.Fatalf("different-source release changed @agent_name = %q, want pi", got)
+	}
+	if got := paneOptionValue(ctx, pane, "@agent_source"); got != "active" {
+		t.Fatalf("different-source release changed @agent_source = %q, want active", got)
+	}
+	if got := paneOptionValue(ctx, pane, "@agent_seq"); got != "200" {
+		t.Fatalf("different-source release changed @agent_seq = %q, want 200", got)
+	}
+}
+
+func TestReleaseAgentWithSeqDoesNotTombstoneActiveReportWithoutSource(t *testing.T) {
+	ctx, pane := requireTestTmuxPane(t)
+	if err := ReportAgent(ctx, AgentReport{Pane: pane, Name: "pi", State: AgentWorking, Seq: 300, SeqSeen: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ReleaseAgent(ctx, AgentRelease{Pane: pane, Source: "hook", SourceSeen: true, Seq: 301, SeqSeen: true}); err != nil {
+		t.Fatal(err)
+	}
+	if got := paneOptionValue(ctx, pane, "@agent_name"); got != "pi" {
+		t.Fatalf("source-scoped release changed source-less @agent_name = %q, want pi", got)
+	}
+	if got := paneOptionValue(ctx, pane, "@agent_state"); got != "working" {
+		t.Fatalf("source-scoped release changed source-less @agent_state = %q, want working", got)
+	}
+	if got := paneOptionValue(ctx, pane, "@agent_seq"); got != "300" {
+		t.Fatalf("source-scoped release changed source-less @agent_seq = %q, want 300", got)
+	}
+}
+
+func TestReleaseAgentWithoutSeqClearsSeqForLegacyBehavior(t *testing.T) {
+	ctx, pane := requireTestTmuxPane(t)
+	if err := ReportAgent(ctx, AgentReport{Pane: pane, Name: "pi", State: AgentWorking, Source: "hook", SourceSeen: true, Seq: 100, SeqSeen: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ReleaseAgent(ctx, AgentRelease{Pane: pane, Source: "hook", SourceSeen: true}); err != nil {
+		t.Fatal(err)
+	}
+	if got := paneOptionValue(ctx, pane, "@agent_seq"); got != "" {
+		t.Fatalf("legacy release @agent_seq = %q, want cleared", got)
+	}
+	if got := paneOptionValue(ctx, pane, "@agent_name"); got != "" {
+		t.Fatalf("legacy release @agent_name = %q, want cleared", got)
+	}
+}
+
+func requireTestTmuxPane(t *testing.T) (context.Context, string) {
+	t.Helper()
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux not available")
+	}
+	session := fmt.Sprintf("seshagy_seq_%d", time.Now().UnixNano())
+	if out, err := exec.Command("tmux", "new-session", "-d", "-s", session, "sleep 60").CombinedOutput(); err != nil {
+		t.Skipf("tmux new-session failed: %v: %s", err, strings.TrimSpace(string(out)))
+	}
+	t.Cleanup(func() { _ = exec.Command("tmux", "kill-session", "-t", session).Run() })
+	out, err := exec.Command("tmux", "display-message", "-p", "-t", session+":0.0", "#{pane_id}").Output()
+	if err != nil {
+		t.Fatalf("tmux display pane id failed: %v", err)
+	}
+	pane := strings.TrimSpace(string(out))
+	if pane == "" {
+		t.Fatal("tmux returned empty pane id")
+	}
+	return context.Background(), pane
+}
+
+func paneOptionValue(ctx context.Context, pane, opt string) string {
+	value, _ := showPaneOption(ctx, pane, opt)
+	return value
 }
 
 func TestDetectTmuxPopup(t *testing.T) {

@@ -25,14 +25,17 @@ func TestScanCursorRequiresCursorAgentCommand(t *testing.T) {
 	binDir := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("PATH", binDir)
+	if err := os.MkdirAll(filepath.Join(home, ".cursor"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	writeExecutable(t, filepath.Join(binDir, "cursor"))
-	if rec := findRec(t, Scan(), TargetCursor); rec.AgentAvailable {
-		t.Fatalf("cursor editor command should not make Cursor Agent available: %#v", rec)
+	if rec := findRec(t, Scan(), TargetCursor); rec.AgentAvailable || !rec.Installable {
+		t.Fatalf("cursor editor command plus config dir should be installable but not available: %#v", rec)
 	}
 
 	writeExecutable(t, filepath.Join(binDir, "cursor-agent"))
-	if rec := findRec(t, Scan(), TargetCursor); !rec.AgentAvailable {
-		t.Fatalf("cursor-agent command should make Cursor Agent available: %#v", rec)
+	if rec := findRec(t, Scan(), TargetCursor); !rec.AgentAvailable || !rec.Installable {
+		t.Fatalf("cursor-agent command plus config dir should make Cursor Agent available/installable: %#v", rec)
 	}
 }
 

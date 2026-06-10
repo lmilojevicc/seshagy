@@ -349,14 +349,28 @@ func releaseAgentLocked(ctx context.Context, resolved string, opts AgentRelease)
 	if opts.SourceSeen {
 		source := cleanField(opts.Source)
 		existing, _ := showPaneOption(ctx, resolved, "@agent_source")
-		if existing != source {
+		if existing != "" && existing != source {
 			return nil
+		}
+		if existing == "" {
+			name, _ := showPaneOption(ctx, resolved, "@agent_name")
+			state, _ := showPaneOption(ctx, resolved, "@agent_state")
+			sessionID, _ := showPaneOption(ctx, resolved, "@agent_session_id")
+			if name != "" || state != "" || sessionID != "" {
+				return nil
+			}
 		}
 	}
 	if !agentSeqStillCurrent(ctx, resolved, opts.Seq, opts.SeqSeen) {
 		return nil
 	}
+	if opts.SeqSeen && !setAgentPaneOptionIfCurrent(ctx, resolved, "@agent_seq", strconv.FormatInt(opts.Seq, 10), opts.Seq, true) {
+		return nil
+	}
 	for _, opt := range agentPaneOptions() {
+		if opts.SeqSeen && opt == "@agent_seq" {
+			continue
+		}
 		if !unsetAgentPaneOptionIfCurrent(ctx, resolved, opt, opts.Seq, opts.SeqSeen) {
 			return nil
 		}

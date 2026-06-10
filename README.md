@@ -132,7 +132,9 @@ hooks are Herdr-style session/presence integrations: they install only a
 session-start hook, report `unknown` plus native `--session-id` when the hook
 payload provides one, and do not claim lifecycle state authority from incomplete
 agent hook events. On the first TUI launch, seshagy scans for these agents by
-command or config directory and asks before installing any missing integration.
+command or config directory and asks before installing any missing integration;
+Cursor Agent is the exception and requires the `cursor-agent` command so the
+generic Cursor editor CLI is not mistaken for the hook-capable agent CLI.
 That first-launch prompt is recorded under the user's XDG state directory and is
 not shown again automatically. After that, use `i` in the TUI or `seshagy
 integration install <target>` to install integrations manually. Space toggles

@@ -134,7 +134,12 @@ func specFor(target Target) (spec, bool) {
 func statusFor(spec spec) Recommendation {
 	configDir := spec.configDir()
 	installPath := spec.installPath()
-	agentAvailable := configDirExists(configDir) || commandAvailable(spec.commands)
+	configExists := configDirExists(configDir)
+	commandExists := commandAvailable(spec.commands)
+	agentAvailable := configExists || commandExists
+	if spec.target == TargetCursor {
+		agentAvailable = commandExists
+	}
 	state, version := installedState(installPath, spec.target)
 	rec := Recommendation{
 		Target:         spec.target,
@@ -145,10 +150,14 @@ func statusFor(spec spec) Recommendation {
 		AgentAvailable: agentAvailable,
 		State:          state,
 		Version:        version,
-		Installable:    configDirExists(configDir),
+		Installable:    configExists,
 	}
 	if !rec.AgentAvailable {
-		rec.Reason = "agent command/config not found"
+		if spec.target == TargetCursor {
+			rec.Reason = "cursor-agent command not found"
+		} else {
+			rec.Reason = "agent command/config not found"
+		}
 	} else if !rec.Installable {
 		rec.Reason = "config directory not found"
 	}
