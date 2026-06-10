@@ -258,9 +258,23 @@ func TestStartupSetupPromptSavesTypeFirstChoice(t *testing.T) {
 		t.Fatalf("startupSetupCmd = %#v, %v", msg, ok)
 	}
 	m := New()
-	m.setupPrompt = true
+	model, cmd := m.Update(msg)
+	if cmd != nil {
+		t.Fatal("showing startup setup prompt should not run a command yet")
+	}
+	m = model.(Model)
+	if !m.setupPrompt || m.setupManual || m.setupCursor != 1 {
+		t.Fatalf("startup prompt state = prompt:%v manual:%v cursor:%d", m.setupPrompt, m.setupManual, m.setupCursor)
+	}
 	m.setupCursor = 0
-	model, _ := m.handleSetupKey(keyMsg("enter"))
+	m.width = 100
+	if out := sessionmgr.StripANSI(m.renderSetupPrompt(28)); !strings.Contains(out, "Choose startup input mode") {
+		t.Fatalf("startup setup prompt should use startup title\n%s", out)
+	}
+	model, cmd = m.handleSetupKey(keyMsg("enter"))
+	if cmd == nil {
+		t.Fatal("startup setup should continue to startup integration checks")
+	}
 	m = model.(Model)
 	if m.setupPrompt || !m.config.TypeFirst.Enabled || !m.config.Setup.TypeFirstPromptSeen {
 		t.Fatalf("setup did not enable/save type-first: prompt=%v config=%#v", m.setupPrompt, m.config)
@@ -280,6 +294,146 @@ func TestStartupSetupPromptSavesTypeFirstChoice(t *testing.T) {
 	out := sessionmgr.StripANSI(m.renderFooter())
 	if !strings.Contains(out, "type-first") {
 		t.Fatalf("footer should show type-first after setup\n%s", out)
+	}
+}
+
+func TestManualModePromptInClassicSavesWithoutHookScan(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	m := New()
+	m.width = 100
+
+	model, cmd := m.handleKey(keyMsg("m"))
+	if cmd != nil {
+		t.Fatal("opening manual input-mode prompt should not run a command")
+	}
+	m = model.(Model)
+	if !m.setupPrompt || !m.setupManual || m.setupCursor != 1 || m.status != "change input mode" {
+		t.Fatalf("manual prompt state = prompt:%v manual:%v cursor:%d status:%q", m.setupPrompt, m.setupManual, m.setupCursor, m.status)
+	}
+	if out := sessionmgr.StripANSI(m.renderSetupPrompt(28)); !strings.Contains(out, "Change input mode") {
+		t.Fatalf("manual setup prompt should use manual title\n%s", out)
+	}
+	if out := sessionmgr.StripANSI(m.renderSetupPrompt(28)); !strings.Contains(out, "esc cancel") {
+		t.Fatalf("manual setup prompt should show cancel key\n%s", out)
+	}
+
+	model, cmd = m.handleSetupKey(keyMsg("y"))
+	if cmd != nil {
+		t.Fatal("manual input-mode save should not trigger hook integration startup scan")
+	}
+	m = model.(Model)
+	if m.setupPrompt || m.setupManual || !m.config.TypeFirst.Enabled || !m.config.Setup.TypeFirstPromptSeen {
+		t.Fatalf("manual mode save state = prompt:%v manual:%v config:%#v", m.setupPrompt, m.setupManual, m.config)
+	}
+	loaded, err := appconfig.Load()
+	if err != nil {
+		t.Fatalf("Load() after manual mode save: %v", err)
+	}
+	if !loaded.TypeFirst.Enabled || !loaded.Setup.TypeFirstPromptSeen {
+		t.Fatalf("saved manual mode config = %#v", loaded)
+	}
+}
+
+func TestManualModePromptEscCancelsWithoutSaving(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	m := New()
+
+	model, _ := m.handleKey(keyMsg("m"))
+	m = model.(Model)
+	model, cmd := m.handleSetupKey(keyMsg("esc"))
+	if cmd != nil {
+		t.Fatal("manual input-mode cancel should not run a command")
+	}
+	m = model.(Model)
+	if m.setupPrompt || m.setupManual || m.config.TypeFirst.Enabled || m.config.Setup.TypeFirstPromptSeen {
+		t.Fatalf("manual cancel state = prompt:%v manual:%v config:%#v", m.setupPrompt, m.setupManual, m.config)
+	}
+	if m.status != "input mode change cancelled" || !isWarningStatus(m.status) {
+		t.Fatalf("manual cancel status = %q", m.status)
+	}
+	if appconfig.Exists() {
+		t.Fatal("manual cancel should not write config")
+	}
+}
+
+func TestTypeFirstManualModePromptEscDoesNotDisable(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	cfg := appconfig.Default()
+	cfg.TypeFirst.Enabled = true
+	cfg.Setup.TypeFirstPromptSeen = true
+	if err := appconfig.Save(cfg); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	m := New()
+
+	model, _ := m.handleKey(ctrlXMsg())
+	m = model.(Model)
+	model, _ = m.handleKey(keyMsg("m"))
+	m = model.(Model)
+	if !m.setupPrompt || !m.setupManual || m.setupCursor != 0 {
+		t.Fatalf("manual type-first prompt state = prompt:%v manual:%v cursor:%d", m.setupPrompt, m.setupManual, m.setupCursor)
+	}
+	model, cmd := m.handleSetupKey(keyMsg("esc"))
+	if cmd != nil {
+		t.Fatal("manual type-first cancel should not run a command")
+	}
+	m = model.(Model)
+	if m.setupPrompt || m.setupManual || !m.config.TypeFirst.Enabled {
+		t.Fatalf("manual type-first cancel state = prompt:%v manual:%v config:%#v", m.setupPrompt, m.setupManual, m.config)
+	}
+	loaded, err := appconfig.Load()
+	if err != nil {
+		t.Fatalf("Load() after manual cancel: %v", err)
+	}
+	if !loaded.TypeFirst.Enabled || !loaded.Setup.TypeFirstPromptSeen {
+		t.Fatalf("manual cancel should preserve saved type-first config = %#v", loaded)
+	}
+}
+
+func TestTypeFirstManualModePromptRequiresPrefix(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	m := New()
+	m.config.TypeFirst.Enabled = true
+	m.config.TypeFirst.Prefix = appconfig.DefaultPrefix
+
+	model, _ := m.handleKey(keyMsg("m"))
+	m = model.(Model)
+	if m.setupPrompt || m.query != "m" {
+		t.Fatalf("unprefixed m should filter in type-first mode, prompt=%v query=%q", m.setupPrompt, m.query)
+	}
+
+	model, _ = m.handleKey(ctrlXMsg())
+	m = model.(Model)
+	if !m.prefixArmed {
+		t.Fatal("prefix should arm actions")
+	}
+	model, cmd := m.handleKey(keyMsg("m"))
+	if cmd != nil {
+		t.Fatal("opening prefixed manual input-mode prompt should not run a command")
+	}
+	m = model.(Model)
+	if !m.setupPrompt || !m.setupManual || m.setupCursor != 0 || m.prefixArmed {
+		t.Fatalf("prefixed m prompt state = prompt:%v manual:%v cursor:%d prefix:%v", m.setupPrompt, m.setupManual, m.setupCursor, m.prefixArmed)
+	}
+
+	model, cmd = m.handleSetupKey(keyMsg("n"))
+	if cmd != nil {
+		t.Fatal("manual type-first mode save should not trigger hook integration startup scan")
+	}
+	m = model.(Model)
+	if m.config.TypeFirst.Enabled || !m.config.Setup.TypeFirstPromptSeen {
+		t.Fatalf("manual mode disable config = %#v", m.config)
+	}
+	loaded, err := appconfig.Load()
+	if err != nil {
+		t.Fatalf("Load() after manual disable: %v", err)
+	}
+	if loaded.TypeFirst.Enabled || !loaded.Setup.TypeFirstPromptSeen {
+		t.Fatalf("saved manual disable config = %#v", loaded)
 	}
 }
 
@@ -414,11 +568,28 @@ func TestFooterKeepsStatusOnOneLine(t *testing.T) {
 	}
 }
 
+func TestFooterHelpShowsModeKey(t *testing.T) {
+	m := newTestModel(t)
+	m.width = 120
+	out := sessionmgr.StripANSI(m.renderFooter())
+	if !strings.Contains(out, "m mode") {
+		t.Fatalf("footer should mention mode key\n%s", out)
+	}
+
+	m.config.TypeFirst.Enabled = true
+	m.config.TypeFirst.Prefix = appconfig.DefaultPrefix
+	out = sessionmgr.StripANSI(m.renderFooter())
+	if !strings.Contains(out, "ctrl+x m mode") {
+		t.Fatalf("type-first footer should mention prefixed mode key\n%s", out)
+	}
+}
+
 func TestFooterWarningStatusesUseWarningStyle(t *testing.T) {
 	s := defaultStyles()
 	warnings := []string{
 		"no integrations selected",
 		"hook installation skipped",
+		"input mode change cancelled",
 		"rename cancelled",
 		"yazi closed without a directory",
 		"nothing selected",

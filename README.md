@@ -80,14 +80,16 @@ Runtime tools:
 | `x` | Kill selected session or agent pane |
 | `y` | Open yazi and create/switch from its exit directory |
 | `i` | Open the hook integration installation prompt manually |
+| `m` | Change classic/type-first input mode |
 | `p` | Toggle preview pane |
 | `?`/`h` | Toggle compact help |
 | `q`/`esc`/`ctrl-c` | Quit |
 
 When type-first mode is enabled, normal typing edits the filter immediately.
 Press the configured action prefix first (`ctrl+x` by default) before most
-action keys, for example `ctrl+x` then `g` to open the Agents pane.
-`enter` and arrow/page/home/end navigation keys never require the prefix.
+action keys, for example `ctrl+x` then `g` to open the Agents pane, or
+`ctrl+x` then `m` to change input mode. `enter` and arrow/page/home/end
+navigation keys never require the prefix.
 `backspace` edits the filter and `esc` clears it.
 
 ## CLI helpers

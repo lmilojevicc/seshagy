@@ -304,7 +304,8 @@ Usage:
 
 TUI keys:
   enter attach/create/focus   q quit   / filter   r refresh   R rename
-  x kill session/pane         y yazi   p preview  ? help      1-6 modes
+  x kill session/pane         y yazi   i hooks    m mode     1-6 modes
+  p preview                   ? help
 
 Config:
   Config lives at $XDG_CONFIG_HOME/seshagy/config.toml, or

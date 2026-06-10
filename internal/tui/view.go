@@ -38,8 +38,12 @@ func (m Model) renderSetupPrompt(height int) string {
 	width := max(54, min(88, m.width-4))
 	innerW := max(44, width-4)
 	innerH := 11
+	title := "Choose startup input mode"
+	if m.setupManual {
+		title = "Change input mode"
+	}
 	lines := []string{
-		s.title.Render("Choose startup input mode"),
+		s.title.Render(title),
 		s.muted.Render("Type-first mode lets normal typing filter immediately."),
 		s.muted.Render("App actions then require the configured prefix key (" + m.config.PrefixKey() + ")."),
 		"",
@@ -62,12 +66,16 @@ func (m Model) renderSetupPrompt(height int) string {
 		}
 		lines = append(lines, line)
 	}
-	lines = append(lines, "", strings.Join([]string{
+	helpParts := []string{
 		s.key.Render("enter") + " select",
 		s.key.Render("y") + " type-first",
 		s.key.Render("n") + " classic",
-		s.key.Render("q") + " quit",
-	}, s.muted.Render(" · ")))
+	}
+	if m.setupManual {
+		helpParts = append(helpParts, s.key.Render("esc")+" cancel")
+	}
+	helpParts = append(helpParts, s.key.Render("q")+" quit")
+	lines = append(lines, "", strings.Join(helpParts, s.muted.Render(" · ")))
 	content := trimHeight(strings.Join(lines, "\n"), innerH)
 	box := s.paneFocus.Width(width - 2).Height(innerH).Render(content)
 	return lipgloss.Place(m.width, height, lipgloss.Center, lipgloss.Center, box)
@@ -477,6 +485,7 @@ func (m Model) renderFooter() string {
 			help = strings.Join([]string{
 				s.key.Render("type") + " filter",
 				s.key.Render(m.config.PrefixKey()) + " actions",
+				s.key.Render(m.config.PrefixKey()+" m") + " mode",
 				s.key.Render("backspace") + " edit",
 			}, s.muted.Render(" · "))
 		} else {
@@ -498,6 +507,7 @@ func (m Model) renderFooter() string {
 				s.key.Render("x")+" kill",
 				s.key.Render("y")+" yazi",
 				s.key.Render("i")+" hooks",
+				s.key.Render("m")+" mode",
 				s.key.Render("p")+" preview",
 			)
 			help = strings.Join(helpParts, s.muted.Render(" · "))
@@ -533,6 +543,7 @@ func isWarningStatus(status string) bool {
 	switch status {
 	case "no integrations selected",
 		"hook installation skipped",
+		"input mode change cancelled",
 		"rename cancelled",
 		"yazi closed without a directory",
 		"nothing selected",

@@ -60,6 +60,7 @@ type Model struct {
 	integrationMessages []string
 
 	setupPrompt bool
+	setupManual bool
 	setupCursor int
 }
 
@@ -200,7 +201,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, startupIntegrationsCmd()
 		}
 		if msg.prompt {
-			m.setupPrompt = true
+			m.openInputModePrompt(false)
 			m.status = "choose startup input mode"
 			return m, nil
 		}
@@ -397,6 +398,10 @@ func (m Model) handleActionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.integrationPrompt = true
 		m.status = "scanning hook integrations"
 		return m, integrationsCmd()
+	case "m":
+		m.openInputModePrompt(true)
+		m.status = "change input mode"
+		return m, nil
 	case "?", "h", "alt+h":
 		m.showHelp = !m.showHelp
 		return m, nil
@@ -558,6 +563,16 @@ func (m Model) handleIntegrationKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m *Model) openInputModePrompt(manual bool) {
+	m.setupPrompt = true
+	m.setupManual = manual
+	if m.config.TypeFirst.Enabled {
+		m.setupCursor = 0
+	} else {
+		m.setupCursor = 1
+	}
+}
+
 func (m Model) handleSetupKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c", "q":
@@ -571,7 +586,12 @@ func (m Model) handleSetupKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "y", "Y":
 		return m.applyTypeFirstSetup(true)
-	case "n", "N", "esc":
+	case "n", "N":
+		return m.applyTypeFirstSetup(false)
+	case "esc":
+		if m.setupManual {
+			return m.cancelInputModePrompt()
+		}
 		return m.applyTypeFirstSetup(false)
 	case "enter":
 		return m.applyTypeFirstSetup(m.setupCursor == 0)
@@ -579,7 +599,15 @@ func (m Model) handleSetupKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m Model) cancelInputModePrompt() (tea.Model, tea.Cmd) {
+	m.setupPrompt = false
+	m.setupManual = false
+	m.status = "input mode change cancelled"
+	return m, nil
+}
+
 func (m Model) applyTypeFirstSetup(enabled bool) (tea.Model, tea.Cmd) {
+	manual := m.setupManual
 	cfg := m.config
 	cfg.TypeFirst.Enabled = enabled
 	if strings.TrimSpace(cfg.TypeFirst.Prefix) == "" {
@@ -593,11 +621,15 @@ func (m Model) applyTypeFirstSetup(enabled bool) (tea.Model, tea.Cmd) {
 	}
 	m.config = cfg
 	m.setupPrompt = false
+	m.setupManual = false
 	m.err = nil
 	if enabled {
 		m.status = "type-first mode enabled"
 	} else {
 		m.status = "classic input mode selected"
+	}
+	if manual {
+		return m, nil
 	}
 	return m, startupIntegrationsCmd()
 }
