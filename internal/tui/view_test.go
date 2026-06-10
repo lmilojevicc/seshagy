@@ -50,6 +50,30 @@ func TestFilterVisibleItems(t *testing.T) {
 	}
 }
 
+func TestSearchModeArrowNavigationKeepsInputActive(t *testing.T) {
+	m := newTestModel(t)
+	m.items = []sessionmgr.Item{
+		{Kind: sessionmgr.KindSession, Name: "api"},
+		{Kind: sessionmgr.KindSession, Name: "app"},
+		{Kind: sessionmgr.KindSession, Name: "web"},
+	}
+	m.inputMode = modeSearch
+	m.query = "ap"
+	m.searchInput.SetValue("ap")
+	m.searchInput.Focus()
+
+	model, _ := m.handleKey(downMsg())
+	m = model.(Model)
+	if m.cursor != 1 || m.inputMode != modeSearch || m.query != "ap" || m.searchInput.Value() != "ap" {
+		t.Fatalf("down in search mode = cursor:%d mode:%v query:%q input:%q", m.cursor, m.inputMode, m.query, m.searchInput.Value())
+	}
+	model, _ = m.handleKey(upMsg())
+	m = model.(Model)
+	if m.cursor != 0 || m.inputMode != modeSearch || m.query != "ap" || m.searchInput.Value() != "ap" {
+		t.Fatalf("up in search mode = cursor:%d mode:%v query:%q input:%q", m.cursor, m.inputMode, m.query, m.searchInput.Value())
+	}
+}
+
 func TestTabsUseCurrentAgentsFourthAndNoTrailingCWD(t *testing.T) {
 	m := newTestModel(t)
 	out := sessionmgr.StripANSI(m.renderTabs())
@@ -622,6 +646,10 @@ func ctrlXMsg() tea.KeyMsg {
 
 func downMsg() tea.KeyMsg {
 	return tea.KeyMsg{Type: tea.KeyDown}
+}
+
+func upMsg() tea.KeyMsg {
+	return tea.KeyMsg{Type: tea.KeyUp}
 }
 
 func enterMsg() tea.KeyMsg {

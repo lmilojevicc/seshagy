@@ -294,6 +294,16 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.query = m.searchInput.Value()
 			m.clampCursor()
 			return m, m.previewForSelection()
+		case "up":
+			if m.cursor > 0 {
+				m.cursor--
+			}
+			return m, m.previewForSelection()
+		case "down":
+			if m.cursor < len(m.visibleItems())-1 {
+				m.cursor++
+			}
+			return m, m.previewForSelection()
 		case "ctrl+c":
 			return m, tea.Quit
 		}
