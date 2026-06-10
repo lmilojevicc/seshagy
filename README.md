@@ -86,7 +86,7 @@ Runtime tools:
 
 When type-first mode is enabled, normal typing edits the filter immediately.
 Press the configured action prefix first (`ctrl+x` by default) before most
-action keys, for example `ctrl+x` then `3` to open the Agents pane.
+action keys, for example `ctrl+x` then `g` to open the Agents pane.
 `enter` and arrow/page/home/end navigation keys never require the prefix.
 `backspace` edits the filter and `esc` clears it.
 
