@@ -19,6 +19,10 @@ pane, a live preview pane, and a compact help/status bar.
   independently.
 - Use terminal-default foreground/background colors and ANSI palette accents so
   the TUI follows the active terminal theme instead of forcing a fixed surface.
+- Configure source icons, icon colors, and whether to use Nerd Font icons or
+  plain ASCII labels (`S`, `Z`, `F`, `A`) through the user config file.
+- Optional type-first mode starts filtering as soon as you type; app actions are
+  then run by pressing a configurable prefix first (`ctrl+x` by default).
 - List agent panes only after hooks/plugins report `@agent_*` metadata. seshagy
   does **not** infer agent state by inspecting foreground process names or pane
   text.
@@ -78,6 +82,12 @@ Runtime tools:
 | `?`/`h` | Toggle compact help |
 | `q`/`esc`/`ctrl-c` | Quit |
 
+When type-first mode is enabled, normal typing edits the filter immediately.
+Press the configured action prefix first (`ctrl+x` by default) before most
+action keys, for example `ctrl+x` then `3` to open the Agents pane.
+`enter` and arrow/page/home/end navigation keys never require the prefix.
+`backspace` edits the filter and `esc` clears it.
+
 ## CLI helpers
 
 ```sh
@@ -91,6 +101,9 @@ seshagy --delete-item '<rendered line from --get-all>'
 seshagy integration status
 seshagy integration install pi
 seshagy integration uninstall pi
+seshagy config path
+seshagy config show
+seshagy config init
 ```
 
 Agent metadata helpers are what installed hooks/plugins call. They mirror the
@@ -112,6 +125,56 @@ state directory and is not shown again automatically. After that, use `i` in the
 TUI or `seshagy integration install <target>` to install integrations manually.
 Space toggles each detected agent; Enter installs the selected hooks/plugins;
 `s` or Esc skips.
+
+## Configuration
+
+The config file is TOML at `$XDG_CONFIG_HOME/seshagy/config.toml`, falling back
+to `~/.config/seshagy/config.toml` when `XDG_CONFIG_HOME` is unset. Use
+`seshagy config path` to print the exact path, `seshagy config show` to print the
+effective config, and `seshagy config init` to write the default file.
+
+Default config:
+
+```toml
+[icons]
+enabled = true
+
+[icons.session]
+icon = ""
+ascii = "S"
+color = "10"
+
+[icons.zoxide]
+icon = "󰉖"
+ascii = "Z"
+color = "14"
+
+[icons.fd]
+icon = "󰥩"
+ascii = "F"
+color = "11"
+
+[icons.agent]
+icon = "󰚩"
+ascii = "A"
+color = "13"
+
+[type_first]
+enabled = false
+prefix = "ctrl+x"
+
+[setup]
+type_first_prompt_seen = false
+```
+
+Set `icons.enabled` to `false` to render the ASCII labels instead of Nerd Font
+icons. Each `color` is a terminal color value understood by Lip Gloss/ANSI
+rendering: ANSI palette indexes such as `10`, bright SGR values such as `92`, or
+truecolor hex values such as `#a6e3a1`.
+
+On first TUI startup, seshagy asks whether to enable type-first mode and records
+the answer in this config file. After that, edit `type_first.enabled` or
+`type_first.prefix` manually to change the behavior.
 
 ## Theme behavior
 

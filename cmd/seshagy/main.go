@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	appconfig "github.com/lmilojevicc/seshagy/internal/config"
 	"github.com/lmilojevicc/seshagy/internal/integrations"
 	"github.com/lmilojevicc/seshagy/internal/sessionmgr"
 	"github.com/lmilojevicc/seshagy/internal/tui"
@@ -37,6 +38,8 @@ func run(args []string) error {
 		return nil
 	case "integration", "integrations", "hook", "hooks":
 		return runIntegration(args[1:])
+	case "config":
+		return runConfig(args[1:])
 	case "--get-sessions":
 		return printItems(ctx, sessionmgr.ModeSessions)
 	case "--get-agents":
@@ -68,6 +71,41 @@ func run(args []string) error {
 		return sessionmgr.ReleaseAgent(ctx, pane, source, sourceSeen)
 	default:
 		return tui.Run()
+	}
+}
+
+func runConfig(args []string) error {
+	if len(args) == 0 || args[0] == "path" {
+		fmt.Println(appconfig.Path())
+		return nil
+	}
+	switch args[0] {
+	case "show":
+		cfg, err := appconfig.Load()
+		if err != nil {
+			return err
+		}
+		data, err := appconfig.Marshal(cfg)
+		if err != nil {
+			return err
+		}
+		fmt.Println(string(data))
+		return nil
+	case "init":
+		force := len(args) == 2 && args[1] == "--force"
+		if len(args) > 2 || (len(args) == 2 && !force) {
+			return errors.New("usage: seshagy config init [--force]")
+		}
+		if appconfig.Exists() && !force {
+			return fmt.Errorf("config already exists: %s", appconfig.Path())
+		}
+		if err := appconfig.Save(appconfig.Default()); err != nil {
+			return err
+		}
+		fmt.Println(appconfig.Path())
+		return nil
+	default:
+		return errors.New("usage: seshagy config path|show|init [--force]")
 	}
 }
 
@@ -116,14 +154,23 @@ func printItems(ctx context.Context, mode sessionmgr.SourceMode) error {
 	if err != nil {
 		return err
 	}
+	cfg, err := appconfig.Load()
+	if err != nil {
+		return err
+	}
+	icons := cfg.IconSet()
 	for _, item := range items {
-		fmt.Println(sessionmgr.FormatLine(item))
+		fmt.Println(sessionmgr.FormatLineWithIcons(item, icons))
 	}
 	return nil
 }
 
 func deleteItem(ctx context.Context, raw string) error {
-	item, ok := sessionmgr.ParseActionLine(raw)
+	cfg, err := appconfig.Load()
+	if err != nil {
+		return err
+	}
+	item, ok := sessionmgr.ParseActionLineWithIcons(raw, cfg.IconSet())
 	if !ok {
 		return nil
 	}
@@ -251,10 +298,19 @@ Usage:
   seshagy integration status      list detected agents and hook status
   seshagy integration install pi  install one hook/plugin integration
   seshagy integration uninstall pi
+  seshagy config path             print config file path
+  seshagy config show             print effective config
+  seshagy config init             write default config if missing
 
 TUI keys:
   enter attach/create/focus   q quit   / filter   r refresh   R rename
   x kill session/pane         y yazi   p preview  ? help      1-5 modes
+
+Config:
+  Config lives at $XDG_CONFIG_HOME/seshagy/config.toml, or
+  ~/.config/seshagy/config.toml when XDG_CONFIG_HOME is unset. It controls
+  icons/ascii labels, icon colors, type-first mode, and the action prefix key.
+  In type-first mode, enter and arrow/page/home/end navigation keys do not need a prefix.
 
 Agent flags:
   --pane <pane>               pane id; defaults to current tmux pane

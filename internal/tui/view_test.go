@@ -8,12 +8,19 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	appconfig "github.com/lmilojevicc/seshagy/internal/config"
 	"github.com/lmilojevicc/seshagy/internal/integrations"
 	"github.com/lmilojevicc/seshagy/internal/sessionmgr"
 )
 
+func newTestModel(t *testing.T) Model {
+	t.Helper()
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	return New()
+}
+
 func TestViewRendersDashboardChromeAndRows(t *testing.T) {
-	m := New()
+	m := newTestModel(t)
 	model, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 32})
 	m = model.(Model)
 	m.items = []sessionmgr.Item{
@@ -30,7 +37,7 @@ func TestViewRendersDashboardChromeAndRows(t *testing.T) {
 }
 
 func TestFilterVisibleItems(t *testing.T) {
-	m := New()
+	m := newTestModel(t)
 	m.items = []sessionmgr.Item{
 		{Kind: sessionmgr.KindSession, Name: "api"},
 		{Kind: sessionmgr.KindSession, Name: "web"},
@@ -43,8 +50,154 @@ func TestFilterVisibleItems(t *testing.T) {
 	}
 }
 
-func TestAgentStateFilterOnlyAppliesInAgentSources(t *testing.T) {
+func TestConfiguredASCIIIconsRenderInTUI(t *testing.T) {
+	m := newTestModel(t)
+	cfg := appconfig.Default()
+	cfg.Icons.Enabled = false
+	cfg.Icons.Session.ASCII = "S"
+	cfg.Icons.Zoxide.ASCII = "Z"
+	cfg.Icons.FD.ASCII = "F"
+	cfg.Icons.Agent.ASCII = "A"
+	m.config = cfg
+	m.items = []sessionmgr.Item{
+		{Kind: sessionmgr.KindSession, Name: "demo", Activity: time.Now(), Created: time.Now()},
+		{Kind: sessionmgr.KindZoxide, Path: "~/code/demo"},
+		{Kind: sessionmgr.KindFD, Path: "~/src/demo"},
+		{Kind: sessionmgr.KindAgent, AgentName: "pi", AgentState: sessionmgr.AgentWorking, PaneID: "%1"},
+	}
+	model, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 28})
+	m = model.(Model)
+	out := sessionmgr.StripANSI(m.View())
+	for _, want := range []string{"S ◌ demo", "Z ~/code/demo", "F ~/src/demo", "A ▶ pi"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("configured ascii icon output missing %q\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, sessionmgr.IconSession) || strings.Contains(out, sessionmgr.IconZoxide) {
+		t.Fatalf("nerd font icons should not render when icons are disabled\n%s", out)
+	}
+}
+
+func TestTypeFirstTypingFiltersAndPrefixRunsActions(t *testing.T) {
+	m := newTestModel(t)
+	m.config.TypeFirst.Enabled = true
+	m.config.TypeFirst.Prefix = appconfig.DefaultPrefix
+	m.items = []sessionmgr.Item{
+		{Kind: sessionmgr.KindSession, Name: "api"},
+		{Kind: sessionmgr.KindSession, Name: "web"},
+	}
+
+	model, _ := m.handleKey(keyMsg("a"))
+	m = model.(Model)
+	if m.query != "a" || m.status != "filter: a" {
+		t.Fatalf("typing should filter immediately, query/status = %q/%q", m.query, m.status)
+	}
+	if got := m.visibleItems(); len(got) != 1 || got[0].Name != "api" {
+		t.Fatalf("visibleItems after typing = %#v", got)
+	}
+
+	model, _ = m.handleKey(keyMsg("g"))
+	m = model.(Model)
+	if m.source != sessionmgr.ModeAll || m.query != "ag" {
+		t.Fatalf("unprefixed action key should type into filter, source/query = %v/%q", m.source, m.query)
+	}
+
+	model, _ = m.handleKey(ctrlXMsg())
+	m = model.(Model)
+	if !m.prefixArmed {
+		t.Fatal("prefix key should arm next action")
+	}
+	model, _ = m.handleKey(keyMsg("g"))
+	m = model.(Model)
+	if m.source != sessionmgr.ModeAgents || m.prefixArmed {
+		t.Fatalf("prefixed g should switch to agents, source=%v armed=%v", m.source, m.prefixArmed)
+	}
+}
+
+func TestTypeFirstPrefixIsConfigurableAndUnprefixedActionsWarn(t *testing.T) {
+	m := newTestModel(t)
+	m.config.TypeFirst.Enabled = true
+	m.config.TypeFirst.Prefix = "p"
+
+	model, _ := m.handleKey(ctrlRMsg())
+	m = model.(Model)
+	if m.status != "press p before actions" || !isWarningStatus(m.status) {
+		t.Fatalf("unprefixed non-navigation action status = %q", m.status)
+	}
+
+	model, _ = m.handleKey(keyMsg("p"))
+	m = model.(Model)
+	if !m.prefixArmed {
+		t.Fatal("configured prefix should arm actions")
+	}
+	model, _ = m.handleKey(keyMsg("g"))
+	m = model.(Model)
+	if m.source != sessionmgr.ModeAgents {
+		t.Fatalf("custom-prefixed g source = %v, want agents", m.source)
+	}
+}
+
+func TestTypeFirstAllowsEnterWithoutPrefix(t *testing.T) {
+	m := newTestModel(t)
+	m.config.TypeFirst.Enabled = true
+	m.items = []sessionmgr.Item{{Kind: sessionmgr.KindZoxide, Path: "/tmp/demo"}}
+
+	model, _ := m.handleKey(enterMsg())
+	m = model.(Model)
+	if m.status != "creating session from /tmp/demo" || m.prefixArmed || m.query != "" {
+		t.Fatalf("enter should dispatch action without prefix, status=%q armed=%v query=%q", m.status, m.prefixArmed, m.query)
+	}
+}
+
+func TestTypeFirstAllowsArrowNavigationWithoutPrefix(t *testing.T) {
+	m := newTestModel(t)
+	m.config.TypeFirst.Enabled = true
+	m.items = []sessionmgr.Item{
+		{Kind: sessionmgr.KindSession, Name: "api"},
+		{Kind: sessionmgr.KindSession, Name: "web"},
+	}
+	model, _ := m.handleKey(downMsg())
+	m = model.(Model)
+	if m.cursor != 1 || m.prefixArmed || m.query != "" {
+		t.Fatalf("down arrow should navigate without prefix, cursor=%d armed=%v query=%q", m.cursor, m.prefixArmed, m.query)
+	}
+}
+
+func TestStartupSetupPromptSavesTypeFirstChoice(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	msg, ok := startupSetupCmd(appconfig.Default())().(setupMsg)
+	if !ok || !msg.prompt || msg.err != nil {
+		t.Fatalf("startupSetupCmd = %#v, %v", msg, ok)
+	}
 	m := New()
+	m.setupPrompt = true
+	m.setupCursor = 0
+	model, _ := m.handleSetupKey(keyMsg("enter"))
+	m = model.(Model)
+	if m.setupPrompt || !m.config.TypeFirst.Enabled || !m.config.Setup.TypeFirstPromptSeen {
+		t.Fatalf("setup did not enable/save type-first: prompt=%v config=%#v", m.setupPrompt, m.config)
+	}
+	loaded, err := appconfig.Load()
+	if err != nil {
+		t.Fatalf("Load() after setup: %v", err)
+	}
+	if !loaded.TypeFirst.Enabled || !loaded.Setup.TypeFirstPromptSeen {
+		t.Fatalf("saved setup config = %#v", loaded)
+	}
+	afterMsg, ok := startupSetupCmd(loaded)().(setupMsg)
+	if !ok || afterMsg.prompt || afterMsg.err != nil {
+		t.Fatalf("startupSetupCmd after saved choice = %#v, %v", afterMsg, ok)
+	}
+	m.width = 100
+	out := sessionmgr.StripANSI(m.renderFooter())
+	if !strings.Contains(out, "type-first") {
+		t.Fatalf("footer should show type-first after setup\n%s", out)
+	}
+}
+
+func TestAgentStateFilterOnlyAppliesInAgentSources(t *testing.T) {
+	m := newTestModel(t)
 	m.items = []sessionmgr.Item{
 		{Kind: sessionmgr.KindAgent, AgentName: "pi", AgentState: sessionmgr.AgentWorking, PaneID: "%1"},
 		{Kind: sessionmgr.KindAgent, AgentName: "claude", AgentState: sessionmgr.AgentBlocked, PaneID: "%2"},
@@ -74,7 +227,7 @@ func TestAgentStateFilterOnlyAppliesInAgentSources(t *testing.T) {
 }
 
 func TestAgentStateFilterCombinesWithTextQuery(t *testing.T) {
-	m := New()
+	m := newTestModel(t)
 	m.source = sessionmgr.ModeAgents
 	m.agentStateFilter = sessionmgr.AgentWorking
 	m.query = "api"
@@ -90,7 +243,7 @@ func TestAgentStateFilterCombinesWithTextQuery(t *testing.T) {
 }
 
 func TestAgentStateFilterKeyCyclesAndClears(t *testing.T) {
-	m := New()
+	m := newTestModel(t)
 	m.source = sessionmgr.ModeAgents
 	m.items = []sessionmgr.Item{{Kind: sessionmgr.KindAgent, AgentName: "pi", AgentState: sessionmgr.AgentWorking, PaneID: "%1"}}
 
@@ -112,7 +265,7 @@ func TestAgentStateFilterKeyCyclesAndClears(t *testing.T) {
 }
 
 func TestAgentStateFilterKeyWarnsOutsideAgentPane(t *testing.T) {
-	m := New()
+	m := newTestModel(t)
 	m.source = sessionmgr.ModeSessions
 	model, _ := m.handleKey(keyMsg("s"))
 	m = model.(Model)
@@ -128,7 +281,7 @@ func TestAgentStateFilterKeyWarnsOutsideAgentPane(t *testing.T) {
 }
 
 func TestAgentStateFilterRendersTitleHelpAndEmptyState(t *testing.T) {
-	m := New()
+	m := newTestModel(t)
 	model, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 28})
 	m = model.(Model)
 	m.source = sessionmgr.ModeAgents
@@ -149,7 +302,7 @@ func TestAgentStateFilterRendersTitleHelpAndEmptyState(t *testing.T) {
 }
 
 func TestFooterKeepsStatusOnOneLine(t *testing.T) {
-	m := New()
+	m := newTestModel(t)
 	m.width = 80
 	m.source = sessionmgr.ModeAll
 	m.status = "loaded 1171 items"
@@ -191,7 +344,7 @@ func TestFooterWarningStatusesUseWarningStyle(t *testing.T) {
 		if style.GetForeground() != s.warning.GetForeground() || !style.GetBold() {
 			t.Fatalf("footerStatusStyle(%q) = foreground %v bold %v, want warning foreground %v bold true", status, style.GetForeground(), style.GetBold(), s.warning.GetForeground())
 		}
-		m := New()
+		m := newTestModel(t)
 		m.width = 80
 		m.status = status
 		m.showHelp = false
@@ -203,6 +356,22 @@ func TestFooterWarningStatusesUseWarningStyle(t *testing.T) {
 
 func keyMsg(s string) tea.KeyMsg {
 	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}
+}
+
+func ctrlXMsg() tea.KeyMsg {
+	return tea.KeyMsg{Type: tea.KeyCtrlX}
+}
+
+func downMsg() tea.KeyMsg {
+	return tea.KeyMsg{Type: tea.KeyDown}
+}
+
+func enterMsg() tea.KeyMsg {
+	return tea.KeyMsg{Type: tea.KeyEnter}
+}
+
+func ctrlRMsg() tea.KeyMsg {
+	return tea.KeyMsg{Type: tea.KeyCtrlR}
 }
 
 func TestFooterStatusStylesKeepErrorsRedAndNormalMuted(t *testing.T) {
@@ -247,7 +416,7 @@ func TestDefaultStylesUseTerminalPalette(t *testing.T) {
 }
 
 func TestIntegrationPromptRendersToggleRows(t *testing.T) {
-	m := New()
+	m := newTestModel(t)
 	model, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 28})
 	m = model.(Model)
 	m.integrationPrompt = true

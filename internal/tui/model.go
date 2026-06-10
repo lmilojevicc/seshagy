@@ -13,6 +13,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	appconfig "github.com/lmilojevicc/seshagy/internal/config"
 	"github.com/lmilojevicc/seshagy/internal/integrations"
 	"github.com/lmilojevicc/seshagy/internal/sessionmgr"
 )
@@ -27,6 +28,7 @@ const (
 
 type Model struct {
 	styles styles
+	config appconfig.Config
 
 	width  int
 	height int
@@ -36,6 +38,7 @@ type Model struct {
 	cursor int
 
 	agentStateFilter sessionmgr.AgentState
+	prefixArmed      bool
 
 	query       string
 	searchInput textinput.Model
@@ -56,6 +59,9 @@ type Model struct {
 	integrationSelected map[integrations.Target]bool
 	integrationCursor   int
 	integrationMessages []string
+
+	setupPrompt bool
+	setupCursor int
 }
 
 type refreshMsg struct {
@@ -98,7 +104,13 @@ type integrationsInstalledMsg struct {
 	err      error
 }
 
+type setupMsg struct {
+	prompt bool
+	err    error
+}
+
 func New() Model {
+	cfg, cfgErr := appconfig.Load()
 	search := textinput.New()
 	search.Placeholder = "filter sessions, agents, directories"
 	search.Prompt = "/ "
@@ -107,15 +119,22 @@ func New() Model {
 	rename.Placeholder = "new session name"
 	rename.Prompt = "rename > "
 	rename.CharLimit = 128
-	return Model{
+	m := Model{
 		styles:              defaultStyles(),
+		config:              cfg,
 		source:              sessionmgr.ModeAll,
 		showPreview:         true,
 		showHelp:            true,
 		searchInput:         search,
 		renameInput:         rename,
 		integrationSelected: map[integrations.Target]bool{},
+		setupCursor:         1,
 	}
+	if cfgErr != nil {
+		m.err = cfgErr
+		m.status = cfgErr.Error()
+	}
+	return m
 }
 
 func Run() error {
@@ -126,7 +145,7 @@ func Run() error {
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(refreshCmd(m.source), startupIntegrationsCmd(), tickCmd())
+	return tea.Batch(refreshCmd(m.source), startupSetupCmd(m.config), tickCmd())
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -175,6 +194,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.integrationPrompt = false
 		return m, tea.Batch(integrationsCmd(), refreshCmd(m.source))
+	case setupMsg:
+		if msg.err != nil {
+			m.err = msg.err
+			m.status = msg.err.Error()
+			return m, startupIntegrationsCmd()
+		}
+		if msg.prompt {
+			m.setupPrompt = true
+			m.status = "choose startup input mode"
+			return m, nil
+		}
+		return m, startupIntegrationsCmd()
 	case refreshMsg:
 		m.loading = false
 		if msg.err != nil {
@@ -239,6 +270,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, createSessionCmd(msg.path)
 	case tea.KeyMsg:
+		if m.setupPrompt {
+			return m.handleSetupKey(msg)
+		}
 		if m.integrationPrompt {
 			return m.handleIntegrationKey(msg)
 		}
@@ -296,6 +330,13 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 
+	if m.config.TypeFirst.Enabled {
+		return m.handleTypeFirstKey(msg)
+	}
+	return m.handleActionKey(msg)
+}
+
+func (m Model) handleActionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c", "q", "esc":
 		return m, tea.Quit
@@ -375,6 +416,91 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m Model) handleTypeFirstKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if msg.String() == "ctrl+c" {
+		return m, tea.Quit
+	}
+	if m.prefixArmed {
+		m.prefixArmed = false
+		if m.isPrefixKey(msg) {
+			m.status = "prefix cancelled"
+			return m, nil
+		}
+		return m.handleActionKey(msg)
+	}
+	if m.isPrefixKey(msg) {
+		m.prefixArmed = true
+		m.status = "prefix active: next key is an action"
+		return m, nil
+	}
+	if isUnprefixedNavigationKey(msg) {
+		return m.handleActionKey(msg)
+	}
+	switch msg.String() {
+	case "backspace":
+		return m.deleteFilterRune()
+	case "esc":
+		return m.clearFilterText()
+	}
+	if isPrintableKey(msg) {
+		return m.appendFilterText(string(msg.Runes))
+	}
+	m.status = "press " + m.config.PrefixKey() + " before actions"
+	return m, nil
+}
+
+func (m Model) isPrefixKey(msg tea.KeyMsg) bool {
+	return msg.String() == m.config.PrefixKey()
+}
+
+func isPrintableKey(msg tea.KeyMsg) bool {
+	return len(msg.Runes) > 0 && !msg.Alt
+}
+
+func isUnprefixedNavigationKey(msg tea.KeyMsg) bool {
+	switch msg.String() {
+	case "enter", "up", "down", "pgup", "ctrl+u", "pgdown", "ctrl+d", "home", "end":
+		return true
+	default:
+		return false
+	}
+}
+
+func (m Model) appendFilterText(text string) (tea.Model, tea.Cmd) {
+	m.query += text
+	m.searchInput.SetValue(m.query)
+	m.clampCursor()
+	m.status = "filter: " + m.query
+	return m, m.previewForSelection()
+}
+
+func (m Model) deleteFilterRune() (tea.Model, tea.Cmd) {
+	if m.query == "" {
+		return m, nil
+	}
+	runes := []rune(m.query)
+	m.query = string(runes[:len(runes)-1])
+	m.searchInput.SetValue(m.query)
+	m.clampCursor()
+	if m.query == "" {
+		m.status = "filter cleared"
+	} else {
+		m.status = "filter: " + m.query
+	}
+	return m, m.previewForSelection()
+}
+
+func (m Model) clearFilterText() (tea.Model, tea.Cmd) {
+	if m.query == "" {
+		return m, nil
+	}
+	m.query = ""
+	m.searchInput.SetValue("")
+	m.cursor = 0
+	m.status = "filter cleared"
+	return m, m.previewForSelection()
+}
+
 func (m Model) handleIntegrationKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c", "q":
@@ -416,6 +542,50 @@ func (m Model) handleIntegrationKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, integrationsCmd()
 	}
 	return m, nil
+}
+
+func (m Model) handleSetupKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "ctrl+c", "q":
+		return m, tea.Quit
+	case "up", "down", "j", "k", "tab":
+		if m.setupCursor == 0 {
+			m.setupCursor = 1
+		} else {
+			m.setupCursor = 0
+		}
+		return m, nil
+	case "y", "Y":
+		return m.applyTypeFirstSetup(true)
+	case "n", "N", "esc":
+		return m.applyTypeFirstSetup(false)
+	case "enter":
+		return m.applyTypeFirstSetup(m.setupCursor == 0)
+	}
+	return m, nil
+}
+
+func (m Model) applyTypeFirstSetup(enabled bool) (tea.Model, tea.Cmd) {
+	cfg := m.config
+	cfg.TypeFirst.Enabled = enabled
+	if strings.TrimSpace(cfg.TypeFirst.Prefix) == "" {
+		cfg.TypeFirst.Prefix = appconfig.DefaultPrefix
+	}
+	cfg.Setup.TypeFirstPromptSeen = true
+	if err := appconfig.Save(cfg); err != nil {
+		m.err = err
+		m.status = err.Error()
+		return m, nil
+	}
+	m.config = cfg
+	m.setupPrompt = false
+	m.err = nil
+	if enabled {
+		m.status = "type-first mode enabled"
+	} else {
+		m.status = "classic input mode selected"
+	}
+	return m, startupIntegrationsCmd()
 }
 
 func (m Model) switchSource(source sessionmgr.SourceMode) (tea.Model, tea.Cmd) {
@@ -632,6 +802,15 @@ func refreshCmd(source sessionmgr.SourceMode) tea.Cmd {
 func integrationsCmd() tea.Cmd {
 	return func() tea.Msg {
 		return integrationsMsg{recs: integrations.RecommendedForPrompt()}
+	}
+}
+
+func startupSetupCmd(cfg appconfig.Config) tea.Cmd {
+	return func() tea.Msg {
+		if cfg.Setup.TypeFirstPromptSeen {
+			return setupMsg{}
+		}
+		return setupMsg{prompt: true}
 	}
 }
 

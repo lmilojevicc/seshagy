@@ -17,6 +17,9 @@ func (m Model) View() string {
 	}
 	s := m.styles
 	availableH := max(8, m.height)
+	if m.setupPrompt {
+		return s.app.Width(m.width).Height(availableH).Render(m.renderSetupPrompt(availableH))
+	}
 	if m.integrationPrompt {
 		return s.app.Width(m.width).Height(availableH).Render(m.renderIntegrationPrompt(availableH))
 	}
@@ -28,6 +31,46 @@ func (m Model) View() string {
 	}
 	body := m.renderBody(bodyH)
 	return s.app.Width(m.width).Height(availableH).Render(lipgloss.JoinVertical(lipgloss.Left, header, body, footer))
+}
+
+func (m Model) renderSetupPrompt(height int) string {
+	s := m.styles
+	width := max(54, min(88, m.width-4))
+	innerW := max(44, width-4)
+	innerH := 11
+	lines := []string{
+		s.title.Render("Choose startup input mode"),
+		s.muted.Render("Type-first mode lets normal typing filter immediately."),
+		s.muted.Render("App actions then require the configured prefix key (" + m.config.PrefixKey() + ")."),
+		"",
+	}
+	choices := []struct {
+		label string
+		desc  string
+	}{
+		{"Enable type-first mode", "typing filters; " + m.config.PrefixKey() + " runs actions"},
+		{"Keep classic mode", "/ starts filtering; action keys work directly"},
+	}
+	for i, choice := range choices {
+		cursor := "  "
+		if i == m.setupCursor {
+			cursor = s.bar.Render("▌") + " "
+		}
+		line := cursor + choice.label + s.muted.Render(" — "+choice.desc)
+		if i == m.setupCursor {
+			line = s.selectedBG.Render(pad(line, innerW))
+		}
+		lines = append(lines, line)
+	}
+	lines = append(lines, "", strings.Join([]string{
+		s.key.Render("enter") + " select",
+		s.key.Render("y") + " type-first",
+		s.key.Render("n") + " classic",
+		s.key.Render("q") + " quit",
+	}, s.muted.Render(" · ")))
+	content := trimHeight(strings.Join(lines, "\n"), innerH)
+	box := s.paneFocus.Width(width - 2).Height(innerH).Render(content)
+	return lipgloss.Place(m.width, height, lipgloss.Center, lipgloss.Center, box)
 }
 
 func (m Model) renderTabs() string {
@@ -242,19 +285,15 @@ func (m Model) rowParts(item sessionmgr.Item) (string, string) {
 }
 
 func (m Model) iconFor(kind sessionmgr.Kind) string {
-	s := m.styles
-	switch kind {
-	case sessionmgr.KindSession:
-		return s.iconSession.Render(sessionmgr.IconSession)
-	case sessionmgr.KindZoxide:
-		return s.iconZoxide.Render(sessionmgr.IconZoxide)
-	case sessionmgr.KindFD:
-		return s.iconFD.Render(sessionmgr.IconFD)
-	case sessionmgr.KindAgent:
-		return s.iconAgent.Render(sessionmgr.IconAgent)
-	default:
+	icon := m.config.IconSet().For(kind)
+	if icon.Text == "" {
 		return ""
 	}
+	style := lipgloss.NewStyle().Bold(true)
+	if icon.Color != "" {
+		style = style.Foreground(lipgloss.Color(icon.Color))
+	}
+	return style.Render(icon.Text)
 }
 
 func (m Model) renderRightPane(width, height int) string {
@@ -380,6 +419,12 @@ func (m Model) renderFooter() string {
 		statusLeft = append(statusLeft, s.warning.Render("outside tmux"))
 	}
 	statusLeft = append(statusLeft, s.info.Render(modeName(m.source)))
+	if m.config.TypeFirst.Enabled {
+		statusLeft = append(statusLeft, s.emphasis.Render("type-first"))
+		if m.prefixArmed {
+			statusLeft = append(statusLeft, s.warning.Render("prefix"))
+		}
+	}
 	if m.agentStateFilteringActive() {
 		statusLeft = append(statusLeft, s.emphasis.Render("state:"+agentStateFilterLabel(m.agentStateFilter)))
 	}
@@ -389,27 +434,35 @@ func (m Model) renderFooter() string {
 	left := strings.Join(statusLeft, "  ")
 	help := ""
 	if m.showHelp {
-		helpParts := []string{
-			s.key.Render("?") + " help",
-			s.key.Render("q") + " quit",
-			s.key.Render("enter") + " attach/create/focus",
-			s.key.Render("/") + " filter",
-		}
-		if isAgentSource(m.source) {
+		if m.config.TypeFirst.Enabled && !m.prefixArmed {
+			help = strings.Join([]string{
+				s.key.Render("type") + " filter",
+				s.key.Render(m.config.PrefixKey()) + " actions",
+				s.key.Render("backspace") + " edit",
+			}, s.muted.Render(" · "))
+		} else {
+			helpParts := []string{
+				s.key.Render("?") + " help",
+				s.key.Render("q") + " quit",
+				s.key.Render("enter") + " attach/create/focus",
+				s.key.Render("/") + " filter",
+			}
+			if isAgentSource(m.source) {
+				helpParts = append(helpParts,
+					s.key.Render("s")+" state",
+					s.key.Render("S")+" all",
+				)
+			}
 			helpParts = append(helpParts,
-				s.key.Render("s")+" state",
-				s.key.Render("S")+" all",
+				s.key.Render("r")+" refresh",
+				s.key.Render("R")+" rename",
+				s.key.Render("x")+" kill",
+				s.key.Render("y")+" yazi",
+				s.key.Render("i")+" hooks",
+				s.key.Render("p")+" preview",
 			)
+			help = strings.Join(helpParts, s.muted.Render(" · "))
 		}
-		helpParts = append(helpParts,
-			s.key.Render("r")+" refresh",
-			s.key.Render("R")+" rename",
-			s.key.Render("x")+" kill",
-			s.key.Render("y")+" yazi",
-			s.key.Render("i")+" hooks",
-			s.key.Render("p")+" preview",
-		)
-		help = strings.Join(helpParts, s.muted.Render(" · "))
 	} else {
 		help = s.muted.Render("? help")
 	}
@@ -434,7 +487,11 @@ func footerStatusStyle(s styles, status string, hasError bool) lipgloss.Style {
 }
 
 func isWarningStatus(status string) bool {
-	switch strings.ToLower(strings.TrimSpace(status)) {
+	status = strings.ToLower(strings.TrimSpace(status))
+	if strings.HasPrefix(status, "press ") && strings.HasSuffix(status, " before actions") {
+		return true
+	}
+	switch status {
 	case "no integrations selected",
 		"hook installation skipped",
 		"rename cancelled",

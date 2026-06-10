@@ -72,7 +72,7 @@ func TestAgentPaneFromLine(t *testing.T) {
 
 func TestFormatLineColorsIconsButKeepsParseableText(t *testing.T) {
 	line := FormatLine(Item{Kind: KindSession, Name: "demo"})
-	if !strings.Contains(line, "\x1b[92m"+IconSession+"\x1b[0m") {
+	if !strings.Contains(line, "\x1b[38;5;10m"+IconSession+"\x1b[0m") {
 		t.Fatalf("session icon does not use terminal bright green: %q", line)
 	}
 	if clean := StripANSI(line); clean != IconSession+" demo" {
@@ -81,5 +81,29 @@ func TestFormatLineColorsIconsButKeepsParseableText(t *testing.T) {
 	item, ok := ParseActionLine(line)
 	if !ok || item.Kind != KindSession || item.Name != "demo" {
 		t.Fatalf("ParseActionLine(%q) = %#v, %v", line, item, ok)
+	}
+}
+
+func TestFormatLineWithASCIIIcons(t *testing.T) {
+	icons := DefaultIconSet()
+	icons.Enabled = false
+	icons.Session.ASCII = "S"
+	icons.Session.Color = "9"
+	line := FormatLineWithIcons(Item{Kind: KindSession, Name: "demo"}, icons)
+	if !strings.Contains(line, "\x1b[38;5;9mS\x1b[0m demo") {
+		t.Fatalf("line does not use configured ascii icon/color: %q", line)
+	}
+	item, ok := ParseActionLineWithIcons(line, icons)
+	if !ok || item.Kind != KindSession || item.Name != "demo" {
+		t.Fatalf("ParseActionLineWithIcons(%q) = %#v, %v", line, item, ok)
+	}
+}
+
+func TestParseActionLineWithConfiguredIconsFallsBackToDefaults(t *testing.T) {
+	icons := DefaultIconSet()
+	icons.Session.Icon = "X"
+	item, ok := ParseActionLineWithIcons(IconSession+" demo", icons)
+	if !ok || item.Kind != KindSession || item.Name != "demo" {
+		t.Fatalf("fallback parse = %#v, %v", item, ok)
 	}
 }
