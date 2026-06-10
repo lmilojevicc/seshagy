@@ -347,10 +347,13 @@ func TestUninstallRemovesManagedHookEntriesOnly(t *testing.T) {
 
 func TestShellHookSessionActionReportsUnknownWithSessionIDAndSeq(t *testing.T) {
 	asset := shellHookAsset(TargetCursor, "/bin/seshagy")
-	for _, want := range []string{"next_seq()", `seq="$(next_seq)"`, "session_id", "sessionId", "conversation_id", "conversationId", `state="unknown"`, `--state "$state"`, `--session-id "$session_id"`, `--seq "$seq"`, `--release-agent --source "$source" --seq "$seq"`} {
+	for _, want := range []string{"next_seq()", "time.time_ns()", `date +%s%N`, `seq="$(next_seq)"`, "session_id", "sessionId", "conversation_id", "conversationId", `state="unknown"`, `--state "$state"`, `--session-id "$session_id"`, `--seq "$seq"`, `--release-agent --source "$source" --seq "$seq"`} {
 		if !strings.Contains(asset, want) {
 			t.Fatalf("shell hook asset missing %q:\n%s", want, asset)
 		}
+	}
+	if strings.Contains(asset, "$$ %") {
+		t.Fatalf("shell seq should not use pid modulo ordering:\n%s", asset)
 	}
 	if strings.Contains(asset, `session|start) state="idle"`) || strings.Contains(asset, `session|start)\n    state="idle"`) {
 		t.Fatalf("session action should not be converted to idle:\n%s", asset)
@@ -417,6 +420,9 @@ func TestOpenCodePluginReportsIdleSessionIDAndSeq(t *testing.T) {
         case "session.updated":
           return sessionID ? report("idle", sessionID) : undefined;`) {
 		t.Fatalf("OpenCode session identity events should not report idle state:\n%s", asset)
+	}
+	if strings.Contains(asset, `if (status) return report(status, sessionID);`) {
+		t.Fatalf("OpenCode should only use status mapping for session.status events:\n%s", asset)
 	}
 }
 

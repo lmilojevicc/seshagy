@@ -21,8 +21,13 @@ message="${3:-}"
 session_id=""
 
 next_seq() {
-  now="$(date +%%s 2>/dev/null || echo 0)"
-  echo $((now * 1000 + ($$ %% 1000)))
+  if command -v python3 >/dev/null 2>&1; then
+    python3 -c 'import time; print(time.time_ns())' 2>/dev/null && return 0
+  fi
+  if command -v date >/dev/null 2>&1; then
+    date +%%s%%N 2>/dev/null && return 0
+  fi
+  echo 0
 }
 
 read_session_id() {
@@ -322,7 +327,6 @@ export const SeshagyAgentStatePlugin = async () => {
       if (type === "session.status") {
         return status ? report(status, sessionID) : reportSession(sessionID);
       }
-      if (status) return report(status, sessionID);
       switch (type) {
         case "session.created":
         case "session.updated":
