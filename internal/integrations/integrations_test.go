@@ -265,6 +265,59 @@ func TestShellHookSessionActionReportsUnknownWithSessionID(t *testing.T) {
 	}
 }
 
+func TestPiExtensionUsesHerdrLikeLifecycleStateMachine(t *testing.T) {
+	asset := piExtensionAsset("/bin/seshagy")
+	for _, want := range []string{
+		"SESHAGY_PI_IDLE_DEBOUNCE_MS",
+		"SESHAGY_PI_RETRY_GRACE_MS",
+		"retryableErrorPattern",
+		"let reportSeq = Date.now() * 1000",
+		"function nextReportSeq()",
+		`"--seq", nextReportSeq()`,
+		"let agentActive = false",
+		"let retryHoldActive = false",
+		"let failureBlocked = false",
+		"function desiredState()",
+		"function publishState",
+		"function scheduleIdle()",
+		"function holdForRetry",
+		"function retryableErrorMessage",
+		"if (!agentActive) return",
+		`return { state: "idle"`,
+	} {
+		if !strings.Contains(asset, want) {
+			t.Fatalf("Pi extension missing %q:\n%s", want, asset)
+		}
+	}
+	if strings.Contains(asset, `report("done")`) {
+		t.Fatalf("Pi extension should not report done on normal lifecycle:\n%s", asset)
+	}
+}
+
+func TestOpenCodePluginReportsIdleSessionIDAndSeq(t *testing.T) {
+	asset := opencodePluginAsset("/bin/seshagy")
+	for _, want := range []string{
+		"function sessionIDFromProperties",
+		"properties?.sessionID",
+		"let reportSeq = Date.now() * 1000",
+		"function nextReportSeq()",
+		`"--seq", nextReportSeq()`,
+		`"--session-id", sessionID`,
+		`case "session.created":`,
+		`case "session.updated":`,
+		`case "session.idle":`,
+		`return report("idle", sessionID)`,
+		`return run(["--release-agent", "--source", SOURCE, "--seq", nextReportSeq()])`,
+	} {
+		if !strings.Contains(asset, want) {
+			t.Fatalf("OpenCode plugin missing %q:\n%s", want, asset)
+		}
+	}
+	if strings.Contains(asset, `report("done")`) {
+		t.Fatalf("OpenCode plugin should report idle, not done:\n%s", asset)
+	}
+}
+
 func topLevelFeaturesBlock(content string) string {
 	lines := strings.Split(content, "\n")
 	inFeatures := false
