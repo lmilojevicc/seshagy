@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -64,11 +65,11 @@ func run(args []string) error {
 		}
 		return sessionmgr.ReportAgent(ctx, report)
 	case "--release-agent":
-		pane, source, sourceSeen, err := parseReleaseArgs(args[1:])
+		release, err := parseReleaseArgs(args[1:])
 		if err != nil {
 			return err
 		}
-		return sessionmgr.ReleaseAgent(ctx, pane, source, sourceSeen)
+		return sessionmgr.ReleaseAgent(ctx, release)
 	default:
 		return tui.Run()
 	}
@@ -232,6 +233,24 @@ func parseReportArgs(args []string) (sessionmgr.AgentReport, error) {
 			}
 			opts.Source = v
 			opts.SourceSeen = true
+		case "--session-id":
+			v, err := nextValue()
+			if err != nil {
+				return opts, err
+			}
+			opts.SessionID = v
+			opts.SessionIDSeen = true
+		case "--seq":
+			v, err := nextValue()
+			if err != nil {
+				return opts, err
+			}
+			seq, err := parseSeqFlag(v, key)
+			if err != nil {
+				return opts, err
+			}
+			opts.Seq = seq
+			opts.SeqSeen = true
 		default:
 			return opts, fmt.Errorf("unknown --report-agent flag: %s", arg)
 		}
@@ -240,7 +259,8 @@ func parseReportArgs(args []string) (sessionmgr.AgentReport, error) {
 	return opts, nil
 }
 
-func parseReleaseArgs(args []string) (pane, source string, sourceSeen bool, err error) {
+func parseReleaseArgs(args []string) (sessionmgr.AgentRelease, error) {
+	var opts sessionmgr.AgentRelease
 	for i := 0; i < len(args); {
 		arg := args[i]
 		key, val, hasInline := splitFlag(arg)
@@ -256,22 +276,43 @@ func parseReleaseArgs(args []string) (pane, source string, sourceSeen bool, err 
 		}
 		switch key {
 		case "--pane":
-			pane, err = nextValue()
+			v, err := nextValue()
 			if err != nil {
-				return "", "", false, err
+				return opts, err
 			}
+			opts.Pane = v
 		case "--source":
-			source, err = nextValue()
+			v, err := nextValue()
 			if err != nil {
-				return "", "", false, err
+				return opts, err
 			}
-			sourceSeen = true
+			opts.Source = v
+			opts.SourceSeen = true
+		case "--seq":
+			v, err := nextValue()
+			if err != nil {
+				return opts, err
+			}
+			seq, err := parseSeqFlag(v, key)
+			if err != nil {
+				return opts, err
+			}
+			opts.Seq = seq
+			opts.SeqSeen = true
 		default:
-			return "", "", false, fmt.Errorf("unknown --release-agent flag: %s", arg)
+			return opts, fmt.Errorf("unknown --release-agent flag: %s", arg)
 		}
 		i++
 	}
-	return pane, source, sourceSeen, nil
+	return opts, nil
+}
+
+func parseSeqFlag(raw, flag string) (int64, error) {
+	seq, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("%s requires an integer", flag)
+	}
+	return seq, nil
 }
 
 func splitFlag(arg string) (key, val string, inline bool) {
@@ -321,6 +362,8 @@ Agent flags:
   --state/--status <state>    working|blocked|aborted|done|idle|unknown
   --message <text>            optional status message; empty clears
   --source <text>             optional owner/source token; empty clears
+  --session-id <id>           optional native agent session id
+  --seq <integer>             optional monotonic ordering token
 
 Hook integrations:
   Supported targets: pi, claude, codex, copilot, droid, opencode, qodercli, cursor.

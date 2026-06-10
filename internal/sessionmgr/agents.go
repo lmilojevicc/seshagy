@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -14,7 +15,7 @@ const paneSep = "\x1f"
 
 var ansiRE = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 
-const agentFormat = "#{pane_id}" + paneSep + "#{session_name}" + paneSep + "#{window_index}" + paneSep + "#{pane_index}" + paneSep + "#{pane_current_path}" + paneSep + "#{pane_active}" + paneSep + "#{window_active}" + paneSep + "#{session_attached}" + paneSep + "#{pane_dead}" + paneSep + "#{@agent_name}" + paneSep + "#{@agent_state}" + paneSep + "#{@agent_message}" + paneSep + "#{@agent_updated}" + paneSep + "#{@agent_source}"
+const agentFormat = "#{pane_id}" + paneSep + "#{session_name}" + paneSep + "#{window_index}" + paneSep + "#{pane_index}" + paneSep + "#{pane_current_path}" + paneSep + "#{pane_active}" + paneSep + "#{window_active}" + paneSep + "#{session_attached}" + paneSep + "#{pane_dead}" + paneSep + "#{@agent_name}" + paneSep + "#{@agent_state}" + paneSep + "#{@agent_message}" + paneSep + "#{@agent_updated}" + paneSep + "#{@agent_source}" + paneSep + "#{@agent_session_id}" + paneSep + "#{@agent_seq}"
 
 func ListAgents(ctx context.Context, sessionFilter string) ([]Item, error) {
 	out, err := tmuxCommand(ctx, "list-panes", "-a", "-F", agentFormat).Output()
@@ -58,24 +59,34 @@ func ParseAgents(raw []byte, sessionFilter string) []Item {
 		state := NormalizeAgentState(parts[10])
 		message := cleanField(parts[11])
 		source := cleanField(parts[13])
+		sessionID := ""
+		seq := ""
+		if len(parts) > 14 {
+			sessionID = cleanField(parts[14])
+		}
+		if len(parts) > 15 {
+			seq = cleanField(parts[15])
+		}
 		path := ContractHome(parts[4])
 		location := fmt.Sprintf("%s:%s.%s", parts[1], parts[2], parts[3])
 		items = append(items, Item{
-			Kind:         KindAgent,
-			Name:         name,
-			Target:       parts[0],
-			PaneID:       parts[0],
-			Session:      parts[1],
-			Window:       parts[2],
-			Pane:         parts[3],
-			Path:         path,
-			Location:     location,
-			AgentName:    name,
-			AgentState:   state,
-			AgentMessage: message,
-			AgentUpdated: cleanField(parts[12]),
-			AgentSource:  source,
-			Visible:      parts[5] == "1" && parts[6] == "1" && parts[7] != "0",
+			Kind:           KindAgent,
+			Name:           name,
+			Target:         parts[0],
+			PaneID:         parts[0],
+			Session:        parts[1],
+			Window:         parts[2],
+			Pane:           parts[3],
+			Path:           path,
+			Location:       location,
+			AgentName:      name,
+			AgentState:     state,
+			AgentMessage:   message,
+			AgentUpdated:   cleanField(parts[12]),
+			AgentSource:    source,
+			AgentSessionID: sessionID,
+			AgentSeq:       seq,
+			Visible:        parts[5] == "1" && parts[6] == "1" && parts[7] != "0",
 		})
 	}
 	return items
@@ -240,6 +251,12 @@ func ReportAgent(ctx context.Context, opts AgentReport) error {
 	} else {
 		state = NormalizeAgentState(string(state))
 	}
+	if opts.SeqSeen {
+		existingSeq, _ := showPaneOption(ctx, pane, "@agent_seq")
+		if !shouldApplyAgentSeq(existingSeq, opts.Seq, true) {
+			return nil
+		}
+	}
 	visible := paneVisibleNow(ctx, pane)
 	_, _ = UpdateAgentStatusTracking(ctx, pane, state, visible)
 	updated := fmt.Sprintf("%d", time.Now().Unix())
@@ -260,35 +277,82 @@ func ReportAgent(ctx context.Context, opts AgentReport) error {
 			_ = unsetPaneOption(ctx, pane, "@agent_source")
 		}
 	}
+	if opts.SessionIDSeen {
+		if opts.SessionID != "" {
+			_ = setPaneOption(ctx, pane, "@agent_session_id", cleanField(opts.SessionID))
+		} else {
+			_ = unsetPaneOption(ctx, pane, "@agent_session_id")
+		}
+	}
+	if opts.SeqSeen {
+		_ = setPaneOption(ctx, pane, "@agent_seq", strconv.FormatInt(opts.Seq, 10))
+	}
 	return nil
 }
 
 type AgentReport struct {
-	Pane        string
-	Name        string
-	State       AgentState
-	Message     string
-	MessageSeen bool
-	Source      string
-	SourceSeen  bool
+	Pane          string
+	Name          string
+	State         AgentState
+	Message       string
+	MessageSeen   bool
+	Source        string
+	SourceSeen    bool
+	SessionID     string
+	SessionIDSeen bool
+	Seq           int64
+	SeqSeen       bool
 }
 
-func ReleaseAgent(ctx context.Context, pane, source string, sourceSeen bool) error {
-	resolved, err := ResolvePane(ctx, pane)
+type AgentRelease struct {
+	Pane       string
+	Source     string
+	SourceSeen bool
+	Seq        int64
+	SeqSeen    bool
+}
+
+func ReleaseAgent(ctx context.Context, opts AgentRelease) error {
+	resolved, err := ResolvePane(ctx, opts.Pane)
 	if err != nil {
 		return err
 	}
-	if sourceSeen {
-		source = cleanField(source)
+	if opts.SourceSeen {
+		source := cleanField(opts.Source)
 		existing, _ := showPaneOption(ctx, resolved, "@agent_source")
 		if existing != source {
 			return nil
 		}
 	}
-	for _, opt := range []string{"@agent_name", "@agent_state", "@agent_message", "@agent_updated", "@agent_source", "@agent_last_state", "@agent_last_status", "@agent_last_seen"} {
+	if opts.SeqSeen {
+		existingSeq, _ := showPaneOption(ctx, resolved, "@agent_seq")
+		if !shouldApplyAgentSeq(existingSeq, opts.Seq, true) {
+			return nil
+		}
+	}
+	for _, opt := range agentPaneOptions() {
 		_ = unsetPaneOption(ctx, resolved, opt)
 	}
 	return nil
+}
+
+func agentPaneOptions() []string {
+	return []string{"@agent_name", "@agent_state", "@agent_message", "@agent_updated", "@agent_source", "@agent_session_id", "@agent_seq", "@agent_last_state", "@agent_last_status", "@agent_last_seen"}
+}
+
+func shouldApplyAgentSeq(existing string, incoming int64, incomingSeen bool) bool {
+	if !incomingSeen {
+		return true
+	}
+	existing = strings.TrimSpace(existing)
+	if existing == "" {
+		return true
+	}
+	existingSeq, err := strconv.ParseInt(existing, 10, 64)
+	if err != nil {
+		return true
+	}
+	return incoming >= existingSeq
 }
 
 func showPaneOption(ctx context.Context, pane, opt string) (string, error) {

@@ -45,14 +45,26 @@ func TestNormalizeAgentState(t *testing.T) {
 }
 
 func TestParseAgentsSkipsNonAgentsAndFormatsLocation(t *testing.T) {
+	fields := []string{"%3", "work", "1", "0", "/Users/milo/Projects/seshagy", "1", "1", "1", "0", "claude", "busy", "needs ok", "123", "hook", "session-123", "42"}
+	raw := []byte(strings.Join(fields, paneSep) + "\n")
+	got := ParseAgents(raw, "")
+	if len(got) != 1 {
+		t.Fatalf("len = %d", len(got))
+	}
+	if got[0].AgentName != "claude" || got[0].AgentState != AgentWorking || got[0].Location != "work:1.0" || got[0].AgentMessage != "needs ok" || got[0].AgentSessionID != "session-123" || got[0].AgentSeq != "42" {
+		t.Fatalf("unexpected agent: %#v", got[0])
+	}
+}
+
+func TestParseAgentsToleratesLegacyFormatWithoutSessionMetadata(t *testing.T) {
 	fields := []string{"%3", "work", "1", "0", "/Users/milo/Projects/seshagy", "1", "1", "1", "0", "claude", "busy", "needs ok", "123", "hook"}
 	raw := []byte(strings.Join(fields, paneSep) + "\n")
 	got := ParseAgents(raw, "")
 	if len(got) != 1 {
 		t.Fatalf("len = %d", len(got))
 	}
-	if got[0].AgentName != "claude" || got[0].AgentState != AgentWorking || got[0].Location != "work:1.0" || got[0].AgentMessage != "needs ok" {
-		t.Fatalf("unexpected agent: %#v", got[0])
+	if got[0].AgentSessionID != "" || got[0].AgentSeq != "" {
+		t.Fatalf("legacy parse session metadata = %q/%q, want empty", got[0].AgentSessionID, got[0].AgentSeq)
 	}
 }
 
@@ -78,6 +90,39 @@ func TestListFDirsWithCustomCommand(t *testing.T) {
 	for _, item := range got {
 		if item.Kind != KindFD || item.Target != item.Path {
 			t.Fatalf("custom fd item = %#v", item)
+		}
+	}
+}
+
+func TestShouldApplyAgentSeq(t *testing.T) {
+	tests := []struct {
+		name         string
+		existing     string
+		incoming     int64
+		incomingSeen bool
+		want         bool
+	}{
+		{name: "legacy no incoming seq applies", existing: "99", incoming: 1, incomingSeen: false, want: true},
+		{name: "empty existing applies", existing: "", incoming: 1, incomingSeen: true, want: true},
+		{name: "malformed existing applies", existing: "bad", incoming: 1, incomingSeen: true, want: true},
+		{name: "newer applies", existing: "41", incoming: 42, incomingSeen: true, want: true},
+		{name: "equal applies", existing: "42", incoming: 42, incomingSeen: true, want: true},
+		{name: "older ignored", existing: "43", incoming: 42, incomingSeen: true, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := shouldApplyAgentSeq(tt.existing, tt.incoming, tt.incomingSeen); got != tt.want {
+				t.Fatalf("shouldApplyAgentSeq(%q, %d, %v) = %v, want %v", tt.existing, tt.incoming, tt.incomingSeen, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAgentPaneOptionsIncludeSessionMetadata(t *testing.T) {
+	got := strings.Join(agentPaneOptions(), ",")
+	for _, want := range []string{"@agent_session_id", "@agent_seq"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("agentPaneOptions missing %s: %s", want, got)
 		}
 	}
 }

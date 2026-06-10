@@ -115,12 +115,15 @@ Agent metadata helpers are what installed hooks/plugins call. They mirror the
 shell script's `@agent_*` tmux metadata behavior:
 
 ```sh
-seshagy --report-agent --pane %1 --agent pi --state working --message 'running tests' --source hook
-seshagy --release-agent --pane %1 --source hook
+seshagy --report-agent --pane %1 --agent pi --state working --message 'running tests' --source hook --session-id native-123 --seq 42
+seshagy --release-agent --pane %1 --source hook --seq 43
 ```
 
 Recognized states are normalized to `working`, `blocked`, `aborted`, `done`,
-`idle`, or `unknown`.
+`idle`, or `unknown`. Hooks may pass `--session-id` to store native agent session
+identity in `@agent_session_id`, and `--seq` to prevent older hook reports or
+releases from overwriting newer state. Hooks without `--seq` still apply for
+backward compatibility.
 
 Supported hook/plugin targets are `pi`, `claude`, `codex`, `copilot`, `droid`,
 `opencode`, `qodercli`, and `cursor`. On the first TUI launch, seshagy scans for

@@ -47,12 +47,14 @@ type Item struct {
 	Pane     string
 	Location string
 
-	AgentName    string
-	AgentState   AgentState
-	AgentMessage string
-	AgentSource  string
-	AgentUpdated string
-	Visible      bool
+	AgentName      string
+	AgentState     AgentState
+	AgentMessage   string
+	AgentSource    string
+	AgentUpdated   string
+	AgentSessionID string
+	AgentSeq       string
+	Visible        bool
 }
 
 func (i Item) Key() string {
