@@ -47,6 +47,12 @@ type ThemeConfig struct {
 type ThemeColorsConfig struct {
 	FocusedBorder string `toml:"focused_border"`
 	ActiveTab     string `toml:"active_tab"`
+	Border        string `toml:"border"`
+	InactiveTab   string `toml:"inactive_tab"`
+	Title         string `toml:"title"`
+	Accent        string `toml:"accent"`
+	Key           string `toml:"key"`
+	Muted         string `toml:"muted"`
 }
 
 type IconsConfig struct {
@@ -82,6 +88,12 @@ func Default() Config {
 		Theme: ThemeConfig{Colors: ThemeColorsConfig{
 			FocusedBorder: "13",
 			ActiveTab:     "default",
+			Border:        "8",
+			InactiveTab:   "8",
+			Title:         "12",
+			Accent:        "13",
+			Key:           "11",
+			Muted:         "8",
 		}},
 		Icons: IconsConfig{
 			Mode:    IconModeIcons,
@@ -153,12 +165,7 @@ func (c *Config) Normalize() {
 	if strings.TrimSpace(c.Directories.FDCommand) == "" {
 		c.Directories.FDCommand = defaults.Directories.FDCommand
 	}
-	if strings.TrimSpace(c.Theme.Colors.FocusedBorder) == "" {
-		c.Theme.Colors.FocusedBorder = defaults.Theme.Colors.FocusedBorder
-	}
-	if strings.TrimSpace(c.Theme.Colors.ActiveTab) == "" {
-		c.Theme.Colors.ActiveTab = defaults.Theme.Colors.ActiveTab
-	}
+	normalizeThemeColors(&c.Theme.Colors, defaults.Theme.Colors)
 	c.Icons.Mode = normalizeIconMode(c.Icons.Mode)
 	if c.Icons.Enabled != nil && !*c.Icons.Enabled {
 		c.Icons.Mode = IconModeNone
@@ -233,6 +240,33 @@ func (c *Config) Normalize() {
 	}
 	if strings.TrimSpace(c.TypeFirst.Prefix) == "" {
 		c.TypeFirst.Prefix = DefaultPrefix
+	}
+}
+
+func normalizeThemeColors(colors *ThemeColorsConfig, defaults ThemeColorsConfig) {
+	if strings.TrimSpace(colors.FocusedBorder) == "" {
+		colors.FocusedBorder = defaults.FocusedBorder
+	}
+	if strings.TrimSpace(colors.ActiveTab) == "" {
+		colors.ActiveTab = defaults.ActiveTab
+	}
+	if strings.TrimSpace(colors.Border) == "" {
+		colors.Border = defaults.Border
+	}
+	if strings.TrimSpace(colors.InactiveTab) == "" {
+		colors.InactiveTab = defaults.InactiveTab
+	}
+	if strings.TrimSpace(colors.Title) == "" {
+		colors.Title = defaults.Title
+	}
+	if strings.TrimSpace(colors.Accent) == "" {
+		colors.Accent = defaults.Accent
+	}
+	if strings.TrimSpace(colors.Key) == "" {
+		colors.Key = defaults.Key
+	}
+	if strings.TrimSpace(colors.Muted) == "" {
+		colors.Muted = defaults.Muted
 	}
 }
 

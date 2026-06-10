@@ -24,7 +24,7 @@ func TestLoadDefaultWhenMissing(t *testing.T) {
 	if cfg.LoadOptions().FDCommand != sessionmgr.DefaultFDCommand {
 		t.Fatalf("default fd command = %q", cfg.LoadOptions().FDCommand)
 	}
-	if cfg.Theme.Colors.FocusedBorder != "13" || cfg.Theme.Colors.ActiveTab != "default" {
+	if cfg.Theme.Colors.FocusedBorder != "13" || cfg.Theme.Colors.ActiveTab != "default" || cfg.Theme.Colors.Border != "8" || cfg.Theme.Colors.InactiveTab != "8" || cfg.Theme.Colors.Title != "12" || cfg.Theme.Colors.Accent != "13" || cfg.Theme.Colors.Key != "11" || cfg.Theme.Colors.Muted != "8" {
 		t.Fatalf("theme color defaults = %#v", cfg.Theme.Colors)
 	}
 	if got := cfg.Sources.Order; strings.Join(got, ",") != "all,sessions,agents,current-agents,zoxide,fd" {
@@ -50,6 +50,12 @@ func TestSaveAndLoadConfig(t *testing.T) {
 	cfg.Directories.FDCommand = `printf '%s\n' /tmp/project`
 	cfg.Theme.Colors.FocusedBorder = "#ff79c6"
 	cfg.Theme.Colors.ActiveTab = "#f5c2e7"
+	cfg.Theme.Colors.Border = "#313244"
+	cfg.Theme.Colors.InactiveTab = "#6c7086"
+	cfg.Theme.Colors.Title = "#b4befe"
+	cfg.Theme.Colors.Accent = "#cba6f7"
+	cfg.Theme.Colors.Key = "#f9e2af"
+	cfg.Theme.Colors.Muted = "#7f849c"
 	cfg.TypeFirst.Enabled = true
 	cfg.TypeFirst.Prefix = "alt+x"
 	cfg.Setup.TypeFirstPromptSeen = true
@@ -78,7 +84,7 @@ func TestSaveAndLoadConfig(t *testing.T) {
 	if !strings.Contains(string(data), `[directories]`) || !strings.Contains(string(data), `fd_command`) {
 		t.Fatalf("saved config missing directory config: %s", data)
 	}
-	if !strings.Contains(string(data), `[theme.colors]`) || !strings.Contains(string(data), `#ff79c6`) || !strings.Contains(string(data), `#f5c2e7`) {
+	if !strings.Contains(string(data), `[theme.colors]`) || !strings.Contains(string(data), `#ff79c6`) || !strings.Contains(string(data), `#f5c2e7`) || !strings.Contains(string(data), `#313244`) || !strings.Contains(string(data), `#7f849c`) {
 		t.Fatalf("saved config missing theme colors: %s", data)
 	}
 	loaded, err := Load()
@@ -94,7 +100,7 @@ func TestSaveAndLoadConfig(t *testing.T) {
 	if loaded.LoadOptions().FDCommand != `printf '%s\n' /tmp/project` {
 		t.Fatalf("loaded fd command = %q", loaded.LoadOptions().FDCommand)
 	}
-	if loaded.Theme.Colors.FocusedBorder != "#ff79c6" || loaded.Theme.Colors.ActiveTab != "#f5c2e7" {
+	if loaded.Theme.Colors.FocusedBorder != "#ff79c6" || loaded.Theme.Colors.ActiveTab != "#f5c2e7" || loaded.Theme.Colors.Border != "#313244" || loaded.Theme.Colors.InactiveTab != "#6c7086" || loaded.Theme.Colors.Title != "#b4befe" || loaded.Theme.Colors.Accent != "#cba6f7" || loaded.Theme.Colors.Key != "#f9e2af" || loaded.Theme.Colors.Muted != "#7f849c" {
 		t.Fatalf("loaded theme colors = %#v", loaded.Theme.Colors)
 	}
 	if !loaded.TypeFirst.Enabled || loaded.PrefixKey() != "alt+x" || !loaded.Setup.TypeFirstPromptSeen {

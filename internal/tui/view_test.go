@@ -730,10 +730,16 @@ func TestDefaultStylesUseTerminalPalette(t *testing.T) {
 	}
 }
 
-func TestConfiguredCoreThemeColorsApply(t *testing.T) {
+func TestConfiguredThemeColorsApply(t *testing.T) {
 	cfg := appconfig.Default()
 	cfg.Theme.Colors.FocusedBorder = "#ff79c6"
 	cfg.Theme.Colors.ActiveTab = "#f5c2e7"
+	cfg.Theme.Colors.Border = "#313244"
+	cfg.Theme.Colors.InactiveTab = "#6c7086"
+	cfg.Theme.Colors.Title = "#b4befe"
+	cfg.Theme.Colors.Accent = "#cba6f7"
+	cfg.Theme.Colors.Key = "#f9e2af"
+	cfg.Theme.Colors.Muted = "#7f849c"
 	s := stylesFromConfig(cfg)
 
 	wantBorder := lipgloss.Color("#ff79c6")
@@ -749,6 +755,30 @@ func TestConfiguredCoreThemeColorsApply(t *testing.T) {
 	}
 	if got := s.tabActive.GetForeground(); got != lipgloss.Color("#f5c2e7") {
 		t.Fatalf("active tab color = %v, want #f5c2e7", got)
+	}
+	if got := s.pane.GetBorderTopForeground(); got != lipgloss.Color("#313244") {
+		t.Fatalf("border color = %v, want #313244", got)
+	}
+	if got := s.tabInactive.GetForeground(); got != lipgloss.Color("#6c7086") {
+		t.Fatalf("inactive tab color = %v, want #6c7086", got)
+	}
+	if got := s.title.GetForeground(); got != lipgloss.Color("#b4befe") {
+		t.Fatalf("title color = %v, want #b4befe", got)
+	}
+	if got := s.emphasis.GetForeground(); got != lipgloss.Color("#cba6f7") {
+		t.Fatalf("accent emphasis color = %v, want #cba6f7", got)
+	}
+	if got := s.bar.GetForeground(); got != lipgloss.Color("#cba6f7") {
+		t.Fatalf("accent bar color = %v, want #cba6f7", got)
+	}
+	if got := s.key.GetForeground(); got != lipgloss.Color("#f9e2af") {
+		t.Fatalf("key color = %v, want #f9e2af", got)
+	}
+	if got := s.muted.GetForeground(); got != lipgloss.Color("#7f849c") {
+		t.Fatalf("muted color = %v, want #7f849c", got)
+	}
+	if got := s.subtitle.GetForeground(); got != lipgloss.Color("#7f849c") {
+		t.Fatalf("subtitle color = %v, want #7f849c", got)
 	}
 
 	cfg.Theme.Colors.ActiveTab = "default"
