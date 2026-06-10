@@ -340,7 +340,17 @@ func rowText(parts ...string) string {
 			kept = append(kept, part)
 		}
 	}
-	return strings.Join(kept, " ")
+	if len(kept) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	for i, part := range kept {
+		if i > 0 && !strings.HasSuffix(sessionmgr.StripANSI(b.String()), " ") && !strings.HasPrefix(sessionmgr.StripANSI(part), " ") {
+			b.WriteString(" ")
+		}
+		b.WriteString(part)
+	}
+	return b.String()
 }
 
 func (m Model) renderRightPane(width, height int) string {

@@ -112,7 +112,7 @@ func TestAgentPaneFromLine(t *testing.T) {
 
 func TestFormatLineColorsIconsButKeepsParseableText(t *testing.T) {
 	line := FormatLine(Item{Kind: KindSession, Name: "demo"})
-	if !strings.Contains(line, "\x1b[38;5;10m"+IconSession+"\x1b[0m") {
+	if !strings.Contains(line, "\x1b[38;5;10m"+IconSession+" \x1b[0m") {
 		t.Fatalf("session icon does not use terminal bright green: %q", line)
 	}
 	if clean := StripANSI(line); clean != IconSession+" demo" {
@@ -143,8 +143,27 @@ func TestFormatLineWithHexIconColor(t *testing.T) {
 	icons := DefaultIconSet()
 	icons.Session.Color = "#a6e3a1"
 	line := FormatLineWithIcons(Item{Kind: KindSession, Name: "demo"}, icons)
-	if !strings.Contains(line, "\x1b[38;2;166;227;161m"+IconSession+"\x1b[0m demo") {
+	if !strings.Contains(line, "\x1b[38;2;166;227;161m"+IconSession+" \x1b[0mdemo") {
 		t.Fatalf("line does not use truecolor hex escape: %q", line)
+	}
+}
+
+func TestDefaultIconsCarryOneTrailingDisplaySpace(t *testing.T) {
+	icons := DefaultIconSet()
+	for name, style := range map[string]IconStyle{
+		"session": icons.Session,
+		"zoxide":  icons.Zoxide,
+		"fd":      icons.FD,
+		"agent":   icons.Agent,
+	} {
+		if !strings.HasSuffix(style.Icon, " ") || strings.HasSuffix(style.Icon, "  ") {
+			t.Fatalf("%s default icon = %q, want exactly one trailing space", name, style.Icon)
+		}
+	}
+
+	line := FormatLine(Item{Kind: KindSession, Name: "demo"})
+	if clean := StripANSI(line); clean != IconSession+" demo" {
+		t.Fatalf("default icon spacing = %q, want one display space", clean)
 	}
 }
 

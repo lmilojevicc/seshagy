@@ -166,22 +166,22 @@ danger = "9"
 mode = "icons"
 
 [icons.session]
-icon = ""
+icon = " "
 label = "S"
 color = "10"
 
 [icons.zoxide]
-icon = "󰉖"
+icon = "󰉖 "
 label = "Z"
 color = "14"
 
 [icons.fd]
-icon = "󰥩"
+icon = "󰥩 "
 label = "F"
 color = "11"
 
 [icons.agent]
-icon = "󰚩"
+icon = " "
 label = "A"
 color = "13"
 

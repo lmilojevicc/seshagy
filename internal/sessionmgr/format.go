@@ -26,10 +26,10 @@ func DefaultIconSet() IconSet {
 	return IconSet{
 		Enabled: true,
 		ASCII:   false,
-		Session: IconStyle{Icon: IconSession, ASCII: "S", Color: "10"},
-		Zoxide:  IconStyle{Icon: IconZoxide, ASCII: "Z", Color: "14"},
-		FD:      IconStyle{Icon: IconFD, ASCII: "F", Color: "11"},
-		Agent:   IconStyle{Icon: IconAgent, ASCII: "A", Color: "13"},
+		Session: IconStyle{Icon: IconSession + " ", ASCII: "S", Color: "10"},
+		Zoxide:  IconStyle{Icon: IconZoxide + " ", ASCII: "Z", Color: "14"},
+		FD:      IconStyle{Icon: IconFD + " ", ASCII: "F", Color: "11"},
+		Agent:   IconStyle{Icon: IconAgent + " ", ASCII: "A", Color: "13"},
 	}
 }
 
@@ -120,7 +120,26 @@ func joinNonEmpty(sep string, parts ...string) string {
 			kept = append(kept, part)
 		}
 	}
-	return strings.Join(kept, sep)
+	if len(kept) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	for i, part := range kept {
+		if i > 0 && shouldInsertSeparator(b.String(), part, sep) {
+			b.WriteString(sep)
+		}
+		b.WriteString(part)
+	}
+	return b.String()
+}
+
+func shouldInsertSeparator(left, right, sep string) bool {
+	if sep != " " {
+		return true
+	}
+	leftClean := StripANSI(left)
+	rightClean := StripANSI(right)
+	return !strings.HasSuffix(leftClean, " ") && !strings.HasPrefix(rightClean, " ")
 }
 
 func iconAndColor(kind Kind) (string, string) {
@@ -202,6 +221,9 @@ func matchedIconPrefix(clean string, icons IconSet, kind Kind) string {
 func hasPrefixToken(clean, prefix string) bool {
 	if prefix == "" || !strings.HasPrefix(clean, prefix) {
 		return false
+	}
+	if strings.HasSuffix(prefix, " ") || strings.HasSuffix(prefix, "\t") {
+		return true
 	}
 	if len(clean) == len(prefix) {
 		return true

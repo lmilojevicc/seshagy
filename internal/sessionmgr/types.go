@@ -6,7 +6,7 @@ const (
 	IconSession = ""
 	IconZoxide  = "󰉖"
 	IconFD      = "󰥩"
-	IconAgent   = "󰚩"
+	IconAgent   = ""
 )
 
 type Kind string
