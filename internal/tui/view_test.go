@@ -178,15 +178,15 @@ func TestConfiguredASCIIIconsRenderInTUI(t *testing.T) {
 	}
 }
 
-func TestDefaultIconsRenderWithSingleDisplaySpace(t *testing.T) {
+func TestDefaultIconsRenderWithConfiguredDisplaySpacing(t *testing.T) {
 	m := newTestModel(t)
 	sessionPrimary, _ := m.rowParts(sessionmgr.Item{Kind: sessionmgr.KindSession, Name: "demo"})
 	if got := sessionmgr.StripANSI(sessionPrimary); got != sessionmgr.IconSession+" ◌ demo" {
 		t.Fatalf("default session icon spacing = %q, want one space after icon", got)
 	}
 	agentPrimary, _ := m.rowParts(sessionmgr.Item{Kind: sessionmgr.KindAgent, AgentName: "pi", AgentState: sessionmgr.AgentWorking})
-	if got := sessionmgr.StripANSI(agentPrimary); got != sessionmgr.IconAgent+" ▶ pi" {
-		t.Fatalf("default agent icon spacing = %q, want one space after icon", got)
+	if got := sessionmgr.StripANSI(agentPrimary); got != sessionmgr.IconAgent+"  ▶ pi" {
+		t.Fatalf("default agent icon spacing = %q, want two spaces after icon", got)
 	}
 }
 

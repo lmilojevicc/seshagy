@@ -29,7 +29,7 @@ func DefaultIconSet() IconSet {
 		Session: IconStyle{Icon: IconSession + " ", ASCII: "S", Color: "10"},
 		Zoxide:  IconStyle{Icon: IconZoxide + " ", ASCII: "Z", Color: "14"},
 		FD:      IconStyle{Icon: IconFD + " ", ASCII: "F", Color: "11"},
-		Agent:   IconStyle{Icon: IconAgent + " ", ASCII: "A", Color: "13"},
+		Agent:   IconStyle{Icon: IconAgent + "  ", ASCII: "A", Color: "13"},
 	}
 }
 

@@ -148,17 +148,19 @@ func TestFormatLineWithHexIconColor(t *testing.T) {
 	}
 }
 
-func TestDefaultIconsCarryOneTrailingDisplaySpace(t *testing.T) {
+func TestDefaultIconsCarryConfiguredDisplaySpacing(t *testing.T) {
 	icons := DefaultIconSet()
 	for name, style := range map[string]IconStyle{
 		"session": icons.Session,
 		"zoxide":  icons.Zoxide,
 		"fd":      icons.FD,
-		"agent":   icons.Agent,
 	} {
 		if !strings.HasSuffix(style.Icon, " ") || strings.HasSuffix(style.Icon, "  ") {
 			t.Fatalf("%s default icon = %q, want exactly one trailing space", name, style.Icon)
 		}
+	}
+	if !strings.HasSuffix(icons.Agent.Icon, "  ") || strings.HasSuffix(icons.Agent.Icon, "   ") {
+		t.Fatalf("agent default icon = %q, want exactly two trailing spaces", icons.Agent.Icon)
 	}
 
 	line := FormatLine(Item{Kind: KindSession, Name: "demo"})

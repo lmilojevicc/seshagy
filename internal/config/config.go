@@ -108,7 +108,7 @@ func Default() Config {
 			Session: IconConfig{Icon: sessionmgr.IconSession + " ", Label: "S", Color: "10"},
 			Zoxide:  IconConfig{Icon: sessionmgr.IconZoxide + " ", Label: "Z", Color: "14"},
 			FD:      IconConfig{Icon: sessionmgr.IconFD + " ", Label: "F", Color: "11"},
-			Agent:   IconConfig{Icon: sessionmgr.IconAgent + " ", Label: "A", Color: "13"},
+			Agent:   IconConfig{Icon: sessionmgr.IconAgent + "  ", Label: "A", Color: "13"},
 		},
 		TypeFirst: TypeFirstConfig{Enabled: false, Prefix: DefaultPrefix},
 	}
@@ -242,7 +242,7 @@ func (c *Config) Normalize() {
 	if strings.TrimSpace(c.Icons.Agent.Icon) == "" {
 		c.Icons.Agent.Icon = defaults.Icons.Agent.Icon
 	}
-	if c.Icons.Agent.Icon == sessionmgr.IconAgent || c.Icons.Agent.Icon == "󰚩" {
+	if c.Icons.Agent.Icon == sessionmgr.IconAgent || c.Icons.Agent.Icon == sessionmgr.IconAgent+" " || c.Icons.Agent.Icon == "󰚩" {
 		c.Icons.Agent.Icon = defaults.Icons.Agent.Icon
 	}
 	if legacy := strings.TrimSpace(c.Icons.Agent.ASCII); legacy != "" && (strings.TrimSpace(c.Icons.Agent.Label) == "" || c.Icons.Agent.Label == defaults.Icons.Agent.Label) {

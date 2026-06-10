@@ -163,13 +163,14 @@ mode = "icons"
 }
 
 func TestLoadMigratesPreviousDefaultIcons(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", dir)
-	path := Path()
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		t.Fatalf("mkdir config dir: %v", err)
-	}
-	data := []byte(`
+	for _, agentIcon := range []string{"󰚩", sessionmgr.IconAgent + " "} {
+		dir := t.TempDir()
+		t.Setenv("XDG_CONFIG_HOME", dir)
+		path := Path()
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatalf("mkdir config dir: %v", err)
+		}
+		data := []byte(strings.Replace(`
 [icons]
 mode = "icons"
 
@@ -183,27 +184,28 @@ icon = "󰉖"
 icon = "󰥩"
 
 [icons.agent]
-icon = "󰚩"
-`)
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		t.Fatalf("write old icon config: %v", err)
-	}
-	loaded, err := Load()
-	if err != nil {
-		t.Fatalf("Load() error = %v", err)
-	}
-	icons := loaded.IconSet()
-	if got := icons.For(sessionmgr.KindSession).Text; got != sessionmgr.IconSession+" " {
-		t.Fatalf("session icon = %q, want trailing-space default", got)
-	}
-	if got := icons.For(sessionmgr.KindAgent).Text; got != sessionmgr.IconAgent+" " {
-		t.Fatalf("agent icon = %q, want new trailing-space default", got)
+icon = "$AGENT"
+`, "$AGENT", agentIcon, 1))
+		if err := os.WriteFile(path, data, 0o600); err != nil {
+			t.Fatalf("write old icon config: %v", err)
+		}
+		loaded, err := Load()
+		if err != nil {
+			t.Fatalf("Load() error = %v", err)
+		}
+		icons := loaded.IconSet()
+		if got := icons.For(sessionmgr.KindSession).Text; got != sessionmgr.IconSession+" " {
+			t.Fatalf("session icon = %q, want trailing-space default", got)
+		}
+		if got := icons.For(sessionmgr.KindAgent).Text; got != sessionmgr.IconAgent+"  " {
+			t.Fatalf("agent icon from %q = %q, want new two-space default", agentIcon, got)
+		}
 	}
 }
 
 func TestIconModes(t *testing.T) {
 	cfg := Default()
-	if got := cfg.IconSet().For(sessionmgr.KindAgent).Text; got != sessionmgr.IconAgent+" " {
+	if got := cfg.IconSet().For(sessionmgr.KindAgent).Text; got != sessionmgr.IconAgent+"  " {
 		t.Fatalf("default agent icon = %q", got)
 	}
 

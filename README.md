@@ -181,7 +181,7 @@ label = "F"
 color = "11"
 
 [icons.agent]
-icon = " "
+icon = "  "
 label = "A"
 color = "13"
 
