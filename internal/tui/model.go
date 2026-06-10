@@ -122,7 +122,7 @@ func New() Model {
 	rename.Prompt = "rename > "
 	rename.CharLimit = 128
 	m := Model{
-		styles:              defaultStyles(),
+		styles:              stylesFromConfig(cfg),
 		config:              cfg,
 		source:              cfg.DefaultSource(),
 		showPreview:         true,

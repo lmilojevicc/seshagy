@@ -24,6 +24,9 @@ func TestLoadDefaultWhenMissing(t *testing.T) {
 	if cfg.LoadOptions().FDCommand != sessionmgr.DefaultFDCommand {
 		t.Fatalf("default fd command = %q", cfg.LoadOptions().FDCommand)
 	}
+	if cfg.Theme.Colors.FocusedBorder != "13" || cfg.Theme.Colors.ActiveTab != "default" {
+		t.Fatalf("theme color defaults = %#v", cfg.Theme.Colors)
+	}
 	if got := cfg.Sources.Order; strings.Join(got, ",") != "all,sessions,agents,current-agents,zoxide,fd" {
 		t.Fatalf("default source order = %#v", got)
 	}
@@ -45,6 +48,8 @@ func TestSaveAndLoadConfig(t *testing.T) {
 	cfg.Sources.Default = "current-agents"
 	cfg.Sources.Order = []string{"sessions", "agents", "current-agents", "zoxide", "fd", "all"}
 	cfg.Directories.FDCommand = `printf '%s\n' /tmp/project`
+	cfg.Theme.Colors.FocusedBorder = "#ff79c6"
+	cfg.Theme.Colors.ActiveTab = "#f5c2e7"
 	cfg.TypeFirst.Enabled = true
 	cfg.TypeFirst.Prefix = "alt+x"
 	cfg.Setup.TypeFirstPromptSeen = true
@@ -73,6 +78,9 @@ func TestSaveAndLoadConfig(t *testing.T) {
 	if !strings.Contains(string(data), `[directories]`) || !strings.Contains(string(data), `fd_command`) {
 		t.Fatalf("saved config missing directory config: %s", data)
 	}
+	if !strings.Contains(string(data), `[theme.colors]`) || !strings.Contains(string(data), `#ff79c6`) || !strings.Contains(string(data), `#f5c2e7`) {
+		t.Fatalf("saved config missing theme colors: %s", data)
+	}
 	loaded, err := Load()
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
@@ -85,6 +93,9 @@ func TestSaveAndLoadConfig(t *testing.T) {
 	}
 	if loaded.LoadOptions().FDCommand != `printf '%s\n' /tmp/project` {
 		t.Fatalf("loaded fd command = %q", loaded.LoadOptions().FDCommand)
+	}
+	if loaded.Theme.Colors.FocusedBorder != "#ff79c6" || loaded.Theme.Colors.ActiveTab != "#f5c2e7" {
+		t.Fatalf("loaded theme colors = %#v", loaded.Theme.Colors)
 	}
 	if !loaded.TypeFirst.Enabled || loaded.PrefixKey() != "alt+x" || !loaded.Setup.TypeFirstPromptSeen {
 		t.Fatalf("loaded config = %#v", loaded)

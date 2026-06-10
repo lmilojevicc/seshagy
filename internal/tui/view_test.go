@@ -730,6 +730,34 @@ func TestDefaultStylesUseTerminalPalette(t *testing.T) {
 	}
 }
 
+func TestConfiguredCoreThemeColorsApply(t *testing.T) {
+	cfg := appconfig.Default()
+	cfg.Theme.Colors.FocusedBorder = "#ff79c6"
+	cfg.Theme.Colors.ActiveTab = "#f5c2e7"
+	s := stylesFromConfig(cfg)
+
+	wantBorder := lipgloss.Color("#ff79c6")
+	for side, got := range map[string]lipgloss.TerminalColor{
+		"top":    s.paneFocus.GetBorderTopForeground(),
+		"right":  s.paneFocus.GetBorderRightForeground(),
+		"bottom": s.paneFocus.GetBorderBottomForeground(),
+		"left":   s.paneFocus.GetBorderLeftForeground(),
+	} {
+		if got != wantBorder {
+			t.Fatalf("%s focused border color = %v, want %v", side, got, wantBorder)
+		}
+	}
+	if got := s.tabActive.GetForeground(); got != lipgloss.Color("#f5c2e7") {
+		t.Fatalf("active tab color = %v, want #f5c2e7", got)
+	}
+
+	cfg.Theme.Colors.ActiveTab = "default"
+	s = stylesFromConfig(cfg)
+	if _, ok := s.tabActive.GetForeground().(lipgloss.NoColor); !ok {
+		t.Fatalf("default active tab should use terminal foreground, got %T", s.tabActive.GetForeground())
+	}
+}
+
 func TestIntegrationPromptRendersToggleRows(t *testing.T) {
 	m := newTestModel(t)
 	model, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 28})

@@ -1,6 +1,12 @@
 package tui
 
-import "github.com/charmbracelet/lipgloss"
+import (
+	"strings"
+
+	"github.com/charmbracelet/lipgloss"
+
+	appconfig "github.com/lmilojevicc/seshagy/internal/config"
+)
 
 type palette struct {
 	bg       lipgloss.TerminalColor
@@ -45,6 +51,13 @@ type styles struct {
 }
 
 func defaultStyles() styles {
+	return stylesFromConfig(appconfig.Default())
+}
+
+func stylesFromConfig(cfg appconfig.Config) styles {
+	cfg.Normalize()
+	colors := cfg.Theme.Colors
+
 	// Use terminal-default foreground/background plus the terminal's ANSI color
 	// palette for accents. This lets seshagy follow the user's terminal theme
 	// instead of painting a fixed Catppuccin surface over it.
@@ -63,12 +76,15 @@ func defaultStyles() styles {
 		yellow:   lipgloss.Color("11"),
 		lavender: lipgloss.Color("12"),
 	}
+	focusedBorder := themeColor(colors.FocusedBorder, p.mauve)
+	activeTab := themeColor(colors.ActiveTab, p.fg)
+
 	s := styles{p: p}
 	s.app = lipgloss.NewStyle().Foreground(p.fg).Background(p.bg)
-	s.tabActive = lipgloss.NewStyle().Foreground(p.fg).Bold(true)
+	s.tabActive = lipgloss.NewStyle().Foreground(activeTab).Bold(true)
 	s.tabInactive = lipgloss.NewStyle().Foreground(p.muted)
 	s.pane = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(p.border).Padding(0, 1)
-	s.paneFocus = s.pane.BorderForeground(p.mauve)
+	s.paneFocus = s.pane.BorderForeground(focusedBorder)
 	s.title = lipgloss.NewStyle().Foreground(p.lavender).Bold(true)
 	s.subtitle = lipgloss.NewStyle().Foreground(p.muted)
 	s.muted = lipgloss.NewStyle().Foreground(p.muted)
@@ -86,4 +102,15 @@ func defaultStyles() styles {
 	s.warning = lipgloss.NewStyle().Foreground(p.yellow).Bold(true)
 	s.danger = lipgloss.NewStyle().Foreground(p.red).Bold(true)
 	return s
+}
+
+func themeColor(value string, fallback lipgloss.TerminalColor) lipgloss.TerminalColor {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return fallback
+	}
+	if strings.EqualFold(value, "default") {
+		return lipgloss.NoColor{}
+	}
+	return lipgloss.Color(value)
 }

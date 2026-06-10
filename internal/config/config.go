@@ -25,6 +25,7 @@ const (
 type Config struct {
 	Sources     SourcesConfig     `toml:"sources"`
 	Directories DirectoriesConfig `toml:"directories"`
+	Theme       ThemeConfig       `toml:"theme"`
 	Icons       IconsConfig       `toml:"icons"`
 	TypeFirst   TypeFirstConfig   `toml:"type_first"`
 	Setup       SetupConfig       `toml:"setup"`
@@ -37,6 +38,15 @@ type SourcesConfig struct {
 
 type DirectoriesConfig struct {
 	FDCommand string `toml:"fd_command"`
+}
+
+type ThemeConfig struct {
+	Colors ThemeColorsConfig `toml:"colors"`
+}
+
+type ThemeColorsConfig struct {
+	FocusedBorder string `toml:"focused_border"`
+	ActiveTab     string `toml:"active_tab"`
 }
 
 type IconsConfig struct {
@@ -69,6 +79,10 @@ func Default() Config {
 	return Config{
 		Sources:     SourcesConfig{Default: "all", Order: defaultSourceOrderNames()},
 		Directories: DirectoriesConfig{FDCommand: sessionmgr.DefaultFDCommand},
+		Theme: ThemeConfig{Colors: ThemeColorsConfig{
+			FocusedBorder: "13",
+			ActiveTab:     "default",
+		}},
 		Icons: IconsConfig{
 			Mode:    IconModeIcons,
 			Session: IconConfig{Icon: sessionmgr.IconSession, Label: "S", Color: "10"},
@@ -138,6 +152,12 @@ func (c *Config) Normalize() {
 	}
 	if strings.TrimSpace(c.Directories.FDCommand) == "" {
 		c.Directories.FDCommand = defaults.Directories.FDCommand
+	}
+	if strings.TrimSpace(c.Theme.Colors.FocusedBorder) == "" {
+		c.Theme.Colors.FocusedBorder = defaults.Theme.Colors.FocusedBorder
+	}
+	if strings.TrimSpace(c.Theme.Colors.ActiveTab) == "" {
+		c.Theme.Colors.ActiveTab = defaults.Theme.Colors.ActiveTab
 	}
 	c.Icons.Mode = normalizeIconMode(c.Icons.Mode)
 	if c.Icons.Enabled != nil && !*c.Icons.Enabled {

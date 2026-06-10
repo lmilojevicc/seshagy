@@ -148,6 +148,10 @@ order = ["all", "sessions", "agents", "current-agents", "zoxide", "fd"]
 [directories]
 fd_command = 'fd -H -a -d 2 -t d -E .Trash . "$HOME"'
 
+[theme.colors]
+focused_border = "13"
+active_tab = "default"
+
 [icons]
 mode = "icons"
 
@@ -187,6 +191,10 @@ the first source is `1`, the second is `2`, and so on. Source names are `all`,
 Set `directories.fd_command` to change which directories populate the fd source.
 The command should print one directory path per line.
 
+Set `theme.colors.focused_border` to change the highlighted pane/prompt border
+and `theme.colors.active_tab` to change the currently selected source tab. Use
+`"default"` for the terminal default foreground.
+
 Set `icons.mode` to `"text"` to render the configured plain labels instead of
 Nerd Font icons, or `"none"` for true no-icons mode. In no-icons mode, no source
 icons, session state glyphs, or text labels are shown; agent rows still use state
@@ -203,5 +211,8 @@ the answer in this config file. After that, edit `type_first.enabled` or
 The dashboard intentionally avoids hard-coded app foreground/background colors.
 It renders on top of the terminal's default colors, uses reverse video for the
 selected row, and uses the terminal's ANSI accent palette for source icons,
-borders, status labels, and state markers. Changing the terminal color scheme is
-therefore enough to retheme seshagy.
+borders, status labels, and state markers. `theme.colors` accepts the same color
+syntax as icon colors: ANSI palette indexes such as `13`, bright SGR values such
+as `92`, truecolor hex values such as `#f5c2e7`, or `default` for the terminal
+default. Changing the terminal color scheme is therefore enough to retheme
+seshagy, while the theme config lets you override specific accents.
