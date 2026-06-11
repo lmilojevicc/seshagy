@@ -27,7 +27,8 @@ func shellCommand(ctx context.Context, command string) *exec.Cmd {
 
 func withLocale(env []string) []string {
 	for _, e := range env {
-		if strings.HasPrefix(e, "LC_ALL=") || strings.HasPrefix(e, "LC_CTYPE=") || strings.HasPrefix(e, "LANG=") {
+		if strings.HasPrefix(e, "LC_ALL=") || strings.HasPrefix(e, "LC_CTYPE=") ||
+			strings.HasPrefix(e, "LANG=") {
 			return env
 		}
 	}

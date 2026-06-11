@@ -30,7 +30,9 @@ func (m Model) View() string {
 		bodyH = 6
 	}
 	body := m.renderBody(bodyH)
-	return s.app.Width(m.width).Height(availableH).Render(lipgloss.JoinVertical(lipgloss.Left, header, body, footer))
+	return s.app.Width(m.width).
+		Height(availableH).
+		Render(lipgloss.JoinVertical(lipgloss.Left, header, body, footer))
 }
 
 func (m Model) renderSetupPrompt(height int) string {
@@ -45,7 +47,9 @@ func (m Model) renderSetupPrompt(height int) string {
 	lines := []string{
 		s.title.Render(title),
 		s.muted.Render("Type-first mode lets normal typing filter immediately."),
-		s.muted.Render("App actions then require the configured prefix key (" + m.config.PrefixKey() + ")."),
+		s.muted.Render(
+			"App actions then require the configured prefix key (" + m.config.PrefixKey() + ").",
+		),
 		"",
 	}
 	choices := []struct {
@@ -138,12 +142,17 @@ func (m Model) renderIntegrationPrompt(height int) string {
 	innerH := max(8, height-6)
 	lines := []string{
 		s.title.Render("Install agent state hooks?"),
-		s.muted.Render("seshagy now uses hook/plugin reports for agent state instead of pane text or process inspection."),
+		s.muted.Render(
+			"seshagy now uses hook/plugin reports for agent state instead of pane text or process inspection.",
+		),
 		s.muted.Render("Toggle the detected integrations you want to install, then press enter."),
 		"",
 	}
 	if len(m.integrationRows) == 0 {
-		lines = append(lines, s.muted.Render("No missing hook integrations found for installed agents."))
+		lines = append(
+			lines,
+			s.muted.Render("No missing hook integrations found for installed agents."),
+		)
 	} else {
 		for i, rec := range m.integrationRows {
 			lines = append(lines, m.renderIntegrationRow(rec, i == m.integrationCursor, innerW))
@@ -167,7 +176,11 @@ func (m Model) renderIntegrationPrompt(height int) string {
 	return lipgloss.Place(m.width, height, lipgloss.Center, lipgloss.Center, box)
 }
 
-func (m Model) renderIntegrationRow(rec integrations.Recommendation, selected bool, width int) string {
+func (m Model) renderIntegrationRow(
+	rec integrations.Recommendation,
+	selected bool,
+	width int,
+) string {
 	s := m.styles
 	prefix := "  "
 	if selected {
@@ -235,7 +248,13 @@ func (m Model) renderListPane(width, height int) string {
 	}
 	title += ")"
 	if m.source == sessionmgr.ModeAll {
-		title = fmt.Sprintf("All (%d · %d sessions · %d agents · %d dirs)", len(items), counts[sessionmgr.KindSession], counts[sessionmgr.KindAgent], counts[sessionmgr.KindZoxide]+counts[sessionmgr.KindFD])
+		title = fmt.Sprintf(
+			"All (%d · %d sessions · %d agents · %d dirs)",
+			len(items),
+			counts[sessionmgr.KindSession],
+			counts[sessionmgr.KindAgent],
+			counts[sessionmgr.KindZoxide]+counts[sessionmgr.KindFD],
+		)
 	}
 	lines := []string{s.title.Render(title)}
 	if m.loading {
@@ -345,7 +364,8 @@ func rowText(parts ...string) string {
 	}
 	var b strings.Builder
 	for i, part := range kept {
-		if i > 0 && !strings.HasSuffix(sessionmgr.StripANSI(b.String()), " ") && !strings.HasPrefix(sessionmgr.StripANSI(part), " ") {
+		if i > 0 && !strings.HasSuffix(sessionmgr.StripANSI(b.String()), " ") &&
+			!strings.HasPrefix(sessionmgr.StripANSI(part), " ") {
 			b.WriteString(" ")
 		}
 		b.WriteString(part)
@@ -450,7 +470,9 @@ func (m Model) renderPreviewPane(width, height int) string {
 	for _, line := range strings.Split(content, "\n") {
 		lines = append(lines, clampText(line, innerW))
 	}
-	return s.pane.Width(width - 2).Height(height - 2).Render(trimHeight(strings.Join(lines, "\n"), innerH))
+	return s.pane.Width(width - 2).
+		Height(height - 2).
+		Render(trimHeight(strings.Join(lines, "\n"), innerH))
 }
 
 func (m Model) renderFooter() string {
@@ -483,13 +505,16 @@ func (m Model) renderFooter() string {
 		}
 	}
 	if m.agentStateFilteringActive() {
-		statusLeft = append(statusLeft, s.emphasis.Render("state:"+agentStateFilterLabel(m.agentStateFilter)))
+		statusLeft = append(
+			statusLeft,
+			s.emphasis.Render("state:"+agentStateFilterLabel(m.agentStateFilter)),
+		)
 	}
 	if m.query != "" {
 		statusLeft = append(statusLeft, s.emphasis.Render("/"+m.query))
 	}
 	left := strings.Join(statusLeft, "  ")
-	help := ""
+	var help string
 	if m.showHelp {
 		if m.config.TypeFirst.Enabled && !m.prefixArmed {
 			help = strings.Join([]string{

@@ -188,7 +188,10 @@ func (c *Config) Normalize() {
 	if c.Icons.Session.Icon == sessionmgr.IconSession {
 		c.Icons.Session.Icon = defaults.Icons.Session.Icon
 	}
-	if legacy := strings.TrimSpace(c.Icons.Session.ASCII); legacy != "" && (strings.TrimSpace(c.Icons.Session.Label) == "" || c.Icons.Session.Label == defaults.Icons.Session.Label) {
+	if legacy := strings.TrimSpace(
+		c.Icons.Session.ASCII,
+	); legacy != "" &&
+		(strings.TrimSpace(c.Icons.Session.Label) == "" || c.Icons.Session.Label == defaults.Icons.Session.Label) {
 		c.Icons.Session.Label = legacy
 	}
 	if strings.TrimSpace(c.Icons.Session.Label) == "" {
@@ -207,7 +210,10 @@ func (c *Config) Normalize() {
 	if c.Icons.Zoxide.Icon == sessionmgr.IconZoxide {
 		c.Icons.Zoxide.Icon = defaults.Icons.Zoxide.Icon
 	}
-	if legacy := strings.TrimSpace(c.Icons.Zoxide.ASCII); legacy != "" && (strings.TrimSpace(c.Icons.Zoxide.Label) == "" || c.Icons.Zoxide.Label == defaults.Icons.Zoxide.Label) {
+	if legacy := strings.TrimSpace(
+		c.Icons.Zoxide.ASCII,
+	); legacy != "" &&
+		(strings.TrimSpace(c.Icons.Zoxide.Label) == "" || c.Icons.Zoxide.Label == defaults.Icons.Zoxide.Label) {
 		c.Icons.Zoxide.Label = legacy
 	}
 	if strings.TrimSpace(c.Icons.Zoxide.Label) == "" {
@@ -226,7 +232,10 @@ func (c *Config) Normalize() {
 	if c.Icons.FD.Icon == sessionmgr.IconFD {
 		c.Icons.FD.Icon = defaults.Icons.FD.Icon
 	}
-	if legacy := strings.TrimSpace(c.Icons.FD.ASCII); legacy != "" && (strings.TrimSpace(c.Icons.FD.Label) == "" || c.Icons.FD.Label == defaults.Icons.FD.Label) {
+	if legacy := strings.TrimSpace(
+		c.Icons.FD.ASCII,
+	); legacy != "" &&
+		(strings.TrimSpace(c.Icons.FD.Label) == "" || c.Icons.FD.Label == defaults.Icons.FD.Label) {
 		c.Icons.FD.Label = legacy
 	}
 	if strings.TrimSpace(c.Icons.FD.Label) == "" {
@@ -242,10 +251,15 @@ func (c *Config) Normalize() {
 	if strings.TrimSpace(c.Icons.Agent.Icon) == "" {
 		c.Icons.Agent.Icon = defaults.Icons.Agent.Icon
 	}
-	if c.Icons.Agent.Icon == sessionmgr.IconAgent || c.Icons.Agent.Icon == sessionmgr.IconAgent+" " || c.Icons.Agent.Icon == "󰚩" {
+	if c.Icons.Agent.Icon == sessionmgr.IconAgent ||
+		c.Icons.Agent.Icon == sessionmgr.IconAgent+" " ||
+		c.Icons.Agent.Icon == "󰚩" {
 		c.Icons.Agent.Icon = defaults.Icons.Agent.Icon
 	}
-	if legacy := strings.TrimSpace(c.Icons.Agent.ASCII); legacy != "" && (strings.TrimSpace(c.Icons.Agent.Label) == "" || c.Icons.Agent.Label == defaults.Icons.Agent.Label) {
+	if legacy := strings.TrimSpace(
+		c.Icons.Agent.ASCII,
+	); legacy != "" &&
+		(strings.TrimSpace(c.Icons.Agent.Label) == "" || c.Icons.Agent.Label == defaults.Icons.Agent.Label) {
 		c.Icons.Agent.Label = legacy
 	}
 	if strings.TrimSpace(c.Icons.Agent.Label) == "" {
@@ -308,10 +322,26 @@ func (c Config) IconSet() sessionmgr.IconSet {
 	return sessionmgr.IconSet{
 		Enabled: enabled,
 		ASCII:   c.Icons.Mode == IconModeText,
-		Session: sessionmgr.IconStyle{Icon: c.Icons.Session.Icon, ASCII: c.Icons.Session.Label, Color: c.Icons.Session.Color},
-		Zoxide:  sessionmgr.IconStyle{Icon: c.Icons.Zoxide.Icon, ASCII: c.Icons.Zoxide.Label, Color: c.Icons.Zoxide.Color},
-		FD:      sessionmgr.IconStyle{Icon: c.Icons.FD.Icon, ASCII: c.Icons.FD.Label, Color: c.Icons.FD.Color},
-		Agent:   sessionmgr.IconStyle{Icon: c.Icons.Agent.Icon, ASCII: c.Icons.Agent.Label, Color: c.Icons.Agent.Color},
+		Session: sessionmgr.IconStyle{
+			Icon:  c.Icons.Session.Icon,
+			ASCII: c.Icons.Session.Label,
+			Color: c.Icons.Session.Color,
+		},
+		Zoxide: sessionmgr.IconStyle{
+			Icon:  c.Icons.Zoxide.Icon,
+			ASCII: c.Icons.Zoxide.Label,
+			Color: c.Icons.Zoxide.Color,
+		},
+		FD: sessionmgr.IconStyle{
+			Icon:  c.Icons.FD.Icon,
+			ASCII: c.Icons.FD.Label,
+			Color: c.Icons.FD.Color,
+		},
+		Agent: sessionmgr.IconStyle{
+			Icon:  c.Icons.Agent.Icon,
+			ASCII: c.Icons.Agent.Label,
+			Color: c.Icons.Agent.Color,
+		},
 	}
 }
 

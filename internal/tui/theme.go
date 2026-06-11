@@ -93,7 +93,10 @@ func stylesFromConfig(cfg appconfig.Config) styles {
 	s.app = lipgloss.NewStyle().Foreground(p.fg).Background(p.bg)
 	s.tabActive = lipgloss.NewStyle().Foreground(activeTab).Bold(true)
 	s.tabInactive = lipgloss.NewStyle().Foreground(inactiveTab)
-	s.pane = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(border).Padding(0, 1)
+	s.pane = lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(border).
+		Padding(0, 1)
 	s.paneFocus = s.pane.BorderForeground(focusedBorder)
 	s.title = lipgloss.NewStyle().Foreground(title).Bold(true)
 	s.subtitle = lipgloss.NewStyle().Foreground(muted)

@@ -13,16 +13,27 @@ func uninstallPi() ([]string, error) {
 }
 
 func uninstallClaude() ([]string, error) {
-	return uninstallNestedSettingsHook(TargetClaude, claudeDir(), filepath.Join(claudeDir(), "settings.json"))
+	return uninstallNestedSettingsHook(
+		TargetClaude,
+		claudeDir(),
+		filepath.Join(claudeDir(), "settings.json"),
+	)
 }
 
 func uninstallDroid() ([]string, error) {
-	messages, err := uninstallNestedSettingsHook(TargetDroid, droidDir(), filepath.Join(droidDir(), "settings.json"))
+	messages, err := uninstallNestedSettingsHook(
+		TargetDroid,
+		droidDir(),
+		filepath.Join(droidDir(), "settings.json"),
+	)
 	if err != nil {
 		return nil, err
 	}
 	hooksPath := filepath.Join(droidDir(), "hooks.json")
-	if updated, err := removeCommandsFromJSON(hooksPath, shellHookName, removeNestedCommands); err != nil {
+	if updated, err := removeCommandsFromJSON(
+		hooksPath,
+		removeNestedCommands,
+	); err != nil {
 		return nil, err
 	} else if updated {
 		messages = append(messages, fmt.Sprintf("removed seshagy hook entries from %s", hooksPath))
@@ -31,7 +42,11 @@ func uninstallDroid() ([]string, error) {
 }
 
 func uninstallQodercli() ([]string, error) {
-	return uninstallNestedSettingsHook(TargetQodercli, qoderDir(), filepath.Join(qoderDir(), "settings.json"))
+	return uninstallNestedSettingsHook(
+		TargetQodercli,
+		qoderDir(),
+		filepath.Join(qoderDir(), "settings.json"),
+	)
 }
 
 func uninstallCodex() ([]string, error) {
@@ -43,7 +58,10 @@ func uninstallCodex() ([]string, error) {
 	}
 	messages := removalMessages("Codex hook", hookPath, removed)
 	hooksPath := filepath.Join(dir, "hooks.json")
-	if updated, err := removeCommandsFromJSON(hooksPath, shellHookName, removeNestedCommands); err != nil {
+	if updated, err := removeCommandsFromJSON(
+		hooksPath,
+		removeNestedCommands,
+	); err != nil {
 		return nil, err
 	} else if updated {
 		messages = append(messages, fmt.Sprintf("removed seshagy hook entries from %s", hooksPath))
@@ -60,10 +78,16 @@ func uninstallCopilot() ([]string, error) {
 	}
 	messages := removalMessages("Copilot hook", hookPath, removed)
 	settingsPath := filepath.Join(dir, "settings.json")
-	if updated, err := removeCommandsFromJSON(settingsPath, shellHookName, removeDirectCommands); err != nil {
+	if updated, err := removeCommandsFromJSON(
+		settingsPath,
+		removeDirectCommands,
+	); err != nil {
 		return nil, err
 	} else if updated {
-		messages = append(messages, fmt.Sprintf("removed seshagy hook entries from %s", settingsPath))
+		messages = append(
+			messages,
+			fmt.Sprintf("removed seshagy hook entries from %s", settingsPath),
+		)
 	}
 	return messages, nil
 }
@@ -83,7 +107,10 @@ func uninstallCursor() ([]string, error) {
 	}
 	messages := removalMessages("Cursor hook", hookPath, removed)
 	hooksPath := filepath.Join(dir, "hooks.json")
-	if updated, err := removeCommandsFromJSON(hooksPath, shellHookName, removeSimpleCommands); err != nil {
+	if updated, err := removeCommandsFromJSON(
+		hooksPath,
+		removeSimpleCommands,
+	); err != nil {
 		return nil, err
 	} else if updated {
 		messages = append(messages, fmt.Sprintf("removed seshagy hook entries from %s", hooksPath))
@@ -98,15 +125,24 @@ func uninstallNestedSettingsHook(target Target, dir, settingsPath string) ([]str
 		return nil, err
 	}
 	messages := removalMessages(TargetLabel(target)+" hook", hookPath, removed)
-	if updated, err := removeCommandsFromJSON(settingsPath, shellHookName, removeNestedCommands); err != nil {
+	if updated, err := removeCommandsFromJSON(
+		settingsPath,
+		removeNestedCommands,
+	); err != nil {
 		return nil, err
 	} else if updated {
-		messages = append(messages, fmt.Sprintf("removed seshagy hook entries from %s", settingsPath))
+		messages = append(
+			messages,
+			fmt.Sprintf("removed seshagy hook entries from %s", settingsPath),
+		)
 	}
 	return messages, nil
 }
 
-func removeCommandsFromJSON(path, commandPrefix string, remove func(map[string]any, string) bool) (bool, error) {
+func removeCommandsFromJSON(
+	path string,
+	remove func(map[string]any, string) bool,
+) (bool, error) {
 	if _, err := os.Stat(path); err != nil {
 		if os.IsNotExist(err) {
 			return false, nil
@@ -121,7 +157,7 @@ func removeCommandsFromJSON(path, commandPrefix string, remove func(map[string]a
 	if err != nil {
 		return false, err
 	}
-	updated := remove(hooks, commandPrefix)
+	updated := remove(hooks, shellHookName)
 	if updated {
 		return true, writeJSONObject(path, root)
 	}

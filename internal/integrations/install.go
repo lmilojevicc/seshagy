@@ -20,31 +20,55 @@ func installPi(binaryPath string) ([]string, error) {
 }
 
 func installClaude(binaryPath string) ([]string, error) {
-	return installNestedSessionHook(TargetClaude, claudeDir(), filepath.Join(claudeDir(), "settings.json"), binaryPath, true)
+	return installNestedSessionHook(
+		TargetClaude,
+		claudeDir(),
+		filepath.Join(claudeDir(), "settings.json"),
+		binaryPath,
+		true,
+	)
 }
 
 func installDroid(binaryPath string) ([]string, error) {
-	messages, err := installNestedSessionHook(TargetDroid, droidDir(), filepath.Join(droidDir(), "settings.json"), binaryPath, true)
+	messages, err := installNestedSessionHook(
+		TargetDroid,
+		droidDir(),
+		filepath.Join(droidDir(), "settings.json"),
+		binaryPath,
+		true,
+	)
 	if err != nil {
 		return nil, err
 	}
 	hooksPath := filepath.Join(droidDir(), "hooks.json")
-	if updated, err := removeCommandsFromJSON(hooksPath, shellHookName, removeNestedCommands); err != nil {
+	if updated, err := removeCommandsFromJSON(
+		hooksPath,
+		removeNestedCommands,
+	); err != nil {
 		return nil, err
 	} else if updated {
-		messages = append(messages, fmt.Sprintf("removed stale seshagy hook entries from %s", hooksPath))
+		messages = append(
+			messages,
+			fmt.Sprintf("removed stale seshagy hook entries from %s", hooksPath),
+		)
 	}
 	return messages, nil
 }
 
 func installQodercli(binaryPath string) ([]string, error) {
-	return installNestedSessionHook(TargetQodercli, qoderDir(), filepath.Join(qoderDir(), "settings.json"), binaryPath, true)
+	return installNestedSessionHook(
+		TargetQodercli,
+		qoderDir(),
+		filepath.Join(qoderDir(), "settings.json"),
+		binaryPath,
+		true,
+	)
 }
 
 func installCodex(binaryPath string) ([]string, error) {
 	dir := codexDir()
 	if !configDirExists(dir) {
-		return nil, fmt.Errorf("Codex config directory not found at %s", dir)
+		return nil, fmt.Errorf("codex config directory not found at %s", dir)
 	}
 	hookPath := filepath.Join(dir, shellHookName)
 	if err := writeShellHook(TargetCodex, hookPath, binaryPath); err != nil {
@@ -60,7 +84,12 @@ func installCodex(binaryPath string) ([]string, error) {
 		return nil, err
 	}
 	removeNestedCommands(hooks, shellHookName)
-	if err := ensureNestedCommandHook(hooks, "SessionStart", hookCommand(hookPath, TargetCodex, "session"), ""); err != nil {
+	if err := ensureNestedCommandHook(
+		hooks,
+		"SessionStart",
+		hookCommand(hookPath, TargetCodex),
+		"",
+	); err != nil {
 		return nil, err
 	}
 	if err := writeJSONObject(hooksPath, root); err != nil {
@@ -70,13 +99,17 @@ func installCodex(binaryPath string) ([]string, error) {
 	if err := ensureCodexHooksEnabled(configPath); err != nil {
 		return nil, err
 	}
-	return []string{fmt.Sprintf("installed Codex hook to %s", hookPath), fmt.Sprintf("updated %s", hooksPath), fmt.Sprintf("enabled Codex hooks in %s", configPath)}, nil
+	return []string{
+		fmt.Sprintf("installed Codex hook to %s", hookPath),
+		fmt.Sprintf("updated %s", hooksPath),
+		fmt.Sprintf("enabled Codex hooks in %s", configPath),
+	}, nil
 }
 
 func installCopilot(binaryPath string) ([]string, error) {
 	dir := copilotDir()
 	if !configDirExists(dir) {
-		return nil, fmt.Errorf("Copilot config directory not found at %s", dir)
+		return nil, fmt.Errorf("copilot config directory not found at %s", dir)
 	}
 	hookPath := filepath.Join(dir, "hooks", shellHookName)
 	if err := writeShellHook(TargetCopilot, hookPath, binaryPath); err != nil {
@@ -92,13 +125,20 @@ func installCopilot(binaryPath string) ([]string, error) {
 		return nil, err
 	}
 	removeDirectCommands(hooks, shellHookName)
-	if err := ensureDirectCommandHook(hooks, "SessionStart", hookCommand(hookPath, TargetCopilot, "session")); err != nil {
+	if err := ensureDirectCommandHook(
+		hooks,
+		"SessionStart",
+		hookCommand(hookPath, TargetCopilot),
+	); err != nil {
 		return nil, err
 	}
 	if err := writeJSONObject(settingsPath, root); err != nil {
 		return nil, err
 	}
-	return []string{fmt.Sprintf("installed Copilot hook to %s", hookPath), fmt.Sprintf("updated %s", settingsPath)}, nil
+	return []string{
+		fmt.Sprintf("installed Copilot hook to %s", hookPath),
+		fmt.Sprintf("updated %s", settingsPath),
+	}, nil
 }
 
 func installOpencode(binaryPath string) ([]string, error) {
@@ -120,7 +160,7 @@ func installOpencode(binaryPath string) ([]string, error) {
 func installCursor(binaryPath string) ([]string, error) {
 	dir := cursorDir()
 	if !configDirExists(dir) {
-		return nil, fmt.Errorf("Cursor config directory not found at %s", dir)
+		return nil, fmt.Errorf("cursor config directory not found at %s", dir)
 	}
 	hookPath := filepath.Join(dir, shellHookName)
 	if err := writeShellHook(TargetCursor, hookPath, binaryPath); err != nil {
@@ -139,16 +179,27 @@ func installCursor(binaryPath string) ([]string, error) {
 	if _, ok := root["version"]; !ok {
 		root["version"] = float64(1)
 	}
-	if err := ensureSimpleCommandHook(hooks, "sessionStart", hookCommand(hookPath, TargetCursor, "session")); err != nil {
+	if err := ensureSimpleCommandHook(
+		hooks,
+		"sessionStart",
+		hookCommand(hookPath, TargetCursor),
+	); err != nil {
 		return nil, err
 	}
 	if err := writeJSONObject(hooksPath, root); err != nil {
 		return nil, err
 	}
-	return []string{fmt.Sprintf("installed Cursor hook to %s", hookPath), fmt.Sprintf("updated %s", hooksPath)}, nil
+	return []string{
+		fmt.Sprintf("installed Cursor hook to %s", hookPath),
+		fmt.Sprintf("updated %s", hooksPath),
+	}, nil
 }
 
-func installNestedSessionHook(target Target, dir, settingsPath, binaryPath string, matcherStar bool) ([]string, error) {
+func installNestedSessionHook(
+	target Target,
+	dir, settingsPath, binaryPath string,
+	matcherStar bool,
+) ([]string, error) {
 	if !configDirExists(dir) {
 		return nil, fmt.Errorf("%s config directory not found at %s", TargetLabel(target), dir)
 	}
@@ -169,13 +220,21 @@ func installNestedSessionHook(target Target, dir, settingsPath, binaryPath strin
 	if matcherStar {
 		matcher = "*"
 	}
-	if err := ensureNestedCommandHook(hooks, "SessionStart", hookCommand(hookPath, target, "session"), matcher); err != nil {
+	if err := ensureNestedCommandHook(
+		hooks,
+		"SessionStart",
+		hookCommand(hookPath, target),
+		matcher,
+	); err != nil {
 		return nil, err
 	}
 	if err := writeJSONObject(settingsPath, root); err != nil {
 		return nil, err
 	}
-	return []string{fmt.Sprintf("installed %s hook to %s", TargetLabel(target), hookPath), fmt.Sprintf("updated %s", settingsPath)}, nil
+	return []string{
+		fmt.Sprintf("installed %s hook to %s", TargetLabel(target), hookPath),
+		fmt.Sprintf("updated %s", settingsPath),
+	}, nil
 }
 
 func writeShellHook(target Target, path, binaryPath string) error {
@@ -188,8 +247,8 @@ func writeShellHook(target Target, path, binaryPath string) error {
 	return os.Chmod(path, 0o755)
 }
 
-func hookCommand(hookPath string, target Target, state string) string {
-	return "bash " + shellQuoteLiteral(hookPath) + " " + string(target) + " " + state
+func hookCommand(hookPath string, target Target) string {
+	return "bash " + shellQuoteLiteral(hookPath) + " " + string(target) + " session"
 }
 
 func ensureCodexHooksEnabled(path string) error {

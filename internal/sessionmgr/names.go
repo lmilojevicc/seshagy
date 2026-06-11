@@ -27,7 +27,8 @@ func sanitizeSessionName(name string) string {
 	var b strings.Builder
 	lastUnderscore := false
 	for _, r := range name {
-		ok := r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_'
+		ok := r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' ||
+			r == '_'
 		if ok {
 			b.WriteRune(r)
 			lastUnderscore = false

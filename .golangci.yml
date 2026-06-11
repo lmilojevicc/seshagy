@@ -1,0 +1,52 @@
+version: "2"
+run:
+  go: "1.26"
+  timeout: 5m
+  modules-download-mode: readonly
+  relative-path-mode: gomod
+linters:
+  default: standard
+  enable:
+    - copyloopvar
+    - dupword
+    - durationcheck
+    - errorlint
+    - gocritic
+    - misspell
+    - nilerr
+    - nolintlint
+    - unconvert
+    - unparam
+    - usestdlibvars
+    - wastedassign
+    - whitespace
+  settings:
+    gocritic:
+      disabled-checks:
+        - ifElseChain
+  exclusions:
+    generated: strict
+    presets:
+      - common-false-positives
+      - std-error-handling
+formatters:
+  enable:
+    - gci
+    - gofmt
+    - gofumpt
+    - golines
+    - goimports
+  settings:
+    gci:
+      custom-order: true
+      sections:
+        - standard
+        - default
+        - localmodule
+    gofumpt:
+      module-path: github.com/lmilojevicc/seshagy
+    goimports:
+      local-prefixes:
+        - github.com/lmilojevicc/seshagy
+  exclusions:
+    generated: strict

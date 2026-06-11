@@ -1,0 +1,65 @@
+[tools]
+"aqua:google/yamlfmt" = "0.21.0"
+"aqua:golangci/golangci-lint" = "v2.12.2"
+"aqua:goreleaser/goreleaser" = "v2.15.0"
+"go:golang.org/x/vuln/cmd/govulncheck" = "v1.3.0"
+
+[tasks.fmt]
+description = "Format Go and YAML files"
+run = """
+golangci-lint fmt
+yamlfmt -conf .yamlfmt -exclude .pi -exclude .worktrees .
+"""
+
+[tasks."fmt:check"]
+description = "Check that Go and YAML formatting is up to date"
+run = """
+golangci-lint fmt --diff
+yamlfmt -conf .yamlfmt -lint -exclude .pi -exclude .worktrees .
+"""
+
+[tasks.lint]
+description = "Run Go linter"
+run = "golangci-lint run ./..."
+
+[tasks.vet]
+description = "Run go vet"
+run = "go vet ./..."
+
+[tasks.vuln]
+description = "Run Go vulnerability checks"
+run = "govulncheck ./..."
+
+[tasks.test]
+description = "Run Go tests"
+run = "go test ./..."
+
+[tasks."test:focused"]
+description = "Run focused Go tests by package and -run pattern"
+usage = '''
+arg "<package>" help="Go package path to test, e.g. ./internal/cli"
+arg "<pattern>" help="Test name or regular expression for go test -run"
+'''
+run = 'go test "${usage_package:?}" -run "${usage_pattern:?}"'
+
+[tasks.build]
+description = "Build the seshagy CLI"
+run = "go build -o seshagy ./cmd/seshagy"
+
+[tasks."release:check"]
+description = "Validate GoReleaser configuration"
+run = "goreleaser check"
+
+[tasks."release:snapshot"]
+description = "Build a local snapshot release (no publish)"
+run = "goreleaser release --snapshot --clean"
+
+[tasks.verify]
+description = "Run all CI checks"
+run = """
+mise run fmt:check
+mise run lint
+mise run vet
+mise run test
+mise run build
+"""

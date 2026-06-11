@@ -2,6 +2,7 @@ package sessionmgr
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"strconv"
@@ -17,7 +18,8 @@ func exactPane(name string) string    { return "=" + name + ":" }
 func ListSessions(ctx context.Context) ([]Item, error) {
 	out, err := tmuxCommand(ctx, "list-sessions", "-F", sessionFormat).Output()
 	if err != nil {
-		if ee, ok := err.(*exec.ExitError); ok && ee.ExitCode() == 1 {
+		var ee *exec.ExitError
+		if errors.As(err, &ee) && ee.ExitCode() == 1 {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("tmux list-sessions: %w", err)
@@ -56,7 +58,8 @@ func HasSession(ctx context.Context, name string) (bool, error) {
 	if err == nil {
 		return true, nil
 	}
-	if ee, ok := err.(*exec.ExitError); ok && ee.ExitCode() == 1 {
+	var ee *exec.ExitError
+	if errors.As(err, &ee) && ee.ExitCode() == 1 {
 		return false, nil
 	}
 	return false, fmt.Errorf("tmux has-session: %w", err)
@@ -74,13 +77,22 @@ func CreateSessionFromDir(ctx context.Context, dir string) (string, bool, error)
 	}
 	cmd := tmuxCommand(ctx, "new-session", "-d", "-s", name, "-c", dir)
 	if out, err := cmd.CombinedOutput(); err != nil {
-		return name, false, fmt.Errorf("tmux new-session: %w (%s)", err, strings.TrimSpace(string(out)))
+		return name, false, fmt.Errorf(
+			"tmux new-session: %w (%s)",
+			err,
+			strings.TrimSpace(string(out)),
+		)
 	}
 	return name, true, nil
 }
 
 func KillSession(ctx context.Context, name string) error {
-	if out, err := tmuxCommand(ctx, "kill-session", "-t", exactSession(name)).CombinedOutput(); err != nil {
+	if out, err := tmuxCommand(
+		ctx,
+		"kill-session",
+		"-t",
+		exactSession(name),
+	).CombinedOutput(); err != nil {
 		return fmt.Errorf("tmux kill-session: %w (%s)", err, strings.TrimSpace(string(out)))
 	}
 	return nil
@@ -88,7 +100,13 @@ func KillSession(ctx context.Context, name string) error {
 
 func RenameSession(ctx context.Context, oldName, newName string) error {
 	newName = sanitizeSessionName(newName)
-	if out, err := tmuxCommand(ctx, "rename-session", "-t", exactSession(oldName), newName).CombinedOutput(); err != nil {
+	if out, err := tmuxCommand(
+		ctx,
+		"rename-session",
+		"-t",
+		exactSession(oldName),
+		newName,
+	).CombinedOutput(); err != nil {
 		return fmt.Errorf("tmux rename-session: %w (%s)", err, strings.TrimSpace(string(out)))
 	}
 	return nil

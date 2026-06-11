@@ -86,11 +86,13 @@ type createDoneMsg struct {
 	err     error
 }
 
-type attachDoneMsg struct{ err error }
-type yaziDoneMsg struct {
-	path string
-	err  error
-}
+type (
+	attachDoneMsg struct{ err error }
+	yaziDoneMsg   struct {
+		path string
+		err  error
+	}
+)
 
 type tickMsg time.Time
 
@@ -147,7 +149,11 @@ func Run() error {
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(refreshCmd(m.source, m.config.LoadOptions()), startupSetupCmd(m.config), tickCmd())
+	return tea.Batch(
+		refreshCmd(m.source, m.config.LoadOptions()),
+		startupSetupCmd(m.config),
+		tickCmd(),
+	)
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -168,7 +174,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.integrationRows = msg.recs
 		m.integrationSelected = map[integrations.Target]bool{}
 		for _, rec := range msg.recs {
-			m.integrationSelected[rec.Target] = rec.AgentAvailable && rec.Installable && rec.State != integrations.StatusCurrent
+			m.integrationSelected[rec.Target] = rec.AgentAvailable && rec.Installable &&
+				rec.State != integrations.StatusCurrent
 		}
 		if m.integrationCursor >= len(m.integrationRows) {
 			m.integrationCursor = max(0, len(m.integrationRows)-1)
@@ -787,11 +794,26 @@ func (m Model) visibleItems() []sessionmgr.Item {
 	query := strings.ToLower(m.query)
 	out := make([]sessionmgr.Item, 0, len(m.items))
 	for _, item := range m.items {
-		if m.agentStateFilteringActive() && (item.Kind != sessionmgr.KindAgent || item.AgentState != m.agentStateFilter) {
+		if m.agentStateFilteringActive() &&
+			(item.Kind != sessionmgr.KindAgent || item.AgentState != m.agentStateFilter) {
 			continue
 		}
 		if query != "" {
-			haystack := strings.ToLower(strings.Join([]string{string(item.Kind), item.Name, item.Path, item.AgentName, string(item.AgentState), item.Location, item.AgentMessage, item.AgentSource}, " "))
+			haystack := strings.ToLower(
+				strings.Join(
+					[]string{
+						string(item.Kind),
+						item.Name,
+						item.Path,
+						item.AgentName,
+						string(item.AgentState),
+						item.Location,
+						item.AgentMessage,
+						item.AgentSource,
+					},
+					" ",
+				),
+			)
 			if !strings.Contains(haystack, query) {
 				continue
 			}

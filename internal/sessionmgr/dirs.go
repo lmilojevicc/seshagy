@@ -14,13 +14,10 @@ import (
 const DefaultFDCommand = `fd -H -a -d 2 -t d -E .Trash . "$HOME"`
 
 func ListZoxideDirs(ctx context.Context) ([]Item, error) {
-	if _, err := exec.LookPath("zoxide"); err != nil {
+	if !commandOnPath("zoxide") {
 		return nil, nil
 	}
-	out, err := plainCommand(ctx, "zoxide", "query", "-l").Output()
-	if err != nil {
-		return nil, nil
-	}
+	out := optionalCommandOutput(plainCommand(ctx, "zoxide", "query", "-l"))
 	return dirItems(out, KindZoxide), nil
 }
 
@@ -33,13 +30,23 @@ func ListFDirsWithCommand(ctx context.Context, command string) ([]Item, error) {
 	if command == "" {
 		command = DefaultFDCommand
 	}
-	out, err := shellCommand(ctx, command).Output()
-	if err != nil {
-		return nil, nil
-	}
+	out := optionalCommandOutput(shellCommand(ctx, command))
 	items := dirItems(out, KindFD)
 	sort.SliceStable(items, func(i, j int) bool { return items[i].Path < items[j].Path })
 	return items, nil
+}
+
+func commandOnPath(name string) bool {
+	_, err := exec.LookPath(name)
+	return err == nil
+}
+
+func optionalCommandOutput(cmd *exec.Cmd) []byte {
+	out, err := cmd.Output()
+	if err != nil {
+		return nil
+	}
+	return out
 }
 
 func dirItems(out []byte, kind Kind) []Item {
@@ -62,7 +69,16 @@ func ListDirectoryPreview(ctx context.Context, dir string, maxLines int) (string
 		return "", err
 	}
 	if _, err := exec.LookPath("eza"); err == nil {
-		out, err := plainCommand(ctx, "eza", "-lah", "--icons=always", "--sort=name", "--group-directories-first", "--color=always", dir).CombinedOutput()
+		out, err := plainCommand(
+			ctx,
+			"eza",
+			"-lah",
+			"--icons=always",
+			"--sort=name",
+			"--group-directories-first",
+			"--color=always",
+			dir,
+		).CombinedOutput()
 		return limitLines(string(out), maxLines), err
 	}
 	entries, err := os.ReadDir(dir)

@@ -84,7 +84,7 @@ func FormatLine(i Item) string {
 func FormatLineWithIcons(i Item, icons IconSet) string {
 	switch i.Kind {
 	case KindSession:
-		return joinNonEmpty(" ", colorIcon(KindSession, icons), i.Name)
+		return joinNonEmpty(colorIcon(KindSession, icons), i.Name)
 	case KindAgent:
 		suffix := ""
 		if i.AgentMessage != "" {
@@ -94,12 +94,15 @@ func FormatLineWithIcons(i Item, icons IconSet) string {
 		} else if i.AgentUpdated != "" {
 			suffix = " — updated " + i.AgentUpdated
 		}
-		prefix := joinNonEmpty(" ", colorIcon(KindAgent, icons), "["+agentStateLabel(i.AgentState)+"]")
+		prefix := joinNonEmpty(
+			colorIcon(KindAgent, icons),
+			"["+agentStateLabel(i.AgentState)+"]",
+		)
 		return fmt.Sprintf("%s\t%s\t%s\t%s%s", prefix, i.AgentName, i.Location, i.Path, suffix)
 	case KindZoxide:
-		return joinNonEmpty(" ", colorIcon(KindZoxide, icons), i.Path)
+		return joinNonEmpty(colorIcon(KindZoxide, icons), i.Path)
 	case KindFD:
-		return joinNonEmpty(" ", colorIcon(KindFD, icons), i.Path)
+		return joinNonEmpty(colorIcon(KindFD, icons), i.Path)
 	default:
 		return i.DisplayName()
 	}
@@ -113,7 +116,7 @@ func colorIcon(kind Kind, icons IconSet) string {
 	return fmt.Sprintf("\x1b[%sm%s\x1b[0m", ansiColorSequence(style.Color), style.Text)
 }
 
-func joinNonEmpty(sep string, parts ...string) string {
+func joinNonEmpty(parts ...string) string {
 	kept := make([]string, 0, len(parts))
 	for _, part := range parts {
 		if part != "" {
@@ -125,26 +128,18 @@ func joinNonEmpty(sep string, parts ...string) string {
 	}
 	var b strings.Builder
 	for i, part := range kept {
-		if i > 0 && shouldInsertSeparator(b.String(), part, sep) {
-			b.WriteString(sep)
+		if i > 0 && shouldInsertSeparator(b.String(), part) {
+			b.WriteString(" ")
 		}
 		b.WriteString(part)
 	}
 	return b.String()
 }
 
-func shouldInsertSeparator(left, right, sep string) bool {
-	if sep != " " {
-		return true
-	}
+func shouldInsertSeparator(left, right string) bool {
 	leftClean := StripANSI(left)
 	rightClean := StripANSI(right)
 	return !strings.HasSuffix(leftClean, " ") && !strings.HasPrefix(rightClean, " ")
-}
-
-func iconAndColor(kind Kind) (string, string) {
-	style := DefaultIconSet().For(kind)
-	return style.Text, style.Color
 }
 
 func ParseActionLine(raw string) (Item, bool) {
@@ -161,7 +156,9 @@ func ParseActionLineWithIcons(raw string, icons IconSet) (Item, bool) {
 	}
 	switch {
 	case hasIconPrefix(clean, icons, KindSession):
-		name := strings.TrimSpace(strings.TrimPrefix(clean, matchedIconPrefix(clean, icons, KindSession)))
+		name := strings.TrimSpace(
+			strings.TrimPrefix(clean, matchedIconPrefix(clean, icons, KindSession)),
+		)
 		return Item{Kind: KindSession, Name: name, Target: name}, name != ""
 	case hasIconPrefix(clean, icons, KindAgent):
 		pane := AgentPaneFromLine(clean)
@@ -170,10 +167,14 @@ func ParseActionLineWithIcons(raw string, icons IconSet) (Item, bool) {
 		pane := AgentPaneFromLine(clean)
 		return Item{Kind: KindAgent, PaneID: pane, Target: pane}, pane != ""
 	case hasIconPrefix(clean, icons, KindZoxide):
-		path := strings.TrimSpace(strings.TrimPrefix(clean, matchedIconPrefix(clean, icons, KindZoxide)))
+		path := strings.TrimSpace(
+			strings.TrimPrefix(clean, matchedIconPrefix(clean, icons, KindZoxide)),
+		)
 		return Item{Kind: KindZoxide, Path: path, Target: ExpandHome(path)}, path != ""
 	case hasIconPrefix(clean, icons, KindFD):
-		path := strings.TrimSpace(strings.TrimPrefix(clean, matchedIconPrefix(clean, icons, KindFD)))
+		path := strings.TrimSpace(
+			strings.TrimPrefix(clean, matchedIconPrefix(clean, icons, KindFD)),
+		)
 		return Item{Kind: KindFD, Path: path, Target: ExpandHome(path)}, path != ""
 	default:
 		return Item{}, false
@@ -194,7 +195,8 @@ func parseNoIconActionLine(clean string) (Item, bool) {
 }
 
 func looksPathLine(s string) bool {
-	return strings.HasPrefix(s, "/") || strings.HasPrefix(s, "~/") || strings.HasPrefix(s, "./") || strings.HasPrefix(s, "../")
+	return strings.HasPrefix(s, "/") || strings.HasPrefix(s, "~/") || strings.HasPrefix(s, "./") ||
+		strings.HasPrefix(s, "../")
 }
 
 func hasIconPrefix(clean string, icons IconSet, kind Kind) bool {

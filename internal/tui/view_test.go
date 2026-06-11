@@ -25,8 +25,23 @@ func TestViewRendersDashboardChromeAndRows(t *testing.T) {
 	model, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 32})
 	m = model.(Model)
 	m.items = []sessionmgr.Item{
-		{Kind: sessionmgr.KindSession, Name: "demo", Path: "/tmp/demo", Windows: 1, Activity: time.Now(), Created: time.Now()},
-		{Kind: sessionmgr.KindAgent, Name: "pi", AgentName: "pi", AgentState: sessionmgr.AgentWorking, PaneID: "%1", Location: "demo:1.1", Path: "~/demo"},
+		{
+			Kind:     sessionmgr.KindSession,
+			Name:     "demo",
+			Path:     "/tmp/demo",
+			Windows:  1,
+			Activity: time.Now(),
+			Created:  time.Now(),
+		},
+		{
+			Kind:       sessionmgr.KindAgent,
+			Name:       "pi",
+			AgentName:  "pi",
+			AgentState: sessionmgr.AgentWorking,
+			PaneID:     "%1",
+			Location:   "demo:1.1",
+			Path:       "~/demo",
+		},
 		{Kind: sessionmgr.KindZoxide, Name: "~/code/demo", Path: "~/code/demo"},
 	}
 	out := sessionmgr.StripANSI(m.View())
@@ -65,13 +80,27 @@ func TestSearchModeArrowNavigationKeepsInputActive(t *testing.T) {
 
 	model, _ := m.handleKey(downMsg())
 	m = model.(Model)
-	if m.cursor != 1 || m.inputMode != modeSearch || m.query != "ap" || m.searchInput.Value() != "ap" {
-		t.Fatalf("down in search mode = cursor:%d mode:%v query:%q input:%q", m.cursor, m.inputMode, m.query, m.searchInput.Value())
+	if m.cursor != 1 || m.inputMode != modeSearch || m.query != "ap" ||
+		m.searchInput.Value() != "ap" {
+		t.Fatalf(
+			"down in search mode = cursor:%d mode:%v query:%q input:%q",
+			m.cursor,
+			m.inputMode,
+			m.query,
+			m.searchInput.Value(),
+		)
 	}
 	model, _ = m.handleKey(upMsg())
 	m = model.(Model)
-	if m.cursor != 0 || m.inputMode != modeSearch || m.query != "ap" || m.searchInput.Value() != "ap" {
-		t.Fatalf("up in search mode = cursor:%d mode:%v query:%q input:%q", m.cursor, m.inputMode, m.query, m.searchInput.Value())
+	if m.cursor != 0 || m.inputMode != modeSearch || m.query != "ap" ||
+		m.searchInput.Value() != "ap" {
+		t.Fatalf(
+			"up in search mode = cursor:%d mode:%v query:%q input:%q",
+			m.cursor,
+			m.inputMode,
+			m.query,
+			m.searchInput.Value(),
+		)
 	}
 }
 
@@ -145,7 +174,8 @@ func TestRefreshUsesConfiguredFDCommand(t *testing.T) {
 	if !ok || msg.err != nil {
 		t.Fatalf("refreshCmd = %#v, ok=%v", msg, ok)
 	}
-	if len(msg.items) != 1 || msg.items[0].Kind != sessionmgr.KindFD || msg.items[0].Path != "/tmp/seshagy-tui-fd" {
+	if len(msg.items) != 1 || msg.items[0].Kind != sessionmgr.KindFD ||
+		msg.items[0].Path != "/tmp/seshagy-tui-fd" {
 		t.Fatalf("configured fd refresh items = %#v", msg.items)
 	}
 }
@@ -163,7 +193,12 @@ func TestConfiguredASCIIIconsRenderInTUI(t *testing.T) {
 		{Kind: sessionmgr.KindSession, Name: "demo", Activity: time.Now(), Created: time.Now()},
 		{Kind: sessionmgr.KindZoxide, Path: "~/code/demo"},
 		{Kind: sessionmgr.KindFD, Path: "~/src/demo"},
-		{Kind: sessionmgr.KindAgent, AgentName: "pi", AgentState: sessionmgr.AgentWorking, PaneID: "%1"},
+		{
+			Kind:       sessionmgr.KindAgent,
+			AgentName:  "pi",
+			AgentState: sessionmgr.AgentWorking,
+			PaneID:     "%1",
+		},
 	}
 	model, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 28})
 	m = model.(Model)
@@ -173,7 +208,8 @@ func TestConfiguredASCIIIconsRenderInTUI(t *testing.T) {
 			t.Fatalf("configured ascii icon output missing %q\n%s", want, out)
 		}
 	}
-	if strings.Contains(out, sessionmgr.IconSession) || strings.Contains(out, sessionmgr.IconZoxide) {
+	if strings.Contains(out, sessionmgr.IconSession) ||
+		strings.Contains(out, sessionmgr.IconZoxide) {
 		t.Fatalf("nerd font icons should not render in ascii mode\n%s", out)
 	}
 }
@@ -184,7 +220,13 @@ func TestDefaultIconsRenderWithConfiguredDisplaySpacing(t *testing.T) {
 	if got := sessionmgr.StripANSI(sessionPrimary); got != sessionmgr.IconSession+" ◌ demo" {
 		t.Fatalf("default session icon spacing = %q, want one space after icon", got)
 	}
-	agentPrimary, _ := m.rowParts(sessionmgr.Item{Kind: sessionmgr.KindAgent, AgentName: "pi", AgentState: sessionmgr.AgentWorking})
+	agentPrimary, _ := m.rowParts(
+		sessionmgr.Item{
+			Kind:       sessionmgr.KindAgent,
+			AgentName:  "pi",
+			AgentState: sessionmgr.AgentWorking,
+		},
+	)
 	if got := sessionmgr.StripANSI(agentPrimary); got != sessionmgr.IconAgent+"  ▶ pi" {
 		t.Fatalf("default agent icon spacing = %q, want two spaces after icon", got)
 	}
@@ -200,15 +242,25 @@ func TestNoIconsAgentRowsRenderStateLabel(t *testing.T) {
 	if got := sessionmgr.StripANSI(sessionPrimary); got != "demo" {
 		t.Fatalf("no-icons session primary = %q, want no source or state prefix", got)
 	}
-	attachedPrimary, _ := m.rowParts(sessionmgr.Item{Kind: sessionmgr.KindSession, Name: "attached", Attached: true})
+	attachedPrimary, _ := m.rowParts(
+		sessionmgr.Item{Kind: sessionmgr.KindSession, Name: "attached", Attached: true},
+	)
 	if got := sessionmgr.StripANSI(attachedPrimary); got != "attached" {
 		t.Fatalf("no-icons attached session primary = %q, want no source or state prefix", got)
 	}
-	zoxidePrimary, _ := m.rowParts(sessionmgr.Item{Kind: sessionmgr.KindZoxide, Path: "~/code/demo"})
+	zoxidePrimary, _ := m.rowParts(
+		sessionmgr.Item{Kind: sessionmgr.KindZoxide, Path: "~/code/demo"},
+	)
 	if got := sessionmgr.StripANSI(zoxidePrimary); got != "~/code/demo" {
 		t.Fatalf("no-icons zoxide primary = %q, want no source prefix", got)
 	}
-	agentPrimary, _ := m.rowParts(sessionmgr.Item{Kind: sessionmgr.KindAgent, AgentName: "pi", AgentState: sessionmgr.AgentWorking})
+	agentPrimary, _ := m.rowParts(
+		sessionmgr.Item{
+			Kind:       sessionmgr.KindAgent,
+			AgentName:  "pi",
+			AgentState: sessionmgr.AgentWorking,
+		},
+	)
 	if got := sessionmgr.StripANSI(agentPrimary); got != "[working] pi" {
 		t.Fatalf("no-icons agent primary = %q, want [working] pi", got)
 	}
@@ -235,7 +287,11 @@ func TestTypeFirstTypingFiltersAndPrefixRunsActions(t *testing.T) {
 	model, _ = m.handleKey(keyMsg("g"))
 	m = model.(Model)
 	if m.source != sessionmgr.ModeAll || m.query != "ag" {
-		t.Fatalf("unprefixed action key should type into filter, source/query = %v/%q", m.source, m.query)
+		t.Fatalf(
+			"unprefixed action key should type into filter, source/query = %v/%q",
+			m.source,
+			m.query,
+		)
 	}
 
 	model, _ = m.handleKey(ctrlXMsg())
@@ -281,7 +337,12 @@ func TestTypeFirstAllowsEnterWithoutPrefix(t *testing.T) {
 	model, _ := m.handleKey(enterMsg())
 	m = model.(Model)
 	if m.status != "creating session from /tmp/demo" || m.prefixArmed || m.query != "" {
-		t.Fatalf("enter should dispatch action without prefix, status=%q armed=%v query=%q", m.status, m.prefixArmed, m.query)
+		t.Fatalf(
+			"enter should dispatch action without prefix, status=%q armed=%v query=%q",
+			m.status,
+			m.prefixArmed,
+			m.query,
+		)
 	}
 }
 
@@ -295,7 +356,12 @@ func TestTypeFirstAllowsArrowNavigationWithoutPrefix(t *testing.T) {
 	model, _ := m.handleKey(downMsg())
 	m = model.(Model)
 	if m.cursor != 1 || m.prefixArmed || m.query != "" {
-		t.Fatalf("down arrow should navigate without prefix, cursor=%d armed=%v query=%q", m.cursor, m.prefixArmed, m.query)
+		t.Fatalf(
+			"down arrow should navigate without prefix, cursor=%d armed=%v query=%q",
+			m.cursor,
+			m.prefixArmed,
+			m.query,
+		)
 	}
 }
 
@@ -329,11 +395,21 @@ func TestStartupSetupPromptSavesTypeFirstChoice(t *testing.T) {
 	}
 	m = model.(Model)
 	if !m.setupPrompt || m.setupManual || m.setupCursor != 1 {
-		t.Fatalf("startup prompt state = prompt:%v manual:%v cursor:%d", m.setupPrompt, m.setupManual, m.setupCursor)
+		t.Fatalf(
+			"startup prompt state = prompt:%v manual:%v cursor:%d",
+			m.setupPrompt,
+			m.setupManual,
+			m.setupCursor,
+		)
 	}
 	m.setupCursor = 0
 	m.width = 100
-	if out := sessionmgr.StripANSI(m.renderSetupPrompt(28)); !strings.Contains(out, "Choose startup input mode") {
+	if out := sessionmgr.StripANSI(
+		m.renderSetupPrompt(28),
+	); !strings.Contains(
+		out,
+		"Choose startup input mode",
+	) {
 		t.Fatalf("startup setup prompt should use startup title\n%s", out)
 	}
 	model, cmd = m.handleSetupKey(keyMsg("enter"))
@@ -342,7 +418,11 @@ func TestStartupSetupPromptSavesTypeFirstChoice(t *testing.T) {
 	}
 	m = model.(Model)
 	if m.setupPrompt || !m.config.TypeFirst.Enabled || !m.config.Setup.TypeFirstPromptSeen {
-		t.Fatalf("setup did not enable/save type-first: prompt=%v config=%#v", m.setupPrompt, m.config)
+		t.Fatalf(
+			"setup did not enable/save type-first: prompt=%v config=%#v",
+			m.setupPrompt,
+			m.config,
+		)
 	}
 	loaded, err := appconfig.Load()
 	if err != nil {
@@ -374,9 +454,20 @@ func TestManualModePromptInClassicSavesWithoutHookScan(t *testing.T) {
 	}
 	m = model.(Model)
 	if !m.setupPrompt || !m.setupManual || m.setupCursor != 1 || m.status != "change input mode" {
-		t.Fatalf("manual prompt state = prompt:%v manual:%v cursor:%d status:%q", m.setupPrompt, m.setupManual, m.setupCursor, m.status)
+		t.Fatalf(
+			"manual prompt state = prompt:%v manual:%v cursor:%d status:%q",
+			m.setupPrompt,
+			m.setupManual,
+			m.setupCursor,
+			m.status,
+		)
 	}
-	if out := sessionmgr.StripANSI(m.renderSetupPrompt(28)); !strings.Contains(out, "Change input mode") {
+	if out := sessionmgr.StripANSI(
+		m.renderSetupPrompt(28),
+	); !strings.Contains(
+		out,
+		"Change input mode",
+	) {
 		t.Fatalf("manual setup prompt should use manual title\n%s", out)
 	}
 	if out := sessionmgr.StripANSI(m.renderSetupPrompt(28)); !strings.Contains(out, "esc cancel") {
@@ -388,8 +479,14 @@ func TestManualModePromptInClassicSavesWithoutHookScan(t *testing.T) {
 		t.Fatal("manual input-mode save should not trigger hook integration startup scan")
 	}
 	m = model.(Model)
-	if m.setupPrompt || m.setupManual || !m.config.TypeFirst.Enabled || !m.config.Setup.TypeFirstPromptSeen {
-		t.Fatalf("manual mode save state = prompt:%v manual:%v config:%#v", m.setupPrompt, m.setupManual, m.config)
+	if m.setupPrompt || m.setupManual || !m.config.TypeFirst.Enabled ||
+		!m.config.Setup.TypeFirstPromptSeen {
+		t.Fatalf(
+			"manual mode save state = prompt:%v manual:%v config:%#v",
+			m.setupPrompt,
+			m.setupManual,
+			m.config,
+		)
 	}
 	loaded, err := appconfig.Load()
 	if err != nil {
@@ -412,8 +509,14 @@ func TestManualModePromptEscCancelsWithoutSaving(t *testing.T) {
 		t.Fatal("manual input-mode cancel should not run a command")
 	}
 	m = model.(Model)
-	if m.setupPrompt || m.setupManual || m.config.TypeFirst.Enabled || m.config.Setup.TypeFirstPromptSeen {
-		t.Fatalf("manual cancel state = prompt:%v manual:%v config:%#v", m.setupPrompt, m.setupManual, m.config)
+	if m.setupPrompt || m.setupManual || m.config.TypeFirst.Enabled ||
+		m.config.Setup.TypeFirstPromptSeen {
+		t.Fatalf(
+			"manual cancel state = prompt:%v manual:%v config:%#v",
+			m.setupPrompt,
+			m.setupManual,
+			m.config,
+		)
 	}
 	if m.status != "input mode change cancelled" || !isWarningStatus(m.status) {
 		t.Fatalf("manual cancel status = %q", m.status)
@@ -439,7 +542,12 @@ func TestTypeFirstManualModePromptEscDoesNotDisable(t *testing.T) {
 	model, _ = m.handleKey(keyMsg("m"))
 	m = model.(Model)
 	if !m.setupPrompt || !m.setupManual || m.setupCursor != 0 {
-		t.Fatalf("manual type-first prompt state = prompt:%v manual:%v cursor:%d", m.setupPrompt, m.setupManual, m.setupCursor)
+		t.Fatalf(
+			"manual type-first prompt state = prompt:%v manual:%v cursor:%d",
+			m.setupPrompt,
+			m.setupManual,
+			m.setupCursor,
+		)
 	}
 	model, cmd := m.handleSetupKey(keyMsg("esc"))
 	if cmd != nil {
@@ -447,7 +555,12 @@ func TestTypeFirstManualModePromptEscDoesNotDisable(t *testing.T) {
 	}
 	m = model.(Model)
 	if m.setupPrompt || m.setupManual || !m.config.TypeFirst.Enabled {
-		t.Fatalf("manual type-first cancel state = prompt:%v manual:%v config:%#v", m.setupPrompt, m.setupManual, m.config)
+		t.Fatalf(
+			"manual type-first cancel state = prompt:%v manual:%v config:%#v",
+			m.setupPrompt,
+			m.setupManual,
+			m.config,
+		)
 	}
 	loaded, err := appconfig.Load()
 	if err != nil {
@@ -468,7 +581,11 @@ func TestTypeFirstManualModePromptRequiresPrefix(t *testing.T) {
 	model, _ := m.handleKey(keyMsg("m"))
 	m = model.(Model)
 	if m.setupPrompt || m.query != "m" {
-		t.Fatalf("unprefixed m should filter in type-first mode, prompt=%v query=%q", m.setupPrompt, m.query)
+		t.Fatalf(
+			"unprefixed m should filter in type-first mode, prompt=%v query=%q",
+			m.setupPrompt,
+			m.query,
+		)
 	}
 
 	model, _ = m.handleKey(ctrlXMsg())
@@ -482,7 +599,13 @@ func TestTypeFirstManualModePromptRequiresPrefix(t *testing.T) {
 	}
 	m = model.(Model)
 	if !m.setupPrompt || !m.setupManual || m.setupCursor != 0 || m.prefixArmed {
-		t.Fatalf("prefixed m prompt state = prompt:%v manual:%v cursor:%d prefix:%v", m.setupPrompt, m.setupManual, m.setupCursor, m.prefixArmed)
+		t.Fatalf(
+			"prefixed m prompt state = prompt:%v manual:%v cursor:%d prefix:%v",
+			m.setupPrompt,
+			m.setupManual,
+			m.setupCursor,
+			m.prefixArmed,
+		)
 	}
 
 	model, cmd = m.handleSetupKey(keyMsg("n"))
@@ -505,9 +628,24 @@ func TestTypeFirstManualModePromptRequiresPrefix(t *testing.T) {
 func TestAgentStateFilterOnlyAppliesInAgentSources(t *testing.T) {
 	m := newTestModel(t)
 	m.items = []sessionmgr.Item{
-		{Kind: sessionmgr.KindAgent, AgentName: "pi", AgentState: sessionmgr.AgentWorking, PaneID: "%1"},
-		{Kind: sessionmgr.KindAgent, AgentName: "claude", AgentState: sessionmgr.AgentBlocked, PaneID: "%2"},
-		{Kind: sessionmgr.KindAgent, AgentName: "codex", AgentState: sessionmgr.AgentIdle, PaneID: "%3"},
+		{
+			Kind:       sessionmgr.KindAgent,
+			AgentName:  "pi",
+			AgentState: sessionmgr.AgentWorking,
+			PaneID:     "%1",
+		},
+		{
+			Kind:       sessionmgr.KindAgent,
+			AgentName:  "claude",
+			AgentState: sessionmgr.AgentBlocked,
+			PaneID:     "%2",
+		},
+		{
+			Kind:       sessionmgr.KindAgent,
+			AgentName:  "codex",
+			AgentState: sessionmgr.AgentIdle,
+			PaneID:     "%3",
+		},
 		{Kind: sessionmgr.KindSession, Name: "api"},
 	}
 	m.source = sessionmgr.ModeAgents
@@ -538,9 +676,27 @@ func TestAgentStateFilterCombinesWithTextQuery(t *testing.T) {
 	m.agentStateFilter = sessionmgr.AgentWorking
 	m.query = "api"
 	m.items = []sessionmgr.Item{
-		{Kind: sessionmgr.KindAgent, AgentName: "pi", AgentState: sessionmgr.AgentWorking, Location: "api:1.1", PaneID: "%1"},
-		{Kind: sessionmgr.KindAgent, AgentName: "claude", AgentState: sessionmgr.AgentWorking, Location: "web:1.1", PaneID: "%2"},
-		{Kind: sessionmgr.KindAgent, AgentName: "codex", AgentState: sessionmgr.AgentBlocked, Location: "api:1.2", PaneID: "%3"},
+		{
+			Kind:       sessionmgr.KindAgent,
+			AgentName:  "pi",
+			AgentState: sessionmgr.AgentWorking,
+			Location:   "api:1.1",
+			PaneID:     "%1",
+		},
+		{
+			Kind:       sessionmgr.KindAgent,
+			AgentName:  "claude",
+			AgentState: sessionmgr.AgentWorking,
+			Location:   "web:1.1",
+			PaneID:     "%2",
+		},
+		{
+			Kind:       sessionmgr.KindAgent,
+			AgentName:  "codex",
+			AgentState: sessionmgr.AgentBlocked,
+			Location:   "api:1.2",
+			PaneID:     "%3",
+		},
 	}
 	got := m.visibleItems()
 	if len(got) != 1 || got[0].AgentName != "pi" {
@@ -551,7 +707,14 @@ func TestAgentStateFilterCombinesWithTextQuery(t *testing.T) {
 func TestAgentStateFilterKeyCyclesAndClears(t *testing.T) {
 	m := newTestModel(t)
 	m.source = sessionmgr.ModeAgents
-	m.items = []sessionmgr.Item{{Kind: sessionmgr.KindAgent, AgentName: "pi", AgentState: sessionmgr.AgentWorking, PaneID: "%1"}}
+	m.items = []sessionmgr.Item{
+		{
+			Kind:       sessionmgr.KindAgent,
+			AgentName:  "pi",
+			AgentState: sessionmgr.AgentWorking,
+			PaneID:     "%1",
+		},
+	}
 
 	model, _ := m.handleKey(keyMsg("s"))
 	m = model.(Model)
@@ -592,7 +755,14 @@ func TestAgentStateFilterRendersTitleHelpAndEmptyState(t *testing.T) {
 	m = model.(Model)
 	m.source = sessionmgr.ModeAgents
 	m.agentStateFilter = sessionmgr.AgentBlocked
-	m.items = []sessionmgr.Item{{Kind: sessionmgr.KindAgent, AgentName: "pi", AgentState: sessionmgr.AgentWorking, PaneID: "%1"}}
+	m.items = []sessionmgr.Item{
+		{
+			Kind:       sessionmgr.KindAgent,
+			AgentName:  "pi",
+			AgentState: sessionmgr.AgentWorking,
+			PaneID:     "%1",
+		},
+	}
 	out := sessionmgr.StripANSI(m.View())
 	for _, want := range []string{"Agents · blocked", "no agent panes with state blocked", "state:blocked", "s state", "S all"} {
 		if !strings.Contains(out, want) {
@@ -628,7 +798,12 @@ func TestFooterKeepsStatusOnOneLine(t *testing.T) {
 	}
 	for i, line := range lines {
 		if width := lipgloss.Width(line); width >= m.width {
-			t.Fatalf("footer line %d width = %d, want less than terminal width %d", i, width, m.width)
+			t.Fatalf(
+				"footer line %d width = %d, want less than terminal width %d",
+				i,
+				width,
+				m.width,
+			)
 		}
 	}
 }
@@ -665,13 +840,24 @@ func TestFooterWarningStatusesUseWarningStyle(t *testing.T) {
 	for _, status := range warnings {
 		style := footerStatusStyle(s, status, false)
 		if style.GetForeground() != s.warning.GetForeground() || !style.GetBold() {
-			t.Fatalf("footerStatusStyle(%q) = foreground %v bold %v, want warning foreground %v bold true", status, style.GetForeground(), style.GetBold(), s.warning.GetForeground())
+			t.Fatalf(
+				"footerStatusStyle(%q) = foreground %v bold %v, want warning foreground %v bold true",
+				status,
+				style.GetForeground(),
+				style.GetBold(),
+				s.warning.GetForeground(),
+			)
 		}
 		m := newTestModel(t)
 		m.width = 80
 		m.status = status
 		m.showHelp = false
-		if clean := sessionmgr.StripANSI(m.renderFooter()); !strings.Contains(strings.Split(clean, "\n")[0], status) {
+		if clean := sessionmgr.StripANSI(
+			m.renderFooter(),
+		); !strings.Contains(
+			strings.Split(clean, "\n")[0],
+			status,
+		) {
 			t.Fatalf("footer did not render warning status %q on first line:\n%s", status, clean)
 		}
 	}
@@ -703,11 +889,33 @@ func ctrlRMsg() tea.KeyMsg {
 
 func TestFooterStatusStylesKeepErrorsRedAndNormalMuted(t *testing.T) {
 	s := defaultStyles()
-	if style := footerStatusStyle(s, "loaded 1171 items", false); style.GetForeground() != s.muted.GetForeground() || style.GetBold() != s.muted.GetBold() {
-		t.Fatalf("normal status style = foreground %v bold %v, want muted foreground %v bold %v", style.GetForeground(), style.GetBold(), s.muted.GetForeground(), s.muted.GetBold())
+	if style := footerStatusStyle(
+		s,
+		"loaded 1171 items",
+		false,
+	); style.GetForeground() != s.muted.GetForeground() ||
+		style.GetBold() != s.muted.GetBold() {
+		t.Fatalf(
+			"normal status style = foreground %v bold %v, want muted foreground %v bold %v",
+			style.GetForeground(),
+			style.GetBold(),
+			s.muted.GetForeground(),
+			s.muted.GetBold(),
+		)
 	}
-	if style := footerStatusStyle(s, "nothing selected", true); style.GetForeground() != s.danger.GetForeground() || style.GetBold() != s.danger.GetBold() {
-		t.Fatalf("error status style = foreground %v bold %v, want danger foreground %v bold %v", style.GetForeground(), style.GetBold(), s.danger.GetForeground(), s.danger.GetBold())
+	if style := footerStatusStyle(
+		s,
+		"nothing selected",
+		true,
+	); style.GetForeground() != s.danger.GetForeground() ||
+		style.GetBold() != s.danger.GetBold() {
+		t.Fatalf(
+			"error status style = foreground %v bold %v, want danger foreground %v bold %v",
+			style.GetForeground(),
+			style.GetBold(),
+			s.danger.GetForeground(),
+			s.danger.GetBold(),
+		)
 	}
 }
 
@@ -812,7 +1020,10 @@ func TestConfiguredThemeColorsApply(t *testing.T) {
 	cfg.Theme.Colors.ActiveTab = "default"
 	s = stylesFromConfig(cfg)
 	if _, ok := s.tabActive.GetForeground().(lipgloss.NoColor); !ok {
-		t.Fatalf("default active tab should use terminal foreground, got %T", s.tabActive.GetForeground())
+		t.Fatalf(
+			"default active tab should use terminal foreground, got %T",
+			s.tabActive.GetForeground(),
+		)
 	}
 }
 
@@ -821,7 +1032,15 @@ func TestIntegrationPromptRendersToggleRows(t *testing.T) {
 	model, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 28})
 	m = model.(Model)
 	m.integrationPrompt = true
-	m.integrationRows = []integrations.Recommendation{{Target: integrations.TargetPi, Label: "Pi", AgentAvailable: true, Installable: true, State: integrations.StatusNotInstalled}}
+	m.integrationRows = []integrations.Recommendation{
+		{
+			Target:         integrations.TargetPi,
+			Label:          "Pi",
+			AgentAvailable: true,
+			Installable:    true,
+			State:          integrations.StatusNotInstalled,
+		},
+	}
 	m.integrationSelected[integrations.TargetPi] = true
 	out := sessionmgr.StripANSI(m.View())
 	for _, want := range []string{"Install agent state hooks?", "[x] Pi", "space toggle", "pane text or process", "inspection"} {

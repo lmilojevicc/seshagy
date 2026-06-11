@@ -30,12 +30,18 @@ func TestScanCursorRequiresCursorAgentCommand(t *testing.T) {
 	}
 	writeExecutable(t, filepath.Join(binDir, "cursor"))
 	if rec := findRec(t, Scan(), TargetCursor); rec.AgentAvailable || !rec.Installable {
-		t.Fatalf("cursor editor command plus config dir should be installable but not available: %#v", rec)
+		t.Fatalf(
+			"cursor editor command plus config dir should be installable but not available: %#v",
+			rec,
+		)
 	}
 
 	writeExecutable(t, filepath.Join(binDir, "cursor-agent"))
 	if rec := findRec(t, Scan(), TargetCursor); !rec.AgentAvailable || !rec.Installable {
-		t.Fatalf("cursor-agent command plus config dir should make Cursor Agent available/installable: %#v", rec)
+		t.Fatalf(
+			"cursor-agent command plus config dir should make Cursor Agent available/installable: %#v",
+			rec,
+		)
 	}
 }
 
@@ -66,7 +72,8 @@ func TestScanDetectsAvailableMissingAndInstalledPi(t *testing.T) {
 		t.Fatalf("unexpected after status: %#v", after)
 	}
 	content := readFile(t, after.InstallPath)
-	if !strings.Contains(content, "SESHAGY_INTEGRATION_ID=pi") || !strings.Contains(content, "/bin/seshagy") {
+	if !strings.Contains(content, "SESHAGY_INTEGRATION_ID=pi") ||
+		!strings.Contains(content, "/bin/seshagy") {
 		t.Fatalf("unexpected extension content: %s", content)
 	}
 }
@@ -80,9 +87,30 @@ func TestInstallNestedSessionTargetsWriteSessionHookOnlyAndCleanLifecycle(t *tes
 		settings    string
 		wantCommand string
 	}{
-		{name: "claude", dirName: ".claude", target: TargetClaude, install: installClaude, settings: "settings.json", wantCommand: " claude session"},
-		{name: "droid", dirName: ".factory", target: TargetDroid, install: installDroid, settings: "settings.json", wantCommand: " droid session"},
-		{name: "qoder", dirName: ".qoder", target: TargetQodercli, install: installQodercli, settings: "settings.json", wantCommand: " qodercli session"},
+		{
+			name:        "claude",
+			dirName:     ".claude",
+			target:      TargetClaude,
+			install:     installClaude,
+			settings:    "settings.json",
+			wantCommand: " claude session",
+		},
+		{
+			name:        "droid",
+			dirName:     ".factory",
+			target:      TargetDroid,
+			install:     installDroid,
+			settings:    "settings.json",
+			wantCommand: " droid session",
+		},
+		{
+			name:        "qoder",
+			dirName:     ".qoder",
+			target:      TargetQodercli,
+			install:     installQodercli,
+			settings:    "settings.json",
+			wantCommand: " qodercli session",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -95,10 +123,26 @@ func TestInstallNestedSessionTargetsWriteSessionHookOnlyAndCleanLifecycle(t *tes
 			settingsPath := filepath.Join(dir, tt.settings)
 			root := map[string]any{"hooks": map[string]any{
 				"UserPromptSubmit": []any{map[string]any{"hooks": []any{
-					map[string]any{"type": "command", "command": "bash /old/seshagy-agent-state.sh " + string(tt.target) + " working"},
+					map[string]any{
+						"type": "command",
+						"command": "bash /old/seshagy-agent-state.sh " + string(
+							tt.target,
+						) + " working",
+					},
 					map[string]any{"type": "command", "command": "echo keep"},
 				}}},
-				"Stop": []any{map[string]any{"hooks": []any{map[string]any{"type": "command", "command": "bash /old/seshagy-agent-state.sh " + string(tt.target) + " done"}}}},
+				"Stop": []any{
+					map[string]any{
+						"hooks": []any{
+							map[string]any{
+								"type": "command",
+								"command": "bash /old/seshagy-agent-state.sh " + string(
+									tt.target,
+								) + " done",
+							},
+						},
+					},
+				},
 			}}
 			if err := writeJSONObject(settingsPath, root); err != nil {
 				t.Fatal(err)
@@ -109,7 +153,8 @@ func TestInstallNestedSessionTargetsWriteSessionHookOnlyAndCleanLifecycle(t *tes
 			}
 			hooks := readJSON(t, settingsPath)["hooks"].(map[string]any)
 			commands, matchers := nestedHookCommands(t, hooks, "SessionStart")
-			if len(commands) != 1 || !strings.Contains(commands[0], "seshagy-agent-state.sh") || !strings.Contains(commands[0], tt.wantCommand) {
+			if len(commands) != 1 || !strings.Contains(commands[0], "seshagy-agent-state.sh") ||
+				!strings.Contains(commands[0], tt.wantCommand) {
 				t.Fatalf("SessionStart command = %#v, want managed session hook", commands)
 			}
 			if len(matchers) != 1 || matchers[0] != "*" {
@@ -138,7 +183,10 @@ func TestInstallDroidCleansLegacyHooksJSON(t *testing.T) {
 	legacyPath := filepath.Join(droid, "hooks.json")
 	root := map[string]any{"hooks": map[string]any{
 		"UserPromptSubmit": []any{map[string]any{"hooks": []any{
-			map[string]any{"type": "command", "command": "bash /old/seshagy-agent-state.sh droid working"},
+			map[string]any{
+				"type":    "command",
+				"command": "bash /old/seshagy-agent-state.sh droid working",
+			},
 			map[string]any{"type": "command", "command": "echo keep"},
 		}}},
 	}}
@@ -163,7 +211,11 @@ func TestUninstallDroidCleansLegacyHooksJSON(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(droid, "hooks"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(droid, "hooks", shellHookName), []byte("hook"), 0o755); err != nil {
+	if err := os.WriteFile(
+		filepath.Join(droid, "hooks", shellHookName),
+		[]byte("hook"),
+		0o755,
+	); err != nil {
 		t.Fatal(err)
 	}
 	settingsPath := filepath.Join(droid, "settings.json")
@@ -171,7 +223,10 @@ func TestUninstallDroidCleansLegacyHooksJSON(t *testing.T) {
 	for _, path := range []string{settingsPath, legacyPath} {
 		root := map[string]any{"hooks": map[string]any{
 			"Stop": []any{map[string]any{"hooks": []any{
-				map[string]any{"type": "command", "command": "bash /old/seshagy-agent-state.sh droid done"},
+				map[string]any{
+					"type":    "command",
+					"command": "bash /old/seshagy-agent-state.sh droid done",
+				},
 				map[string]any{"type": "command", "command": "echo keep"},
 			}}},
 		}}
@@ -205,7 +260,10 @@ func TestInstallCodexWritesSessionHookOnlyAndPreservesNestedCodexHooks(t *testin
 	}
 	root := map[string]any{"hooks": map[string]any{
 		"UserPromptSubmit": []any{map[string]any{"hooks": []any{
-			map[string]any{"type": "command", "command": "bash /old/seshagy-agent-state.sh codex working"},
+			map[string]any{
+				"type":    "command",
+				"command": "bash /old/seshagy-agent-state.sh codex working",
+			},
 			map[string]any{"type": "command", "command": "echo keep"},
 		}}},
 	}}
@@ -227,13 +285,19 @@ func TestInstallCodexWritesSessionHookOnlyAndPreservesNestedCodexHooks(t *testin
 	}
 	hooks := readJSON(t, filepath.Join(codex, "hooks.json"))["hooks"].(map[string]any)
 	commands := nestedHookCommandsOnly(t, hooks, "SessionStart")
-	if len(commands) != 1 || !strings.Contains(commands[0], "seshagy-agent-state.sh") || !strings.Contains(commands[0], " codex session") {
+	if len(commands) != 1 || !strings.Contains(commands[0], "seshagy-agent-state.sh") ||
+		!strings.Contains(commands[0], " codex session") {
 		t.Fatalf("Codex SessionStart = %#v, want session hook", commands)
 	}
 	if managedCommandPresent(nestedHookCommandsOnly(t, hooks, "UserPromptSubmit")) {
 		t.Fatalf("stale Codex lifecycle hook remains: %#v", hooks["UserPromptSubmit"])
 	}
-	if got := nestedHookCommandsOnly(t, hooks, "UserPromptSubmit"); len(got) != 1 || got[0] != "echo keep" {
+	if got := nestedHookCommandsOnly(
+		t,
+		hooks,
+		"UserPromptSubmit",
+	); len(got) != 1 ||
+		got[0] != "echo keep" {
 		t.Fatalf("Codex user hook not preserved: %#v", got)
 	}
 }
@@ -247,7 +311,10 @@ func TestInstallCopilotWritesSessionHookOnlyAndCleansLifecycle(t *testing.T) {
 	}
 	root := map[string]any{"hooks": map[string]any{
 		"UserPromptSubmit": []any{
-			map[string]any{"type": "command", "bash": "bash /old/seshagy-agent-state.sh copilot working"},
+			map[string]any{
+				"type": "command",
+				"bash": "bash /old/seshagy-agent-state.sh copilot working",
+			},
 			map[string]any{"type": "command", "bash": "echo keep"},
 		},
 	}}
@@ -261,13 +328,19 @@ func TestInstallCopilotWritesSessionHookOnlyAndCleansLifecycle(t *testing.T) {
 	}
 	hooks := readJSON(t, settingsPath)["hooks"].(map[string]any)
 	commands := directHookCommands(t, hooks, "SessionStart")
-	if len(commands) != 1 || !strings.Contains(commands[0], "seshagy-agent-state.sh") || !strings.Contains(commands[0], " copilot session") {
+	if len(commands) != 1 || !strings.Contains(commands[0], "seshagy-agent-state.sh") ||
+		!strings.Contains(commands[0], " copilot session") {
 		t.Fatalf("Copilot SessionStart = %#v, want session hook", commands)
 	}
 	if managedCommandPresent(directHookCommands(t, hooks, "UserPromptSubmit")) {
 		t.Fatalf("stale Copilot lifecycle hook remains: %#v", hooks["UserPromptSubmit"])
 	}
-	if got := directHookCommands(t, hooks, "UserPromptSubmit"); len(got) != 1 || got[0] != "echo keep" {
+	if got := directHookCommands(
+		t,
+		hooks,
+		"UserPromptSubmit",
+	); len(got) != 1 ||
+		got[0] != "echo keep" {
 		t.Fatalf("Copilot user hook not preserved: %#v", got)
 	}
 }
@@ -295,13 +368,19 @@ func TestInstallCursorWritesSessionHookOnlyAndCleansLifecycle(t *testing.T) {
 	}
 	hooks := readJSON(t, hooksPath)["hooks"].(map[string]any)
 	commands := simpleHookCommands(t, hooks, "sessionStart")
-	if len(commands) != 1 || !strings.Contains(commands[0], "seshagy-agent-state.sh") || !strings.Contains(commands[0], " cursor session") {
+	if len(commands) != 1 || !strings.Contains(commands[0], "seshagy-agent-state.sh") ||
+		!strings.Contains(commands[0], " cursor session") {
 		t.Fatalf("Cursor sessionStart = %#v, want session hook", commands)
 	}
 	if managedCommandPresent(simpleHookCommands(t, hooks, "beforeSubmitPrompt")) {
 		t.Fatalf("stale Cursor lifecycle hook remains: %#v", hooks["beforeSubmitPrompt"])
 	}
-	if got := simpleHookCommands(t, hooks, "beforeSubmitPrompt"); len(got) != 1 || got[0] != "echo keep" {
+	if got := simpleHookCommands(
+		t,
+		hooks,
+		"beforeSubmitPrompt",
+	); len(got) != 1 ||
+		got[0] != "echo keep" {
 		t.Fatalf("Cursor user hook not preserved: %#v", got)
 	}
 	if version := readJSON(t, hooksPath)["version"]; version != float64(1) {
@@ -318,8 +397,27 @@ func TestUninstallRemovesManagedHookEntriesOnly(t *testing.T) {
 	}
 	settingsPath := filepath.Join(claude, "settings.json")
 	root := map[string]any{"hooks": map[string]any{
-		"SessionStart": []any{map[string]any{"hooks": []any{map[string]any{"type": "command", "command": "bash /old/seshagy-agent-state.sh claude session"}}}},
-		"Stop":         []any{map[string]any{"hooks": []any{map[string]any{"type": "command", "command": "bash /old/seshagy-agent-state.sh claude done"}, map[string]any{"type": "command", "command": "echo keep"}}}},
+		"SessionStart": []any{
+			map[string]any{
+				"hooks": []any{
+					map[string]any{
+						"type":    "command",
+						"command": "bash /old/seshagy-agent-state.sh claude session",
+					},
+				},
+			},
+		},
+		"Stop": []any{
+			map[string]any{
+				"hooks": []any{
+					map[string]any{
+						"type":    "command",
+						"command": "bash /old/seshagy-agent-state.sh claude done",
+					},
+					map[string]any{"type": "command", "command": "echo keep"},
+				},
+			},
+		},
 	}}
 	if err := writeJSONObject(settingsPath, root); err != nil {
 		t.Fatal(err)
@@ -327,7 +425,11 @@ func TestUninstallRemovesManagedHookEntriesOnly(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(claude, "hooks"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(claude, "hooks", shellHookName), []byte("hook"), 0o755); err != nil {
+	if err := os.WriteFile(
+		filepath.Join(claude, "hooks", shellHookName),
+		[]byte("hook"),
+		0o755,
+	); err != nil {
 		t.Fatal(err)
 	}
 
@@ -336,7 +438,8 @@ func TestUninstallRemovesManagedHookEntriesOnly(t *testing.T) {
 	}
 	settings := readJSON(t, settingsPath)
 	hooks := settings["hooks"].(map[string]any)
-	if managedCommandPresent(nestedHookCommandsOnly(t, hooks, "SessionStart")) || managedCommandPresent(nestedHookCommandsOnly(t, hooks, "Stop")) {
+	if managedCommandPresent(nestedHookCommandsOnly(t, hooks, "SessionStart")) ||
+		managedCommandPresent(nestedHookCommandsOnly(t, hooks, "Stop")) {
 		t.Fatalf("managed hooks should be removed: %#v", hooks)
 	}
 	stop := nestedHookCommandsOnly(t, hooks, "Stop")
@@ -358,7 +461,8 @@ func TestShellHookSessionActionReportsUnknownWithSessionIDAndSeq(t *testing.T) {
 	if strings.Contains(asset, "$$ %") {
 		t.Fatalf("shell seq should not use pid modulo ordering:\n%s", asset)
 	}
-	if strings.Contains(asset, `session|start) state="idle"`) || strings.Contains(asset, `session|start)\n    state="idle"`) {
+	if strings.Contains(asset, `session|start) state="idle"`) ||
+		strings.Contains(asset, `session|start)\n    state="idle"`) {
 		t.Fatalf("session action should not be converted to idle:\n%s", asset)
 	}
 }

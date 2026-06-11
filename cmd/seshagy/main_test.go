@@ -3,11 +3,27 @@ package main
 import "testing"
 
 func TestParseReportArgsSessionIDAndSeq(t *testing.T) {
-	report, err := parseReportArgs([]string{"--pane", "%1", "--agent", "opencode", "--state", "working", "--source", "seshagy:opencode", "--session-id", "session-123", "--seq", "42"})
+	report, err := parseReportArgs(
+		[]string{
+			"--pane",
+			"%1",
+			"--agent",
+			"opencode",
+			"--state",
+			"working",
+			"--source",
+			"seshagy:opencode",
+			"--session-id",
+			"session-123",
+			"--seq",
+			"42",
+		},
+	)
 	if err != nil {
 		t.Fatalf("parseReportArgs() error = %v", err)
 	}
-	if report.Pane != "%1" || report.Name != "opencode" || report.Source != "seshagy:opencode" || !report.SourceSeen {
+	if report.Pane != "%1" || report.Name != "opencode" || report.Source != "seshagy:opencode" ||
+		!report.SourceSeen {
 		t.Fatalf("report parsed basic fields incorrectly: %#v", report)
 	}
 	if report.SessionID != "session-123" || !report.SessionIDSeen {

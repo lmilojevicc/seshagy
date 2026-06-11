@@ -6,6 +6,10 @@ This is a Go CLI/TUI project for `seshagy`, an agent-aware tmux dashboard. The c
 
 ## Build, Test, and Development Commands
 
+- `mise run verify`: runs the local CI gate (`fmt:check`, `lint`, `vet`, `test`, `build`).
+- `mise run vuln`: runs `govulncheck ./...`; GitHub CI runs this as a separate gate.
+- `mise run release:check`: validates `.goreleaser.yml` without publishing.
+- `mise run release:snapshot`: builds local release artifacts under `dist/` without publishing.
 - `make build`: builds the local `./seshagy` binary from `./cmd/seshagy`.
 - `make test`: runs `go test ./...` across all packages.
 - `make vet`: runs `go vet ./...` for static checks.
@@ -27,6 +31,28 @@ Add focused table-driven tests near the package being changed. Use names like `T
 Recent history uses concise, imperative commit subjects, for example `Update README` and `Harden lifecycle agent integrations`. Follow that style: capitalize the subject, avoid trailing punctuation, and keep it focused on one change.
 
 Pull requests should include a short problem/solution summary, test results such as `make test` and `make vet`, and screenshots or terminal captures for visible TUI changes. Link related issues when available and call out any config, tmux, or integration behavior changes.
+
+## CI/CD and Release Workflow
+
+CI mirrors the `dotty` setup: GitHub Actions runs `fmt:check`, `lint`, `vet`, `test`, `vuln`, and `build` through pinned `mise` tools. Release automation is tag-driven: pushing a `v*` tag runs GoReleaser and publishes Linux/macOS `amd64`/`arm64` archives plus checksums to GitHub Releases.
+
+Before creating a release tag:
+
+```sh
+mise run verify
+mise run vuln
+mise run release:check
+```
+
+For the first release:
+
+```sh
+git tag v0.1.0
+git push origin main
+git push origin v0.1.0
+```
+
+Do not tag before the working tree is clean and the checks above pass.
 
 ## Agent-Specific Instructions
 

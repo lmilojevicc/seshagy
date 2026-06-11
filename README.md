@@ -237,22 +237,6 @@ The config also controls theme colors and icon colors. The TUI uses terminal
 default foreground/background colors with ANSI accents, so changing your
 terminal theme usually rethemes seshagy without extra config.
 
-## Development
-
-```sh
-make build   # go build -o seshagy ./cmd/seshagy
-make test    # go test ./...
-make vet     # go vet ./...
-make install # go install ./cmd/seshagy
-```
-
-Local binary build without make:
-
-```sh
-go build -o seshagy ./cmd/seshagy
-./seshagy
-```
-
 ## Limits and expectations
 
 - tmux is required for session and agent operations.

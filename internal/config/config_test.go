@@ -24,10 +24,23 @@ func TestLoadDefaultWhenMissing(t *testing.T) {
 	if cfg.LoadOptions().FDCommand != sessionmgr.DefaultFDCommand {
 		t.Fatalf("default fd command = %q", cfg.LoadOptions().FDCommand)
 	}
-	if cfg.Theme.Colors.FocusedBorder != "13" || cfg.Theme.Colors.ActiveTab != "default" || cfg.Theme.Colors.Border != "8" || cfg.Theme.Colors.InactiveTab != "8" || cfg.Theme.Colors.Title != "12" || cfg.Theme.Colors.Accent != "13" || cfg.Theme.Colors.Key != "11" || cfg.Theme.Colors.Muted != "8" || cfg.Theme.Colors.Success != "10" || cfg.Theme.Colors.Info != "14" || cfg.Theme.Colors.Warning != "11" || cfg.Theme.Colors.Danger != "9" {
+	if cfg.Theme.Colors.FocusedBorder != "13" || cfg.Theme.Colors.ActiveTab != "default" ||
+		cfg.Theme.Colors.Border != "8" ||
+		cfg.Theme.Colors.InactiveTab != "8" ||
+		cfg.Theme.Colors.Title != "12" ||
+		cfg.Theme.Colors.Accent != "13" ||
+		cfg.Theme.Colors.Key != "11" ||
+		cfg.Theme.Colors.Muted != "8" ||
+		cfg.Theme.Colors.Success != "10" ||
+		cfg.Theme.Colors.Info != "14" ||
+		cfg.Theme.Colors.Warning != "11" ||
+		cfg.Theme.Colors.Danger != "9" {
 		t.Fatalf("theme color defaults = %#v", cfg.Theme.Colors)
 	}
-	if got := cfg.Sources.Order; strings.Join(got, ",") != "all,sessions,agents,current-agents,zoxide,fd" {
+	if got := cfg.Sources.Order; strings.Join(
+		got,
+		",",
+	) != "all,sessions,agents,current-agents,zoxide,fd" {
 		t.Fatalf("default source order = %#v", got)
 	}
 	if cfg.Icons.Mode != IconModeIcons {
@@ -79,16 +92,26 @@ func TestSaveAndLoadConfig(t *testing.T) {
 	if strings.Contains(string(data), `ascii`) {
 		t.Fatalf("saved config should not contain ascii keys: %s", data)
 	}
-	if !strings.Contains(string(data), `mode = "text"`) || !strings.Contains(string(data), `label = "X"`) || !strings.Contains(string(data), `#a6e3a1`) {
+	if !strings.Contains(string(data), `mode = "text"`) ||
+		!strings.Contains(string(data), `label = "X"`) ||
+		!strings.Contains(string(data), `#a6e3a1`) {
 		t.Fatalf("saved config missing text mode, label, or hex color: %s", data)
 	}
-	if !strings.Contains(string(data), `[sources]`) || !strings.Contains(string(data), `current-agents`) {
+	if !strings.Contains(string(data), `[sources]`) ||
+		!strings.Contains(string(data), `current-agents`) {
 		t.Fatalf("saved config missing source config: %s", data)
 	}
-	if !strings.Contains(string(data), `[directories]`) || !strings.Contains(string(data), `fd_command`) {
+	if !strings.Contains(string(data), `[directories]`) ||
+		!strings.Contains(string(data), `fd_command`) {
 		t.Fatalf("saved config missing directory config: %s", data)
 	}
-	if !strings.Contains(string(data), `[theme.colors]`) || !strings.Contains(string(data), `#ff79c6`) || !strings.Contains(string(data), `#f5c2e7`) || !strings.Contains(string(data), `#313244`) || !strings.Contains(string(data), `#7f849c`) || !strings.Contains(string(data), `#a6e3a1`) || !strings.Contains(string(data), `#f38ba8`) {
+	if !strings.Contains(string(data), `[theme.colors]`) ||
+		!strings.Contains(string(data), `#ff79c6`) ||
+		!strings.Contains(string(data), `#f5c2e7`) ||
+		!strings.Contains(string(data), `#313244`) ||
+		!strings.Contains(string(data), `#7f849c`) ||
+		!strings.Contains(string(data), `#a6e3a1`) ||
+		!strings.Contains(string(data), `#f38ba8`) {
 		t.Fatalf("saved config missing theme colors: %s", data)
 	}
 	loaded, err := Load()
@@ -98,16 +121,30 @@ func TestSaveAndLoadConfig(t *testing.T) {
 	if loaded.DefaultSource() != sessionmgr.ModeCurrentAgents {
 		t.Fatalf("loaded default source = %v, want current agents", loaded.DefaultSource())
 	}
-	if order := loaded.SourceOrder(); len(order) != 6 || order[0] != sessionmgr.ModeSessions || order[2] != sessionmgr.ModeCurrentAgents || order[5] != sessionmgr.ModeAll {
+	if order := loaded.SourceOrder(); len(order) != 6 || order[0] != sessionmgr.ModeSessions ||
+		order[2] != sessionmgr.ModeCurrentAgents ||
+		order[5] != sessionmgr.ModeAll {
 		t.Fatalf("loaded source order = %#v", order)
 	}
 	if loaded.LoadOptions().FDCommand != `printf '%s\n' /tmp/project` {
 		t.Fatalf("loaded fd command = %q", loaded.LoadOptions().FDCommand)
 	}
-	if loaded.Theme.Colors.FocusedBorder != "#ff79c6" || loaded.Theme.Colors.ActiveTab != "#f5c2e7" || loaded.Theme.Colors.Border != "#313244" || loaded.Theme.Colors.InactiveTab != "#6c7086" || loaded.Theme.Colors.Title != "#b4befe" || loaded.Theme.Colors.Accent != "#cba6f7" || loaded.Theme.Colors.Key != "#f9e2af" || loaded.Theme.Colors.Muted != "#7f849c" || loaded.Theme.Colors.Success != "#a6e3a1" || loaded.Theme.Colors.Info != "#89dceb" || loaded.Theme.Colors.Warning != "#f9e2af" || loaded.Theme.Colors.Danger != "#f38ba8" {
+	if loaded.Theme.Colors.FocusedBorder != "#ff79c6" ||
+		loaded.Theme.Colors.ActiveTab != "#f5c2e7" ||
+		loaded.Theme.Colors.Border != "#313244" ||
+		loaded.Theme.Colors.InactiveTab != "#6c7086" ||
+		loaded.Theme.Colors.Title != "#b4befe" ||
+		loaded.Theme.Colors.Accent != "#cba6f7" ||
+		loaded.Theme.Colors.Key != "#f9e2af" ||
+		loaded.Theme.Colors.Muted != "#7f849c" ||
+		loaded.Theme.Colors.Success != "#a6e3a1" ||
+		loaded.Theme.Colors.Info != "#89dceb" ||
+		loaded.Theme.Colors.Warning != "#f9e2af" ||
+		loaded.Theme.Colors.Danger != "#f38ba8" {
 		t.Fatalf("loaded theme colors = %#v", loaded.Theme.Colors)
 	}
-	if !loaded.TypeFirst.Enabled || loaded.PrefixKey() != "alt+x" || !loaded.Setup.TypeFirstPromptSeen {
+	if !loaded.TypeFirst.Enabled || loaded.PrefixKey() != "alt+x" ||
+		!loaded.Setup.TypeFirstPromptSeen {
 		t.Fatalf("loaded config = %#v", loaded)
 	}
 	if loaded.Icons.Mode != IconModeText {
@@ -244,13 +281,18 @@ color = "#a6e3a1"
 		t.Fatalf("Load() error = %v", err)
 	}
 	if loaded.Icons.Mode != IconModeText || loaded.Icons.Session.Label != "X" {
-		t.Fatalf("legacy ascii config migrated to mode=%q label=%q", loaded.Icons.Mode, loaded.Icons.Session.Label)
+		t.Fatalf(
+			"legacy ascii config migrated to mode=%q label=%q",
+			loaded.Icons.Mode,
+			loaded.Icons.Session.Label,
+		)
 	}
 	saved, err := Marshal(loaded)
 	if err != nil {
 		t.Fatalf("Marshal() error = %v", err)
 	}
-	if strings.Contains(string(saved), "ascii") || strings.Contains(string(saved), "[icons]\n  enabled") {
+	if strings.Contains(string(saved), "ascii") ||
+		strings.Contains(string(saved), "[icons]\n  enabled") {
 		t.Fatalf("migrated config should omit legacy ascii/enabled keys: %s", saved)
 	}
 }

@@ -29,7 +29,8 @@ func TestParseSessions(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("len = %d", len(got))
 	}
-	if got[0].Name != "dev" || got[0].Path != "/Users/milo/dev" || !got[0].Attached || got[0].Windows != 2 {
+	if got[0].Name != "dev" || got[0].Path != "/Users/milo/dev" || !got[0].Attached ||
+		got[0].Windows != 2 {
 		t.Fatalf("parsed unexpected session: %#v", got[0])
 	}
 	if !got[0].Created.Equal(time.Unix(100, 0)) || !got[0].Activity.Equal(time.Unix(120, 0)) {
@@ -38,7 +39,14 @@ func TestParseSessions(t *testing.T) {
 }
 
 func TestNormalizeAgentState(t *testing.T) {
-	tests := map[string]AgentState{"busy": AgentWorking, "permission": AgentBlocked, "cancelled": AgentAborted, "finished": AgentDone, "ready": AgentIdle, "weird": AgentUnknown}
+	tests := map[string]AgentState{
+		"busy":       AgentWorking,
+		"permission": AgentBlocked,
+		"cancelled":  AgentAborted,
+		"finished":   AgentDone,
+		"ready":      AgentIdle,
+		"weird":      AgentUnknown,
+	}
 	for in, want := range tests {
 		if got := NormalizeAgentState(in); got != want {
 			t.Fatalf("NormalizeAgentState(%q) = %q, want %q", in, got, want)
@@ -47,31 +55,86 @@ func TestNormalizeAgentState(t *testing.T) {
 }
 
 func TestParseAgentsSkipsNonAgentsAndFormatsLocation(t *testing.T) {
-	fields := []string{"%3", "work", "1", "0", "/Users/milo/Projects/seshagy", "1", "1", "1", "0", "claude", "busy", "needs ok", "123", "hook", "session-123", "42"}
+	fields := []string{
+		"%3",
+		"work",
+		"1",
+		"0",
+		"/Users/milo/Projects/seshagy",
+		"1",
+		"1",
+		"1",
+		"0",
+		"claude",
+		"busy",
+		"needs ok",
+		"123",
+		"hook",
+		"session-123",
+		"42",
+	}
 	raw := []byte(strings.Join(fields, paneSep) + "\n")
 	got := ParseAgents(raw, "")
 	if len(got) != 1 {
 		t.Fatalf("len = %d", len(got))
 	}
-	if got[0].AgentName != "claude" || got[0].AgentState != AgentWorking || got[0].Location != "work:1.0" || got[0].AgentMessage != "needs ok" || got[0].AgentSessionID != "session-123" || got[0].AgentSeq != "42" {
+	if got[0].AgentName != "claude" || got[0].AgentState != AgentWorking ||
+		got[0].Location != "work:1.0" ||
+		got[0].AgentMessage != "needs ok" ||
+		got[0].AgentSessionID != "session-123" ||
+		got[0].AgentSeq != "42" {
 		t.Fatalf("unexpected agent: %#v", got[0])
 	}
 }
 
 func TestParseAgentsToleratesLegacyFormatWithoutSessionMetadata(t *testing.T) {
-	fields := []string{"%3", "work", "1", "0", "/Users/milo/Projects/seshagy", "1", "1", "1", "0", "claude", "busy", "needs ok", "123", "hook"}
+	fields := []string{
+		"%3",
+		"work",
+		"1",
+		"0",
+		"/Users/milo/Projects/seshagy",
+		"1",
+		"1",
+		"1",
+		"0",
+		"claude",
+		"busy",
+		"needs ok",
+		"123",
+		"hook",
+	}
 	raw := []byte(strings.Join(fields, paneSep) + "\n")
 	got := ParseAgents(raw, "")
 	if len(got) != 1 {
 		t.Fatalf("len = %d", len(got))
 	}
 	if got[0].AgentSessionID != "" || got[0].AgentSeq != "" {
-		t.Fatalf("legacy parse session metadata = %q/%q, want empty", got[0].AgentSessionID, got[0].AgentSeq)
+		t.Fatalf(
+			"legacy parse session metadata = %q/%q, want empty",
+			got[0].AgentSessionID,
+			got[0].AgentSeq,
+		)
 	}
 }
 
 func TestParseAgentsRequiresHookReportedAgentName(t *testing.T) {
-	fields := []string{"%3", "work", "1", "0", "/Users/milo/Projects/seshagy", "1", "1", "1", "0", "", "busy", "needs ok", "123", "hook"}
+	fields := []string{
+		"%3",
+		"work",
+		"1",
+		"0",
+		"/Users/milo/Projects/seshagy",
+		"1",
+		"1",
+		"1",
+		"0",
+		"",
+		"busy",
+		"needs ok",
+		"123",
+		"hook",
+	}
 	raw := []byte(strings.Join(fields, paneSep) + "\n")
 	if got := ParseAgents(raw, ""); len(got) != 0 {
 		t.Fatalf("expected unreported pane to be ignored, got %#v", got)
@@ -79,7 +142,10 @@ func TestParseAgentsRequiresHookReportedAgentName(t *testing.T) {
 }
 
 func TestListFDirsWithCustomCommand(t *testing.T) {
-	got, err := ListFDirsWithCommand(context.Background(), `printf '%s\n' /tmp/seshagy-fd-b /tmp/seshagy-fd-a`)
+	got, err := ListFDirsWithCommand(
+		context.Background(),
+		`printf '%s\n' /tmp/seshagy-fd-b /tmp/seshagy-fd-a`,
+	)
 	if err != nil {
 		t.Fatalf("ListFDirsWithCommand() error = %v", err)
 	}
@@ -104,17 +170,40 @@ func TestShouldApplyAgentSeq(t *testing.T) {
 		incomingSeen bool
 		want         bool
 	}{
-		{name: "legacy no incoming seq applies", existing: "99", incoming: 1, incomingSeen: false, want: true},
+		{
+			name:         "legacy no incoming seq applies",
+			existing:     "99",
+			incoming:     1,
+			incomingSeen: false,
+			want:         true,
+		},
 		{name: "empty existing applies", existing: "", incoming: 1, incomingSeen: true, want: true},
-		{name: "malformed existing applies", existing: "bad", incoming: 1, incomingSeen: true, want: true},
+		{
+			name:         "malformed existing applies",
+			existing:     "bad",
+			incoming:     1,
+			incomingSeen: true,
+			want:         true,
+		},
 		{name: "newer applies", existing: "41", incoming: 42, incomingSeen: true, want: true},
 		{name: "equal applies", existing: "42", incoming: 42, incomingSeen: true, want: true},
 		{name: "older ignored", existing: "43", incoming: 42, incomingSeen: true, want: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := shouldApplyAgentSeq(tt.existing, tt.incoming, tt.incomingSeen); got != tt.want {
-				t.Fatalf("shouldApplyAgentSeq(%q, %d, %v) = %v, want %v", tt.existing, tt.incoming, tt.incomingSeen, got, tt.want)
+			if got := shouldApplyAgentSeq(
+				tt.existing,
+				tt.incoming,
+				tt.incomingSeen,
+			); got != tt.want {
+				t.Fatalf(
+					"shouldApplyAgentSeq(%q, %d, %v) = %v, want %v",
+					tt.existing,
+					tt.incoming,
+					tt.incomingSeen,
+					got,
+					tt.want,
+				)
 			}
 		})
 	}
@@ -138,13 +227,27 @@ func TestAgentLockPathIsPaneSpecificAndSafe(t *testing.T) {
 
 func TestReleaseAgentWithSeqLeavesTombstoneForStaleReports(t *testing.T) {
 	ctx, pane := requireTestTmuxPane(t)
-	if err := ReportAgent(ctx, AgentReport{Pane: pane, Name: "pi", State: AgentWorking, Source: "hook", SourceSeen: true, Seq: 100, SeqSeen: true}); err != nil {
+	if err := ReportAgent(
+		ctx,
+		AgentReport{
+			Pane:       pane,
+			Name:       "pi",
+			State:      AgentWorking,
+			Source:     "hook",
+			SourceSeen: true,
+			Seq:        100,
+			SeqSeen:    true,
+		},
+	); err != nil {
 		t.Fatal(err)
 	}
 	if got := paneOptionValue(ctx, pane, "@agent_seq"); got != "100" {
 		t.Fatalf("initial @agent_seq = %q, want 100", got)
 	}
-	if err := ReleaseAgent(ctx, AgentRelease{Pane: pane, Source: "hook", SourceSeen: true, Seq: 101, SeqSeen: true}); err != nil {
+	if err := ReleaseAgent(
+		ctx,
+		AgentRelease{Pane: pane, Source: "hook", SourceSeen: true, Seq: 101, SeqSeen: true},
+	); err != nil {
 		t.Fatal(err)
 	}
 	if got := paneOptionValue(ctx, pane, "@agent_seq"); got != "101" {
@@ -156,13 +259,27 @@ func TestReleaseAgentWithSeqLeavesTombstoneForStaleReports(t *testing.T) {
 	if got := paneOptionValue(ctx, pane, "@agent_state"); got != "" {
 		t.Fatalf("release @agent_state = %q, want cleared", got)
 	}
-	if err := ReleaseAgent(ctx, AgentRelease{Pane: pane, Source: "hook", SourceSeen: true, Seq: 102, SeqSeen: true}); err != nil {
+	if err := ReleaseAgent(
+		ctx,
+		AgentRelease{Pane: pane, Source: "hook", SourceSeen: true, Seq: 102, SeqSeen: true},
+	); err != nil {
 		t.Fatal(err)
 	}
 	if got := paneOptionValue(ctx, pane, "@agent_seq"); got != "102" {
 		t.Fatalf("release after cleared pane @agent_seq = %q, want tombstone 102", got)
 	}
-	if err := ReportAgent(ctx, AgentReport{Pane: pane, Name: "pi", State: AgentWorking, Source: "hook", SourceSeen: true, Seq: 101, SeqSeen: true}); err != nil {
+	if err := ReportAgent(
+		ctx,
+		AgentReport{
+			Pane:       pane,
+			Name:       "pi",
+			State:      AgentWorking,
+			Source:     "hook",
+			SourceSeen: true,
+			Seq:        101,
+			SeqSeen:    true,
+		},
+	); err != nil {
 		t.Fatal(err)
 	}
 	if got := paneOptionValue(ctx, pane, "@agent_name"); got != "" {
@@ -178,10 +295,24 @@ func TestReleaseAgentWithSeqLeavesTombstoneForStaleReports(t *testing.T) {
 
 func TestReleaseAgentWithSeqDoesNotTombstoneDifferentActiveSource(t *testing.T) {
 	ctx, pane := requireTestTmuxPane(t)
-	if err := ReportAgent(ctx, AgentReport{Pane: pane, Name: "pi", State: AgentWorking, Source: "active", SourceSeen: true, Seq: 200, SeqSeen: true}); err != nil {
+	if err := ReportAgent(
+		ctx,
+		AgentReport{
+			Pane:       pane,
+			Name:       "pi",
+			State:      AgentWorking,
+			Source:     "active",
+			SourceSeen: true,
+			Seq:        200,
+			SeqSeen:    true,
+		},
+	); err != nil {
 		t.Fatal(err)
 	}
-	if err := ReleaseAgent(ctx, AgentRelease{Pane: pane, Source: "stale", SourceSeen: true, Seq: 201, SeqSeen: true}); err != nil {
+	if err := ReleaseAgent(
+		ctx,
+		AgentRelease{Pane: pane, Source: "stale", SourceSeen: true, Seq: 201, SeqSeen: true},
+	); err != nil {
 		t.Fatal(err)
 	}
 	if got := paneOptionValue(ctx, pane, "@agent_name"); got != "pi" {
@@ -197,10 +328,16 @@ func TestReleaseAgentWithSeqDoesNotTombstoneDifferentActiveSource(t *testing.T) 
 
 func TestReleaseAgentWithSeqDoesNotTombstoneActiveReportWithoutSource(t *testing.T) {
 	ctx, pane := requireTestTmuxPane(t)
-	if err := ReportAgent(ctx, AgentReport{Pane: pane, Name: "pi", State: AgentWorking, Seq: 300, SeqSeen: true}); err != nil {
+	if err := ReportAgent(
+		ctx,
+		AgentReport{Pane: pane, Name: "pi", State: AgentWorking, Seq: 300, SeqSeen: true},
+	); err != nil {
 		t.Fatal(err)
 	}
-	if err := ReleaseAgent(ctx, AgentRelease{Pane: pane, Source: "hook", SourceSeen: true, Seq: 301, SeqSeen: true}); err != nil {
+	if err := ReleaseAgent(
+		ctx,
+		AgentRelease{Pane: pane, Source: "hook", SourceSeen: true, Seq: 301, SeqSeen: true},
+	); err != nil {
 		t.Fatal(err)
 	}
 	if got := paneOptionValue(ctx, pane, "@agent_name"); got != "pi" {
@@ -216,10 +353,24 @@ func TestReleaseAgentWithSeqDoesNotTombstoneActiveReportWithoutSource(t *testing
 
 func TestReleaseAgentWithoutSeqClearsSeqForLegacyBehavior(t *testing.T) {
 	ctx, pane := requireTestTmuxPane(t)
-	if err := ReportAgent(ctx, AgentReport{Pane: pane, Name: "pi", State: AgentWorking, Source: "hook", SourceSeen: true, Seq: 100, SeqSeen: true}); err != nil {
+	if err := ReportAgent(
+		ctx,
+		AgentReport{
+			Pane:       pane,
+			Name:       "pi",
+			State:      AgentWorking,
+			Source:     "hook",
+			SourceSeen: true,
+			Seq:        100,
+			SeqSeen:    true,
+		},
+	); err != nil {
 		t.Fatal(err)
 	}
-	if err := ReleaseAgent(ctx, AgentRelease{Pane: pane, Source: "hook", SourceSeen: true}); err != nil {
+	if err := ReleaseAgent(
+		ctx,
+		AgentRelease{Pane: pane, Source: "hook", SourceSeen: true},
+	); err != nil {
 		t.Fatal(err)
 	}
 	if got := paneOptionValue(ctx, pane, "@agent_seq"); got != "" {
@@ -236,11 +387,13 @@ func requireTestTmuxPane(t *testing.T) (context.Context, string) {
 		t.Skip("tmux not available")
 	}
 	session := fmt.Sprintf("seshagy_seq_%d", time.Now().UnixNano())
-	if out, err := exec.Command("tmux", "new-session", "-d", "-s", session, "sleep 60").CombinedOutput(); err != nil {
+	if out, err := exec.Command("tmux", "new-session", "-d", "-s", session, "sleep 60").
+		CombinedOutput(); err != nil {
 		t.Skipf("tmux new-session failed: %v: %s", err, strings.TrimSpace(string(out)))
 	}
 	t.Cleanup(func() { _ = exec.Command("tmux", "kill-session", "-t", session).Run() })
-	out, err := exec.Command("tmux", "display-message", "-p", "-t", session+":0.0", "#{pane_id}").Output()
+	out, err := exec.Command("tmux", "display-message", "-p", "-t", session+":0.0", "#{pane_id}").
+		Output()
 	if err != nil {
 		t.Fatalf("tmux display pane id failed: %v", err)
 	}
@@ -265,13 +418,24 @@ func TestDetectTmuxPopup(t *testing.T) {
 	}{
 		{name: "normal pane", envPane: "%1", currentPane: "%1", want: false},
 		{name: "popup has no pane env", envPane: "", currentPane: "%2", want: true},
-		{name: "popup differs from inherited pane env", envPane: "%1", currentPane: "%2", want: true},
+		{
+			name:        "popup differs from inherited pane env",
+			envPane:     "%1",
+			currentPane: "%2",
+			want:        true,
+		},
 		{name: "empty current pane is inconclusive", envPane: "%1", currentPane: "", want: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := detectTmuxPopup(tt.envPane, tt.currentPane); got != tt.want {
-				t.Fatalf("detectTmuxPopup(%q, %q) = %v, want %v", tt.envPane, tt.currentPane, got, tt.want)
+				t.Fatalf(
+					"detectTmuxPopup(%q, %q) = %v, want %v",
+					tt.envPane,
+					tt.currentPane,
+					got,
+					tt.want,
+				)
 			}
 		})
 	}
@@ -361,7 +525,13 @@ func TestFormatLineWithNoIconsOmitsSourcePrefixes(t *testing.T) {
 		t.Fatalf("ParseActionLineWithIcons(%q) = %#v, %v, want full session name", line, item, ok)
 	}
 
-	agent := Item{Kind: KindAgent, AgentName: "pi", AgentState: AgentWorking, Location: "work:2.1", Path: "~/Projects/x"}
+	agent := Item{
+		Kind:       KindAgent,
+		AgentName:  "pi",
+		AgentState: AgentWorking,
+		Location:   "work:2.1",
+		Path:       "~/Projects/x",
+	}
 	line = FormatLineWithIcons(agent, icons)
 	if !strings.HasPrefix(line, "[working]\tpi\twork:2.1") {
 		t.Fatalf("no-icons agent line = %q, want state label without source prefix", line)

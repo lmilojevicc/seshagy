@@ -77,7 +77,9 @@ func ensureNestedCommandHook(hooks map[string]any, event, command string, matche
 		}
 	}
 	entry := map[string]any{
-		"hooks": []any{map[string]any{"type": "command", "command": command, "timeout": float64(10)}},
+		"hooks": []any{
+			map[string]any{"type": "command", "command": command, "timeout": float64(10)},
+		},
 	}
 	if matcher != "" {
 		entry["matcher"] = matcher
@@ -97,7 +99,8 @@ func ensureDirectCommandHook(hooks map[string]any, event, command string) error 
 		if !ok {
 			continue
 		}
-		if entryObject["type"] == "command" && (entryObject["bash"] == command || entryObject["command"] == command) {
+		if entryObject["type"] == "command" &&
+			(entryObject["bash"] == command || entryObject["command"] == command) {
 			entryObject["bash"] = command
 			entryObject["timeoutSec"] = float64(10)
 			delete(entryObject, "command")
@@ -106,7 +109,10 @@ func ensureDirectCommandHook(hooks map[string]any, event, command string) error 
 			return nil
 		}
 	}
-	entries = append(entries, map[string]any{"type": "command", "bash": command, "timeoutSec": float64(10)})
+	entries = append(
+		entries,
+		map[string]any{"type": "command", "bash": command, "timeoutSec": float64(10)},
+	)
 	hooks[event] = entries
 	return nil
 }

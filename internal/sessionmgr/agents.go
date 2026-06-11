@@ -2,6 +2,7 @@ package sessionmgr
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -22,14 +23,20 @@ const agentFormat = "#{pane_id}" + paneSep + "#{session_name}" + paneSep + "#{wi
 func ListAgents(ctx context.Context, sessionFilter string) ([]Item, error) {
 	out, err := tmuxCommand(ctx, "list-panes", "-a", "-F", agentFormat).Output()
 	if err != nil {
-		if ee, ok := err.(*exec.ExitError); ok && ee.ExitCode() == 1 {
+		var ee *exec.ExitError
+		if errors.As(err, &ee) && ee.ExitCode() == 1 {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("tmux list-panes: %w", err)
 	}
 	items := ParseAgents(out, sessionFilter)
 	for i := range items {
-		state, err := UpdateAgentStatusTracking(ctx, items[i].PaneID, items[i].AgentState, items[i].Visible)
+		state, err := UpdateAgentStatusTracking(
+			ctx,
+			items[i].PaneID,
+			items[i].AgentState,
+			items[i].Visible,
+		)
 		if err == nil {
 			items[i].AgentState = state
 		}
@@ -98,7 +105,14 @@ func NormalizeAgentState(state string) AgentState {
 	switch strings.ToLower(strings.TrimSpace(state)) {
 	case "working", "busy", "running", "thinking", "processing":
 		return AgentWorking
-	case "blocked", "permission", "permissions", "question", "confirm", "confirmation", "waiting", "wait":
+	case "blocked",
+		"permission",
+		"permissions",
+		"question",
+		"confirm",
+		"confirmation",
+		"waiting",
+		"wait":
 		return AgentBlocked
 	case "aborted", "abort", "cancelled", "canceled", "interrupted", "stopped":
 		return AgentAborted
@@ -125,7 +139,12 @@ func agentStateLabel(state AgentState) string {
 	return string(state)
 }
 
-func UpdateAgentStatusTracking(ctx context.Context, pane string, detected AgentState, visible bool) (AgentState, error) {
+func UpdateAgentStatusTracking(
+	ctx context.Context,
+	pane string,
+	detected AgentState,
+	visible bool,
+) (AgentState, error) {
 	if pane == "" {
 		return detected, nil
 	}
@@ -134,7 +153,7 @@ func UpdateAgentStatusTracking(ctx context.Context, pane string, detected AgentS
 	previousStatusRaw, _ := showPaneOption(ctx, pane, "@agent_last_status")
 	previousState := semanticAgentState(NormalizeAgentState(previousRaw))
 	previousStatus := NormalizeAgentState(previousStatusRaw)
-	status := detected
+	var status AgentState
 	switch detected {
 	case AgentDone:
 		if visible {
@@ -262,7 +281,15 @@ func reportAgentLocked(ctx context.Context, pane string, opts AgentReport) error
 	if !agentSeqStillCurrent(ctx, pane, opts.Seq, opts.SeqSeen) {
 		return nil
 	}
-	if opts.SeqSeen && !setAgentPaneOptionIfCurrent(ctx, pane, "@agent_seq", strconv.FormatInt(opts.Seq, 10), opts.Seq, opts.SeqSeen) {
+	if opts.SeqSeen &&
+		!setAgentPaneOptionIfCurrent(
+			ctx,
+			pane,
+			"@agent_seq",
+			strconv.FormatInt(opts.Seq, 10),
+			opts.Seq,
+			opts.SeqSeen,
+		) {
 		return nil
 	}
 	if !agentSeqStillCurrent(ctx, pane, opts.Seq, opts.SeqSeen) {
@@ -277,7 +304,14 @@ func reportAgentLocked(ctx context.Context, pane string, opts AgentReport) error
 	if !setAgentPaneOptionIfCurrent(ctx, pane, "@agent_name", name, opts.Seq, opts.SeqSeen) {
 		return nil
 	}
-	if !setAgentPaneOptionIfCurrent(ctx, pane, "@agent_state", string(semanticAgentState(state)), opts.Seq, opts.SeqSeen) {
+	if !setAgentPaneOptionIfCurrent(
+		ctx,
+		pane,
+		"@agent_state",
+		string(semanticAgentState(state)),
+		opts.Seq,
+		opts.SeqSeen,
+	) {
 		return nil
 	}
 	if !setAgentPaneOptionIfCurrent(ctx, pane, "@agent_updated", updated, opts.Seq, opts.SeqSeen) {
@@ -285,7 +319,14 @@ func reportAgentLocked(ctx context.Context, pane string, opts AgentReport) error
 	}
 	if opts.MessageSeen {
 		if opts.Message != "" {
-			if !setAgentPaneOptionIfCurrent(ctx, pane, "@agent_message", cleanField(opts.Message), opts.Seq, opts.SeqSeen) {
+			if !setAgentPaneOptionIfCurrent(
+				ctx,
+				pane,
+				"@agent_message",
+				cleanField(opts.Message),
+				opts.Seq,
+				opts.SeqSeen,
+			) {
 				return nil
 			}
 		} else if !unsetAgentPaneOptionIfCurrent(ctx, pane, "@agent_message", opts.Seq, opts.SeqSeen) {
@@ -294,7 +335,14 @@ func reportAgentLocked(ctx context.Context, pane string, opts AgentReport) error
 	}
 	if opts.SourceSeen {
 		if opts.Source != "" {
-			if !setAgentPaneOptionIfCurrent(ctx, pane, "@agent_source", cleanField(opts.Source), opts.Seq, opts.SeqSeen) {
+			if !setAgentPaneOptionIfCurrent(
+				ctx,
+				pane,
+				"@agent_source",
+				cleanField(opts.Source),
+				opts.Seq,
+				opts.SeqSeen,
+			) {
 				return nil
 			}
 		} else if !unsetAgentPaneOptionIfCurrent(ctx, pane, "@agent_source", opts.Seq, opts.SeqSeen) {
@@ -303,7 +351,14 @@ func reportAgentLocked(ctx context.Context, pane string, opts AgentReport) error
 	}
 	if opts.SessionIDSeen {
 		if opts.SessionID != "" {
-			if !setAgentPaneOptionIfCurrent(ctx, pane, "@agent_session_id", cleanField(opts.SessionID), opts.Seq, opts.SeqSeen) {
+			if !setAgentPaneOptionIfCurrent(
+				ctx,
+				pane,
+				"@agent_session_id",
+				cleanField(opts.SessionID),
+				opts.Seq,
+				opts.SeqSeen,
+			) {
 				return nil
 			}
 		} else if !unsetAgentPaneOptionIfCurrent(ctx, pane, "@agent_session_id", opts.Seq, opts.SeqSeen) {
@@ -364,7 +419,15 @@ func releaseAgentLocked(ctx context.Context, resolved string, opts AgentRelease)
 	if !agentSeqStillCurrent(ctx, resolved, opts.Seq, opts.SeqSeen) {
 		return nil
 	}
-	if opts.SeqSeen && !setAgentPaneOptionIfCurrent(ctx, resolved, "@agent_seq", strconv.FormatInt(opts.Seq, 10), opts.Seq, true) {
+	if opts.SeqSeen &&
+		!setAgentPaneOptionIfCurrent(
+			ctx,
+			resolved,
+			"@agent_seq",
+			strconv.FormatInt(opts.Seq, 10),
+			opts.Seq,
+			true,
+		) {
 		return nil
 	}
 	for _, opt := range agentPaneOptions() {
@@ -388,7 +451,7 @@ func withAgentPaneLock(pane string, fn func() error) error {
 	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX); err != nil {
 		return err
 	}
-	defer syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
+	defer func() { _ = syscall.Flock(int(file.Fd()), syscall.LOCK_UN) }()
 	return fn()
 }
 
@@ -402,7 +465,18 @@ func agentLockPath(pane string) string {
 }
 
 func agentPaneOptions() []string {
-	return []string{"@agent_name", "@agent_state", "@agent_message", "@agent_updated", "@agent_source", "@agent_session_id", "@agent_seq", "@agent_last_state", "@agent_last_status", "@agent_last_seen"}
+	return []string{
+		"@agent_name",
+		"@agent_state",
+		"@agent_message",
+		"@agent_updated",
+		"@agent_source",
+		"@agent_session_id",
+		"@agent_seq",
+		"@agent_last_state",
+		"@agent_last_status",
+		"@agent_last_seen",
+	}
 }
 
 func agentSeqStillCurrent(ctx context.Context, pane string, seq int64, seqSeen bool) bool {
@@ -413,7 +487,12 @@ func agentSeqStillCurrent(ctx context.Context, pane string, seq int64, seqSeen b
 	return shouldApplyAgentSeq(existingSeq, seq, true)
 }
 
-func setAgentPaneOptionIfCurrent(ctx context.Context, pane, opt, value string, seq int64, seqSeen bool) bool {
+func setAgentPaneOptionIfCurrent(
+	ctx context.Context,
+	pane, opt, value string,
+	seq int64,
+	seqSeen bool,
+) bool {
 	if !agentSeqStillCurrent(ctx, pane, seq, seqSeen) {
 		return false
 	}
@@ -421,7 +500,12 @@ func setAgentPaneOptionIfCurrent(ctx context.Context, pane, opt, value string, s
 	return true
 }
 
-func unsetAgentPaneOptionIfCurrent(ctx context.Context, pane, opt string, seq int64, seqSeen bool) bool {
+func unsetAgentPaneOptionIfCurrent(
+	ctx context.Context,
+	pane, opt string,
+	seq int64,
+	seqSeen bool,
+) bool {
 	if !agentSeqStillCurrent(ctx, pane, seq, seqSeen) {
 		return false
 	}
