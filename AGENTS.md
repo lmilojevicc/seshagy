@@ -2,64 +2,36 @@
 
 ## Project Structure & Module Organization
 
-This is a Go CLI/TUI project for `seshagy`, an agent-aware tmux dashboard. The command entry point lives in `cmd/seshagy/`. Core behavior is split under `internal/`: `config` handles TOML config loading and defaults, `sessionmgr` handles tmux sessions, directories, and agent pane metadata, `integrations` manages agent hook installs, and `tui` contains Bubble Tea UI state and rendering. Tests sit beside the code as `*_test.go` files. Root files include `go.mod`, `go.sum`, `Makefile`, and `README.md`.
+This is a Go CLI/TUI project for `seshagy`, an agent-aware tmux dashboard. The command entry point is `cmd/seshagy/`. Core packages live under `internal/`: `config` for TOML config, `sessionmgr` for tmux sessions and agent pane metadata, `integrations` for hook installs, and `tui` for Bubble Tea UI state/rendering. Tests sit beside code as `*_test.go` files.
 
 ## Build, Test, and Development Commands
 
-- `mise run verify`: runs the local CI gate (`fmt:check`, `lint`, `vet`, `test`, `build`).
+- `mise run verify`: runs CI checks (`fmt:check`, `lint`, `vet`, `test`, `build`).
+- `mise run fmt`: formats Go and YAML files using the configured formatters.
 - `mise run vuln`: runs `govulncheck ./...`; GitHub CI runs this as a separate gate.
 - `mise run release:check`: validates `.goreleaser.yml` without publishing.
-- `mise run release:snapshot`: builds local release artifacts under `dist/` without publishing.
 - `make build`: builds the local `./seshagy` binary from `./cmd/seshagy`.
-- `make test`: runs `go test ./...` across all packages.
-- `make vet`: runs `go vet ./...` for static checks.
-- `make install`: installs the command with `go install ./cmd/seshagy`.
 - `go run ./cmd/seshagy`: runs the TUI from the checkout.
 
-Go 1.26 is declared in `go.mod`. Runtime behavior expects `tmux`; optional integrations use tools such as `zoxide`, `fd`, `yazi`, and `eza`.
+Go 1.26 is in `go.mod`. Runtime behavior expects `tmux`; optional tools include `zoxide`, `fd`, `yazi`, and `eza`.
 
 ## Coding Style & Naming Conventions
 
-Use standard Go formatting: run `gofmt` on changed `.go` files and keep imports organized by `go fmt`/`goimports` conventions. Prefer small package-local helpers and clear domain names matching the existing vocabulary: sessions, panes, agents, integrations, sources, and launch state. Export identifiers only when they are used across packages or are part of the command-facing model.
+Use `mise run fmt` before submitting changes. Formatting uses `golangci-lint fmt`, `gofumpt`, `goimports`, `gci`, `golines`, and `yamlfmt`. Prefer small package-local helpers and existing domain terms: sessions, panes, agents, integrations, sources, and launch state. Export identifiers only when used across packages or by command-facing code.
 
 ## Testing Guidelines
 
-Add focused table-driven tests near the package being changed. Use names like `TestParseAgentsSkipsNonAgentsAndFormatsLocation` that describe the behavior, not the implementation. `make test` is the default check before submitting. Some `sessionmgr` tests create temporary tmux sessions and skip when `tmux` is unavailable; keep external-tool-dependent tests isolated and skippable.
+Add focused table-driven tests near the package being changed. Use names like `TestParseAgentsSkipsNonAgentsAndFormatsLocation` that describe behavior. `mise run verify` is the default check; use `mise run test:focused ./internal/sessionmgr ParseAgents` for narrow loops. Some `sessionmgr` tests create temporary tmux sessions and skip when `tmux` is unavailable.
 
 ## Commit & Pull Request Guidelines
 
-Recent history uses concise, imperative commit subjects, for example `Update README` and `Harden lifecycle agent integrations`. Follow that style: capitalize the subject, avoid trailing punctuation, and keep it focused on one change.
+Recent history uses concise, imperative commit subjects, for example `Update README` and `Harden lifecycle agent integrations`. Capitalize the subject, avoid trailing punctuation, and keep it focused on one change.
 
-Pull requests should include a short problem/solution summary, test results such as `make test` and `make vet`, and screenshots or terminal captures for visible TUI changes. Link related issues when available and call out any config, tmux, or integration behavior changes.
+Pull requests should include a short problem/solution summary, `mise run verify` results, and screenshots or terminal captures for visible TUI changes. Call out any config, tmux, or integration behavior changes.
 
 ## CI/CD and Release Workflow
 
-CI mirrors the `dotty` setup: GitHub Actions runs `fmt:check`, `lint`, `vet`, `test`, `vuln`, and `build` through pinned `mise` tools. Release automation is tag-driven: pushing a `v*` tag runs GoReleaser and publishes Linux/macOS `amd64`/`arm64` archives plus checksums to GitHub Releases.
-
-Repository protection is configured with GitHub repository rulesets, not classic branch protection:
-
-- `Protect main` applies to `refs/heads/main`.
-- Main requires pull requests, one approving review, code-owner review, stale review dismissal on push, resolved review threads, the `verify` status check, up-to-date branches, linear history, no deletions, and no non-fast-forward updates.
-- Release tags are protected by `Protect release tags` on `refs/tags/v*`, requiring admin bypass for tag creation/deletion/non-fast-forward updates.
-- Repository merge settings disable merge commits, allow squash/rebase merges, and delete branches on merge.
-
-Before creating a release tag:
-
-```sh
-mise run verify
-mise run vuln
-mise run release:check
-```
-
-For the first release:
-
-```sh
-git tag v0.1.0
-git push origin main
-git push origin v0.1.0
-```
-
-Do not tag before the working tree is clean and the checks above pass.
+GitHub Actions runs formatting, linting, vet, tests, vulnerability checks, and build through pinned `mise` tools. Releases are tag-driven: after `mise run verify`, `mise run vuln`, and `mise run release:check` pass on a clean tree, push a `v*` tag to run GoReleaser.
 
 ## Agent-Specific Instructions
 
