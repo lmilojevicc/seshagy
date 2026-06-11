@@ -36,6 +36,13 @@ Pull requests should include a short problem/solution summary, test results such
 
 CI mirrors the `dotty` setup: GitHub Actions runs `fmt:check`, `lint`, `vet`, `test`, `vuln`, and `build` through pinned `mise` tools. Release automation is tag-driven: pushing a `v*` tag runs GoReleaser and publishes Linux/macOS `amd64`/`arm64` archives plus checksums to GitHub Releases.
 
+Repository protection is configured with GitHub repository rulesets, not classic branch protection:
+
+- `Protect main` applies to `refs/heads/main`.
+- Main requires pull requests, one approving review, code-owner review, stale review dismissal on push, resolved review threads, the `verify` status check, up-to-date branches, linear history, no deletions, and no non-fast-forward updates.
+- Release tags are protected by `Protect release tags` on `refs/tags/v*`, requiring admin bypass for tag creation/deletion/non-fast-forward updates.
+- Repository merge settings disable merge commits, allow squash/rebase merges, and delete branches on merge.
+
 Before creating a release tag:
 
 ```sh
