@@ -537,12 +537,14 @@ func (m Model) renderFooter() string {
 				)
 			}
 			helpParts = append(helpParts,
+				s.key.Render("g")+" agents",
+				s.key.Render("o")+" current agents",
+				s.key.Render("m")+" mode",
 				s.key.Render("r")+" refresh",
 				s.key.Render("R")+" rename",
 				s.key.Render("x")+" kill",
 				s.key.Render("y")+" yazi",
 				s.key.Render("i")+" hooks",
-				s.key.Render("m")+" mode",
 				s.key.Render("p")+" preview",
 			)
 			help = strings.Join(helpParts, s.muted.Render(" · "))

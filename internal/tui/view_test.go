@@ -808,12 +808,17 @@ func TestFooterKeepsStatusOnOneLine(t *testing.T) {
 	}
 }
 
-func TestFooterHelpShowsModeKey(t *testing.T) {
+func TestFooterHelpShowsSourceAndModeKeys(t *testing.T) {
 	m := newTestModel(t)
 	m.width = 120
 	out := sessionmgr.StripANSI(m.renderFooter())
 	if !strings.Contains(out, "m mode") {
 		t.Fatalf("footer should mention mode key\n%s", out)
+	}
+	for _, want := range []string{"g agents", "o current agents"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("footer should mention source key %q\n%s", want, out)
+		}
 	}
 
 	m.config.TypeFirst.Enabled = true
@@ -821,6 +826,14 @@ func TestFooterHelpShowsModeKey(t *testing.T) {
 	out = sessionmgr.StripANSI(m.renderFooter())
 	if !strings.Contains(out, "ctrl+x m mode") {
 		t.Fatalf("type-first footer should mention prefixed mode key\n%s", out)
+	}
+
+	m.prefixArmed = true
+	out = sessionmgr.StripANSI(m.renderFooter())
+	for _, want := range []string{"g agents", "o current agents", "m mode"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("prefix-armed footer should mention %q\n%s", want, out)
+		}
 	}
 }
 
