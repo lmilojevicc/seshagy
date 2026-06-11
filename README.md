@@ -1,154 +1,221 @@
 # seshagy
 
-`seshagy` is a minimal Go tmux session manager. It ports the useful behavior from
-`~/dotfiles/scripts/tmux-session-manager` into a small Bubble Tea TUI with a
-ccmux-inspired layout: a top tab strip, a focused rounded session list, a details
-pane, a live preview pane, and a compact help/status bar.
+`seshagy` is an agent-aware tmux dashboard for jumping between project
+sessions, discovered directories, and coding-agent panes.
 
-## Features
+Run one command to get a keyboard-first view where you can:
 
-- List existing tmux sessions.
-- Discover project directories from `zoxide query -l` and a configurable fd command.
-- Create/switch to a tmux session from a selected directory using the same
-  basename-derived naming convention as the shell script (`foo.bar` -> `foo_bar`,
-  `.config` -> `dot_config`).
-- Attach to sessions when outside tmux; `switch-client` when already inside tmux.
-- Detect installed hook-capable coding agents and ask before installing
-  hooks/plugins for each one on the first TUI launch only. The prompt is
-  toggle-based, so every detected integration can be enabled or skipped
-  independently.
-- Use terminal-default foreground/background colors and ANSI palette accents so
-  the TUI follows the active terminal theme instead of forcing a fixed surface.
-- Configure source icons, icon colors, and whether to use Nerd Font icons,
-  plain ASCII labels (`S`, `Z`, `F`, `A`), or no source icons through the user
-  config file.
-- Optional type-first mode starts filtering as soon as you type; app actions are
-  then run by pressing a configurable prefix first (`ctrl+x` by default).
-- List agent panes only after hooks/plugins report `@agent_*` metadata. seshagy
-  does **not** infer agent state by inspecting foreground process names or pane
-  text.
-- Focus reported agent panes and preserve the `@agent_*` status tracking metadata used by
-  the original script.
-- Kill sessions or agent panes.
-- Rename sessions in-place.
-- Open `yazi`, then create/switch to a session from the directory it exits in;
-  yazi is blocked with an error when seshagy is running inside a tmux popup.
-- CLI compatibility helpers for scripting/fzf-style integrations:
-  `--get-*`, `--delete-item`, `--report-agent`, and `--release-agent`.
-- Herdr-style integration commands: `seshagy integration status`,
-  `seshagy integration install <target>`, and
-  `seshagy integration uninstall <target>`.
+- jump to existing tmux sessions,
+- create or switch sessions from directories found by `zoxide` and `fd`, and
+- see hook-reported AI coding agent panes, their current state, and where they
+  are running.
 
-## Install
+It is intentionally tmux-native. Agent state comes from tmux `@agent_*` pane
+metadata reported by hooks/plugins; seshagy does not scrape pane text or guess
+from process names.
+
+## Quick start
+
+Install from GitHub:
 
 ```sh
+go install github.com/lmilojevicc/seshagy/cmd/seshagy@latest
+```
+
+Or from a local checkout:
+
+```sh
+git clone https://github.com/lmilojevicc/seshagy.git
+cd seshagy
 go install ./cmd/seshagy
+# or: make install
 ```
 
-Or build a local binary:
+Open the dashboard:
 
 ```sh
-make build
-./seshagy
+seshagy
 ```
 
-Runtime tools:
+Typical first run:
 
-- Required for session operations: `tmux`
-- Optional directory sources: `zoxide`, `fd`
-- Optional directory picker: `yazi`
-- Optional richer directory previews: `eza`
+1. Start tmux or run `seshagy` from inside an existing tmux client.
+2. Press `z` or `f` to browse project directories from `zoxide` or `fd`.
+3. Press `enter` on a directory to create/switch to a tmux session for it.
+4. Press `g` to view tracked agent panes, then `enter` to focus one.
+5. Press `i` if you want to install detected agent hook integrations later.
+
+First launch asks about detected missing integrations. After that prompt is
+recorded, use `i` in the TUI or `seshagy integration install <target>` manually.
+The prompt is toggle-based, so each detected integration can be enabled or
+skipped independently.
+
+## Requirements
+
+Required:
+
+- `tmux`
+
+Optional, but useful:
+
+- `zoxide` for frecency-ranked directory history
+- `fd` for filesystem directory discovery
+- `yazi` for choosing a directory interactively
+- `eza` for richer directory previews
+
+Builds from source require Go 1.26, matching `go.mod`. Shell hook integrations
+may use `bash`, `python3`, or `date` depending on the agent integration context.
+
+## What seshagy manages
+
+| Area | What you can do |
+| --- | --- |
+| tmux sessions | list, attach outside tmux, switch-client inside tmux, rename, kill, and preview sessions |
+| project directories | create/switch tmux sessions from `zoxide` or a configurable `fd` command |
+| agent panes | list, filter, focus, or kill panes that reported `@agent_*` metadata |
+| current session agents | narrow the agent view to the current tmux session |
+| input flow | use classic action keys or type-first filtering with a prefix key |
+
+When a directory becomes a session, the session name is derived from the
+basename: `.config` becomes `dot_config`, and unsupported characters collapse to
+`_` (`foo.bar` becomes `foo_bar`).
+
+## Agent tracking
+
+seshagy tracks only agents that report metadata through supported hooks/plugins.
+That keeps the model predictable: if an agent pane appears, something explicitly
+reported it to tmux.
+
+Supported integration targets:
+
+| Target | Label | Tracking behavior |
+| --- | --- | --- |
+| `pi` | Pi | lifecycle state |
+| `opencode` | OpenCode | lifecycle state |
+| `claude` | Claude Code | presence, optional session id, state `unknown` |
+| `codex` | Codex | presence, optional session id, state `unknown` |
+| `copilot` | GitHub Copilot CLI | presence, optional session id, state `unknown` |
+| `droid` | Factory Droid | presence, optional session id, state `unknown` |
+| `qodercli` | Qoder CLI | presence, optional session id, state `unknown` |
+| `cursor` | Cursor Agent | presence, optional session id, state `unknown` |
+
+Cursor Agent detection requires the `cursor-agent` command so the generic
+Cursor editor CLI is not treated as a hook-capable agent.
+
+States normalize to:
+
+```text
+working  blocked  aborted  done  idle  unknown
+```
+
+Check and install integrations:
+
+```sh
+seshagy integration status
+seshagy integration install pi
+seshagy integration uninstall pi
+```
 
 ## TUI keys
 
 | Key | Action |
 | --- | --- |
-| `enter` | Attach/switch to a session, create/switch from a directory, or focus an agent pane |
-| `j/k`, arrows | Move selection |
-| `1`..`6` | Select the source at that position in `sources.order` |
-| `a` | All sources |
-| `t` | Sessions only |
-| `g` | Agent panes |
-| `o` | Agents in the current tmux session |
-| `z` | Zoxide directories |
+| `enter` | attach/switch to a session, create/switch from a directory, or focus an agent pane |
+| `j`/`k`, arrows | move selection |
+| `1`..`6` | select source by configured order |
+| `a` | all sources |
+| `t` | tmux sessions |
+| `g` | all tracked agents |
+| `o` | tracked agents in the current tmux session |
+| `z` | zoxide directories |
 | `f` | fd directories |
-| `s` | Cycle agent state filter in agent panes |
-| `S` | Clear agent state filter in agent panes |
-| `/` | Filter visible rows |
-| `backspace` | Clear filter when not editing |
-| `r` | Refresh |
-| `R` | Rename selected session |
-| `x` | Kill selected session or agent pane |
-| `y` | Open yazi and create/switch from its exit directory |
-| `i` | Open the hook integration installation prompt manually |
-| `m` | Change classic/type-first input mode |
-| `p` | Toggle preview pane |
-| `?`/`h` | Toggle compact help |
-| `q`/`esc`/`ctrl-c` | Quit |
+| `s` / `S` | cycle / clear agent state filter |
+| `/` | filter visible rows |
+| `backspace` | clear filter when not editing |
+| `r` | refresh |
+| `R` | rename selected session |
+| `x` | kill selected session or agent pane |
+| `y` | open `yazi`, then create/switch from its exit directory |
+| `i` | open integration installer prompt |
+| `m` | change classic/type-first input mode |
+| `p` | toggle preview pane |
+| `?` / `h` | toggle help |
+| `q` / `esc` / `ctrl-c` | quit |
 
-When type-first mode is enabled, normal typing edits the filter immediately.
-Press the configured action prefix first (`ctrl+x` by default) before most
-action keys, for example `ctrl+x` then `g` to open the Agents pane, or
-`ctrl+x` then `m` to change input mode. `enter` and arrow/page/home/end
-navigation keys never require the prefix.
-`backspace` edits the filter and `esc` clears it.
+In type-first mode, typing edits the filter immediately. Most action keys then
+require the configured prefix first (`ctrl+x` by default). `enter` and movement
+keys stay unprefixed.
 
 ## CLI helpers
+
+The TUI is the main interface. The CLI helpers are useful for scripts, fzf-style
+menus, and agent hooks.
 
 ```sh
 seshagy --get-all
 seshagy --get-sessions
 seshagy --get-agents
 seshagy --get-current-session-agents
+seshagy --get-session-agents        # alias
 seshagy --get-zoxide
 seshagy --get-fd
 seshagy --delete-item '<rendered line from --get-all>'
+```
+
+Agent metadata helpers:
+
+```sh
+seshagy --report-agent \
+  --pane %1 \
+  --agent pi \
+  --state working \
+  --message 'running tests' \
+  --source hook \
+  --session-id native-123 \
+  --seq 42
+
+seshagy --release-agent --pane %1 --source hook --seq 43
+```
+
+`--seq` is a monotonic ordering token used by hooks to avoid older updates
+winning over newer state. `--session-id` stores native agent session identity
+when the integration has one.
+
+Other commands:
+
+```sh
 seshagy integration status
-seshagy integration install pi
-seshagy integration uninstall pi
+seshagy integration install <target>
+seshagy integration uninstall <target>
+
+seshagy config path
+seshagy config show
+seshagy config init [--force]
+```
+
+## Configuration
+
+Config is TOML at:
+
+```text
+$XDG_CONFIG_HOME/seshagy/config.toml
+```
+
+If `XDG_CONFIG_HOME` is unset, seshagy uses:
+
+```text
+~/.config/seshagy/config.toml
+```
+
+Inspect or create it with:
+
+```sh
 seshagy config path
 seshagy config show
 seshagy config init
 ```
 
-Agent metadata helpers are what installed hooks/plugins call. They mirror the
-shell script's `@agent_*` tmux metadata behavior:
-
-```sh
-seshagy --report-agent --pane %1 --agent pi --state working --message 'running tests' --source hook --session-id native-123 --seq 42
-seshagy --release-agent --pane %1 --source hook --seq 43
-```
-
-Recognized states are normalized to `working`, `blocked`, `aborted`, `done`,
-`idle`, or `unknown`. Hooks may pass `--session-id` to store native agent session
-identity in `@agent_session_id`, and `--seq` to prevent older hook reports or
-releases from overwriting newer state. Hooks without `--seq` still apply for
-backward compatibility.
-
-Supported hook/plugin targets are `pi`, `claude`, `codex`, `copilot`, `droid`,
-`opencode`, `qodercli`, and `cursor`. Pi and OpenCode integrations report
-lifecycle state directly. Claude, Codex, Copilot, Droid, Qoder CLI, and Cursor
-hooks are Herdr-style session/presence integrations: they install only a
-session-start hook, report `unknown` plus native `--session-id` when the hook
-payload provides one, and do not claim lifecycle state authority from incomplete
-agent hook events. On the first TUI launch, seshagy scans for these agents by
-command or config directory and asks before installing any missing integration;
-Cursor Agent is the exception and requires the `cursor-agent` command so the
-generic Cursor editor CLI is not mistaken for the hook-capable agent CLI.
-That first-launch prompt is recorded under the user's XDG state directory and is
-not shown again automatically. After that, use `i` in the TUI or `seshagy
-integration install <target>` to install integrations manually. Space toggles
-each detected agent; Enter installs the selected hooks/plugins; `s` or Esc
-skips.
-
-## Configuration
-
-The config file is TOML at `$XDG_CONFIG_HOME/seshagy/config.toml`, falling back
-to `~/.config/seshagy/config.toml` when `XDG_CONFIG_HOME` is unset. Use
-`seshagy config path` to print the exact path, `seshagy config show` to print the
-effective config, and `seshagy config init` to write the default file.
-
-Default config:
+Common settings:
 
 ```toml
 [sources]
@@ -158,83 +225,39 @@ order = ["all", "sessions", "agents", "current-agents", "zoxide", "fd"]
 [directories]
 fd_command = 'fd -H -a -d 2 -t d -E .Trash . "$HOME"'
 
-[theme.colors]
-focused_border = "13"
-active_tab = "default"
-border = "8"
-inactive_tab = "8"
-title = "12"
-accent = "13"
-key = "11"
-muted = "8"
-success = "10"
-info = "14"
-warning = "11"
-danger = "9"
-
 [icons]
-mode = "icons"
-
-[icons.session]
-icon = " "
-label = "S"
-color = "10"
-
-[icons.zoxide]
-icon = "󰉖 "
-label = "Z"
-color = "14"
-
-[icons.fd]
-icon = "󰥩 "
-label = "F"
-color = "11"
-
-[icons.agent]
-icon = "  "
-label = "A"
-color = "13"
+mode = "icons" # "icons", "text", or "none"
 
 [type_first]
 enabled = false
 prefix = "ctrl+x"
-
-[setup]
-type_first_prompt_seen = false
 ```
 
-Set `sources.order` to change the tab order. Number keys follow that order, so
-the first source is `1`, the second is `2`, and so on. Source names are `all`,
-`sessions`, `agents`, `current-agents`, `zoxide`, and `fd`. Set
-`sources.default` to choose the source seshagy loads on startup.
+The config also controls theme colors and icon colors. The TUI uses terminal
+default foreground/background colors with ANSI accents, so changing your
+terminal theme usually rethemes seshagy without extra config.
 
-Set `directories.fd_command` to change which directories populate the fd source.
-The command should print one directory path per line.
+## Development
 
-Set `theme.colors.focused_border` to change the highlighted pane/prompt border,
-`theme.colors.active_tab` to change the currently selected source tab, and the
-other theme colors to tune unfocused borders, inactive tabs, titles, accent
-chips/markers, key hints, muted secondary text, and semantic success/info/
-warning/error states. Use `"default"` for the terminal default foreground.
+```sh
+make build   # go build -o seshagy ./cmd/seshagy
+make test    # go test ./...
+make vet     # go vet ./...
+make install # go install ./cmd/seshagy
+```
 
-Set `icons.mode` to `"text"` to render the configured plain labels instead of
-Nerd Font icons, or `"none"` for true no-icons mode. In no-icons mode, no source
-icons, session state glyphs, or text labels are shown; agent rows still use state
-labels such as `[working] pi`. Each `color` is a terminal color value understood
-by Lip Gloss/ANSI rendering: ANSI palette indexes such as `10`, bright SGR
-values such as `92`, or truecolor hex values such as `#a6e3a1`.
+Local binary build without make:
 
-On first TUI startup, seshagy asks whether to enable type-first mode and records
-the answer in this config file. After that, edit `type_first.enabled` or
-`type_first.prefix` manually to change the behavior.
+```sh
+go build -o seshagy ./cmd/seshagy
+./seshagy
+```
 
-## Theme behavior
+## Limits and expectations
 
-The dashboard intentionally avoids hard-coded app foreground/background colors.
-It renders on top of the terminal's default colors, uses reverse video for the
-selected row, and uses the terminal's ANSI accent palette for source icons,
-borders, status labels, and state markers. `theme.colors` accepts the same color
-syntax as icon colors: ANSI palette indexes such as `13`, bright SGR values such
-as `92`, truecolor hex values such as `#f5c2e7`, or `default` for the terminal
-default. Changing the terminal color scheme is therefore enough to retheme
-seshagy, while the theme config lets you override specific accents.
+- tmux is required for session and agent operations.
+- Agents appear only after a hook/plugin reports `@agent_*` metadata.
+- Presence-only integrations do not claim lifecycle state; they report
+  `unknown` plus optional native session ids when available.
+- Directory results depend on your `zoxide` database and configured `fd` command.
+- `yazi` directory picking is blocked when seshagy is running inside a tmux popup.
