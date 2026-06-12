@@ -18,7 +18,7 @@ const paneSep = "\x1f"
 
 var ansiRE = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 
-const agentFormat = "#{pane_id}" + paneSep + "#{session_name}" + paneSep + "#{window_index}" + paneSep + "#{pane_index}" + paneSep + "#{pane_current_path}" + paneSep + "#{pane_active}" + paneSep + "#{window_active}" + paneSep + "#{session_attached}" + paneSep + "#{pane_dead}" + paneSep + "#{@agent_name}" + paneSep + "#{@agent_state}" + paneSep + "#{@agent_message}" + paneSep + "#{@agent_updated}" + paneSep + "#{@agent_source}" + paneSep + "#{@agent_session_id}" + paneSep + "#{@agent_seq}"
+const agentFormat = "#{pane_id}" + paneSep + "#{session_name}" + paneSep + "#{window_index}" + paneSep + "#{pane_index}" + paneSep + "#{pane_current_path}" + paneSep + "#{pane_active}" + paneSep + "#{window_active}" + paneSep + "#{session_attached}" + paneSep + "#{pane_dead}" + paneSep + "#{pane_current_command}" + paneSep + "#{pane_title}" + paneSep + "#{@agent_name}" + paneSep + "#{@agent_state}" + paneSep + "#{@agent_message}" + paneSep + "#{@agent_updated}" + paneSep + "#{@agent_source}" + paneSep + "#{@agent_session_id}" + paneSep + "#{@agent_seq}"
 
 func ListAgents(ctx context.Context, sessionFilter string) ([]Item, error) {
 	out, err := tmuxCommand(ctx, "list-panes", "-a", "-F", agentFormat).Output()
@@ -44,6 +44,119 @@ func ListAgents(ctx context.Context, sessionFilter string) ([]Item, error) {
 	return items, nil
 }
 
+func detectAgentName(command, title string) string {
+	command = filepath.Base(command)
+	command = strings.TrimSuffix(command, ".exe")
+	command = strings.TrimSuffix(command, ".cmd")
+	command = strings.TrimSuffix(command, ".bat")
+	command = strings.TrimSuffix(command, ".ps1")
+	command = strings.TrimSuffix(command, ".js")
+	commandLower := strings.ToLower(command)
+	titleLower := strings.ToLower(title)
+
+	// Match bash's is_shell_command: only actual interactive shells, not runtimes.
+	// This gates the π/pi title fallback — node/bun/python are NOT shells here.
+	isShell := func(name string) bool {
+		switch name {
+		case "sh", "bash", "zsh", "fish", "tmux":
+			return true
+		}
+		return false
+	}
+
+	// Match bash behavior: π title check is gated by !isShell, and comes before
+	// command-based matching. A pane running "node" with title "π - foo" IS detected
+	// as pi, but a pane running "zsh" with title "π - foo" is NOT.
+	if strings.HasPrefix(titleLower, "π") || strings.HasPrefix(titleLower, "pi ") {
+		if !isShell(commandLower) {
+			return "pi"
+		}
+	}
+
+	// isRuntime gates the other title fallbacks (claude, opencode, codex, etc.).
+	// Includes interpreters/runtimes that could appear as pane_current_command
+	// without being agents themselves.
+	isRuntime := func(name string) bool {
+		switch name {
+		case "sh", "bash", "zsh", "fish", "tmux",
+			"node", "bun", "python", "python3",
+			"cmd", "powershell", "pwsh":
+			return true
+		}
+		return false
+	}
+
+	switch commandLower {
+	case "pi":
+		return "pi"
+	case "claude", "claude-code":
+		return "claude"
+	case "opencode", "open-code":
+		return "opencode"
+	case "codex":
+		return "codex"
+	case "droid":
+		return "droid"
+	case "gemini":
+		return "gemini"
+	case "cursor", "cursor-agent":
+		return "cursor"
+	case "agy", "antigravity", "antigravity-cli":
+		return "agy"
+	case "cline":
+		return "cline"
+	case "copilot", "github-copilot", "ghcs":
+		return "copilot"
+	case "kimi", "kimi-code":
+		return "kimi"
+	case "kiro", "kiro-cli":
+		return "kiro"
+	case "amp", "amp-local":
+		return "amp"
+	case "grok", "grok-build":
+		return "grok"
+	case "hermes", "hermes-agent":
+		return "hermes"
+	case "kilo", "kilo-code":
+		return "kilo"
+	case "qodercli", "qoderclicn", "qoder", "qodercn":
+		return "qodercli"
+	}
+
+	// Wildcard matching for agents with variant binaries (e.g. codex-local, droid-agent).
+	if strings.HasPrefix(commandLower, "codex-") || strings.HasPrefix(commandLower, "codex_") {
+		return "codex"
+	}
+	if strings.HasPrefix(commandLower, "droid-") || strings.HasPrefix(commandLower, "droid_") {
+		return "droid"
+	}
+
+	if isRuntime(commandLower) {
+		return ""
+	}
+
+	if strings.Contains(titleLower, "claude code") {
+		return "claude"
+	}
+	if strings.Contains(titleLower, "opencode") {
+		return "opencode"
+	}
+	if strings.HasPrefix(titleLower, "codex") || strings.HasPrefix(titleLower, "codex -") {
+		return "codex"
+	}
+	if strings.HasPrefix(titleLower, "droid") || strings.HasPrefix(titleLower, "droid -") {
+		return "droid"
+	}
+	if strings.HasPrefix(titleLower, "gemini") || strings.HasPrefix(titleLower, "gemini -") {
+		return "gemini"
+	}
+	if strings.Contains(titleLower, "cursor") {
+		return "cursor"
+	}
+
+	return ""
+}
+
 func ParseAgents(raw []byte, sessionFilter string) []Item {
 	text := strings.TrimSpace(string(raw))
 	if text == "" {
@@ -52,7 +165,7 @@ func ParseAgents(raw []byte, sessionFilter string) []Item {
 	var items []Item
 	for _, line := range strings.Split(text, "\n") {
 		parts := strings.Split(line, paneSep)
-		if len(parts) < 14 {
+		if len(parts) < 18 {
 			continue
 		}
 		if parts[8] == "1" {
@@ -61,21 +174,23 @@ func ParseAgents(raw []byte, sessionFilter string) []Item {
 		if sessionFilter != "" && parts[1] != sessionFilter {
 			continue
 		}
-		name := parts[9]
+		name := parts[11]
 		if name == "" {
-			continue
+			command := cleanField(parts[9])
+			title := cleanField(parts[10])
+			name = detectAgentName(command, title)
+			if name == "" {
+				continue
+			}
 		}
-		state := NormalizeAgentState(parts[10])
-		message := cleanField(parts[11])
-		source := cleanField(parts[13])
-		sessionID := ""
-		seq := ""
-		if len(parts) > 14 {
-			sessionID = cleanField(parts[14])
+		state := NormalizeAgentState(parts[12])
+		message := cleanField(parts[13])
+		source := cleanField(parts[15])
+		if source == "" && parts[11] == "" {
+			source = "process"
 		}
-		if len(parts) > 15 {
-			seq = cleanField(parts[15])
-		}
+		sessionID := cleanField(parts[16])
+		seq := cleanField(parts[17])
 		path := ContractHome(parts[4])
 		location := fmt.Sprintf("%s:%s.%s", parts[1], parts[2], parts[3])
 		items = append(items, Item{
@@ -91,7 +206,7 @@ func ParseAgents(raw []byte, sessionFilter string) []Item {
 			AgentName:      name,
 			AgentState:     state,
 			AgentMessage:   message,
-			AgentUpdated:   cleanField(parts[12]),
+			AgentUpdated:   cleanField(parts[14]),
 			AgentSource:    source,
 			AgentSessionID: sessionID,
 			AgentSeq:       seq,
@@ -114,7 +229,10 @@ func NormalizeAgentState(state string) AgentState {
 		"waiting",
 		"wait":
 		return AgentBlocked
-	case "aborted", "abort", "cancelled", "canceled", "interrupted", "stopped":
+	case "aborted", "abort", "cancelled", "canceled", "interrupted", "stopped",
+		"error", "failed", "failure",
+		"timeout", "timed_out", "timed-out",
+		"disconnected", "offline":
 		return AgentAborted
 	case "done", "complete", "completed", "finished":
 		return AgentDone
@@ -161,17 +279,25 @@ func UpdateAgentStatusTracking(
 		} else {
 			status = AgentDone
 		}
+	case AgentAborted:
+		if visible {
+			status = AgentIdle
+		} else {
+			status = AgentAborted
+		}
 	case AgentIdle:
 		if visible {
 			status = AgentIdle
 		} else if previousStatus == AgentDone {
 			status = AgentDone
+		} else if previousStatus == AgentAborted {
+			status = AgentAborted
 		} else if previousState == AgentWorking || previousState == AgentBlocked {
 			status = AgentDone
 		} else {
 			status = AgentIdle
 		}
-	case AgentWorking, AgentBlocked, AgentAborted, AgentUnknown:
+	case AgentWorking, AgentBlocked, AgentUnknown:
 		status = detected
 	default:
 		status = AgentUnknown
@@ -187,11 +313,21 @@ func UpdateAgentStatusTracking(
 func MarkAgentSeen(ctx context.Context, pane string) {
 	stateRaw, _ := showPaneOption(ctx, pane, "@agent_state")
 	semantic := semanticAgentState(NormalizeAgentState(stateRaw))
-	if semantic == AgentIdle {
-		_ = setPaneOption(ctx, pane, "@agent_state", string(AgentIdle))
-		_ = setPaneOption(ctx, pane, "@agent_last_status", string(AgentIdle))
+	if semantic == AgentIdle || semantic == AgentAborted {
+		// Use seq-safe writes to avoid overwriting concurrent hook reports.
+		seqRaw, _ := showPaneOption(ctx, pane, "@agent_seq")
+		seq, err := strconv.ParseInt(strings.TrimSpace(seqRaw), 10, 64)
+		seqSeen := err == nil && seqRaw != ""
+		setAgentPaneOptionIfCurrent(ctx, pane, "@agent_state", string(AgentIdle), seq, seqSeen)
+		setAgentPaneOptionIfCurrent(
+			ctx,
+			pane,
+			"@agent_last_status",
+			string(AgentIdle),
+			seq,
+			seqSeen,
+		)
 	}
-	_ = setPaneOption(ctx, pane, "@agent_last_state", string(semantic))
 	_ = setPaneOption(ctx, pane, "@agent_last_seen", fmt.Sprintf("%d", time.Now().Unix()))
 }
 
@@ -205,7 +341,7 @@ tmux select-window -t "$window_id"
 tmux select-pane -t "$pane"
 tmux set-option -qpt "$pane" @agent_last_seen "$(date +%s)" 2>/dev/null || true
 state=$(tmux show-option -qvpt "$pane" @agent_state 2>/dev/null || true)
-case "${state}" in done|complete|completed|finished|idle|ready) tmux set-option -qpt "$pane" @agent_state idle 2>/dev/null || true; tmux set-option -qpt "$pane" @agent_last_status idle 2>/dev/null || true ;; esac
+case "${state}" in done|complete|completed|finished|idle|ready|aborted|cancelled|canceled|stopped|error|failed|timeout) tmux set-option -qpt "$pane" @agent_state idle 2>/dev/null || true; tmux set-option -qpt "$pane" @agent_last_status idle 2>/dev/null || true ;; esac
 if [ -n "${TMUX:-}" ]; then
   tmux switch-client -t "$session_id"
 else
@@ -281,8 +417,11 @@ func reportAgentLocked(ctx context.Context, pane string, opts AgentReport) error
 	if !agentSeqStillCurrent(ctx, pane, opts.Seq, opts.SeqSeen) {
 		return nil
 	}
-	if opts.SeqSeen &&
-		!setAgentPaneOptionIfCurrent(
+	// Write seq FIRST so concurrent reports with higher seq can't have
+	// their options overwritten by a lower-seq write that passed the
+	// pre-check but arrived after them.
+	if opts.SeqSeen {
+		if !setAgentPaneOptionIfCurrent(
 			ctx,
 			pane,
 			"@agent_seq",
@@ -290,79 +429,34 @@ func reportAgentLocked(ctx context.Context, pane string, opts AgentReport) error
 			opts.Seq,
 			opts.SeqSeen,
 		) {
-		return nil
-	}
-	if !agentSeqStillCurrent(ctx, pane, opts.Seq, opts.SeqSeen) {
-		return nil
+			return nil
+		}
 	}
 	visible := paneVisibleNow(ctx, pane)
 	_, _ = UpdateAgentStatusTracking(ctx, pane, state, visible)
-	if !agentSeqStillCurrent(ctx, pane, opts.Seq, opts.SeqSeen) {
-		return nil
-	}
 	updated := fmt.Sprintf("%d", time.Now().Unix())
-	if !setAgentPaneOptionIfCurrent(ctx, pane, "@agent_name", name, opts.Seq, opts.SeqSeen) {
-		return nil
-	}
-	if !setAgentPaneOptionIfCurrent(
-		ctx,
-		pane,
-		"@agent_state",
-		string(semanticAgentState(state)),
-		opts.Seq,
-		opts.SeqSeen,
-	) {
-		return nil
-	}
-	if !setAgentPaneOptionIfCurrent(ctx, pane, "@agent_updated", updated, opts.Seq, opts.SeqSeen) {
-		return nil
-	}
+	_ = setPaneOption(ctx, pane, "@agent_name", name)
+	_ = setPaneOption(ctx, pane, "@agent_state", string(semanticAgentState(state)))
+	_ = setPaneOption(ctx, pane, "@agent_updated", updated)
 	if opts.MessageSeen {
 		if opts.Message != "" {
-			if !setAgentPaneOptionIfCurrent(
-				ctx,
-				pane,
-				"@agent_message",
-				cleanField(opts.Message),
-				opts.Seq,
-				opts.SeqSeen,
-			) {
-				return nil
-			}
-		} else if !unsetAgentPaneOptionIfCurrent(ctx, pane, "@agent_message", opts.Seq, opts.SeqSeen) {
-			return nil
+			_ = setPaneOption(ctx, pane, "@agent_message", cleanField(opts.Message))
+		} else {
+			_ = unsetPaneOption(ctx, pane, "@agent_message")
 		}
 	}
 	if opts.SourceSeen {
 		if opts.Source != "" {
-			if !setAgentPaneOptionIfCurrent(
-				ctx,
-				pane,
-				"@agent_source",
-				cleanField(opts.Source),
-				opts.Seq,
-				opts.SeqSeen,
-			) {
-				return nil
-			}
-		} else if !unsetAgentPaneOptionIfCurrent(ctx, pane, "@agent_source", opts.Seq, opts.SeqSeen) {
-			return nil
+			_ = setPaneOption(ctx, pane, "@agent_source", cleanField(opts.Source))
+		} else {
+			_ = unsetPaneOption(ctx, pane, "@agent_source")
 		}
 	}
 	if opts.SessionIDSeen {
 		if opts.SessionID != "" {
-			if !setAgentPaneOptionIfCurrent(
-				ctx,
-				pane,
-				"@agent_session_id",
-				cleanField(opts.SessionID),
-				opts.Seq,
-				opts.SeqSeen,
-			) {
-				return nil
-			}
-		} else if !unsetAgentPaneOptionIfCurrent(ctx, pane, "@agent_session_id", opts.Seq, opts.SeqSeen) {
-			return nil
+			_ = setPaneOption(ctx, pane, "@agent_session_id", cleanField(opts.SessionID))
+		} else {
+			_ = unsetPaneOption(ctx, pane, "@agent_session_id")
 		}
 	}
 	return nil
@@ -419,8 +513,9 @@ func releaseAgentLocked(ctx context.Context, resolved string, opts AgentRelease)
 	if !agentSeqStillCurrent(ctx, resolved, opts.Seq, opts.SeqSeen) {
 		return nil
 	}
-	if opts.SeqSeen &&
-		!setAgentPaneOptionIfCurrent(
+	// Write seq first to claim the epoch with strict > comparison.
+	if opts.SeqSeen {
+		if !setAgentPaneOptionIfCurrent(
 			ctx,
 			resolved,
 			"@agent_seq",
@@ -428,15 +523,15 @@ func releaseAgentLocked(ctx context.Context, resolved string, opts AgentRelease)
 			opts.Seq,
 			true,
 		) {
-		return nil
+			return nil
+		}
 	}
+	// Clear metadata unconditionally — seq ownership was established above.
 	for _, opt := range agentPaneOptions() {
 		if opts.SeqSeen && opt == "@agent_seq" {
 			continue
 		}
-		if !unsetAgentPaneOptionIfCurrent(ctx, resolved, opt, opts.Seq, opts.SeqSeen) {
-			return nil
-		}
+		_ = unsetPaneOption(ctx, resolved, opt)
 	}
 	return nil
 }
@@ -500,19 +595,6 @@ func setAgentPaneOptionIfCurrent(
 	return true
 }
 
-func unsetAgentPaneOptionIfCurrent(
-	ctx context.Context,
-	pane, opt string,
-	seq int64,
-	seqSeen bool,
-) bool {
-	if !agentSeqStillCurrent(ctx, pane, seq, seqSeen) {
-		return false
-	}
-	_ = unsetPaneOption(ctx, pane, opt)
-	return true
-}
-
 func shouldApplyAgentSeq(existing string, incoming int64, incomingSeen bool) bool {
 	if !incomingSeen {
 		return true
@@ -525,7 +607,7 @@ func shouldApplyAgentSeq(existing string, incoming int64, incomingSeen bool) boo
 	if err != nil {
 		return true
 	}
-	return incoming >= existingSeq
+	return incoming > existingSeq
 }
 
 func showPaneOption(ctx context.Context, pane, opt string) (string, error) {

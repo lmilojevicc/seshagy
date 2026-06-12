@@ -66,6 +66,8 @@ func TestParseAgentsSkipsNonAgentsAndFormatsLocation(t *testing.T) {
 		"1",
 		"0",
 		"claude",
+		"",
+		"claude",
 		"busy",
 		"needs ok",
 		"123",
@@ -99,10 +101,14 @@ func TestParseAgentsToleratesLegacyFormatWithoutSessionMetadata(t *testing.T) {
 		"1",
 		"0",
 		"claude",
+		"",
+		"claude",
 		"busy",
 		"needs ok",
 		"123",
 		"hook",
+		"",
+		"",
 	}
 	raw := []byte(strings.Join(fields, paneSep) + "\n")
 	got := ParseAgents(raw, "")
@@ -186,7 +192,7 @@ func TestShouldApplyAgentSeq(t *testing.T) {
 			want:         true,
 		},
 		{name: "newer applies", existing: "41", incoming: 42, incomingSeen: true, want: true},
-		{name: "equal applies", existing: "42", incoming: 42, incomingSeen: true, want: true},
+		{name: "equal applies", existing: "42", incoming: 42, incomingSeen: true, want: false},
 		{name: "older ignored", existing: "43", incoming: 42, incomingSeen: true, want: false},
 	}
 	for _, tt := range tests {
@@ -548,5 +554,56 @@ func TestParseActionLineWithConfiguredIconsFallsBackToDefaults(t *testing.T) {
 	item, ok := ParseActionLineWithIcons(IconSession+" demo", icons)
 	if !ok || item.Kind != KindSession || item.Name != "demo" {
 		t.Fatalf("fallback parse = %#v, %v", item, ok)
+	}
+}
+
+func TestDetectAgentNameFromCommand(t *testing.T) {
+	tests := []struct{ command, want string }{
+		{"pi", "pi"},
+		{"claude", "claude"},
+		{"claude-code", "claude"},
+		{"codex", "codex"},
+		{"codex-local", "codex"},
+		{"codex-build", "codex"},
+		{"opencode", "opencode"},
+		{"gemini", "gemini"},
+		{"cursor", "cursor"},
+		{"cursor-agent", "cursor"},
+		{"agy", "agy"},
+		{"copilot", "copilot"},
+		{"ghcs", "copilot"},
+		{"kimi", "kimi"},
+		{"kiro", "kiro"},
+		{"droid", "droid"},
+		{"droid-agent", "droid"},
+		{"droid-build", "droid"},
+		{"grok", "grok"},
+		{"hermes", "hermes"},
+		{"hermes-agent", "hermes"},
+		{"kilo", "kilo"},
+		{"qodercli", "qodercli"},
+		{"bash", ""},
+		{"zsh", ""},
+		{"node", ""},
+		{"python3", ""},
+		{"vim", ""},
+	}
+	for _, tt := range tests {
+		got := detectAgentName(tt.command, "")
+		if got != tt.want {
+			t.Errorf("detectAgentName(%q, \"\") = %q, want %q", tt.command, got, tt.want)
+		}
+	}
+}
+
+func TestDetectAgentNameStripsExtensions(t *testing.T) {
+	if got := detectAgentName("opencode.exe", ""); got != "opencode" {
+		t.Errorf("got %q, want opencode", got)
+	}
+	if got := detectAgentName("codex.cmd", ""); got != "codex" {
+		t.Errorf("got %q, want codex", got)
+	}
+	if got := detectAgentName("pi.js", ""); got != "pi" {
+		t.Errorf("got %q, want pi", got)
 	}
 }
