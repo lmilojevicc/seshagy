@@ -192,20 +192,21 @@ func TestExplainAgentTitleInferenceStateSource(t *testing.T) {
 	}
 }
 
-func TestExplainAgentManifestFallbackSkippedForLifecycleAuthority(t *testing.T) {
+func TestExplainAgentManifestFallbackForLifecycleAgentWithSilentHooks(t *testing.T) {
 	const pane = "%7"
+	screen := "Some output above\nRun a dynamic workflow? (esc to cancel)\n"
 	fields := agentExplainFields(pane, map[int]string{
 		0:  pane,
 		12: "",
 	})
-	installExplainFakeTmux(t, pane, fields)
+	installExplainFakeTmuxWithCapture(t, pane, fields, screen)
 
 	out, err := ExplainAgent(context.Background(), pane, LoadOptions{ManifestFallback: true})
 	if err != nil {
 		t.Fatalf("ExplainAgent() error = %v", err)
 	}
-	if !strings.Contains(out, "manifest fallback: manifest skipped") {
-		t.Fatalf("expected manifest skipped for lifecycle authority in:\n%s", out)
+	if !strings.Contains(out, "manifest fallback: rule dynamic_workflow_prompt → blocked") {
+		t.Fatalf("expected manifest fallback match for lifecycle agent in:\n%s", out)
 	}
 }
 

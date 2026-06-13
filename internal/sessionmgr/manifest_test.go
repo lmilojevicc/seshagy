@@ -90,7 +90,7 @@ func TestShouldApplyManifestFallback(t *testing.T) {
 			state:  AgentUnknown,
 			agent:  "claude",
 			source: "seshagy:claude",
-			want:   false,
+			want:   true,
 		},
 		{
 			name:  "hook reported working",
@@ -133,13 +133,37 @@ func TestManifestExplainLineShowsMatchedRule(t *testing.T) {
 	t.Cleanup(func() { tmuxOutput = origOut })
 
 	got := manifestExplainLine(context.Background(), pane, "codex", "process", AgentUnknown)
-	if got != "manifest skipped" {
-		t.Fatalf("manifestExplainLine() = %q, want manifest skipped for lifecycle authority", got)
+	if got != "rule live_strong_blocker → blocked" {
+		t.Fatalf("manifestExplainLine() = %q, want matched rule for codex", got)
 	}
 
 	got = manifestExplainLine(context.Background(), pane, "gemini", "process", AgentUnknown)
 	if got != "manifest skipped" {
 		t.Fatalf("manifestExplainLine() = %q, want manifest skipped for unsupported manifest", got)
+	}
+}
+
+func TestApplyManifestFallbackForLifecycleAgentWithSilentHooks(t *testing.T) {
+	const pane = "%11"
+	screen := "Some output above\nRun a dynamic workflow? (esc to cancel)\n"
+	origOut := tmuxOutput
+	tmuxOutput = func(ctx context.Context, args ...string) ([]byte, error) {
+		if len(args) >= 4 && args[0] == "capture-pane" && args[3] == pane {
+			return []byte(screen), nil
+		}
+		return nil, nil
+	}
+	t.Cleanup(func() { tmuxOutput = origOut })
+
+	items := []Item{{
+		PaneID:      pane,
+		AgentName:   "claude",
+		AgentSource: "seshagy:claude",
+		AgentState:  AgentUnknown,
+	}}
+	applyManifestFallback(context.Background(), items)
+	if items[0].AgentState != AgentBlocked {
+		t.Fatalf("AgentState = %q, want %q", items[0].AgentState, AgentBlocked)
 	}
 }
 

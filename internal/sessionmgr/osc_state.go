@@ -51,26 +51,27 @@ func titleHasWorkingSpinner(title string) bool {
 	return false
 }
 
+func hookStateAllowsFallback(hookStateRaw string, state AgentState) bool {
+	hookStateRaw = strings.TrimSpace(hookStateRaw)
+	if hookStateRaw == "" || state == AgentUnknown {
+		return true
+	}
+	switch state {
+	case AgentWorking, AgentBlocked, AgentIdle:
+		return false
+	}
+	return false
+}
+
 func shouldSupplementStateFromTitle(
 	hookStateRaw string,
 	state AgentState,
 	agentName,
 	source string,
 ) bool {
-	hookStateRaw = strings.TrimSpace(hookStateRaw)
-	if HasLifecycleAuthority(agentName, source) {
-		if hookStateRaw != "" {
-			switch state {
-			case AgentWorking, AgentBlocked, AgentIdle:
-				return false
-			}
-		}
-		return false
-	}
-	if state != AgentUnknown && hookStateRaw != "" {
-		return false
-	}
-	return true
+	_ = agentName
+	_ = source
+	return hookStateAllowsFallback(hookStateRaw, state)
 }
 
 func resolveAgentState(hookStateRaw, agentName, source, title string) AgentState {

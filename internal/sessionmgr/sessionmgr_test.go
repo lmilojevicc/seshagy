@@ -335,7 +335,7 @@ func TestParseAgentsDoesNotOverrideLifecycleHookStateFromTitle(t *testing.T) {
 	}
 }
 
-func TestParseAgentsDoesNotInferTitleForLifecycleAgentWithSilentHooks(t *testing.T) {
+func TestParseAgentsInfersTitleForLifecycleAgentWithSilentHooks(t *testing.T) {
 	fields := []string{
 		"%3",
 		"work",
@@ -361,8 +361,8 @@ func TestParseAgentsDoesNotInferTitleForLifecycleAgentWithSilentHooks(t *testing
 	if len(got) != 1 {
 		t.Fatalf("len = %d, want 1", len(got))
 	}
-	if got[0].AgentState != AgentUnknown {
-		t.Fatalf("AgentState = %q, want %q", got[0].AgentState, AgentUnknown)
+	if got[0].AgentState != AgentWorking {
+		t.Fatalf("AgentState = %q, want %q", got[0].AgentState, AgentWorking)
 	}
 }
 

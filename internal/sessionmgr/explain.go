@@ -144,8 +144,6 @@ func buildAgentExplain(ctx context.Context, pane string, parts []string) agentEx
 			} else {
 				info.StateSource = "default (unknown)"
 			}
-		} else if HasLifecycleAuthority(name, info.AgentSource) {
-			info.StateSource = "default (unknown; lifecycle hook authority suppresses title inference)"
 		} else {
 			info.StateSource = "default (unknown)"
 		}

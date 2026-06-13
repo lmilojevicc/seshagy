@@ -272,10 +272,9 @@ func detectStateFromManifest(agentName, screen string) (manifestMatch, bool) {
 }
 
 func shouldApplyManifestFallback(state AgentState, agentName, source string) bool {
-	if state != AgentUnknown {
-		return false
-	}
-	return !HasLifecycleAuthority(agentName, source)
+	_ = agentName
+	_ = source
+	return state == AgentUnknown
 }
 
 func manifestExplainLine(

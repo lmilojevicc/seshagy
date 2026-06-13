@@ -131,11 +131,11 @@ When hooks are silent, session-only and process-detected agents can infer
 "Action Required") without scraping pane contents.
 
 Optional screen manifest fallback (`[agents] manifest_fallback = true` in
-`config.toml`) adds a conservative second pass for agents without lifecycle
-hook authority. When hook state is still `unknown`, seshagy captures the last
-20 pane lines and matches bundled per-agent TOML rules (Claude, Codex, and Grok
-to start). Hook-reported `working`, `blocked`, and `idle` are never overridden.
-Lifecycle-authority agents keep hook ownership even when hooks are silent.
+`config.toml`) adds a conservative second pass when hooks are silent and state
+is still `unknown`. Seshagy captures the last 20 pane lines and matches bundled
+per-agent TOML rules (Claude, Codex, and Grok to start). Hook-reported
+`working`, `blocked`, and `idle` are never overridden by title inference or
+manifest fallback.
 Bundled rules currently cover common blocked prompts and a few working signals;
 remote manifest fetch is not implemented yet.
 
