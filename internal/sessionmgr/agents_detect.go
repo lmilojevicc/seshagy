@@ -141,11 +141,19 @@ func agentNameFromWrappedCommand(command string) string {
 	}
 
 	for _, token := range tokens {
+		if !looksLikeAgentPath(token) {
+			continue
+		}
 		if name := agentNameFromPathToken(token); name != "" {
 			return name
 		}
 	}
 	return ""
+}
+
+func looksLikeAgentPath(token string) bool {
+	token = strings.Trim(token, `"'`)
+	return strings.Contains(token, "/") || strings.Contains(token, "\\")
 }
 
 func unwrapRuntimeArgv(runtime string, tokens []string) string {
@@ -213,6 +221,9 @@ func optionTakesValue(arg string) bool {
 func agentNameFromPathToken(token string) string {
 	token = strings.Trim(token, `"'`)
 	if token == "" || strings.HasPrefix(token, "-") {
+		return ""
+	}
+	if !looksLikeAgentPath(token) {
 		return ""
 	}
 	basename := normalizeAgentLookupName(filepath.Base(token))

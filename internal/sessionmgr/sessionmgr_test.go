@@ -737,6 +737,9 @@ func TestDetectAgentNameFromWrappedCommand(t *testing.T) {
 		{"/nix/store/hash/bin/grok-macos-aarc", "grok"},
 		{"node", ""},
 		{"python3", ""},
+		{"echo gemini", ""},
+		{"node gemini", ""},
+		{"python3 -m pip install gemini", ""},
 	}
 	for _, tt := range tests {
 		got := detectAgentName(tt.command, "")
