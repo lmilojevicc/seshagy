@@ -27,6 +27,8 @@ const (
 	TargetCursor   Target = "cursor"
 	TargetKimi     Target = "kimi"
 	TargetGrok     Target = "grok"
+	TargetKilo     Target = "kilo"
+	TargetHermes   Target = "hermes"
 )
 
 type StatusKind string
@@ -313,6 +315,26 @@ func specs() []spec {
 			func() string { return filepath.Join(grokDir(), "hooks", shellHookName) },
 			installGrok,
 			uninstallGrok,
+		},
+		{
+			TargetKilo,
+			"Kilo Code",
+			[]string{"kilo", "kilo-code"},
+			kiloDir,
+			func() string { return filepath.Join(kiloDir(), "plugin", kiloPluginName) },
+			installKilo,
+			uninstallKilo,
+		},
+		{
+			TargetHermes,
+			"Hermes Agent",
+			[]string{"hermes", "hermes-agent"},
+			hermesDir,
+			func() string {
+				return filepath.Join(hermesDir(), "plugins", hermesPluginName, hermesPluginInitName)
+			},
+			installHermes,
+			uninstallHermes,
 		},
 	}
 }

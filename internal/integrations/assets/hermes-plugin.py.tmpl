@@ -1,0 +1,95 @@
+"""Hermes plugin installed by seshagy to report agent lifecycle state."""
+
+# SESHAGY_INTEGRATION_ID=hermes
+# SESHAGY_INTEGRATION_VERSION=%d
+
+from __future__ import annotations
+
+import os
+import subprocess
+import time
+
+_SOURCE = "seshagy:hermes"
+_AGENT = "hermes"
+_BIN = os.environ.get("SESHAGY_BIN", %q)
+_report_seq = time.time_ns()
+
+
+def _next_seq() -> str:
+    global _report_seq
+    _report_seq += 1
+    return str(_report_seq)
+
+
+def _run(args: list[str]) -> None:
+    if not os.environ.get("TMUX_PANE"):
+        return
+    try:
+        subprocess.Popen(
+            [_BIN, *args],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    except Exception:
+        pass
+
+
+def _session_id(kwargs: dict) -> str | None:
+    value = kwargs.get("session_id")
+    if isinstance(value, str) and value:
+        return value
+    return None
+
+
+def _report(state: str, **kwargs) -> None:
+    args = [
+        "--report-agent",
+        "--agent",
+        _AGENT,
+        "--state",
+        state,
+        "--source",
+        _SOURCE,
+        "--seq",
+        _next_seq(),
+    ]
+    session_id = _session_id(kwargs)
+    if session_id:
+        args.extend(["--session-id", session_id])
+    _run(args)
+
+
+def _release() -> None:
+    _run(["--release-agent", "--source", _SOURCE, "--seq", _next_seq()])
+
+
+def _working(**kwargs) -> None:
+    _report("working", **kwargs)
+
+
+def _blocked(**kwargs) -> None:
+    _report("blocked", **kwargs)
+
+
+def _idle(**kwargs) -> None:
+    _report("idle", **kwargs)
+
+
+def _finalize(**kwargs) -> None:
+    del kwargs
+    _release()
+
+
+def register(ctx):
+    ctx.register_hook("on_session_start", _idle)
+    ctx.register_hook("pre_llm_call", _working)
+    ctx.register_hook("pre_api_request", _working)
+    ctx.register_hook("pre_tool_call", _working)
+    ctx.register_hook("post_tool_call", _working)
+    ctx.register_hook("pre_approval_request", _blocked)
+    ctx.register_hook("post_approval_response", _working)
+    ctx.register_hook("post_llm_call", _idle)
+    ctx.register_hook("on_session_end", _idle)
+    ctx.register_hook("on_session_finalize", _finalize)

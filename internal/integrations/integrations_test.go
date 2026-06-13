@@ -108,6 +108,8 @@ func TestAuthorityMapping(t *testing.T) {
 		{TargetQodercli, LifecycleAuthority},
 		{TargetCursor, LifecycleAuthority},
 		{TargetGrok, LifecycleAuthority},
+		{TargetKilo, LifecycleAuthority},
+		{TargetHermes, LifecycleAuthority},
 	}
 	for _, tt := range tests {
 		if got := Authority(tt.target); got != tt.want {
@@ -1003,6 +1005,179 @@ func TestOpenCodePluginReportsIdleSessionIDAndSeq(t *testing.T) {
 	}
 	if strings.Contains(asset, `if (status) return report(status, sessionID);`) {
 		t.Fatalf("OpenCode should only use status mapping for session.status events:\n%s", asset)
+	}
+}
+
+func TestInstallKiloWritesPlugin(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	kilo := filepath.Join(home, ".config", "kilo")
+	if err := os.MkdirAll(kilo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	messages, err := installKilo("/bin/seshagy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 1 {
+		t.Fatalf("unexpected install messages: %#v", messages)
+	}
+
+	pluginPath := filepath.Join(kilo, "plugin", kiloPluginName)
+	content := readFile(t, pluginPath)
+	if !strings.Contains(content, "SESHAGY_INTEGRATION_ID=kilo") {
+		t.Fatalf("kilo plugin missing integration marker:\n%s", content)
+	}
+}
+
+func TestUninstallKiloRemovesPlugin(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	kilo := filepath.Join(home, ".config", "kilo")
+	if err := os.MkdirAll(kilo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := installKilo("/bin/seshagy"); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := uninstallKilo(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(kilo, "plugin", kiloPluginName)); !os.IsNotExist(err) {
+		t.Fatalf("kilo plugin should be removed, stat err=%v", err)
+	}
+}
+
+func TestKiloPluginReportsIdleSessionIDAndSeq(t *testing.T) {
+	asset := kiloPluginAsset("/bin/seshagy")
+	for _, want := range []string{
+		"const SOURCE = \"seshagy:kilo\"",
+		`"--agent", "kilo"`,
+		"function sessionIDFromProperties",
+		"let reportSeq = Date.now() * 1000",
+		`"--seq", nextReportSeq()`,
+		`case "session.idle":`,
+		`return report("idle", sessionID)`,
+		`return run(["--release-agent", "--source", SOURCE, "--seq", nextReportSeq()])`,
+	} {
+		if !strings.Contains(asset, want) {
+			t.Fatalf("Kilo plugin missing %q:\n%s", want, asset)
+		}
+	}
+	if strings.Contains(asset, `report("done")`) {
+		t.Fatalf("Kilo plugin should report idle, not done:\n%s", asset)
+	}
+}
+
+func TestInstallHermesWritesPluginAndEnablesIt(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	hermes := filepath.Join(home, ".hermes")
+	if err := os.MkdirAll(hermes, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(hermes, "config.yaml")
+	if err := os.WriteFile(configPath, []byte("model:\n  provider: auto\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	messages, err := installHermes("/bin/seshagy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 2 {
+		t.Fatalf("unexpected install messages: %#v", messages)
+	}
+
+	pluginDir := filepath.Join(hermes, "plugins", hermesPluginName)
+	initContent := readFile(t, filepath.Join(pluginDir, hermesPluginInitName))
+	if !strings.Contains(initContent, "SESHAGY_INTEGRATION_ID=hermes") {
+		t.Fatalf("hermes plugin missing integration marker:\n%s", initContent)
+	}
+	config := readFile(t, configPath)
+	if !strings.Contains(config, "plugins:\n  enabled:\n    - seshagy-agent-state") {
+		t.Fatalf("hermes config missing enabled plugin:\n%s", config)
+	}
+}
+
+func TestInstallHermesPreservesFlatPluginList(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	hermes := filepath.Join(home, ".hermes")
+	if err := os.MkdirAll(hermes, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(hermes, "config.yaml")
+	existing := "plugins:\n  - platforms/discord\n"
+	if err := os.WriteFile(configPath, []byte(existing), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := installHermes("/bin/seshagy"); err != nil {
+		t.Fatal(err)
+	}
+	config := readFile(t, configPath)
+	want := "plugins:\n  - seshagy-agent-state\n  - platforms/discord\n"
+	if config != want {
+		t.Fatalf("config = %q, want %q", config, want)
+	}
+}
+
+func TestUninstallHermesRemovesPluginAndEnabledEntry(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	hermes := filepath.Join(home, ".hermes")
+	pluginDir := filepath.Join(hermes, "plugins", hermesPluginName)
+	if err := os.MkdirAll(pluginDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(hermes, "config.yaml")
+	if err := os.WriteFile(
+		configPath,
+		[]byte("plugins:\n  enabled:\n    - seshagy-agent-state\n"),
+		0o644,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(pluginDir, hermesPluginInitName),
+		[]byte("x"),
+		0o644,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := uninstallHermes(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(pluginDir); !os.IsNotExist(err) {
+		t.Fatalf("hermes plugin dir should be removed, stat err=%v", err)
+	}
+	config := readFile(t, configPath)
+	if strings.Contains(config, "seshagy-agent-state") {
+		t.Fatalf("hermes config should not mention seshagy plugin:\n%s", config)
+	}
+}
+
+func TestHermesPluginReportsLifecycleAndSessionID(t *testing.T) {
+	asset := hermesPluginInitAsset("/bin/seshagy")
+	for _, want := range []string{
+		`_SOURCE = "seshagy:hermes"`,
+		`"--agent"`,
+		`_AGENT`,
+		`session_id = _session_id(kwargs)`,
+		`args.extend(["--session-id", session_id])`,
+		`ctx.register_hook("pre_approval_request", _blocked)`,
+		`ctx.register_hook("on_session_finalize", _finalize)`,
+		`["--release-agent", "--source", _SOURCE, "--seq", _next_seq()]`,
+	} {
+		if !strings.Contains(asset, want) {
+			t.Fatalf("Hermes plugin missing %q:\n%s", want, asset)
+		}
 	}
 }
 

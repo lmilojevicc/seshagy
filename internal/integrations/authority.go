@@ -9,7 +9,7 @@ const (
 
 func Authority(target Target) AuthorityKind {
 	switch target {
-	case TargetPi, TargetOpencode, TargetKimi,
+	case TargetPi, TargetOpencode, TargetKimi, TargetKilo, TargetHermes,
 		TargetClaude, TargetCodex, TargetCopilot,
 		TargetDroid, TargetQodercli, TargetCursor, TargetGrok:
 		return LifecycleAuthority
