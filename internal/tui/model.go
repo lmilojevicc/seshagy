@@ -45,10 +45,13 @@ type Model struct {
 	preview     string
 	previewKey  string
 	showPreview bool
-	showHelp    bool
-	loading     bool
-	status      string
-	err         error
+	// expandedAgentSessionKey holds the selected item key while its session id
+	// is shown in full in the agent preview footer and detail pane.
+	expandedAgentSessionKey string
+	showHelp                bool
+	loading                 bool
+	status                  string
+	err                     error
 
 	integration integrationPrompt
 	setup       setupPrompt
@@ -227,6 +230,7 @@ func (m Model) visibleItems() []sessionmgr.Item {
 						item.Location,
 						item.AgentMessage,
 						item.AgentSource,
+						item.AgentSessionID,
 					},
 					" ",
 				),
