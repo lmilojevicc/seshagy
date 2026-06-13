@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/lmilojevicc/seshagy/internal/xdg"
 )
 
 func SessionNameFromDir(dir string) string {
@@ -47,17 +49,7 @@ func sanitizeSessionName(name string) string {
 }
 
 func ExpandHome(path string) string {
-	if path == "~" {
-		if home, err := os.UserHomeDir(); err == nil {
-			return home
-		}
-	}
-	if strings.HasPrefix(path, "~/") {
-		if home, err := os.UserHomeDir(); err == nil {
-			return filepath.Join(home, strings.TrimPrefix(path, "~/"))
-		}
-	}
-	return path
+	return xdg.ExpandHome(path)
 }
 
 func ContractHome(path string) string {

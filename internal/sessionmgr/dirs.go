@@ -3,6 +3,7 @@ package sessionmgr
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -17,7 +18,10 @@ func ListZoxideDirs(ctx context.Context) ([]Item, error) {
 	if !commandOnPath("zoxide") {
 		return nil, nil
 	}
-	out := optionalCommandOutput(plainCommand(ctx, "zoxide", "query", "-l"))
+	out, err := optionalCommandOutput(plainCommand(ctx, "zoxide", "query", "-l"))
+	if err != nil {
+		return nil, fmt.Errorf("zoxide query: %w", err)
+	}
 	return dirItems(out, KindZoxide), nil
 }
 
@@ -30,7 +34,10 @@ func ListFDirsWithCommand(ctx context.Context, command string) ([]Item, error) {
 	if command == "" {
 		command = DefaultFDCommand
 	}
-	out := optionalCommandOutput(shellCommand(ctx, command))
+	out, err := optionalCommandOutput(shellCommand(ctx, command))
+	if err != nil {
+		return nil, fmt.Errorf("fd command: %w", err)
+	}
 	items := dirItems(out, KindFD)
 	sort.SliceStable(items, func(i, j int) bool { return items[i].Path < items[j].Path })
 	return items, nil
@@ -41,12 +48,20 @@ func commandOnPath(name string) bool {
 	return err == nil
 }
 
-func optionalCommandOutput(cmd *exec.Cmd) []byte {
+// optionalCommandOutput runs cmd and returns its stdout. A non-zero exit (for
+// example zoxide reporting an empty database) is treated as "no results" with a
+// nil error, but a failure to start the command (missing binary, etc.) is
+// surfaced so callers can report it instead of silently showing nothing.
+func optionalCommandOutput(cmd *exec.Cmd) ([]byte, error) {
 	out, err := cmd.Output()
 	if err != nil {
-		return nil
+		var ee *exec.ExitError
+		if errors.As(err, &ee) {
+			return out, nil
+		}
+		return nil, err
 	}
-	return out
+	return out, nil
 }
 
 func dirItems(out []byte, kind Kind) []Item {

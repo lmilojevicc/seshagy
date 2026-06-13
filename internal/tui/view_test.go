@@ -394,15 +394,15 @@ func TestStartupSetupPromptSavesTypeFirstChoice(t *testing.T) {
 		t.Fatal("showing startup setup prompt should not run a command yet")
 	}
 	m = model.(Model)
-	if !m.setupPrompt || m.setupManual || m.setupCursor != 1 {
+	if !m.setup.active || m.setup.manual || m.setup.cursor != 1 {
 		t.Fatalf(
 			"startup prompt state = prompt:%v manual:%v cursor:%d",
-			m.setupPrompt,
-			m.setupManual,
-			m.setupCursor,
+			m.setup.active,
+			m.setup.manual,
+			m.setup.cursor,
 		)
 	}
-	m.setupCursor = 0
+	m.setup.cursor = 0
 	m.width = 100
 	if out := sessionmgr.StripANSI(
 		m.renderSetupPrompt(28),
@@ -417,10 +417,10 @@ func TestStartupSetupPromptSavesTypeFirstChoice(t *testing.T) {
 		t.Fatal("startup setup should continue to startup integration checks")
 	}
 	m = model.(Model)
-	if m.setupPrompt || !m.config.TypeFirst.Enabled || !m.config.Setup.TypeFirstPromptSeen {
+	if m.setup.active || !m.config.TypeFirst.Enabled || !m.config.Setup.TypeFirstPromptSeen {
 		t.Fatalf(
 			"setup did not enable/save type-first: prompt=%v config=%#v",
-			m.setupPrompt,
+			m.setup.active,
 			m.config,
 		)
 	}
@@ -453,12 +453,13 @@ func TestManualModePromptInClassicSavesWithoutHookScan(t *testing.T) {
 		t.Fatal("opening manual input-mode prompt should not run a command")
 	}
 	m = model.(Model)
-	if !m.setupPrompt || !m.setupManual || m.setupCursor != 1 || m.status != "change input mode" {
+	if !m.setup.active || !m.setup.manual || m.setup.cursor != 1 ||
+		m.status != "change input mode" {
 		t.Fatalf(
 			"manual prompt state = prompt:%v manual:%v cursor:%d status:%q",
-			m.setupPrompt,
-			m.setupManual,
-			m.setupCursor,
+			m.setup.active,
+			m.setup.manual,
+			m.setup.cursor,
 			m.status,
 		)
 	}
@@ -479,12 +480,12 @@ func TestManualModePromptInClassicSavesWithoutHookScan(t *testing.T) {
 		t.Fatal("manual input-mode save should not trigger hook integration startup scan")
 	}
 	m = model.(Model)
-	if m.setupPrompt || m.setupManual || !m.config.TypeFirst.Enabled ||
+	if m.setup.active || m.setup.manual || !m.config.TypeFirst.Enabled ||
 		!m.config.Setup.TypeFirstPromptSeen {
 		t.Fatalf(
 			"manual mode save state = prompt:%v manual:%v config:%#v",
-			m.setupPrompt,
-			m.setupManual,
+			m.setup.active,
+			m.setup.manual,
 			m.config,
 		)
 	}
@@ -509,12 +510,12 @@ func TestManualModePromptEscCancelsWithoutSaving(t *testing.T) {
 		t.Fatal("manual input-mode cancel should not run a command")
 	}
 	m = model.(Model)
-	if m.setupPrompt || m.setupManual || m.config.TypeFirst.Enabled ||
+	if m.setup.active || m.setup.manual || m.config.TypeFirst.Enabled ||
 		m.config.Setup.TypeFirstPromptSeen {
 		t.Fatalf(
 			"manual cancel state = prompt:%v manual:%v config:%#v",
-			m.setupPrompt,
-			m.setupManual,
+			m.setup.active,
+			m.setup.manual,
 			m.config,
 		)
 	}
@@ -541,12 +542,12 @@ func TestTypeFirstManualModePromptEscDoesNotDisable(t *testing.T) {
 	m = model.(Model)
 	model, _ = m.handleKey(keyMsg("m"))
 	m = model.(Model)
-	if !m.setupPrompt || !m.setupManual || m.setupCursor != 0 {
+	if !m.setup.active || !m.setup.manual || m.setup.cursor != 0 {
 		t.Fatalf(
 			"manual type-first prompt state = prompt:%v manual:%v cursor:%d",
-			m.setupPrompt,
-			m.setupManual,
-			m.setupCursor,
+			m.setup.active,
+			m.setup.manual,
+			m.setup.cursor,
 		)
 	}
 	model, cmd := m.handleSetupKey(keyMsg("esc"))
@@ -554,11 +555,11 @@ func TestTypeFirstManualModePromptEscDoesNotDisable(t *testing.T) {
 		t.Fatal("manual type-first cancel should not run a command")
 	}
 	m = model.(Model)
-	if m.setupPrompt || m.setupManual || !m.config.TypeFirst.Enabled {
+	if m.setup.active || m.setup.manual || !m.config.TypeFirst.Enabled {
 		t.Fatalf(
 			"manual type-first cancel state = prompt:%v manual:%v config:%#v",
-			m.setupPrompt,
-			m.setupManual,
+			m.setup.active,
+			m.setup.manual,
 			m.config,
 		)
 	}
@@ -580,10 +581,10 @@ func TestTypeFirstManualModePromptRequiresPrefix(t *testing.T) {
 
 	model, _ := m.handleKey(keyMsg("m"))
 	m = model.(Model)
-	if m.setupPrompt || m.query != "m" {
+	if m.setup.active || m.query != "m" {
 		t.Fatalf(
 			"unprefixed m should filter in type-first mode, prompt=%v query=%q",
-			m.setupPrompt,
+			m.setup.active,
 			m.query,
 		)
 	}
@@ -598,12 +599,12 @@ func TestTypeFirstManualModePromptRequiresPrefix(t *testing.T) {
 		t.Fatal("opening prefixed manual input-mode prompt should not run a command")
 	}
 	m = model.(Model)
-	if !m.setupPrompt || !m.setupManual || m.setupCursor != 0 || m.prefixArmed {
+	if !m.setup.active || !m.setup.manual || m.setup.cursor != 0 || m.prefixArmed {
 		t.Fatalf(
 			"prefixed m prompt state = prompt:%v manual:%v cursor:%d prefix:%v",
-			m.setupPrompt,
-			m.setupManual,
-			m.setupCursor,
+			m.setup.active,
+			m.setup.manual,
+			m.setup.cursor,
 			m.prefixArmed,
 		)
 	}
@@ -1044,8 +1045,8 @@ func TestIntegrationPromptRendersToggleRows(t *testing.T) {
 	m := newTestModel(t)
 	model, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 28})
 	m = model.(Model)
-	m.integrationPrompt = true
-	m.integrationRows = []integrations.Recommendation{
+	m.integration.active = true
+	m.integration.rows = []integrations.Recommendation{
 		{
 			Target:         integrations.TargetPi,
 			Label:          "Pi",
@@ -1054,7 +1055,7 @@ func TestIntegrationPromptRendersToggleRows(t *testing.T) {
 			State:          integrations.StatusNotInstalled,
 		},
 	}
-	m.integrationSelected[integrations.TargetPi] = true
+	m.integration.selected[integrations.TargetPi] = true
 	out := sessionmgr.StripANSI(m.View())
 	for _, want := range []string{"Install agent state hooks?", "[x] Pi", "space toggle", "pane text or process", "inspection"} {
 		if !strings.Contains(out, want) {

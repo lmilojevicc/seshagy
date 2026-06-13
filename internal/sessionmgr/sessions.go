@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -65,16 +67,39 @@ func HasSession(ctx context.Context, name string) (bool, error) {
 	return false, fmt.Errorf("tmux has-session: %w", err)
 }
 
+// CreateSessionFromDir attaches to (or creates) a tmux session for dir.
+//
+// tmux session names must be unique, so a basename-only scheme would silently
+// reuse an existing session whose name matches but whose directory differs
+// (e.g. ~/work/api vs ~/personal/api). To avoid attaching to the wrong
+// directory, an existing session is reused only when it is already rooted at
+// dir. On a name collision with a session rooted elsewhere, both sessions are
+// given parent-qualified names (e.g. work-api and personal-api).
 func CreateSessionFromDir(ctx context.Context, dir string) (string, bool, error) {
 	dir = ExpandHome(dir)
-	name := SessionNameFromDir(dir)
-	exists, err := HasSession(ctx, name)
+	sessions, err := ListSessions(ctx)
 	if err != nil {
-		return name, false, err
+		return "", false, err
 	}
-	if exists {
-		return name, false, nil
+	// Reuse a session already rooted at dir, whatever its current name.
+	if existing := sessionNameForPath(sessions, dir); existing != "" {
+		return existing, false, nil
 	}
+
+	name := SessionNameFromDir(dir)
+	if collide := sessionByName(sessions, name); collide != nil {
+		// A different directory already owns this basename. Qualify the new
+		// session with its parent and rename the colliding one to match.
+		name = parentQualifiedSessionName(dir)
+		if renamed := parentQualifiedSessionName(collide.Path); renamed != collide.Name &&
+			sessionByName(sessions, renamed) == nil {
+			if err := RenameSession(ctx, collide.Name, renamed); err == nil {
+				collide.Name = renamed
+			}
+		}
+	}
+	name = uniqueSessionName(sessions, name)
+
 	cmd := tmuxCommand(ctx, "new-session", "-d", "-s", name, "-c", dir)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return name, false, fmt.Errorf(
@@ -84,6 +109,62 @@ func CreateSessionFromDir(ctx context.Context, dir string) (string, bool, error)
 		)
 	}
 	return name, true, nil
+}
+
+func sessionNameForPath(sessions []Item, dir string) string {
+	want := normalizePath(dir)
+	for i := range sessions {
+		if normalizePath(sessions[i].Path) == want {
+			return sessions[i].Name
+		}
+	}
+	return ""
+}
+
+func sessionByName(sessions []Item, name string) *Item {
+	for i := range sessions {
+		if sessions[i].Name == name {
+			return &sessions[i]
+		}
+	}
+	return nil
+}
+
+func parentQualifiedSessionName(dir string) string {
+	cleaned := filepath.Clean(ExpandHome(dir))
+	base := SessionNameFromDir(cleaned)
+	parent := filepath.Base(filepath.Dir(cleaned))
+	if parent == "" || parent == "." || parent == string(os.PathSeparator) {
+		return base
+	}
+	return sanitizeSessionName(parent) + "-" + base
+}
+
+func uniqueSessionName(sessions []Item, name string) string {
+	taken := make(map[string]bool, len(sessions))
+	for i := range sessions {
+		taken[sessions[i].Name] = true
+	}
+	if !taken[name] {
+		return name
+	}
+	for i := 2; ; i++ {
+		candidate := fmt.Sprintf("%s-%d", name, i)
+		if !taken[candidate] {
+			return candidate
+		}
+	}
+}
+
+func normalizePath(p string) string {
+	if p == "" {
+		return ""
+	}
+	p = ExpandHome(p)
+	if abs, err := filepath.Abs(p); err == nil {
+		p = abs
+	}
+	return filepath.Clean(p)
 }
 
 func KillSession(ctx context.Context, name string) error {
@@ -128,7 +209,7 @@ func AttachOrSwitchCommand(name string) *exec.Cmd {
 	if InTmux() {
 		return exec.Command("tmux", "switch-client", "-t", exactSession(name))
 	}
-	return exec.Command("tmux", "attach-session", "-t", name)
+	return exec.Command("tmux", "attach-session", "-t", exactSession(name))
 }
 
 func unixTime(s string) time.Time {

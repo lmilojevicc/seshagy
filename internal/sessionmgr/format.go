@@ -98,6 +98,19 @@ func FormatLineWithIcons(i Item, icons IconSet) string {
 			colorIcon(KindAgent, icons),
 			"["+agentStateLabel(i.AgentState)+"]",
 		)
+		// Embed the real tmux pane id (%N) so --delete-item can target the pane
+		// unambiguously instead of reparsing the session:window.pane location.
+		if i.PaneID != "" {
+			return fmt.Sprintf(
+				"%s\t%s\t%s\t%s\t%s%s",
+				prefix,
+				i.AgentName,
+				i.PaneID,
+				i.Location,
+				i.Path,
+				suffix,
+			)
+		}
 		return fmt.Sprintf("%s\t%s\t%s\t%s%s", prefix, i.AgentName, i.Location, i.Path, suffix)
 	case KindZoxide:
 		return joinNonEmpty(colorIcon(KindZoxide, icons), i.Path)
@@ -267,7 +280,15 @@ func hexToRGB(hex string) (int, int, int, bool) {
 }
 
 func AgentPaneFromLine(clean string) string {
-	for _, field := range strings.Fields(clean) {
+	fields := strings.Fields(clean)
+	// Prefer an explicit tmux pane id (%N); it is unambiguous.
+	for _, field := range fields {
+		if looksPaneID(field) {
+			return field
+		}
+	}
+	// Fall back to the session:window.pane location for lines without a pane id.
+	for _, field := range fields {
 		if strings.Contains(field, ":") && strings.Contains(field, ".") {
 			parts := strings.Split(field, ":")
 			if len(parts) < 2 {
@@ -280,6 +301,10 @@ func AgentPaneFromLine(clean string) string {
 		}
 	}
 	return ""
+}
+
+func looksPaneID(s string) bool {
+	return len(s) >= 2 && s[0] == '%' && allDigits(s[1:])
 }
 
 func looksWindowPane(s string) bool {

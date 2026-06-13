@@ -2,6 +2,40 @@ package main
 
 import "testing"
 
+func TestRunRoutingNoError(t *testing.T) {
+	cases := [][]string{
+		{"--help"},
+		{"-h"},
+		{"help"},
+		{"--version"},
+		{"version"},
+		{"config", "path"},
+		{"config"},
+	}
+	for _, args := range cases {
+		if err := run(args); err != nil {
+			t.Fatalf("run(%v) unexpected error: %v", args, err)
+		}
+	}
+}
+
+func TestRunRoutingErrors(t *testing.T) {
+	cases := [][]string{
+		{"config", "bogus"},
+		{"config", "init", "bad"},
+		{"integration", "install"},
+		{"integration", "frobnicate", "x"},
+		{"--delete-item"},
+		{"--report-agent", "--bogus"},
+		{"--release-agent", "--seq", "-1"},
+	}
+	for _, args := range cases {
+		if err := run(args); err == nil {
+			t.Fatalf("run(%v) expected error, got nil", args)
+		}
+	}
+}
+
 func TestParseReportArgsSessionIDAndSeq(t *testing.T) {
 	report, err := parseReportArgs(
 		[]string{

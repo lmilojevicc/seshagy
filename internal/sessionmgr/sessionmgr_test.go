@@ -454,6 +454,29 @@ func TestAgentPaneFromLine(t *testing.T) {
 	}
 }
 
+func TestAgentPaneFromLinePrefersPaneID(t *testing.T) {
+	line := IconAgent + " [idle]\tpi\t%7\twork:2.1\t~/Projects/x"
+	if got := AgentPaneFromLine(line); got != "%7" {
+		t.Fatalf("pane = %q, want %%7", got)
+	}
+}
+
+func TestFormatLineAgentRoundTripsPaneID(t *testing.T) {
+	agent := Item{
+		Kind:       KindAgent,
+		AgentName:  "pi",
+		AgentState: AgentWorking,
+		PaneID:     "%7",
+		Location:   "work:2.1",
+		Path:       "~/Projects/x",
+	}
+	line := FormatLine(agent)
+	item, ok := ParseActionLine(line)
+	if !ok || item.Kind != KindAgent || item.PaneID != "%7" {
+		t.Fatalf("ParseActionLine(%q) = %#v, %v; want PaneID %%7", line, item, ok)
+	}
+}
+
 func TestFormatLineColorsIconsButKeepsParseableText(t *testing.T) {
 	line := FormatLine(Item{Kind: KindSession, Name: "demo"})
 	if !strings.Contains(line, "\x1b[38;5;10m"+IconSession+" \x1b[0m") {

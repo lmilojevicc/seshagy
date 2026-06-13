@@ -17,10 +17,10 @@ func (m Model) View() string {
 	}
 	s := m.styles
 	availableH := max(8, m.height)
-	if m.setupPrompt {
+	if m.setup.active {
 		return s.app.Width(m.width).Height(availableH).Render(m.renderSetupPrompt(availableH))
 	}
-	if m.integrationPrompt {
+	if m.integration.active {
 		return s.app.Width(m.width).Height(availableH).Render(m.renderIntegrationPrompt(availableH))
 	}
 	header := m.renderTabs()
@@ -41,7 +41,7 @@ func (m Model) renderSetupPrompt(height int) string {
 	innerW := max(44, width-4)
 	innerH := 11
 	title := "Choose startup input mode"
-	if m.setupManual {
+	if m.setup.manual {
 		title = "Change input mode"
 	}
 	lines := []string{
@@ -61,11 +61,11 @@ func (m Model) renderSetupPrompt(height int) string {
 	}
 	for i, choice := range choices {
 		cursor := "  "
-		if i == m.setupCursor {
+		if i == m.setup.cursor {
 			cursor = s.bar.Render("▌") + " "
 		}
 		line := cursor + choice.label + s.muted.Render(" — "+choice.desc)
-		if i == m.setupCursor {
+		if i == m.setup.cursor {
 			line = s.selectedBG.Render(pad(line, innerW))
 		}
 		lines = append(lines, line)
@@ -75,7 +75,7 @@ func (m Model) renderSetupPrompt(height int) string {
 		s.key.Render("y") + " type-first",
 		s.key.Render("n") + " classic",
 	}
-	if m.setupManual {
+	if m.setup.manual {
 		helpParts = append(helpParts, s.key.Render("esc")+" cancel")
 	}
 	helpParts = append(helpParts, s.key.Render("q")+" quit")
@@ -119,20 +119,7 @@ func (m Model) sourceTabs() []sourceTab {
 }
 
 func tabNameForMode(mode sessionmgr.SourceMode) string {
-	switch mode {
-	case sessionmgr.ModeSessions:
-		return "Sessions"
-	case sessionmgr.ModeAgents:
-		return "Agents"
-	case sessionmgr.ModeCurrentAgents:
-		return "Current agents"
-	case sessionmgr.ModeZoxide:
-		return "Zoxide"
-	case sessionmgr.ModeFD:
-		return "fd"
-	default:
-		return "All"
-	}
+	return mode.Names().Tab
 }
 
 func (m Model) renderIntegrationPrompt(height int) string {
@@ -148,19 +135,19 @@ func (m Model) renderIntegrationPrompt(height int) string {
 		s.muted.Render("Toggle the detected integrations you want to install, then press enter."),
 		"",
 	}
-	if len(m.integrationRows) == 0 {
+	if len(m.integration.rows) == 0 {
 		lines = append(
 			lines,
 			s.muted.Render("No missing hook integrations found for installed agents."),
 		)
 	} else {
-		for i, rec := range m.integrationRows {
-			lines = append(lines, m.renderIntegrationRow(rec, i == m.integrationCursor, innerW))
+		for i, rec := range m.integration.rows {
+			lines = append(lines, m.renderIntegrationRow(rec, i == m.integration.cursor, innerW))
 		}
 	}
-	if len(m.integrationMessages) > 0 {
+	if len(m.integration.messages) > 0 {
 		lines = append(lines, "")
-		for _, message := range m.integrationMessages {
+		for _, message := range m.integration.messages {
 			lines = append(lines, s.muted.Render(clampText(message, innerW)))
 		}
 	}
@@ -187,7 +174,7 @@ func (m Model) renderIntegrationRow(
 		prefix = s.bar.Render("▌") + " "
 	}
 	box := "[ ]"
-	if m.integrationSelected[rec.Target] {
+	if m.integration.selected[rec.Target] {
 		box = s.success.Render("[x]")
 	}
 	if !rec.AgentAvailable || !rec.Installable || rec.State == integrations.StatusCurrent {
@@ -234,7 +221,9 @@ func (m Model) renderListPane(width, height int) string {
 	innerW := max(10, width-4)
 	innerH := max(3, height-2)
 	items := m.visibleItems()
-	counts := sortedCounts(m.items)
+	// Count the visible (filtered) items so the All-tab breakdown stays
+	// consistent with the leading total when a filter is active.
+	counts := sortedCounts(items)
 	titleName := titleForMode(m.source)
 	if m.agentStateFilteringActive() {
 		titleName += " · " + agentStateFilterLabel(m.agentStateFilter)
@@ -594,20 +583,7 @@ func isWarningStatus(status string) bool {
 }
 
 func titleForMode(mode sessionmgr.SourceMode) string {
-	switch mode {
-	case sessionmgr.ModeSessions:
-		return "Sessions"
-	case sessionmgr.ModeAgents:
-		return "Agents"
-	case sessionmgr.ModeCurrentAgents:
-		return "Current session agents"
-	case sessionmgr.ModeZoxide:
-		return "Zoxide"
-	case sessionmgr.ModeFD:
-		return "fd"
-	default:
-		return "All"
-	}
+	return mode.Names().Title
 }
 
 func renderAgentState(s styles, state sessionmgr.AgentState) string {

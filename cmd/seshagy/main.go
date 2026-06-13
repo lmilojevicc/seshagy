@@ -173,7 +173,7 @@ func deleteItem(ctx context.Context, raw string) error {
 	}
 	item, ok := sessionmgr.ParseActionLineWithIcons(raw, cfg.IconSet())
 	if !ok {
-		return nil
+		return fmt.Errorf("--delete-item: unrecognized item line: %q", raw)
 	}
 	switch item.Kind {
 	case sessionmgr.KindSession:
@@ -181,7 +181,7 @@ func deleteItem(ctx context.Context, raw string) error {
 	case sessionmgr.KindAgent:
 		return sessionmgr.KillAgentPane(ctx, item.PaneID)
 	default:
-		return nil
+		return fmt.Errorf("--delete-item: %s items cannot be deleted", item.Kind)
 	}
 }
 

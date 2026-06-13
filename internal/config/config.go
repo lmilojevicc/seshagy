@@ -11,6 +11,7 @@ import (
 	"github.com/BurntSushi/toml"
 
 	"github.com/lmilojevicc/seshagy/internal/sessionmgr"
+	"github.com/lmilojevicc/seshagy/internal/xdg"
 )
 
 const (
@@ -115,7 +116,7 @@ func Default() Config {
 }
 
 func Path() string {
-	return filepath.Join(configHome(), appDirName, configFileName)
+	return filepath.Join(xdg.ConfigHome(), appDirName, configFileName)
 }
 
 func Exists() bool {
@@ -381,20 +382,7 @@ func (c Config) LoadOptions() sessionmgr.LoadOptions {
 }
 
 func SourceModeName(mode sessionmgr.SourceMode) string {
-	switch mode {
-	case sessionmgr.ModeSessions:
-		return "sessions"
-	case sessionmgr.ModeAgents:
-		return "agents"
-	case sessionmgr.ModeCurrentAgents:
-		return "current-agents"
-	case sessionmgr.ModeZoxide:
-		return "zoxide"
-	case sessionmgr.ModeFD:
-		return "fd"
-	default:
-		return "all"
-	}
+	return mode.Names().ConfigToken
 }
 
 func normalizeSourceOrder(names []string) []string {
@@ -470,29 +458,4 @@ func normalizeIconMode(mode string) string {
 	default:
 		return IconModeIcons
 	}
-}
-
-func configHome() string {
-	if value := strings.TrimSpace(os.Getenv("XDG_CONFIG_HOME")); value != "" {
-		return expandHome(value)
-	}
-	if home, err := os.UserHomeDir(); err == nil && home != "" {
-		return filepath.Join(home, ".config")
-	}
-	return "."
-}
-
-func expandHome(path string) string {
-	if path == "~" {
-		if home, err := os.UserHomeDir(); err == nil && home != "" {
-			return home
-		}
-		return "."
-	}
-	if strings.HasPrefix(path, "~/") {
-		if home, err := os.UserHomeDir(); err == nil && home != "" {
-			return filepath.Join(home, strings.TrimPrefix(path, "~/"))
-		}
-	}
-	return path
 }

@@ -13,6 +13,18 @@ func tmuxCommand(ctx context.Context, args ...string) *exec.Cmd {
 	return cmd
 }
 
+// tmuxOutput and tmuxRun are the single seam through which the low-level pane
+// helpers invoke tmux. Tests override these to simulate a tmux server in
+// memory without spawning real processes.
+var (
+	tmuxOutput = func(ctx context.Context, args ...string) ([]byte, error) {
+		return tmuxCommand(ctx, args...).Output()
+	}
+	tmuxRun = func(ctx context.Context, args ...string) error {
+		return tmuxCommand(ctx, args...).Run()
+	}
+)
+
 func plainCommand(ctx context.Context, name string, args ...string) *exec.Cmd {
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Env = withLocale(os.Environ())
