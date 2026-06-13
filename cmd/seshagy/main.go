@@ -39,6 +39,8 @@ func run(args []string) error {
 		return nil
 	case "integration", "integrations", "hook", "hooks":
 		return runIntegration(args[1:])
+	case "agent", "agents":
+		return runAgent(ctx, args[1:])
 	case "config":
 		return runConfig(args[1:])
 	case "--get-sessions":
@@ -72,6 +74,29 @@ func run(args []string) error {
 		return sessionmgr.ReleaseAgent(ctx, release)
 	default:
 		return tui.Run()
+	}
+}
+
+func runAgent(ctx context.Context, args []string) error {
+	if len(args) == 0 {
+		return errors.New("usage: seshagy agent explain <pane-id>")
+	}
+	switch args[0] {
+	case "explain":
+		if len(args) != 2 {
+			return errors.New("usage: seshagy agent explain <pane-id>")
+		}
+		out, err := sessionmgr.ExplainAgent(ctx, args[1])
+		if err != nil {
+			return err
+		}
+		fmt.Print(out)
+		if !strings.HasSuffix(out, "\n") {
+			fmt.Println()
+		}
+		return nil
+	default:
+		return errors.New("usage: seshagy agent explain <pane-id>")
 	}
 }
 
@@ -343,6 +368,7 @@ Usage:
   seshagy --delete-item <line>    kill a rendered session/agent line
   seshagy --report-agent [flags]  set tmux pane @agent_* metadata
   seshagy --release-agent [flags] clear tmux pane @agent_* metadata
+  seshagy agent explain <pane>    show why a pane has its agent state
   seshagy integration status      list detected agents and hook status
   seshagy integration install pi  install one hook/plugin integration
   seshagy integration uninstall pi

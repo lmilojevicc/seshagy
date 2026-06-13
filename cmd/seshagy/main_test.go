@@ -23,6 +23,8 @@ func TestRunRoutingErrors(t *testing.T) {
 	cases := [][]string{
 		{"config", "bogus"},
 		{"config", "init", "bad"},
+		{"agent"},
+		{"agent", "frobnicate", "%1"},
 		{"integration", "install"},
 		{"integration", "frobnicate", "x"},
 		{"--delete-item"},
