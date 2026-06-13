@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -43,6 +44,8 @@ func run(args []string) error {
 		return runAgent(ctx, args[1:])
 	case "config":
 		return runConfig(args[1:])
+	case "manifest", "manifests":
+		return runManifest(args[1:])
 	case "--get-sessions":
 		return printItems(ctx, sessionmgr.ModeSessions)
 	case "--get-agents":
@@ -102,6 +105,122 @@ func runAgent(ctx context.Context, args []string) error {
 	default:
 		return errors.New("usage: seshagy agent explain <pane-id>")
 	}
+}
+
+func runManifest(args []string) error {
+	if len(args) == 0 {
+		return errors.New("usage: seshagy manifest status|update|reload [--json]")
+	}
+	jsonOutput := false
+	cmdArgs := args
+	if len(args) > 0 && args[len(args)-1] == "--json" {
+		jsonOutput = true
+		cmdArgs = args[:len(args)-1]
+	}
+	if len(cmdArgs) == 0 {
+		return errors.New("usage: seshagy manifest status|update|reload [--json]")
+	}
+
+	cfg, err := appconfig.Load()
+	if err != nil {
+		return err
+	}
+
+	switch cmdArgs[0] {
+	case "status":
+		if len(cmdArgs) != 1 {
+			return errors.New("usage: seshagy manifest status [--json]")
+		}
+		return printManifestStatus(cfg.Agents.ManifestCatalogURL, jsonOutput)
+	case "update":
+		if len(cmdArgs) != 1 {
+			return errors.New("usage: seshagy manifest update [--json]")
+		}
+		output, err := sessionmgr.CheckAndUpdateManifests(cfg.Agents.ManifestCatalogURL)
+		if err != nil {
+			return err
+		}
+		if len(output.Updated) > 0 {
+			sessionmgr.ReloadManifests()
+		}
+		if jsonOutput {
+			return encodeJSON(output)
+		}
+		printManifestUpdateResult(output)
+		return nil
+	case "reload":
+		if len(cmdArgs) != 1 {
+			return errors.New("usage: seshagy manifest reload")
+		}
+		summaries := sessionmgr.ReloadManifests()
+		if jsonOutput {
+			return encodeJSON(map[string]any{"reloaded": len(summaries), "agents": summaries})
+		}
+		fmt.Printf("reloaded %d agent manifests\n", len(summaries))
+		return nil
+	default:
+		return errors.New("usage: seshagy manifest status|update|reload [--json]")
+	}
+}
+
+func printManifestStatus(catalogURL string, jsonOutput bool) error {
+	status := sessionmgr.LoadManifestUpdateStatus()
+	summaries := sessionmgr.ManifestSummaries()
+	resolvedCatalog := sessionmgr.ResolveManifestCatalogURL(catalogURL)
+	if jsonOutput {
+		return encodeJSON(map[string]any{
+			"status":  status,
+			"agents":  summaries,
+			"catalog": resolvedCatalog,
+		})
+	}
+	fmt.Printf("catalog: %s\n", resolvedCatalog)
+	if status.LastCheckUnix != nil {
+		fmt.Printf("last check: %d\n", *status.LastCheckUnix)
+	}
+	if status.LastResult != nil {
+		fmt.Printf("last result: %s\n", *status.LastResult)
+	}
+	fmt.Println()
+	for _, summary := range summaries {
+		line := fmt.Sprintf(
+			"%-16s %-10s %s",
+			summary.AgentID,
+			summary.ActiveSource.KindLabel(),
+			summary.ActiveVersion,
+		)
+		if summary.CachedRemoteVersion != "" &&
+			summary.CachedRemoteVersion != summary.ActiveVersion {
+			line += fmt.Sprintf(" (cached remote %s)", summary.CachedRemoteVersion)
+		}
+		fmt.Println(line)
+		if summary.Warning != "" {
+			fmt.Printf("  warning: %s\n", summary.Warning)
+		}
+	}
+	return nil
+}
+
+func printManifestUpdateResult(output sessionmgr.ManifestUpdateOutput) {
+	if output.Status.LastResult != nil {
+		fmt.Printf("update result: %s\n", *output.Status.LastResult)
+	}
+	if len(output.Updated) == 0 {
+		fmt.Println("no manifest updates")
+		return
+	}
+	for _, commit := range output.Updated {
+		fmt.Printf("updated %s to %s\n", commit.AgentID, commit.Version)
+	}
+}
+
+func encodeJSON(value any) error {
+	data, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		return err
+	}
+	fmt.Println(string(data))
+	return nil
 }
 
 func runConfig(args []string) error {
@@ -373,6 +492,9 @@ Usage:
   seshagy --report-agent [flags]  set tmux pane @agent_* metadata
   seshagy --release-agent [flags] clear tmux pane @agent_* metadata
   seshagy agent explain <pane>    show why a pane has its agent state
+  seshagy manifest status         show active manifest sources and update status
+  seshagy manifest update         fetch remote manifest catalog updates
+  seshagy manifest reload         re-read agent manifests from disk
   seshagy integration status      list detected agents and hook status
   seshagy integration install pi  install one hook/plugin integration
   seshagy integration uninstall pi

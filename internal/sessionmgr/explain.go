@@ -44,6 +44,10 @@ type agentExplain struct {
 
 	IntegrationStatus string
 	ManifestFallback  string
+	ManifestSource    string
+	ManifestVersion   string
+	CachedRemoteVer   string
+	ManifestWarning   string
 }
 
 func ExplainAgent(ctx context.Context, pane string, opts LoadOptions) (string, error) {
@@ -69,6 +73,9 @@ func ExplainAgent(ctx context.Context, pane string, opts LoadOptions) (string, e
 			info.Title,
 			info.DetectedStatus,
 		)
+	}
+	if info.AgentName != "" {
+		applyManifestExplainMeta(&info)
 	}
 	return formatAgentExplain(info), nil
 }
@@ -204,6 +211,24 @@ func mustShowPaneOption(ctx context.Context, pane, opt string) string {
 	return value
 }
 
+func applyManifestExplainMeta(info *agentExplain) {
+	meta, ok := ManifestInfoForAgent(info.AgentName)
+	if !ok {
+		return
+	}
+	info.ManifestSource = meta.Source.KindLabel()
+	if meta.Source.Path != "" && meta.Source.Kind != ManifestSourceBundled {
+		info.ManifestSource = meta.Source.Label()
+	}
+	if meta.Version != "" {
+		info.ManifestVersion = meta.Version
+	}
+	if meta.CachedRemoteVersion != "" {
+		info.CachedRemoteVer = meta.CachedRemoteVersion
+	}
+	info.ManifestWarning = meta.Warning
+}
+
 func integrationStatusLine(agentName string) string {
 	target, ok := authorityTarget(agentName)
 	if !ok {
@@ -301,6 +326,20 @@ func formatAgentExplain(info agentExplain) string {
 	if info.ManifestFallback != "" {
 		b.WriteByte('\n')
 		fmt.Fprintf(&b, "manifest fallback: %s\n", info.ManifestFallback)
+	}
+
+	if info.ManifestSource != "" {
+		b.WriteByte('\n')
+		fmt.Fprintf(&b, "manifest source: %s\n", info.ManifestSource)
+		if info.ManifestVersion != "" {
+			fmt.Fprintf(&b, "manifest version: %s\n", info.ManifestVersion)
+		}
+		if info.CachedRemoteVer != "" {
+			fmt.Fprintf(&b, "cached remote version: %s\n", info.CachedRemoteVer)
+		}
+		if info.ManifestWarning != "" {
+			fmt.Fprintf(&b, "manifest warning: %s\n", info.ManifestWarning)
+		}
 	}
 
 	return b.String()

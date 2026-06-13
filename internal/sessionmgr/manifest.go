@@ -4,12 +4,12 @@ import (
 	"context"
 	"embed"
 	"fmt"
+	"os"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
-
-	"github.com/BurntSushi/toml"
 )
 
 //go:embed manifests/*.toml
@@ -39,9 +39,12 @@ type manifestDetectionResult struct {
 }
 
 type agentManifest struct {
-	ID      string         `toml:"id"`
-	Aliases []string       `toml:"aliases"`
-	Rules   []manifestRule `toml:"rules"`
+	ID               string         `toml:"id"`
+	Version          string         `toml:"version"`
+	MinEngineVersion int            `toml:"min_engine_version"`
+	UpdatedAt        string         `toml:"updated_at"`
+	Aliases          []string       `toml:"aliases"`
+	Rules            []manifestRule `toml:"rules"`
 }
 
 type manifestRule struct {
@@ -71,8 +74,9 @@ type manifestGate struct {
 }
 
 type compiledManifest struct {
-	agent string
-	rules []compiledManifestRule
+	agent   string
+	aliases []string
+	rules   []compiledManifestRule
 }
 
 type compiledManifestRule struct {
@@ -101,46 +105,373 @@ type manifestComplexity struct {
 	totalMatchers int
 }
 
+type manifestCacheEntry struct {
+	compiled *compiledManifest
+	info     LoadedManifestInfo
+}
+
 var (
-	manifestOnce    sync.Once
-	manifestByAgent map[string]*compiledManifest
+	manifestMu      sync.RWMutex
+	manifestByAgent map[string]*manifestCacheEntry
 	manifestErr     error
+	manifestLoaded  bool
 
 	manifestBrailleClass = "[\U00002800-\U000028FF]"
 	reManifestHexEscape  = regexp.MustCompile(`\\x\{([0-9A-Fa-f]+)\}`)
 )
 
-func initManifests() {
-	manifestByAgent = make(map[string]*compiledManifest)
+func ReloadManifests() []AgentManifestSummary {
+	manifestMu.Lock()
+	defer manifestMu.Unlock()
+	manifestByAgent, manifestErr = buildManifestCache()
+	manifestLoaded = true
+	return manifestSummariesLocked()
+}
+
+func buildManifestCache() (map[string]*manifestCacheEntry, error) {
 	entries, err := manifestFS.ReadDir("manifests")
 	if err != nil {
-		manifestErr = err
-		return
+		return nil, err
 	}
+
+	cache := make(map[string]*manifestCacheEntry)
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".toml") {
 			continue
 		}
 		data, err := manifestFS.ReadFile("manifests/" + entry.Name())
 		if err != nil {
-			manifestErr = fmt.Errorf("read manifest %s: %w", entry.Name(), err)
-			return
+			return nil, fmt.Errorf("read manifest %s: %w", entry.Name(), err)
 		}
-		var parsed agentManifest
-		if _, err := toml.Decode(string(data), &parsed); err != nil {
-			manifestErr = fmt.Errorf("parse manifest %s: %w", entry.Name(), err)
-			return
-		}
-		compiled, err := compileManifest(parsed)
+		bundled, err := parseLocalManifest(string(data))
 		if err != nil {
-			manifestErr = fmt.Errorf("compile manifest %s: %w", entry.Name(), err)
-			return
+			return nil, fmt.Errorf("parse manifest %s: %w", entry.Name(), err)
 		}
-		manifestByAgent[strings.ToLower(parsed.ID)] = compiled
-		for _, alias := range parsed.Aliases {
-			manifestByAgent[strings.ToLower(alias)] = compiled
+		loaded, err := loadManifestForAgent(bundled)
+		if err != nil {
+			return nil, fmt.Errorf("load manifest %s: %w", entry.Name(), err)
+		}
+		registerManifestEntry(cache, loaded)
+	}
+	return cache, nil
+}
+
+func registerManifestEntry(cache map[string]*manifestCacheEntry, loaded *manifestCacheEntry) {
+	agentID := strings.ToLower(strings.TrimSpace(loaded.compiled.agent))
+	cache[agentID] = loaded
+	for _, alias := range loaded.compiled.aliases {
+		cache[strings.ToLower(strings.TrimSpace(alias))] = loaded
+	}
+}
+
+func loadManifestForAgent(bundled agentManifest) (*manifestCacheEntry, error) {
+	agentID := strings.ToLower(strings.TrimSpace(bundled.ID))
+	remote := readRemoteManifestEntry(agentID, bundled)
+	cachedRemoteVersion := remoteCachedVersion(remote)
+
+	overridePath := manifestOverridePath(agentID)
+	localOverrideShadowingRemote := fileExists(overridePath) && cachedRemoteVersion != ""
+	if remote != nil {
+		remote.info.CachedRemoteVersion = cachedRemoteVersion
+		remote.info.LocalOverrideShadowingRemote = localOverrideShadowingRemote
+	}
+
+	if !fileExists(overridePath) {
+		if remote != nil {
+			return remote, nil
+		}
+		return bundledManifestEntry(bundled, "", cachedRemoteVersion, localOverrideShadowingRemote)
+	}
+
+	content, err := os.ReadFile(overridePath)
+	if err != nil {
+		return fallbackManifestEntry(
+			bundled,
+			remote,
+			cachedRemoteVersion,
+			localOverrideShadowingRemote,
+			fmt.Sprintf(
+				"ignored override %s because it could not be loaded: %v",
+				overridePath,
+				err,
+			),
+		)
+	}
+	override, err := parseLocalManifest(string(content))
+	if err != nil {
+		return fallbackManifestEntry(
+			bundled,
+			remote,
+			cachedRemoteVersion,
+			localOverrideShadowingRemote,
+			fmt.Sprintf(
+				"ignored override %s because it could not be loaded: %v",
+				overridePath,
+				err,
+			),
+		)
+	}
+	if !manifestMatchesAgentID(&override, agentID) {
+		return fallbackManifestEntry(
+			bundled,
+			remote,
+			cachedRemoteVersion,
+			localOverrideShadowingRemote,
+			fmt.Sprintf(
+				"ignored override %s because manifest id %q does not match %q",
+				overridePath,
+				override.ID,
+				agentID,
+			),
+		)
+	}
+	entry, err := compileManifestEntry(
+		override,
+		ManifestSource{
+			Kind:    ManifestSourceOverride,
+			Path:    overridePath,
+			Version: manifestVersionString(override),
+		},
+		"",
+		cachedRemoteVersion,
+		localOverrideShadowingRemote,
+	)
+	if err != nil {
+		return fallbackManifestEntry(
+			bundled,
+			remote,
+			cachedRemoteVersion,
+			localOverrideShadowingRemote,
+			fmt.Sprintf(
+				"ignored override %s because it could not be compiled: %v",
+				overridePath,
+				err,
+			),
+		)
+	}
+	return entry, nil
+}
+
+func readRemoteManifestEntry(agentID string, bundled agentManifest) *manifestCacheEntry {
+	path := remoteManifestPath(agentID)
+	if !fileExists(path) {
+		return nil
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return bundledManifestEntryWithWarning(
+			bundled,
+			fmt.Sprintf(
+				"ignored remote manifest %s because it could not be loaded: %v",
+				path,
+				err,
+			),
+			"",
+		)
+	}
+	parsed, err := parseRemoteManifestForAgent(agentID, string(content))
+	if err != nil {
+		return bundledManifestEntryWithWarning(
+			bundled,
+			fmt.Sprintf(
+				"ignored remote manifest %s because it could not be loaded: %v",
+				path,
+				err,
+			),
+			"",
+		)
+	}
+	remoteVersion := parsed.version.String()
+	if bundledVersion, err := ParseManifestVersion(strings.TrimSpace(bundled.Version)); err == nil {
+		if CompareManifestVersion(parsed.version, bundledVersion) < 0 {
+			return bundledManifestEntryWithWarning(
+				bundled,
+				fmt.Sprintf(
+					"ignored remote manifest %s because cached version %s is older than bundled %s",
+					path,
+					parsed.version,
+					bundledVersion,
+				),
+				remoteVersion,
+			)
 		}
 	}
+	entry, err := compileManifestEntry(
+		parsed.manifest,
+		ManifestSource{
+			Kind:    ManifestSourceRemote,
+			Path:    path,
+			Version: remoteVersion,
+		},
+		"",
+		"",
+		false,
+	)
+	if err != nil {
+		return bundledManifestEntryWithWarning(
+			bundled,
+			fmt.Sprintf(
+				"ignored remote manifest %s because it could not be compiled: %v",
+				path,
+				err,
+			),
+			remoteVersion,
+		)
+	}
+	return entry
+}
+
+func remoteCachedVersion(remote *manifestCacheEntry) string {
+	if remote == nil {
+		return ""
+	}
+	if remote.info.Source.Kind == ManifestSourceRemote {
+		return remote.info.Source.Version
+	}
+	return remote.info.CachedRemoteVersion
+}
+
+func bundledManifestEntry(
+	bundled agentManifest,
+	warning string,
+	cachedRemoteVersion string,
+	localOverrideShadowingRemote bool,
+) (*manifestCacheEntry, error) {
+	entry, err := compileManifestEntry(
+		bundled,
+		ManifestSource{Kind: ManifestSourceBundled, Version: manifestVersionString(bundled)},
+		warning,
+		cachedRemoteVersion,
+		localOverrideShadowingRemote,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return entry, nil
+}
+
+func bundledManifestEntryWithWarning(
+	bundled agentManifest,
+	warning string,
+	cachedRemoteVersion string,
+) *manifestCacheEntry {
+	entry, err := bundledManifestEntry(
+		bundled,
+		warning,
+		cachedRemoteVersion,
+		false,
+	)
+	if err != nil {
+		panic(fmt.Sprintf("bundled %q manifest could not be compiled: %v", bundled.ID, err))
+	}
+	return entry
+}
+
+func fallbackManifestEntry(
+	bundled agentManifest,
+	remote *manifestCacheEntry,
+	cachedRemoteVersion string,
+	localOverrideShadowingRemote bool,
+	warning string,
+) (*manifestCacheEntry, error) {
+	if remote != nil {
+		if warning != "" {
+			remote.info.Warning = warning
+		}
+		return remote, nil
+	}
+	return bundledManifestEntry(
+		bundled,
+		warning,
+		cachedRemoteVersion,
+		localOverrideShadowingRemote,
+	)
+}
+
+func compileManifestEntry(
+	parsed agentManifest,
+	source ManifestSource,
+	warning string,
+	cachedRemoteVersion string,
+	localOverrideShadowingRemote bool,
+) (*manifestCacheEntry, error) {
+	compiled, err := compileManifest(parsed)
+	if err != nil {
+		return nil, err
+	}
+	return &manifestCacheEntry{
+		compiled: compiled,
+		info: LoadedManifestInfo{
+			Source:                       source,
+			Version:                      manifestVersionString(parsed),
+			CachedRemoteVersion:          cachedRemoteVersion,
+			LocalOverrideShadowingRemote: localOverrideShadowingRemote,
+			Warning:                      warning,
+		},
+	}, nil
+}
+
+func manifestSummariesLocked() []AgentManifestSummary {
+	summaries := make([]AgentManifestSummary, 0)
+	seen := map[string]struct{}{}
+	for agentName, entry := range manifestByAgent {
+		agentID := strings.ToLower(strings.TrimSpace(entry.compiled.agent))
+		if agentName != agentID {
+			continue
+		}
+		if _, ok := seen[agentID]; ok {
+			continue
+		}
+		seen[agentID] = struct{}{}
+		summaries = append(summaries, AgentManifestSummary{
+			AgentID:                      agentID,
+			ActiveSource:                 entry.info.Source,
+			ActiveVersion:                entry.info.Version,
+			CachedRemoteVersion:          entry.info.CachedRemoteVersion,
+			LocalOverrideShadowingRemote: entry.info.LocalOverrideShadowingRemote,
+			Warning:                      entry.info.Warning,
+		})
+	}
+	sortManifestSummaries(summaries)
+	return summaries
+}
+
+func sortManifestSummaries(summaries []AgentManifestSummary) {
+	sort.Slice(summaries, func(i, j int) bool {
+		return summaries[i].AgentID < summaries[j].AgentID
+	})
+}
+
+func ManifestSummaries() []AgentManifestSummary {
+	manifestMu.RLock()
+	defer manifestMu.RUnlock()
+	if !manifestLoaded {
+		return nil
+	}
+	return manifestSummariesLocked()
+}
+
+func ManifestInfoForAgent(agentName string) (LoadedManifestInfo, bool) {
+	entry, err := manifestEntryForAgent(agentName)
+	if err != nil || entry == nil {
+		return LoadedManifestInfo{}, false
+	}
+	return entry.info, true
+}
+
+func ensureManifestsLoaded() {
+	manifestMu.RLock()
+	loaded := manifestLoaded
+	manifestMu.RUnlock()
+	if loaded {
+		return
+	}
+	ReloadManifests()
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 func compileManifest(parsed agentManifest) (*compiledManifest, error) {
@@ -160,7 +491,10 @@ func compileManifest(parsed agentManifest) (*compiledManifest, error) {
 	}
 
 	complexity := manifestComplexity{}
-	compiled := &compiledManifest{agent: parsed.ID}
+	compiled := &compiledManifest{
+		agent:   parsed.ID,
+		aliases: append([]string(nil), parsed.Aliases...),
+	}
 	for _, rule := range parsed.Rules {
 		if strings.TrimSpace(rule.ID) == "" {
 			return nil, fmt.Errorf("manifest %q has a rule with an empty id", parsed.ID)
@@ -476,7 +810,17 @@ func validateManifestRegion(region string) error {
 }
 
 func manifestForAgent(agentName string) (*compiledManifest, error) {
-	manifestOnce.Do(initManifests)
+	entry, err := manifestEntryForAgent(agentName)
+	if err != nil || entry == nil {
+		return nil, err
+	}
+	return entry.compiled, nil
+}
+
+func manifestEntryForAgent(agentName string) (*manifestCacheEntry, error) {
+	ensureManifestsLoaded()
+	manifestMu.RLock()
+	defer manifestMu.RUnlock()
 	if manifestErr != nil {
 		return nil, manifestErr
 	}

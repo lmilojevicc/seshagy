@@ -34,7 +34,9 @@ type Config struct {
 }
 
 type AgentsConfig struct {
-	ManifestFallback bool `toml:"manifest_fallback"`
+	ManifestFallback   bool   `toml:"manifest_fallback"`
+	ManifestAutoUpdate bool   `toml:"manifest_auto_update"`
+	ManifestCatalogURL string `toml:"manifest_catalog_url"`
 }
 
 type SourcesConfig struct {
@@ -117,6 +119,9 @@ func Default() Config {
 			Agent:   IconConfig{Icon: sessionmgr.IconAgent + "  ", Label: "A", Color: "13"},
 		},
 		TypeFirst: TypeFirstConfig{Enabled: false, Prefix: DefaultPrefix},
+		Agents: AgentsConfig{
+			ManifestAutoUpdate: true,
+		},
 	}
 }
 

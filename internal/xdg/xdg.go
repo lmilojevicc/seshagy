@@ -25,6 +25,14 @@ func ConfigHome() string {
 	return filepath.Join(Home(), ".config")
 }
 
+// StateHome returns $XDG_STATE_HOME when set, otherwise ~/.local/state.
+func StateHome() string {
+	if value := strings.TrimSpace(os.Getenv("XDG_STATE_HOME")); value != "" {
+		return ExpandHome(value)
+	}
+	return filepath.Join(Home(), ".local", "state")
+}
+
 // ExpandHome expands a leading ~ or ~/ in path to the user's home directory.
 func ExpandHome(path string) string {
 	if path == "~" {

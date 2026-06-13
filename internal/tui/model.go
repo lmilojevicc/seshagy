@@ -154,6 +154,10 @@ func New() Model {
 
 func Run() error {
 	m := New()
+	sessionmgr.StartManifestAutoUpdate(
+		m.config.Agents.ManifestCatalogURL,
+		m.config.Agents.ManifestAutoUpdate,
+	)
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	_, err := p.Run()
 	return err
