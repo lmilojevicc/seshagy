@@ -97,7 +97,8 @@ func reportAgentLocked(ctx context.Context, pane string, opts AgentReport) error
 		}
 	}
 	visible := paneVisibleNow(ctx, pane)
-	_, _ = UpdateAgentStatusTracking(ctx, pane, state, visible)
+	lifecycle := HasLifecycleAuthority(name, opts.Source)
+	_, _ = UpdateAgentStatusTracking(ctx, pane, state, visible, lifecycle)
 	updated := fmt.Sprintf("%d", time.Now().Unix())
 	_ = setPaneOption(ctx, pane, "@agent_name", name)
 	_ = setPaneOption(ctx, pane, "@agent_state", string(semanticAgentState(state)))

@@ -62,93 +62,122 @@ func installFakeTmux(t *testing.T, f *fakeTmux) {
 func TestUpdateAgentStatusTracking(t *testing.T) {
 	const pane = "%1"
 	tests := []struct {
-		name         string
-		detected     AgentState
-		visible      bool
-		lastState    AgentState // seeds @agent_last_state
-		lastStatus   AgentState // seeds @agent_last_status
-		wantStatus   AgentState
-		wantLastSeen bool
+		name               string
+		detected           AgentState
+		visible            bool
+		lifecycleAuthority bool
+		lastState          AgentState // seeds @agent_last_state
+		lastStatus         AgentState // seeds @agent_last_status
+		wantStatus         AgentState
+		wantLastSeen       bool
 	}{
 		{
-			name:         "done visible reports idle",
-			detected:     AgentDone,
-			visible:      true,
-			wantStatus:   AgentIdle,
-			wantLastSeen: true,
+			name:               "done visible reports idle",
+			detected:           AgentDone,
+			visible:            true,
+			lifecycleAuthority: true,
+			wantStatus:         AgentIdle,
+			wantLastSeen:       true,
 		},
 		{
-			name:       "done background stays done",
-			detected:   AgentDone,
-			visible:    false,
-			wantStatus: AgentDone,
+			name:               "done background stays done",
+			detected:           AgentDone,
+			visible:            false,
+			lifecycleAuthority: true,
+			wantStatus:         AgentDone,
 		},
 		{
-			name:         "aborted visible reports idle",
-			detected:     AgentAborted,
-			visible:      true,
-			wantStatus:   AgentIdle,
-			wantLastSeen: true,
+			name:               "aborted visible reports idle",
+			detected:           AgentAborted,
+			visible:            true,
+			lifecycleAuthority: true,
+			wantStatus:         AgentIdle,
+			wantLastSeen:       true,
 		},
 		{
-			name:       "aborted background stays aborted",
-			detected:   AgentAborted,
-			visible:    false,
-			wantStatus: AgentAborted,
+			name:               "aborted background stays aborted",
+			detected:           AgentAborted,
+			visible:            false,
+			lifecycleAuthority: true,
+			wantStatus:         AgentAborted,
 		},
 		{
-			name:         "idle visible stays idle",
-			detected:     AgentIdle,
-			visible:      true,
-			wantStatus:   AgentIdle,
-			wantLastSeen: true,
+			name:               "idle visible stays idle",
+			detected:           AgentIdle,
+			visible:            true,
+			lifecycleAuthority: true,
+			wantStatus:         AgentIdle,
+			wantLastSeen:       true,
 		},
 		{
-			name:       "idle background after done keeps done",
-			detected:   AgentIdle,
-			visible:    false,
-			lastStatus: AgentDone,
-			wantStatus: AgentDone,
+			name:               "idle background after done keeps done",
+			detected:           AgentIdle,
+			visible:            false,
+			lifecycleAuthority: true,
+			lastStatus:         AgentDone,
+			wantStatus:         AgentDone,
 		},
 		{
-			name:       "idle background after aborted keeps aborted",
-			detected:   AgentIdle,
-			visible:    false,
-			lastStatus: AgentAborted,
-			wantStatus: AgentAborted,
+			name:               "idle background after aborted keeps aborted",
+			detected:           AgentIdle,
+			visible:            false,
+			lifecycleAuthority: true,
+			lastStatus:         AgentAborted,
+			wantStatus:         AgentAborted,
 		},
 		{
-			name:       "idle background after working becomes done",
-			detected:   AgentIdle,
-			visible:    false,
-			lastState:  AgentWorking,
-			wantStatus: AgentDone,
+			name:               "idle background after working becomes done",
+			detected:           AgentIdle,
+			visible:            false,
+			lifecycleAuthority: true,
+			lastState:          AgentWorking,
+			wantStatus:         AgentDone,
 		},
 		{
-			name:       "idle background after blocked becomes done",
-			detected:   AgentIdle,
-			visible:    false,
-			lastState:  AgentBlocked,
-			wantStatus: AgentDone,
+			name:               "idle background after blocked becomes done",
+			detected:           AgentIdle,
+			visible:            false,
+			lifecycleAuthority: true,
+			lastState:          AgentBlocked,
+			wantStatus:         AgentDone,
 		},
 		{
-			name:       "idle background fresh stays idle",
-			detected:   AgentIdle,
-			visible:    false,
-			wantStatus: AgentIdle,
+			name:               "session-only idle background after working stays idle",
+			detected:           AgentIdle,
+			visible:            false,
+			lifecycleAuthority: false,
+			lastState:          AgentWorking,
+			wantStatus:         AgentIdle,
 		},
 		{
-			name:       "working passes through",
-			detected:   AgentWorking,
-			visible:    false,
-			wantStatus: AgentWorking,
+			name:               "idle background fresh stays idle",
+			detected:           AgentIdle,
+			visible:            false,
+			lifecycleAuthority: true,
+			wantStatus:         AgentIdle,
 		},
 		{
-			name:         "blocked passes through",
-			detected:     AgentBlocked,
-			visible:      true,
-			wantStatus:   AgentBlocked,
-			wantLastSeen: true,
+			name:               "working passes through",
+			detected:           AgentWorking,
+			visible:            false,
+			lifecycleAuthority: true,
+			wantStatus:         AgentWorking,
+		},
+		{
+			name:               "blocked passes through",
+			detected:           AgentBlocked,
+			visible:            true,
+			lifecycleAuthority: true,
+			wantStatus:         AgentBlocked,
+			wantLastSeen:       true,
+		},
+		{
+			name:               "unknown passes through",
+			detected:           AgentUnknown,
+			visible:            false,
+			lifecycleAuthority: false,
+			lastState:          AgentWorking,
+			wantStatus:         AgentUnknown,
 		},
 	}
 	for _, tt := range tests {
@@ -167,6 +196,7 @@ func TestUpdateAgentStatusTracking(t *testing.T) {
 				pane,
 				tt.detected,
 				tt.visible,
+				tt.lifecycleAuthority,
 			)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
@@ -187,7 +217,7 @@ func TestUpdateAgentStatusTracking(t *testing.T) {
 func TestUpdateAgentStatusTrackingEmptyPane(t *testing.T) {
 	f := newFakeTmux()
 	installFakeTmux(t, f)
-	got, err := UpdateAgentStatusTracking(context.Background(), "", AgentWorking, true)
+	got, err := UpdateAgentStatusTracking(context.Background(), "", AgentWorking, true, true)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

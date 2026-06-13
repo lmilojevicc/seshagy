@@ -135,15 +135,111 @@ func TestParseAgentsRequiresHookReportedAgentName(t *testing.T) {
 		"1",
 		"1",
 		"0",
+		"claude",
 		"",
-		"busy",
-		"needs ok",
-		"123",
-		"hook",
+		"",
+		"unknown",
+		"",
+		"",
+		"",
+		"",
+		"",
 	}
 	raw := []byte(strings.Join(fields, paneSep) + "\n")
 	if got := ParseAgents(raw, ""); len(got) != 0 {
-		t.Fatalf("expected unreported pane to be ignored, got %#v", got)
+		t.Fatalf("expected hook-capable pane without @agent_name to be ignored, got %#v", got)
+	}
+}
+
+func TestParseAgentsSkipsHookCapableWithoutHookReport(t *testing.T) {
+	fields := []string{
+		"%3",
+		"work",
+		"1",
+		"0",
+		"/Users/milo/Projects/seshagy",
+		"1",
+		"1",
+		"1",
+		"0",
+		"claude",
+		"",
+		"",
+		"",
+		"",
+		"",
+		"",
+		"",
+		"",
+	}
+	raw := []byte(strings.Join(fields, paneSep) + "\n")
+	if got := ParseAgents(raw, ""); len(got) != 0 {
+		t.Fatalf("expected claude pane without hook report to be skipped, got %#v", got)
+	}
+}
+
+func TestParseAgentsListsHookReportedHookCapableAgent(t *testing.T) {
+	fields := []string{
+		"%5",
+		"work",
+		"1",
+		"2",
+		"/Users/milo/Projects/seshagy",
+		"1",
+		"1",
+		"1",
+		"0",
+		"kimi",
+		"",
+		"kimi",
+		"working",
+		"tool use",
+		"456",
+		"seshagy:kimi",
+		"session-456",
+		"99",
+	}
+	raw := []byte(strings.Join(fields, paneSep) + "\n")
+	got := ParseAgents(raw, "")
+	if len(got) != 1 {
+		t.Fatalf("len = %d, want 1", len(got))
+	}
+	if got[0].AgentName != "kimi" ||
+		got[0].AgentState != AgentWorking ||
+		got[0].AgentSource != "seshagy:kimi" ||
+		got[0].AgentSessionID != "session-456" {
+		t.Fatalf("unexpected hook-reported kimi agent: %#v", got[0])
+	}
+}
+
+func TestParseAgentsStillListsNonHookCapableProcessAgents(t *testing.T) {
+	fields := []string{
+		"%4",
+		"work",
+		"1",
+		"1",
+		"/Users/milo/Projects/seshagy",
+		"1",
+		"1",
+		"1",
+		"0",
+		"gemini",
+		"",
+		"",
+		"",
+		"",
+		"",
+		"",
+		"",
+		"",
+	}
+	raw := []byte(strings.Join(fields, paneSep) + "\n")
+	got := ParseAgents(raw, "")
+	if len(got) != 1 {
+		t.Fatalf("len = %d, want 1", len(got))
+	}
+	if got[0].AgentName != "gemini" || got[0].AgentSource != "process" {
+		t.Fatalf("unexpected process-detected agent: %#v", got[0])
 	}
 }
 

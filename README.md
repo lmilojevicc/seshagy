@@ -10,9 +10,10 @@ Run one command to get a keyboard-first view where you can:
 - see hook-reported AI coding agent panes, their current state, and where they
   are running.
 
-It is intentionally tmux-native. Agent state comes from tmux `@agent_*` pane
-metadata reported by hooks/plugins; seshagy does not scrape pane text or guess
-from process names.
+It is intentionally tmux-native. Hook-capable agents report identity and state
+through `@agent_*` pane metadata from installed integrations; seshagy does not
+scrape pane text. Agents without hook support may still appear via process
+detection, but their state stays `unknown` unless explicitly reported.
 
 ## Quick start
 
@@ -84,7 +85,14 @@ basename: `.config` becomes `dot_config`, and unsupported characters collapse to
 
 seshagy tracks only agents that report metadata through supported hooks/plugins.
 That keeps the model predictable: if an agent pane appears, something explicitly
-reported it to tmux.
+reported it to tmux. Hook-capable agents (those with installable integrations)
+require an installed integration; process-name fallback applies only to agents
+without hook support, such as Gemini, Antigravity (`agy`), and similar tools.
+
+Integrations use two authority tiers. **Lifecycle authority** (Pi, OpenCode,
+Kimi Code) means hooks own idle/working/blocked state. **Session-only**
+integrations (Claude, Codex, Copilot, Droid, Qoder CLI, Cursor) report session
+IDs and leave lifecycle state to fallbacks.
 
 Supported integration targets:
 
@@ -92,6 +100,7 @@ Supported integration targets:
 | --- | --- | --- |
 | `pi` | Pi | lifecycle state |
 | `opencode` | OpenCode | lifecycle state |
+| `kimi` | Kimi Code | lifecycle state |
 | `claude` | Claude Code | presence, optional session id, state `unknown` |
 | `codex` | Codex | presence, optional session id, state `unknown` |
 | `copilot` | GitHub Copilot CLI | presence, optional session id, state `unknown` |
@@ -240,7 +249,9 @@ terminal theme usually rethemes seshagy without extra config.
 ## Limits and expectations
 
 - tmux is required for session and agent operations.
-- Agents appear only after a hook/plugin reports `@agent_*` metadata.
+- Agents appear only after a hook/plugin reports `@agent_*` metadata for
+  hook-capable agents, or after process detection for agents without hook
+  integrations.
 - Presence-only integrations do not claim lifecycle state; they report
   `unknown` plus optional native session ids when available.
 - Directory results depend on your `zoxide` database and configured `fd` command.

@@ -248,7 +248,7 @@ func writeShellHook(target Target, path, binaryPath string) error {
 }
 
 func hookCommand(hookPath string, target Target) string {
-	return "bash " + shellQuoteLiteral(hookPath) + " " + string(target) + " session"
+	return shellHookCommand(hookPath, target, "session")
 }
 
 func ensureCodexHooksEnabled(path string) error {

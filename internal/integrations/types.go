@@ -25,6 +25,7 @@ const (
 	TargetOpencode Target = "opencode"
 	TargetQodercli Target = "qodercli"
 	TargetCursor   Target = "cursor"
+	TargetKimi     Target = "kimi"
 )
 
 type StatusKind string
@@ -46,6 +47,7 @@ type Recommendation struct {
 	Version        int
 	Installable    bool
 	Reason         string
+	Authority      AuthorityKind
 }
 
 type spec struct {
@@ -151,6 +153,7 @@ func statusFor(spec spec) Recommendation {
 		State:          state,
 		Version:        version,
 		Installable:    configExists,
+		Authority:      Authority(spec.target),
 	}
 	if !rec.AgentAvailable {
 		if spec.target == TargetCursor {
@@ -287,6 +290,15 @@ func specs() []spec {
 			func() string { return filepath.Join(cursorDir(), shellHookName) },
 			installCursor,
 			uninstallCursor,
+		},
+		{
+			TargetKimi,
+			"Kimi Code",
+			[]string{"kimi", "kimi-code"},
+			kimiDir,
+			func() string { return filepath.Join(kimiDir(), "hooks", shellHookName) },
+			installKimi,
+			uninstallKimi,
 		},
 	}
 }

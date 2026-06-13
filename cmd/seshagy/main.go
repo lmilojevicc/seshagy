@@ -124,7 +124,14 @@ func runIntegration(args []string) error {
 			if !rec.Installable && rec.AgentAvailable {
 				state += "; " + rec.Reason
 			}
-			fmt.Printf("%-18s %-9s %-18s %s\n", rec.Target, availability, state, rec.InstallPath)
+			fmt.Printf(
+				"%-18s %-9s %-18s %-14s %s\n",
+				rec.Target,
+				availability,
+				state,
+				rec.Authority,
+				rec.InstallPath,
+			)
 		}
 		return nil
 	}
@@ -366,12 +373,12 @@ Agent flags:
   --seq <integer>             optional monotonic ordering token
 
 Hook integrations:
-  Supported targets: pi, claude, codex, copilot, droid, opencode, qodercli, cursor.
+  Supported targets: pi, claude, codex, copilot, droid, opencode, qodercli, cursor, kimi.
   The TUI asks before installing missing hooks for detected agents only on the
   first launch. After that, use the TUI's i key or this integration command.
-  Pi and OpenCode report lifecycle state directly. Claude, Codex, Copilot,
-  Droid, Qoder CLI, and Cursor report session/presence as unknown with optional
-  native session ids. seshagy no longer infers agent state by inspecting
-  foreground process names or pane text.
+  Pi, OpenCode, and Kimi Code report lifecycle state directly. Claude, Codex,
+  Copilot, Droid, Qoder CLI, and Cursor report session/presence as unknown with
+  optional native session ids. Hook-capable agents are not listed from process
+  detection alone; install the integration so hooks report @agent_* metadata.
 `
 }

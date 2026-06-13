@@ -55,6 +55,7 @@ func UpdateAgentStatusTracking(
 	pane string,
 	detected AgentState,
 	visible bool,
+	lifecycleAuthority bool,
 ) (AgentState, error) {
 	if pane == "" {
 		return detected, nil
@@ -85,7 +86,8 @@ func UpdateAgentStatusTracking(
 			status = AgentDone
 		} else if previousStatus == AgentAborted {
 			status = AgentAborted
-		} else if previousState == AgentWorking || previousState == AgentBlocked {
+		} else if lifecycleAuthority &&
+			(previousState == AgentWorking || previousState == AgentBlocked) {
 			status = AgentDone
 		} else {
 			status = AgentIdle

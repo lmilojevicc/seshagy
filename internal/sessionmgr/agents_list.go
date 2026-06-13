@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+
+	"github.com/lmilojevicc/seshagy/internal/integrations"
 )
 
 func ListAgents(ctx context.Context, sessionFilter string) ([]Item, error) {
@@ -22,11 +24,18 @@ func ListAgents(ctx context.Context, sessionFilter string) ([]Item, error) {
 		pane := items[i].PaneID
 		detected := items[i].AgentState
 		visible := items[i].Visible
+		lifecycle := HasLifecycleAuthority(items[i].AgentName, items[i].AgentSource)
 		var state AgentState
 		// Hold the per-pane lock so a concurrent hook report/release cannot
 		// interleave with the tracking-option writes below.
 		err := withAgentPaneLock(pane, func() error {
-			s, trackErr := UpdateAgentStatusTracking(ctx, pane, detected, visible)
+			s, trackErr := UpdateAgentStatusTracking(
+				ctx,
+				pane,
+				detected,
+				visible,
+				lifecycle,
+			)
 			state = s
 			return trackErr
 		})
@@ -55,6 +64,7 @@ func ParseAgents(raw []byte, sessionFilter string) []Item {
 			continue
 		}
 		name := parts[11]
+		hookReported := name != ""
 		if name == "" {
 			command := cleanField(parts[9])
 			title := cleanField(parts[10])
@@ -62,11 +72,14 @@ func ParseAgents(raw []byte, sessionFilter string) []Item {
 			if name == "" {
 				continue
 			}
+			if integrations.HookCapableAgent(name) {
+				continue
+			}
 		}
 		state := NormalizeAgentState(parts[12])
 		message := cleanField(parts[13])
 		source := cleanField(parts[15])
-		if source == "" && parts[11] == "" {
+		if source == "" && !hookReported {
 			source = "process"
 		}
 		sessionID := cleanField(parts[16])

@@ -4,9 +4,131 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
+
+func TestHookCapableAgent(t *testing.T) {
+	for _, target := range Targets() {
+		name := AgentNameForTarget(target)
+		if !HookCapableAgent(name) {
+			t.Fatalf("HookCapableAgent(%q) = false, want true", name)
+		}
+	}
+	for _, name := range []string{"gemini", "agy", "cline", ""} {
+		if HookCapableAgent(name) {
+			t.Fatalf("HookCapableAgent(%q) = true, want false", name)
+		}
+	}
+}
+
+func TestInstallKimiWritesLifecycleHooksAndPreservesUserConfig(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	kimi := filepath.Join(home, ".kimi")
+	if err := os.MkdirAll(kimi, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	existing := "model = \"kimi\"\n\n[tools]\nenabled = true\n"
+	configPath := filepath.Join(kimi, "config.toml")
+	if err := os.WriteFile(configPath, []byte(existing), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := installKimi("/bin/seshagy"); err != nil {
+		t.Fatal(err)
+	}
+	updated := readFile(t, configPath)
+	if !strings.Contains(updated, existing) {
+		t.Fatalf("user config not preserved:\n%s", updated)
+	}
+	if !strings.Contains(updated, kimiConfigBlockBegin) ||
+		!strings.Contains(updated, kimiConfigBlockEnd) {
+		t.Fatalf("managed kimi block missing:\n%s", updated)
+	}
+	for _, hook := range kimiHookEvents {
+		if !strings.Contains(updated, "event = "+strconv.Quote(hook.event)) {
+			t.Fatalf("config missing hook event %q:\n%s", hook.event, updated)
+		}
+		if !strings.Contains(updated, " "+string(TargetKimi)+" "+hook.action) {
+			t.Fatalf("config missing hook action %q:\n%s", hook.action, updated)
+		}
+	}
+	hookContent := readFile(t, filepath.Join(kimi, "hooks", shellHookName))
+	if !strings.Contains(hookContent, "SESHAGY_INTEGRATION_ID=kimi") {
+		t.Fatalf("kimi hook missing integration marker:\n%s", hookContent)
+	}
+}
+
+func TestUninstallKimiRemovesManagedBlockOnly(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	kimi := filepath.Join(home, ".kimi")
+	if err := os.MkdirAll(kimi, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	userConfig := "model = \"kimi\"\n"
+	configPath := filepath.Join(kimi, "config.toml")
+	if err := os.WriteFile(configPath, []byte(userConfig), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := installKimi("/bin/seshagy"); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := uninstallKimi(); err != nil {
+		t.Fatal(err)
+	}
+	after := readFile(t, configPath)
+	if strings.Contains(after, kimiConfigBlockBegin) {
+		t.Fatalf("managed block should be removed:\n%s", after)
+	}
+	if !strings.Contains(after, userConfig) {
+		t.Fatalf("user config should remain:\n%s", after)
+	}
+	if _, err := os.Stat(filepath.Join(kimi, "hooks", shellHookName)); !os.IsNotExist(err) {
+		t.Fatalf("hook file should be removed, stat err=%v", err)
+	}
+}
+
+func TestAuthorityMapping(t *testing.T) {
+	tests := []struct {
+		target Target
+		want   AuthorityKind
+	}{
+		{TargetPi, LifecycleAuthority},
+		{TargetOpencode, LifecycleAuthority},
+		{TargetKimi, LifecycleAuthority},
+		{TargetClaude, SessionOnly},
+		{TargetCodex, SessionOnly},
+		{TargetCopilot, SessionOnly},
+		{TargetDroid, SessionOnly},
+		{TargetQodercli, SessionOnly},
+		{TargetCursor, SessionOnly},
+	}
+	for _, tt := range tests {
+		if got := Authority(tt.target); got != tt.want {
+			t.Fatalf("Authority(%s) = %q, want %q", tt.target, got, tt.want)
+		}
+	}
+}
+
+func TestScanIncludesAuthority(t *testing.T) {
+	for _, rec := range Scan() {
+		if rec.Authority == "" {
+			t.Fatalf("Scan() recommendation for %s missing Authority", rec.Target)
+		}
+		if got := Authority(rec.Target); got != rec.Authority {
+			t.Fatalf(
+				"Scan() recommendation for %s has Authority=%q, want %q",
+				rec.Target,
+				rec.Authority,
+				got,
+			)
+		}
+	}
+}
 
 func TestInstalledV1ManagedHookIsOutdated(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "seshagy-agent-state.sh")
