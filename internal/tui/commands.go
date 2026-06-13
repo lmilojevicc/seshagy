@@ -39,14 +39,17 @@ func startupSetupCmd(cfg appconfig.Config) tea.Cmd {
 
 func startupIntegrationsCmd() tea.Cmd {
 	return func() tea.Msg {
-		shouldPrompt, err := claimStartupIntegrationPrompt()
+		shouldPrompt, err := shouldStartupIntegrationPrompt()
 		if err != nil {
-			return integrationsMsg{err: fmt.Errorf("record first-launch hook prompt: %w", err)}
+			return integrationsMsg{err: fmt.Errorf("check startup hook prompt: %w", err)}
 		}
 		if !shouldPrompt {
 			return integrationsMsg{}
 		}
-		return integrationsMsg{recs: integrations.RecommendedForPrompt()}
+		return integrationsMsg{
+			recs:    integrations.RecommendedForPrompt(),
+			startup: true,
+		}
 	}
 }
 

@@ -56,11 +56,12 @@ type Model struct {
 
 // integrationPrompt holds the state of the hook-integration selection prompt.
 type integrationPrompt struct {
-	active   bool
-	rows     []integrations.Recommendation
-	selected map[integrations.Target]bool
-	cursor   int
-	messages []string
+	active        bool
+	startupPrompt bool
+	rows          []integrations.Recommendation
+	selected      map[integrations.Target]bool
+	cursor        int
+	messages      []string
 }
 
 // setupPrompt holds the state of the first-launch / manual input-mode prompt.
@@ -103,8 +104,9 @@ type (
 type tickMsg time.Time
 
 type integrationsMsg struct {
-	recs []integrations.Recommendation
-	err  error
+	recs    []integrations.Recommendation
+	startup bool
+	err     error
 }
 
 type integrationsInstalledMsg struct {

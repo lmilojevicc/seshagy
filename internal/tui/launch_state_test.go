@@ -3,35 +3,164 @@ package tui
 import (
 	"os"
 	"testing"
+
+	"github.com/lmilojevicc/seshagy/internal/integrations"
 )
 
-func TestClaimStartupIntegrationPromptOnlyOnce(t *testing.T) {
+func TestPromptVersionStateFirstLaunch(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 
-	first, err := claimStartupIntegrationPrompt()
+	stored, firstLaunch, err := promptVersionState()
 	if err != nil {
-		t.Fatalf("first claim error: %v", err)
+		t.Fatalf("promptVersionState error: %v", err)
 	}
-	if !first {
-		t.Fatal("first launch should claim the startup prompt")
+	if stored != 0 {
+		t.Fatalf("stored = %d, want 0", stored)
 	}
-	if _, err := os.Stat(integrationPromptSeenPath()); err != nil {
-		t.Fatalf("seen file was not written: %v", err)
-	}
-
-	second, err := claimStartupIntegrationPrompt()
-	if err != nil {
-		t.Fatalf("second claim error: %v", err)
-	}
-	if second {
-		t.Fatal("second launch should not claim the startup prompt")
+	if !firstLaunch {
+		t.Fatal("firstLaunch = false, want true")
 	}
 }
 
-func TestStartupIntegrationsCmdSkipsAfterSeenFile(t *testing.T) {
+func TestPromptVersionStateLegacySeenFile(t *testing.T) {
+	stateHome := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", stateHome)
+	if err := os.MkdirAll(stateHome+"/seshagy", 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(integrationPromptSeenPath(), []byte("seen\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	stored, firstLaunch, err := promptVersionState()
+	if err != nil {
+		t.Fatalf("promptVersionState error: %v", err)
+	}
+	if stored != 0 {
+		t.Fatalf("stored = %d, want 0 for legacy seen file", stored)
+	}
+	if firstLaunch {
+		t.Fatal("firstLaunch = true, want false for legacy seen file")
+	}
+}
+
+func TestWriteIntegrationPromptVersionRoundTrip(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	if first, err := claimStartupIntegrationPrompt(); err != nil || !first {
-		t.Fatalf("claimStartupIntegrationPrompt() = %v, %v; want true, nil", first, err)
+
+	if err := writeIntegrationPromptVersion(3); err != nil {
+		t.Fatalf("writeIntegrationPromptVersion error: %v", err)
+	}
+
+	stored, firstLaunch, err := promptVersionState()
+	if err != nil {
+		t.Fatalf("promptVersionState error: %v", err)
+	}
+	if stored != 3 {
+		t.Fatalf("stored = %d, want 3", stored)
+	}
+	if firstLaunch {
+		t.Fatal("firstLaunch = true, want false after writing version")
+	}
+}
+
+func TestShouldStartupIntegrationPromptFirstLaunchRecordsCurrentVersion(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+
+	should, err := shouldStartupIntegrationPrompt()
+	if err != nil {
+		t.Fatalf("shouldStartupIntegrationPrompt error: %v", err)
+	}
+	recs := integrations.RecommendedForPrompt()
+	if len(recs) > 0 {
+		if !should {
+			t.Fatal("first launch with recommendations should prompt")
+		}
+		return
+	}
+	if should {
+		t.Fatal("first launch without recommendations should not prompt")
+	}
+
+	stored, _, err := promptVersionState()
+	if err != nil {
+		t.Fatalf("promptVersionState error: %v", err)
+	}
+	if stored != integrations.CurrentInstallVersion() {
+		t.Fatalf("stored = %d, want %d", stored, integrations.CurrentInstallVersion())
+	}
+}
+
+func TestShouldStartupIntegrationPromptSkipsAtCurrentVersion(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	if err := writeIntegrationPromptVersion(integrations.CurrentInstallVersion()); err != nil {
+		t.Fatal(err)
+	}
+
+	should, err := shouldStartupIntegrationPrompt()
+	if err != nil {
+		t.Fatalf("shouldStartupIntegrationPrompt error: %v", err)
+	}
+	if should {
+		t.Fatal("startup prompt should be skipped when already recorded for current version")
+	}
+}
+
+func TestShouldStartupIntegrationPromptUpgradeDoesNotBumpWithoutPrompt(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	oldVersion := integrations.CurrentInstallVersion() - 1
+	if oldVersion < 1 {
+		t.Fatalf(
+			"CurrentInstallVersion() = %d, need at least 2 for upgrade test",
+			integrations.CurrentInstallVersion(),
+		)
+	}
+	if err := writeIntegrationPromptVersion(oldVersion); err != nil {
+		t.Fatal(err)
+	}
+
+	should, err := shouldStartupIntegrationPrompt()
+	if err != nil {
+		t.Fatalf("shouldStartupIntegrationPrompt error: %v", err)
+	}
+	recs := integrations.RecommendedForPrompt()
+	if len(recs) > 0 && !should {
+		t.Fatal("upgrade with outdated integrations should allow startup prompt")
+	}
+	if len(recs) == 0 && should {
+		t.Fatal("upgrade without outdated integrations should not prompt")
+	}
+
+	stored, _, err := promptVersionState()
+	if err != nil {
+		t.Fatalf("promptVersionState error: %v", err)
+	}
+	if stored != oldVersion {
+		t.Fatalf("stored = %d, want %d without completing prompt", stored, oldVersion)
+	}
+}
+
+func TestRecordIntegrationPromptDismissed(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	if err := writeIntegrationPromptVersion(1); err != nil {
+		t.Fatal(err)
+	}
+	if err := recordIntegrationPromptDismissed(); err != nil {
+		t.Fatalf("recordIntegrationPromptDismissed error: %v", err)
+	}
+
+	stored, _, err := promptVersionState()
+	if err != nil {
+		t.Fatalf("promptVersionState error: %v", err)
+	}
+	if stored != integrations.CurrentInstallVersion() {
+		t.Fatalf("stored = %d, want %d", stored, integrations.CurrentInstallVersion())
+	}
+}
+
+func TestStartupIntegrationsCmdSkipsAfterCurrentVersion(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	if err := writeIntegrationPromptVersion(integrations.CurrentInstallVersion()); err != nil {
+		t.Fatal(err)
 	}
 
 	msg, ok := startupIntegrationsCmd()().(integrationsMsg)
@@ -41,7 +170,15 @@ func TestStartupIntegrationsCmdSkipsAfterSeenFile(t *testing.T) {
 	if msg.err != nil {
 		t.Fatalf("startupIntegrationsCmd error: %v", msg.err)
 	}
+	if msg.startup {
+		t.Fatal(
+			"startup integrations should not be marked as startup prompt after current version is recorded",
+		)
+	}
 	if len(msg.recs) != 0 {
-		t.Fatalf("startup integrations should be skipped after first launch, got %#v", msg.recs)
+		t.Fatalf(
+			"startup integrations should be skipped after current version is recorded, got %#v",
+			msg.recs,
+		)
 	}
 }

@@ -94,6 +94,10 @@ func Scan() []Recommendation {
 	return out
 }
 
+func CurrentInstallVersion() int {
+	return installVersion
+}
+
 func RecommendedForPrompt() []Recommendation {
 	var out []Recommendation
 	for _, rec := range Scan() {

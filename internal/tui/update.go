@@ -35,6 +35,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if len(msg.recs) > 0 {
 			m.integration.active = true
+			m.integration.startupPrompt = msg.startup
 			m.status = "install hook integrations for detected agents"
 		} else if m.integration.active {
 			m.integration.active = false
@@ -53,6 +54,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.status = "no integrations selected"
 		} else {
 			m.status = strings.Join(msg.messages, " · ")
+		}
+		if m.integration.startupPrompt {
+			if err := recordIntegrationPromptDismissed(); err != nil {
+				m.status = err.Error()
+				return m, nil
+			}
+			m.integration.startupPrompt = false
 		}
 		m.integration.active = false
 		return m, tea.Batch(integrationsCmd(), refreshCmd(m.source, m.config.LoadOptions()))

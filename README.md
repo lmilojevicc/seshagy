@@ -46,8 +46,10 @@ Typical first run:
 4. Press `g` to view tracked agent panes, then `enter` to focus one.
 5. Press `i` if you want to install detected agent hook integrations later.
 
-First launch asks about detected missing integrations. After that prompt is
-recorded, use `i` in the TUI or `seshagy integration install <target>` manually.
+First launch asks about detected missing integrations. After a seshagy upgrade,
+the startup prompt appears again when installed hook versions are behind the
+current release. Once you complete or skip that prompt, use `i` in the TUI or
+`seshagy integration install <target>` manually.
 The prompt is toggle-based, so each detected integration can be enabled or
 skipped independently.
 
