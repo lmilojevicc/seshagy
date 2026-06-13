@@ -89,10 +89,11 @@ reported it to tmux. Hook-capable agents (those with installable integrations)
 require an installed integration; process-name fallback applies only to agents
 without hook support, such as Gemini, Antigravity (`agy`), and similar tools.
 
-Integrations use two authority tiers. **Lifecycle authority** (Pi, OpenCode,
-Kimi Code) means hooks own idle/working/blocked state. **Session-only**
-integrations (Claude, Codex, Copilot, Droid, Qoder CLI, Cursor) report session
-IDs and leave lifecycle state to fallbacks.
+Integrations use two authority tiers. **Lifecycle authority** means hooks own
+idle/working/blocked state. Shell-hook integrations for Claude Code, Codex,
+GitHub Copilot CLI, Factory Droid, Qoder CLI, and Cursor Agent report lifecycle
+state through the shared `seshagy-agent-state.sh` hook. Plugin integrations for
+Pi, OpenCode, and Kimi Code do the same through their respective plugins.
 
 Supported integration targets:
 
@@ -101,12 +102,12 @@ Supported integration targets:
 | `pi` | Pi | lifecycle state |
 | `opencode` | OpenCode | lifecycle state |
 | `kimi` | Kimi Code | lifecycle state |
-| `claude` | Claude Code | presence, optional session id, state `unknown` |
-| `codex` | Codex | presence, optional session id, state `unknown` |
-| `copilot` | GitHub Copilot CLI | presence, optional session id, state `unknown` |
-| `droid` | Factory Droid | presence, optional session id, state `unknown` |
-| `qodercli` | Qoder CLI | presence, optional session id, state `unknown` |
-| `cursor` | Cursor Agent | presence, optional session id, state `unknown` |
+| `claude` | Claude Code | lifecycle state |
+| `codex` | Codex | lifecycle state |
+| `copilot` | GitHub Copilot CLI | lifecycle state |
+| `droid` | Factory Droid | lifecycle state |
+| `qodercli` | Qoder CLI | lifecycle state |
+| `cursor` | Cursor Agent | lifecycle state |
 
 Cursor Agent detection requires the `cursor-agent` command so the generic
 Cursor editor CLI is not treated as a hook-capable agent.
@@ -124,6 +125,9 @@ seshagy integration status
 seshagy integration install pi
 seshagy integration uninstall pi
 ```
+
+After upgrading seshagy, run `seshagy integration install <target>` again for each
+installed agent so hook versions stay current.
 
 ## TUI keys
 
@@ -252,7 +256,7 @@ terminal theme usually rethemes seshagy without extra config.
 - Agents appear only after a hook/plugin reports `@agent_*` metadata for
   hook-capable agents, or after process detection for agents without hook
   integrations.
-- Presence-only integrations do not claim lifecycle state; they report
-  `unknown` plus optional native session ids when available.
+- Agents without hook integrations may still appear via process detection, but
+  their lifecycle state stays `unknown` unless explicitly reported.
 - Directory results depend on your `zoxide` database and configured `fd` command.
 - `yazi` directory picking is blocked when seshagy is running inside a tmux popup.

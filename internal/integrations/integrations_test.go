@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -100,12 +101,12 @@ func TestAuthorityMapping(t *testing.T) {
 		{TargetPi, LifecycleAuthority},
 		{TargetOpencode, LifecycleAuthority},
 		{TargetKimi, LifecycleAuthority},
-		{TargetClaude, SessionOnly},
-		{TargetCodex, SessionOnly},
-		{TargetCopilot, SessionOnly},
-		{TargetDroid, SessionOnly},
-		{TargetQodercli, SessionOnly},
-		{TargetCursor, SessionOnly},
+		{TargetClaude, LifecycleAuthority},
+		{TargetCodex, LifecycleAuthority},
+		{TargetCopilot, LifecycleAuthority},
+		{TargetDroid, LifecycleAuthority},
+		{TargetQodercli, LifecycleAuthority},
+		{TargetCursor, LifecycleAuthority},
 	}
 	for _, tt := range tests {
 		if got := Authority(tt.target); got != tt.want {
@@ -139,6 +140,18 @@ func TestInstalledV1ManagedHookIsOutdated(t *testing.T) {
 	state, version := installedState(path, TargetPi)
 	if state != StatusOutdated || version != 1 {
 		t.Fatalf("installedState(v1) = %s/%d, want outdated/1", state, version)
+	}
+}
+
+func TestInstalledV2ManagedHookIsOutdated(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "seshagy-agent-state.sh")
+	data := []byte("# SESHAGY_INTEGRATION_ID=claude\n# SESHAGY_INTEGRATION_VERSION=2\n")
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	state, version := installedState(path, TargetClaude)
+	if state != StatusOutdated || version != 2 {
+		t.Fatalf("installedState(v2) = %s/%d, want outdated/2", state, version)
 	}
 }
 
@@ -200,38 +213,38 @@ func TestScanDetectsAvailableMissingAndInstalledPi(t *testing.T) {
 	}
 }
 
-func TestInstallNestedSessionTargetsWriteSessionHookOnlyAndCleanLifecycle(t *testing.T) {
+func TestInstallNestedLifecycleTargetsWriteLifecycleHooksAndCleanStale(t *testing.T) {
 	tests := []struct {
-		name        string
-		dirName     string
-		target      Target
-		install     func(string) ([]string, error)
-		settings    string
-		wantCommand string
+		name     string
+		dirName  string
+		target   Target
+		install  func(string) ([]string, error)
+		settings string
+		events   []lifecycleHook
 	}{
 		{
-			name:        "claude",
-			dirName:     ".claude",
-			target:      TargetClaude,
-			install:     installClaude,
-			settings:    "settings.json",
-			wantCommand: " claude session",
+			name:     "claude",
+			dirName:  ".claude",
+			target:   TargetClaude,
+			install:  installClaude,
+			settings: "settings.json",
+			events:   claudeLifecycleHooks,
 		},
 		{
-			name:        "droid",
-			dirName:     ".factory",
-			target:      TargetDroid,
-			install:     installDroid,
-			settings:    "settings.json",
-			wantCommand: " droid session",
+			name:     "droid",
+			dirName:  ".factory",
+			target:   TargetDroid,
+			install:  installDroid,
+			settings: "settings.json",
+			events:   droidLifecycleHooks,
 		},
 		{
-			name:        "qoder",
-			dirName:     ".qoder",
-			target:      TargetQodercli,
-			install:     installQodercli,
-			settings:    "settings.json",
-			wantCommand: " qodercli session",
+			name:     "qoder",
+			dirName:  ".qoder",
+			target:   TargetQodercli,
+			install:  installQodercli,
+			settings: "settings.json",
+			events:   qodercliLifecycleHooks,
 		},
 	}
 	for _, tt := range tests {
@@ -265,6 +278,18 @@ func TestInstallNestedSessionTargetsWriteSessionHookOnlyAndCleanLifecycle(t *tes
 						},
 					},
 				},
+				"SessionStart": []any{
+					map[string]any{
+						"hooks": []any{
+							map[string]any{
+								"type": "command",
+								"command": "bash /old/seshagy-agent-state.sh " + string(
+									tt.target,
+								) + " idle",
+							},
+						},
+					},
+				},
 			}}
 			if err := writeJSONObject(settingsPath, root); err != nil {
 				t.Fatal(err)
@@ -274,21 +299,25 @@ func TestInstallNestedSessionTargetsWriteSessionHookOnlyAndCleanLifecycle(t *tes
 				t.Fatal(err)
 			}
 			hooks := readJSON(t, settingsPath)["hooks"].(map[string]any)
-			commands, matchers := nestedHookCommands(t, hooks, "SessionStart")
-			if len(commands) != 1 || !strings.Contains(commands[0], "seshagy-agent-state.sh") ||
-				!strings.Contains(commands[0], tt.wantCommand) {
-				t.Fatalf("SessionStart command = %#v, want managed session hook", commands)
-			}
-			if len(matchers) != 1 || matchers[0] != "*" {
-				t.Fatalf("SessionStart matcher = %#v, want *", matchers)
-			}
-			for _, event := range []string{"Stop", "SessionEnd", "PreToolUse", "PostToolUse", "PermissionRequest", "Notification"} {
-				if managedCommandPresent(nestedHookCommandsOnly(t, hooks, event)) {
-					t.Fatalf("stale managed hook remains for %s: %#v", event, hooks[event])
+			for _, hook := range tt.events {
+				commands, matchers := nestedHookCommands(t, hooks, hook.event)
+				command := managedLifecycleCommand(commands, tt.target, hook.action)
+				if command == "" {
+					t.Fatalf(
+						"%s command = %#v, want managed %s hook",
+						hook.event,
+						commands,
+						hook.action,
+					)
+				}
+				if hook.event == "SessionStart" {
+					if len(matchers) != 1 || matchers[0] != "*" {
+						t.Fatalf("SessionStart matcher = %#v, want *", matchers)
+					}
 				}
 			}
 			userCommands := nestedHookCommandsOnly(t, hooks, "UserPromptSubmit")
-			if len(userCommands) != 1 || userCommands[0] != "echo keep" {
+			if !slices.Contains(userCommands, "echo keep") {
 				t.Fatalf("user hook not preserved: %#v", userCommands)
 			}
 		})
@@ -369,7 +398,7 @@ func TestUninstallDroidCleansLegacyHooksJSON(t *testing.T) {
 	}
 }
 
-func TestInstallCodexWritesSessionHookOnlyAndPreservesNestedCodexHooks(t *testing.T) {
+func TestInstallCodexWritesLifecycleHooksAndPreservesNestedCodexHooks(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	codex := filepath.Join(home, ".codex")
@@ -406,25 +435,22 @@ func TestInstallCodexWritesSessionHookOnlyAndPreservesNestedCodexHooks(t *testin
 		t.Fatalf("top-level codex_hooks should be removed:\n%s", updated)
 	}
 	hooks := readJSON(t, filepath.Join(codex, "hooks.json"))["hooks"].(map[string]any)
-	commands := nestedHookCommandsOnly(t, hooks, "SessionStart")
-	if len(commands) != 1 || !strings.Contains(commands[0], "seshagy-agent-state.sh") ||
-		!strings.Contains(commands[0], " codex session") {
-		t.Fatalf("Codex SessionStart = %#v, want session hook", commands)
-	}
-	if managedCommandPresent(nestedHookCommandsOnly(t, hooks, "UserPromptSubmit")) {
-		t.Fatalf("stale Codex lifecycle hook remains: %#v", hooks["UserPromptSubmit"])
+	for _, hook := range codexLifecycleHooks {
+		commands := nestedHookCommandsOnly(t, hooks, hook.event)
+		if managedLifecycleCommand(commands, TargetCodex, hook.action) == "" {
+			t.Fatalf("Codex %s = %#v, want %s hook", hook.event, commands, hook.action)
+		}
 	}
 	if got := nestedHookCommandsOnly(
 		t,
 		hooks,
 		"UserPromptSubmit",
-	); len(got) != 1 ||
-		got[0] != "echo keep" {
+	); !slices.Contains(got, "echo keep") {
 		t.Fatalf("Codex user hook not preserved: %#v", got)
 	}
 }
 
-func TestInstallCopilotWritesSessionHookOnlyAndCleansLifecycle(t *testing.T) {
+func TestInstallCopilotWritesLifecycleHooksAndCleansStale(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	copilot := filepath.Join(home, ".copilot")
@@ -449,25 +475,22 @@ func TestInstallCopilotWritesSessionHookOnlyAndCleansLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	hooks := readJSON(t, settingsPath)["hooks"].(map[string]any)
-	commands := directHookCommands(t, hooks, "SessionStart")
-	if len(commands) != 1 || !strings.Contains(commands[0], "seshagy-agent-state.sh") ||
-		!strings.Contains(commands[0], " copilot session") {
-		t.Fatalf("Copilot SessionStart = %#v, want session hook", commands)
-	}
-	if managedCommandPresent(directHookCommands(t, hooks, "UserPromptSubmit")) {
-		t.Fatalf("stale Copilot lifecycle hook remains: %#v", hooks["UserPromptSubmit"])
+	for _, hook := range copilotLifecycleHooks {
+		commands := directHookCommands(t, hooks, hook.event)
+		if managedLifecycleCommand(commands, TargetCopilot, hook.action) == "" {
+			t.Fatalf("Copilot %s = %#v, want %s hook", hook.event, commands, hook.action)
+		}
 	}
 	if got := directHookCommands(
 		t,
 		hooks,
 		"UserPromptSubmit",
-	); len(got) != 1 ||
-		got[0] != "echo keep" {
+	); !slices.Contains(got, "echo keep") {
 		t.Fatalf("Copilot user hook not preserved: %#v", got)
 	}
 }
 
-func TestInstallCursorWritesSessionHookOnlyAndCleansLifecycle(t *testing.T) {
+func TestInstallCursorWritesLifecycleHooksAndCleansStale(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	cursor := filepath.Join(home, ".cursor")
@@ -479,6 +502,9 @@ func TestInstallCursorWritesSessionHookOnlyAndCleansLifecycle(t *testing.T) {
 			map[string]any{"command": "bash /old/seshagy-agent-state.sh cursor working"},
 			map[string]any{"command": "echo keep"},
 		},
+		"stop": []any{
+			map[string]any{"command": "bash /old/seshagy-agent-state.sh cursor session"},
+		},
 	}}
 	hooksPath := filepath.Join(cursor, "hooks.json")
 	if err := writeJSONObject(hooksPath, root); err != nil {
@@ -489,20 +515,17 @@ func TestInstallCursorWritesSessionHookOnlyAndCleansLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	hooks := readJSON(t, hooksPath)["hooks"].(map[string]any)
-	commands := simpleHookCommands(t, hooks, "sessionStart")
-	if len(commands) != 1 || !strings.Contains(commands[0], "seshagy-agent-state.sh") ||
-		!strings.Contains(commands[0], " cursor session") {
-		t.Fatalf("Cursor sessionStart = %#v, want session hook", commands)
-	}
-	if managedCommandPresent(simpleHookCommands(t, hooks, "beforeSubmitPrompt")) {
-		t.Fatalf("stale Cursor lifecycle hook remains: %#v", hooks["beforeSubmitPrompt"])
+	for _, hook := range cursorLifecycleHooks {
+		commands := simpleHookCommands(t, hooks, hook.event)
+		if managedLifecycleCommand(commands, TargetCursor, hook.action) == "" {
+			t.Fatalf("Cursor %s = %#v, want %s hook", hook.event, commands, hook.action)
+		}
 	}
 	if got := simpleHookCommands(
 		t,
 		hooks,
 		"beforeSubmitPrompt",
-	); len(got) != 1 ||
-		got[0] != "echo keep" {
+	); !slices.Contains(got, "echo keep") {
 		t.Fatalf("Cursor user hook not preserved: %#v", got)
 	}
 	if version := readJSON(t, hooksPath)["version"]; version != float64(1) {
@@ -570,6 +593,203 @@ func TestUninstallRemovesManagedHookEntriesOnly(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(claude, "hooks", shellHookName)); !os.IsNotExist(err) {
 		t.Fatalf("hook file should be removed, stat err=%v", err)
+	}
+}
+
+func TestUninstallCodexRemovesManagedHookEntriesOnly(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	codex := filepath.Join(home, ".codex")
+	if err := os.MkdirAll(codex, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	hooksPath := filepath.Join(codex, "hooks.json")
+	root := map[string]any{"hooks": map[string]any{
+		"SessionStart": []any{
+			map[string]any{
+				"hooks": []any{
+					map[string]any{
+						"type":    "command",
+						"command": "bash /old/seshagy-agent-state.sh codex session",
+					},
+				},
+			},
+		},
+		"UserPromptSubmit": []any{map[string]any{"hooks": []any{
+			map[string]any{
+				"type":    "command",
+				"command": "bash /old/seshagy-agent-state.sh codex working",
+			},
+			map[string]any{"type": "command", "command": "echo keep"},
+		}}},
+	}}
+	if err := writeJSONObject(hooksPath, root); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(codex, shellHookName), []byte("hook"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := uninstallCodex(); err != nil {
+		t.Fatal(err)
+	}
+	hooks := readJSON(t, hooksPath)["hooks"].(map[string]any)
+	if managedCommandPresent(nestedHookCommandsOnly(t, hooks, "SessionStart")) ||
+		managedCommandPresent(nestedHookCommandsOnly(t, hooks, "UserPromptSubmit")) {
+		t.Fatalf("managed hooks should be removed: %#v", hooks)
+	}
+	userCommands := nestedHookCommandsOnly(t, hooks, "UserPromptSubmit")
+	if len(userCommands) != 1 || userCommands[0] != "echo keep" {
+		t.Fatalf("expected preserved user hook, got %#v", userCommands)
+	}
+	if _, err := os.Stat(filepath.Join(codex, shellHookName)); !os.IsNotExist(err) {
+		t.Fatalf("hook file should be removed, stat err=%v", err)
+	}
+}
+
+func TestUninstallCopilotRemovesManagedHookEntriesOnly(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	copilot := filepath.Join(home, ".copilot")
+	if err := os.MkdirAll(filepath.Join(copilot, "hooks"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	settingsPath := filepath.Join(copilot, "settings.json")
+	root := map[string]any{"hooks": map[string]any{
+		"SessionStart": []any{
+			map[string]any{
+				"type": "command",
+				"bash": "bash /old/seshagy-agent-state.sh copilot session",
+			},
+		},
+		"UserPromptSubmit": []any{
+			map[string]any{
+				"type": "command",
+				"bash": "bash /old/seshagy-agent-state.sh copilot working",
+			},
+			map[string]any{"type": "command", "bash": "echo keep"},
+		},
+	}}
+	if err := writeJSONObject(settingsPath, root); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(copilot, "hooks", shellHookName),
+		[]byte("hook"),
+		0o755,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := uninstallCopilot(); err != nil {
+		t.Fatal(err)
+	}
+	hooks := readJSON(t, settingsPath)["hooks"].(map[string]any)
+	if managedCommandPresent(directHookCommands(t, hooks, "SessionStart")) ||
+		managedCommandPresent(directHookCommands(t, hooks, "UserPromptSubmit")) {
+		t.Fatalf("managed hooks should be removed: %#v", hooks)
+	}
+	userCommands := directHookCommands(t, hooks, "UserPromptSubmit")
+	if len(userCommands) != 1 || userCommands[0] != "echo keep" {
+		t.Fatalf("expected preserved user hook, got %#v", userCommands)
+	}
+	if _, err := os.Stat(filepath.Join(copilot, "hooks", shellHookName)); !os.IsNotExist(err) {
+		t.Fatalf("hook file should be removed, stat err=%v", err)
+	}
+}
+
+func TestUninstallCursorRemovesManagedHookEntriesOnly(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	cursor := filepath.Join(home, ".cursor")
+	if err := os.MkdirAll(cursor, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	hooksPath := filepath.Join(cursor, "hooks.json")
+	root := map[string]any{"hooks": map[string]any{
+		"sessionStart": []any{
+			map[string]any{"command": "bash /old/seshagy-agent-state.sh cursor session"},
+		},
+		"beforeSubmitPrompt": []any{
+			map[string]any{"command": "bash /old/seshagy-agent-state.sh cursor working"},
+			map[string]any{"command": "echo keep"},
+		},
+	}}
+	if err := writeJSONObject(hooksPath, root); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(cursor, shellHookName),
+		[]byte("hook"),
+		0o755,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := uninstallCursor(); err != nil {
+		t.Fatal(err)
+	}
+	hooks := readJSON(t, hooksPath)["hooks"].(map[string]any)
+	if managedCommandPresent(simpleHookCommands(t, hooks, "sessionStart")) ||
+		managedCommandPresent(simpleHookCommands(t, hooks, "beforeSubmitPrompt")) {
+		t.Fatalf("managed hooks should be removed: %#v", hooks)
+	}
+	userCommands := simpleHookCommands(t, hooks, "beforeSubmitPrompt")
+	if len(userCommands) != 1 || userCommands[0] != "echo keep" {
+		t.Fatalf("expected preserved user hook, got %#v", userCommands)
+	}
+	if _, err := os.Stat(filepath.Join(cursor, shellHookName)); !os.IsNotExist(err) {
+		t.Fatalf("hook file should be removed, stat err=%v", err)
+	}
+}
+
+func TestReinstallClaudeIsIdempotent(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	claude := filepath.Join(home, ".claude")
+	if err := os.MkdirAll(claude, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	settingsPath := filepath.Join(claude, "settings.json")
+	root := map[string]any{"hooks": map[string]any{
+		"UserPromptSubmit": []any{map[string]any{"hooks": []any{
+			map[string]any{"type": "command", "command": "echo keep"},
+		}}},
+	}}
+	if err := writeJSONObject(settingsPath, root); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := installClaude("/bin/seshagy"); err != nil {
+		t.Fatal(err)
+	}
+	firstSettings := readFile(t, settingsPath)
+	firstHook := readFile(t, filepath.Join(claude, "hooks", shellHookName))
+	if _, err := installClaude("/bin/seshagy"); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFile(t, settingsPath); got != firstSettings {
+		t.Fatalf("reinstall changed settings.json:\nfirst=%s\nsecond=%s", firstSettings, got)
+	}
+	if got := readFile(t, filepath.Join(claude, "hooks", shellHookName)); got != firstHook {
+		t.Fatalf("reinstall changed hook script")
+	}
+	hooks := readJSON(t, settingsPath)["hooks"].(map[string]any)
+	for _, hook := range claudeLifecycleHooks {
+		commands := nestedHookCommandsOnly(t, hooks, hook.event)
+		managed := 0
+		for _, command := range commands {
+			if strings.Contains(command, shellHookName) {
+				managed++
+			}
+		}
+		if managed != 1 {
+			t.Fatalf("%s has %d managed hooks, want 1: %#v", hook.event, managed, commands)
+		}
+	}
+	after := findRec(t, Scan(), TargetClaude)
+	if after.State != StatusCurrent || after.Version != installVersion {
+		t.Fatalf("unexpected status after reinstall: %#v", after)
 	}
 }
 
@@ -762,6 +982,16 @@ func simpleHookCommands(t *testing.T, hooks map[string]any, event string) []stri
 		}
 	}
 	return commands
+}
+
+func managedLifecycleCommand(commands []string, target Target, action string) string {
+	want := " " + string(target) + " " + action
+	for _, command := range commands {
+		if strings.Contains(command, shellHookName) && strings.Contains(command, want) {
+			return command
+		}
+	}
+	return ""
 }
 
 func managedCommandPresent(commands []string) bool {

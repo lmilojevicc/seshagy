@@ -246,3 +246,80 @@ func removeSimpleCommands(hooks map[string]any, commandPrefix string) bool {
 	}
 	return updated
 }
+
+func removeDirectCommandsForEvent(hooks map[string]any, event, commandPrefix string) bool {
+	raw, ok := hooks[event]
+	if !ok {
+		return false
+	}
+	entries, ok := raw.([]any)
+	if !ok {
+		return false
+	}
+	kept := entries[:0]
+	updated := false
+	for _, entry := range entries {
+		entryObject, ok := entry.(map[string]any)
+		if !ok {
+			kept = append(kept, entry)
+			continue
+		}
+		command, _ := entryObject["bash"].(string)
+		if command == "" {
+			command, _ = entryObject["command"].(string)
+		}
+		if strings.Contains(command, commandPrefix) {
+			updated = true
+			continue
+		}
+		kept = append(kept, entry)
+	}
+	if !updated {
+		return false
+	}
+	if len(kept) == 0 {
+		delete(hooks, event)
+	} else {
+		hooks[event] = kept
+	}
+	return true
+}
+
+func removeSimpleCommandsForAction(
+	hooks map[string]any,
+	event, commandPrefix, action string,
+) bool {
+	raw, ok := hooks[event]
+	if !ok {
+		return false
+	}
+	entries, ok := raw.([]any)
+	if !ok {
+		return false
+	}
+	kept := entries[:0]
+	updated := false
+	for _, entry := range entries {
+		entryObject, ok := entry.(map[string]any)
+		if !ok {
+			kept = append(kept, entry)
+			continue
+		}
+		command, _ := entryObject["command"].(string)
+		if strings.Contains(command, commandPrefix) &&
+			strings.Contains(command, " "+action) {
+			updated = true
+			continue
+		}
+		kept = append(kept, entry)
+	}
+	if !updated {
+		return false
+	}
+	if len(kept) == 0 {
+		delete(hooks, event)
+	} else {
+		hooks[event] = kept
+	}
+	return true
+}

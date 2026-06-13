@@ -20,21 +20,23 @@ func installPi(binaryPath string) ([]string, error) {
 }
 
 func installClaude(binaryPath string) ([]string, error) {
-	return installNestedSessionHook(
+	return installNestedLifecycleHooks(
 		TargetClaude,
 		claudeDir(),
 		filepath.Join(claudeDir(), "settings.json"),
 		binaryPath,
+		claudeLifecycleHooks,
 		true,
 	)
 }
 
 func installDroid(binaryPath string) ([]string, error) {
-	messages, err := installNestedSessionHook(
+	messages, err := installNestedLifecycleHooks(
 		TargetDroid,
 		droidDir(),
 		filepath.Join(droidDir(), "settings.json"),
 		binaryPath,
+		droidLifecycleHooks,
 		true,
 	)
 	if err != nil {
@@ -56,11 +58,12 @@ func installDroid(binaryPath string) ([]string, error) {
 }
 
 func installQodercli(binaryPath string) ([]string, error) {
-	return installNestedSessionHook(
+	return installNestedLifecycleHooks(
 		TargetQodercli,
 		qoderDir(),
 		filepath.Join(qoderDir(), "settings.json"),
 		binaryPath,
+		qodercliLifecycleHooks,
 		true,
 	)
 }
@@ -84,11 +87,12 @@ func installCodex(binaryPath string) ([]string, error) {
 		return nil, err
 	}
 	removeNestedCommands(hooks, shellHookName)
-	if err := ensureNestedCommandHook(
+	if err := ensureNestedLifecycleHooks(
 		hooks,
-		"SessionStart",
-		hookCommand(hookPath, TargetCodex),
-		"",
+		hookPath,
+		TargetCodex,
+		codexLifecycleHooks,
+		false,
 	); err != nil {
 		return nil, err
 	}
@@ -125,10 +129,14 @@ func installCopilot(binaryPath string) ([]string, error) {
 		return nil, err
 	}
 	removeDirectCommands(hooks, shellHookName)
-	if err := ensureDirectCommandHook(
+	for _, event := range copilotStaleLifecycleHooks {
+		removeDirectCommandsForEvent(hooks, event, shellHookName)
+	}
+	if err := ensureDirectLifecycleHooks(
 		hooks,
-		"SessionStart",
-		hookCommand(hookPath, TargetCopilot),
+		hookPath,
+		TargetCopilot,
+		copilotLifecycleHooks,
 	); err != nil {
 		return nil, err
 	}
@@ -176,13 +184,17 @@ func installCursor(binaryPath string) ([]string, error) {
 		return nil, err
 	}
 	removeSimpleCommands(hooks, shellHookName)
+	for _, hook := range cursorStaleLifecycleHooks {
+		removeSimpleCommandsForAction(hooks, hook.event, shellHookName, hook.action)
+	}
 	if _, ok := root["version"]; !ok {
 		root["version"] = float64(1)
 	}
-	if err := ensureSimpleCommandHook(
+	if err := ensureSimpleLifecycleHooks(
 		hooks,
-		"sessionStart",
-		hookCommand(hookPath, TargetCursor),
+		hookPath,
+		TargetCursor,
+		cursorLifecycleHooks,
 	); err != nil {
 		return nil, err
 	}
@@ -195,9 +207,10 @@ func installCursor(binaryPath string) ([]string, error) {
 	}, nil
 }
 
-func installNestedSessionHook(
+func installNestedLifecycleHooks(
 	target Target,
 	dir, settingsPath, binaryPath string,
+	events []lifecycleHook,
 	matcherStar bool,
 ) ([]string, error) {
 	if !configDirExists(dir) {
@@ -216,16 +229,7 @@ func installNestedSessionHook(
 		return nil, err
 	}
 	removeNestedCommands(hooks, shellHookName)
-	matcher := ""
-	if matcherStar {
-		matcher = "*"
-	}
-	if err := ensureNestedCommandHook(
-		hooks,
-		"SessionStart",
-		hookCommand(hookPath, target),
-		matcher,
-	); err != nil {
+	if err := ensureNestedLifecycleHooks(hooks, hookPath, target, events, matcherStar); err != nil {
 		return nil, err
 	}
 	if err := writeJSONObject(settingsPath, root); err != nil {
@@ -237,6 +241,57 @@ func installNestedSessionHook(
 	}, nil
 }
 
+func ensureNestedLifecycleHooks(
+	hooks map[string]any,
+	hookPath string,
+	target Target,
+	events []lifecycleHook,
+	matcherStar bool,
+) error {
+	for _, hook := range events {
+		command := shellHookCommand(hookPath, target, hook.action)
+		if err := ensureNestedCommandHook(
+			hooks,
+			hook.event,
+			command,
+			nestedLifecycleMatcher(hook.event, matcherStar),
+		); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func ensureDirectLifecycleHooks(
+	hooks map[string]any,
+	hookPath string,
+	target Target,
+	events []lifecycleHook,
+) error {
+	for _, hook := range events {
+		command := shellHookCommand(hookPath, target, hook.action)
+		if err := ensureDirectCommandHook(hooks, hook.event, command); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func ensureSimpleLifecycleHooks(
+	hooks map[string]any,
+	hookPath string,
+	target Target,
+	events []lifecycleHook,
+) error {
+	for _, hook := range events {
+		command := shellHookCommand(hookPath, target, hook.action)
+		if err := ensureSimpleCommandHook(hooks, hook.event, command); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func writeShellHook(target Target, path, binaryPath string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
@@ -245,10 +300,6 @@ func writeShellHook(target Target, path, binaryPath string) error {
 		return err
 	}
 	return os.Chmod(path, 0o755)
-}
-
-func hookCommand(hookPath string, target Target) string {
-	return shellHookCommand(hookPath, target, "session")
 }
 
 func ensureCodexHooksEnabled(path string) error {

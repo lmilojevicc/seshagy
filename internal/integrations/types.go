@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	installVersion = 2
+	installVersion = 3
 	markerPrefix   = "SESHAGY_INTEGRATION_"
 )
 
