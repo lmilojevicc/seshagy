@@ -107,6 +107,7 @@ func TestAuthorityMapping(t *testing.T) {
 		{TargetDroid, LifecycleAuthority},
 		{TargetQodercli, LifecycleAuthority},
 		{TargetCursor, LifecycleAuthority},
+		{TargetGrok, LifecycleAuthority},
 	}
 	for _, tt := range tests {
 		if got := Authority(tt.target); got != tt.want {
@@ -447,6 +448,136 @@ func TestInstallCodexWritesLifecycleHooksAndPreservesNestedCodexHooks(t *testing
 		"UserPromptSubmit",
 	); !slices.Contains(got, "echo keep") {
 		t.Fatalf("Codex user hook not preserved: %#v", got)
+	}
+}
+
+func TestInstallGrokWritesLifecycleHooksAndPreservesNestedUserHooks(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	grok := filepath.Join(home, ".grok")
+	if err := os.MkdirAll(filepath.Join(grok, "hooks"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	root := map[string]any{"hooks": map[string]any{
+		"UserPromptSubmit": []any{map[string]any{"hooks": []any{
+			map[string]any{
+				"type":    "command",
+				"command": "bash /old/seshagy-agent-state.sh grok working",
+			},
+			map[string]any{"type": "command", "command": "echo keep"},
+		}}},
+	}}
+	hooksPath := filepath.Join(grok, "hooks", grokHooksRegistryName)
+	if err := writeJSONObject(hooksPath, root); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := installGrok("/bin/seshagy"); err != nil {
+		t.Fatal(err)
+	}
+	hookContent := readFile(t, filepath.Join(grok, "hooks", shellHookName))
+	if !strings.Contains(hookContent, "SESHAGY_INTEGRATION_ID=grok") {
+		t.Fatalf("grok hook missing integration marker:\n%s", hookContent)
+	}
+	hooks := readJSON(t, hooksPath)["hooks"].(map[string]any)
+	for _, hook := range grokLifecycleHooks {
+		commands := nestedHookCommandsOnly(t, hooks, hook.event)
+		if managedLifecycleCommand(commands, TargetGrok, hook.action) == "" {
+			t.Fatalf("Grok %s = %#v, want %s hook", hook.event, commands, hook.action)
+		}
+	}
+	if got := nestedHookCommandsOnly(
+		t,
+		hooks,
+		"UserPromptSubmit",
+	); !slices.Contains(got, "echo keep") {
+		t.Fatalf("Grok user hook not preserved: %#v", got)
+	}
+}
+
+func TestUninstallGrokRemovesManagedHookEntriesOnly(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	grok := filepath.Join(home, ".grok")
+	if err := os.MkdirAll(filepath.Join(grok, "hooks"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	hooksPath := filepath.Join(grok, "hooks", grokHooksRegistryName)
+	root := map[string]any{"hooks": map[string]any{
+		"SessionStart": []any{
+			map[string]any{
+				"hooks": []any{
+					map[string]any{
+						"type":    "command",
+						"command": "bash /old/seshagy-agent-state.sh grok session",
+					},
+				},
+			},
+		},
+		"UserPromptSubmit": []any{map[string]any{"hooks": []any{
+			map[string]any{
+				"type":    "command",
+				"command": "bash /old/seshagy-agent-state.sh grok working",
+			},
+			map[string]any{"type": "command", "command": "echo keep"},
+		}}},
+	}}
+	if err := writeJSONObject(hooksPath, root); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(grok, "hooks", shellHookName),
+		[]byte("hook"),
+		0o755,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := uninstallGrok(); err != nil {
+		t.Fatal(err)
+	}
+	hooks := readJSON(t, hooksPath)["hooks"].(map[string]any)
+	if managedCommandPresent(nestedHookCommandsOnly(t, hooks, "SessionStart")) ||
+		managedCommandPresent(nestedHookCommandsOnly(t, hooks, "UserPromptSubmit")) {
+		t.Fatalf("managed hooks should be removed: %#v", hooks)
+	}
+	userCommands := nestedHookCommandsOnly(t, hooks, "UserPromptSubmit")
+	if len(userCommands) != 1 || userCommands[0] != "echo keep" {
+		t.Fatalf("expected preserved user hook, got %#v", userCommands)
+	}
+	if _, err := os.Stat(filepath.Join(grok, "hooks", shellHookName)); !os.IsNotExist(err) {
+		t.Fatalf("hook file should be removed, stat err=%v", err)
+	}
+}
+
+func TestScanDetectsAvailableGrok(t *testing.T) {
+	home := t.TempDir()
+	binDir := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", binDir)
+	if err := os.MkdirAll(filepath.Join(home, ".grok"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	writeExecutable(t, filepath.Join(binDir, "grok-build"))
+	rec := findRec(t, Scan(), TargetGrok)
+	if !rec.AgentAvailable || !rec.Installable || rec.State != StatusNotInstalled {
+		t.Fatalf("unexpected grok status with config dir and grok-build: %#v", rec)
+	}
+	if rec.Authority != LifecycleAuthority {
+		t.Fatalf("grok authority = %q, want lifecycle", rec.Authority)
+	}
+
+	messages, err := installGrok("/bin/seshagy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) == 0 {
+		t.Fatal("expected install message")
+	}
+	after := findRec(t, Scan(), TargetGrok)
+	if after.State != StatusCurrent || after.Version != installVersion {
+		t.Fatalf("unexpected after status: %#v", after)
 	}
 }
 

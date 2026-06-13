@@ -93,7 +93,7 @@ without hook support, such as Gemini, Antigravity (`agy`), and similar tools.
 
 Integrations use two authority tiers. **Lifecycle authority** means hooks own
 idle/working/blocked state. Shell-hook integrations for Claude Code, Codex,
-GitHub Copilot CLI, Factory Droid, Qoder CLI, and Cursor Agent report lifecycle
+GitHub Copilot CLI, Factory Droid, Qoder CLI, Cursor Agent, and Grok Build report lifecycle
 state through the shared `seshagy-agent-state.sh` hook. Plugin integrations for
 Pi, OpenCode, and Kimi Code do the same through their respective plugins.
 
@@ -110,9 +110,12 @@ Supported integration targets:
 | `droid` | Factory Droid | lifecycle state |
 | `qodercli` | Qoder CLI | lifecycle state |
 | `cursor` | Cursor Agent | lifecycle state |
+| `grok` | Grok Build | lifecycle state |
 
 Cursor Agent detection requires the `cursor-agent` command so the generic
-Cursor editor CLI is not treated as a hook-capable agent.
+Cursor editor CLI is not treated as a hook-capable agent. Grok Build also
+recognizes the xAI `agent` symlink for availability scanning; process-name
+fallback for `agent` requires a grok-related pane title.
 
 States normalize to:
 

@@ -19,6 +19,7 @@ func qoderDir() string   { return envDir("QODER_CONFIG_DIR", filepath.Join(xdg.H
 func cursorDir() string   { return envDir("CURSOR_CONFIG_DIR", filepath.Join(xdg.Home(), ".cursor")) }
 func opencodeDir() string { return filepath.Join(xdg.ConfigHome(), "opencode") }
 func kimiDir() string     { return envDir("KIMI_CODE_HOME", filepath.Join(xdg.Home(), ".kimi")) }
+func grokDir() string     { return envDir("GROK_HOME", filepath.Join(xdg.Home(), ".grok")) }
 
 func envDir(name, fallback string) string {
 	value := strings.TrimSpace(os.Getenv(name))

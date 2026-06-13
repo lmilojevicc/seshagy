@@ -26,6 +26,7 @@ const (
 	TargetQodercli Target = "qodercli"
 	TargetCursor   Target = "cursor"
 	TargetKimi     Target = "kimi"
+	TargetGrok     Target = "grok"
 )
 
 type StatusKind string
@@ -303,6 +304,15 @@ func specs() []spec {
 			func() string { return filepath.Join(kimiDir(), "hooks", shellHookName) },
 			installKimi,
 			uninstallKimi,
+		},
+		{
+			TargetGrok,
+			"Grok Build",
+			[]string{"grok", "grok-build", "agent"},
+			grokDir,
+			func() string { return filepath.Join(grokDir(), "hooks", shellHookName) },
+			installGrok,
+			uninstallGrok,
 		},
 	}
 }

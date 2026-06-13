@@ -697,6 +697,8 @@ func TestDetectAgentNameFromCommand(t *testing.T) {
 		{"droid-agent", "droid"},
 		{"droid-build", "droid"},
 		{"grok", "grok"},
+		{"grok-build", "grok"},
+		{"agent", ""},
 		{"hermes", "hermes"},
 		{"hermes-agent", "hermes"},
 		{"kilo", "kilo"},
@@ -712,6 +714,9 @@ func TestDetectAgentNameFromCommand(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("detectAgentName(%q, \"\") = %q, want %q", tt.command, got, tt.want)
 		}
+	}
+	if got := detectAgentName("agent", "Grok Build"); got != "grok" {
+		t.Errorf("detectAgentName(%q, %q) = %q, want %q", "agent", "Grok Build", got, "grok")
 	}
 }
 

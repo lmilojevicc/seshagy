@@ -82,6 +82,19 @@ var copilotStaleLifecycleHooks = []string{
 	"sessionStart",
 }
 
+// grokLifecycleHooks matches Grok Build hooks/seshagy.json events.
+var grokLifecycleHooks = []lifecycleHook{
+	{"SessionStart", "session"},
+	{"UserPromptSubmit", "working"},
+	{"PreToolUse", "working"},
+	{"PostToolUse", "working"},
+	{"PostToolUseFailure", "working"},
+	{"PreCompact", "working"},
+	{"Notification", "blocked"},
+	{"Stop", "idle"},
+	{"SessionEnd", "release"},
+}
+
 // cursorLifecycleHooks matches Cursor Agent hooks.json events.
 var cursorLifecycleHooks = []lifecycleHook{
 	{"sessionStart", "session"},

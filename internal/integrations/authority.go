@@ -11,7 +11,7 @@ func Authority(target Target) AuthorityKind {
 	switch target {
 	case TargetPi, TargetOpencode, TargetKimi,
 		TargetClaude, TargetCodex, TargetCopilot,
-		TargetDroid, TargetQodercli, TargetCursor:
+		TargetDroid, TargetQodercli, TargetCursor, TargetGrok:
 		return LifecycleAuthority
 	default:
 		return SessionOnly

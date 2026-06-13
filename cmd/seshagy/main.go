@@ -373,11 +373,11 @@ Agent flags:
   --seq <integer>             optional monotonic ordering token
 
 Hook integrations:
-  Supported targets: pi, claude, codex, copilot, droid, opencode, qodercli, cursor, kimi.
+  Supported targets: pi, claude, codex, copilot, droid, opencode, qodercli, cursor, kimi, grok.
   The TUI asks before installing missing hooks for detected agents only on the
   first launch. After that, use the TUI's i key or this integration command.
   Pi, OpenCode, and Kimi Code report lifecycle state directly. Claude, Codex,
-  Copilot, Droid, Qoder CLI, and Cursor report session/presence as unknown with
+  Copilot, Droid, Qoder CLI, Cursor, and Grok report session/presence as unknown with
   optional native session ids. Hook-capable agents are not listed from process
   detection alone; install the integration so hooks report @agent_* metadata.
 `

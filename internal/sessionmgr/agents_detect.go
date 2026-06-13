@@ -118,6 +118,9 @@ func detectAgentName(command, title string) string {
 	if strings.Contains(titleLower, "cursor") {
 		return "cursor"
 	}
+	if strings.Contains(titleLower, "grok") {
+		return "grok"
+	}
 
 	return ""
 }
