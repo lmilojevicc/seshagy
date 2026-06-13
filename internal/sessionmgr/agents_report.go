@@ -214,6 +214,9 @@ func agentPaneOptions() []string {
 		"@agent_last_state",
 		"@agent_last_status",
 		"@agent_last_seen",
+		"@agent_startup_grace",
+		"@agent_pending_idle_since",
+		"@agent_pending_idle_count",
 	}
 }
 

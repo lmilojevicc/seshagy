@@ -2,7 +2,9 @@ package sessionmgr
 
 import (
 	"context"
+	"fmt"
 	"testing"
+	"time"
 )
 
 // fakeTmux is an in-memory stand-in for a tmux server's pane options, used to
@@ -57,6 +59,27 @@ func installFakeTmux(t *testing.T, f *fakeTmux) {
 		tmuxOutput = origOut
 		tmuxRun = origRun
 	})
+}
+
+func installFixedTrackTime(t *testing.T, now time.Time) {
+	t.Helper()
+	orig := agentTrackNow
+	agentTrackNow = func() time.Time { return now }
+	t.Cleanup(func() { agentTrackNow = orig })
+}
+
+func seedPendingIdleConfirmed(f *fakeTmux, pane string, now time.Time) {
+	f.set(pane, "@agent_pending_idle_since", formatUnix(now.Add(-agentPendingIdleDebounce)))
+	f.set(pane, "@agent_pending_idle_count", "2")
+}
+
+func seedStartupGraceExpired(f *fakeTmux, pane string, now time.Time) {
+	f.set(pane, "@agent_name", "claude")
+	f.set(pane, "@agent_startup_grace", formatUnix(now.Add(-agentStartupGraceWindow)))
+}
+
+func formatUnix(ts time.Time) string {
+	return fmt.Sprintf("%d", ts.Unix())
 }
 
 func TestUpdateAgentStatusTracking(t *testing.T) {
@@ -182,12 +205,18 @@ func TestUpdateAgentStatusTracking(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			now := time.Unix(1_700_000_000, 0)
+			installFixedTrackTime(t, now)
 			f := newFakeTmux()
 			if tt.lastState != "" {
 				f.set(pane, "@agent_last_state", string(tt.lastState))
 			}
 			if tt.lastStatus != "" {
 				f.set(pane, "@agent_last_status", string(tt.lastStatus))
+			}
+			if tt.wantStatus == AgentDone {
+				seedStartupGraceExpired(f, pane, now)
+				seedPendingIdleConfirmed(f, pane, now)
 			}
 			installFakeTmux(t, f)
 
@@ -223,5 +252,121 @@ func TestUpdateAgentStatusTrackingEmptyPane(t *testing.T) {
 	}
 	if got != AgentWorking {
 		t.Fatalf("status = %q, want %q", got, AgentWorking)
+	}
+}
+
+func TestUpdateAgentStatusTrackingPendingIdleDebounce(t *testing.T) {
+	const pane = "%1"
+	now := time.Unix(1_700_000_000, 0)
+	installFixedTrackTime(t, now)
+	f := newFakeTmux()
+	f.set(pane, "@agent_name", "claude")
+	f.set(pane, "@agent_last_state", string(AgentWorking))
+	f.set(pane, "@agent_last_status", string(AgentWorking))
+	f.set(pane, "@agent_startup_grace", formatUnix(now.Add(-agentStartupGraceWindow)))
+	installFakeTmux(t, f)
+
+	got, err := UpdateAgentStatusTracking(
+		context.Background(),
+		pane,
+		AgentIdle,
+		false,
+		true,
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != AgentWorking {
+		t.Fatalf("first idle status = %q, want %q", got, AgentWorking)
+	}
+	if f.get(pane, "@agent_last_state") != string(AgentWorking) {
+		t.Fatalf("@agent_last_state = %q, want working", f.get(pane, "@agent_last_state"))
+	}
+	if f.get(pane, "@agent_pending_idle_count") != "1" {
+		t.Fatalf("@agent_pending_idle_count = %q, want 1", f.get(pane, "@agent_pending_idle_count"))
+	}
+
+	got, err = UpdateAgentStatusTracking(context.Background(), pane, AgentIdle, false, true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != AgentWorking {
+		t.Fatalf("second idle status = %q, want %q", got, AgentWorking)
+	}
+
+	now = now.Add(agentPendingIdleDebounce)
+	installFixedTrackTime(t, now)
+	got, err = UpdateAgentStatusTracking(context.Background(), pane, AgentIdle, false, true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != AgentDone {
+		t.Fatalf("confirmed idle status = %q, want %q", got, AgentDone)
+	}
+	if f.get(pane, "@agent_pending_idle_count") != "" {
+		t.Fatalf(
+			"pending idle count should be cleared, got %q",
+			f.get(pane, "@agent_pending_idle_count"),
+		)
+	}
+}
+
+func TestUpdateAgentStatusTrackingStartupGraceSkipsDoneInference(t *testing.T) {
+	const pane = "%1"
+	now := time.Unix(1_700_000_000, 0)
+	installFixedTrackTime(t, now)
+	f := newFakeTmux()
+	f.set(pane, "@agent_name", "claude")
+	f.set(pane, "@agent_last_state", string(AgentWorking))
+	f.set(pane, "@agent_last_status", string(AgentWorking))
+	seedPendingIdleConfirmed(f, pane, now)
+	installFakeTmux(t, f)
+
+	got, err := UpdateAgentStatusTracking(
+		context.Background(),
+		pane,
+		AgentIdle,
+		false,
+		true,
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != AgentIdle {
+		t.Fatalf("status = %q, want %q", got, AgentIdle)
+	}
+	if grace := f.get(pane, "@agent_startup_grace"); grace == "" {
+		t.Fatal("expected @agent_startup_grace to be set")
+	}
+}
+
+func TestUpdateAgentStatusTrackingWorkingClearsPendingIdle(t *testing.T) {
+	const pane = "%1"
+	now := time.Unix(1_700_000_000, 0)
+	installFixedTrackTime(t, now)
+	f := newFakeTmux()
+	f.set(pane, "@agent_last_state", string(AgentWorking))
+	f.set(pane, "@agent_pending_idle_since", formatUnix(now))
+	f.set(pane, "@agent_pending_idle_count", "2")
+	installFakeTmux(t, f)
+
+	got, err := UpdateAgentStatusTracking(
+		context.Background(),
+		pane,
+		AgentWorking,
+		false,
+		true,
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != AgentWorking {
+		t.Fatalf("status = %q, want %q", got, AgentWorking)
+	}
+	if f.get(pane, "@agent_pending_idle_count") != "" {
+		t.Fatalf(
+			"pending idle count should be cleared, got %q",
+			f.get(pane, "@agent_pending_idle_count"),
+		)
 	}
 }

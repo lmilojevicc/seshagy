@@ -9,6 +9,14 @@ import (
 	"time"
 )
 
+const (
+	agentStartupGraceWindow       = 3 * time.Second
+	agentPendingIdleDebounce      = 700 * time.Millisecond
+	agentPendingIdleConfirmations = 3
+)
+
+var agentTrackNow = time.Now
+
 func NormalizeAgentState(state string) AgentState {
 	switch strings.ToLower(strings.TrimSpace(state)) {
 	case "working", "busy", "running", "thinking", "processing":
@@ -50,6 +58,72 @@ func agentStateLabel(state AgentState) string {
 	return string(state)
 }
 
+func ensureAgentStartupGrace(ctx context.Context, pane string, now time.Time) {
+	name, _ := showPaneOption(ctx, pane, "@agent_name")
+	if name == "" {
+		return
+	}
+	grace, _ := showPaneOption(ctx, pane, "@agent_startup_grace")
+	if grace == "" {
+		_ = setPaneOption(ctx, pane, "@agent_startup_grace", fmt.Sprintf("%d", now.Unix()))
+	}
+}
+
+func inAgentStartupGrace(ctx context.Context, pane string, now time.Time) bool {
+	graceRaw, _ := showPaneOption(ctx, pane, "@agent_startup_grace")
+	if graceRaw == "" {
+		return false
+	}
+	start, err := strconv.ParseInt(strings.TrimSpace(graceRaw), 10, 64)
+	if err != nil {
+		return false
+	}
+	return now.Sub(time.Unix(start, 0)) < agentStartupGraceWindow
+}
+
+func clearAgentPendingIdle(ctx context.Context, pane string) {
+	_ = unsetPaneOption(ctx, pane, "@agent_pending_idle_since")
+	_ = unsetPaneOption(ctx, pane, "@agent_pending_idle_count")
+}
+
+func tickAgentPendingIdle(ctx context.Context, pane string, now time.Time) bool {
+	sinceRaw, _ := showPaneOption(ctx, pane, "@agent_pending_idle_since")
+	countRaw, _ := showPaneOption(ctx, pane, "@agent_pending_idle_count")
+	count := 0
+	if countRaw != "" {
+		count, _ = strconv.Atoi(strings.TrimSpace(countRaw))
+	}
+	if sinceRaw == "" {
+		_ = setPaneOption(ctx, pane, "@agent_pending_idle_since", fmt.Sprintf("%d", now.Unix()))
+	} else if _, err := strconv.ParseInt(strings.TrimSpace(sinceRaw), 10, 64); err != nil {
+		_ = setPaneOption(ctx, pane, "@agent_pending_idle_since", fmt.Sprintf("%d", now.Unix()))
+	}
+	count++
+	_ = setPaneOption(ctx, pane, "@agent_pending_idle_count", strconv.Itoa(count))
+
+	var since time.Time
+	if ts, err := strconv.ParseInt(
+		strings.TrimSpace(sinceRaw),
+		10,
+		64,
+	); err == nil &&
+		sinceRaw != "" {
+		since = time.Unix(ts, 0)
+	} else {
+		since = now
+	}
+	return count >= agentPendingIdleConfirmations && now.Sub(since) >= agentPendingIdleDebounce
+}
+
+func holdLifecycleWorkingStatus(previousStatus AgentState) AgentState {
+	switch previousStatus {
+	case AgentWorking, AgentBlocked:
+		return previousStatus
+	default:
+		return AgentWorking
+	}
+}
+
 func UpdateAgentStatusTracking(
 	ctx context.Context,
 	pane string,
@@ -65,15 +139,19 @@ func UpdateAgentStatusTracking(
 	previousStatusRaw, _ := showPaneOption(ctx, pane, "@agent_last_status")
 	previousState := semanticAgentState(NormalizeAgentState(previousRaw))
 	previousStatus := NormalizeAgentState(previousStatusRaw)
+	now := agentTrackNow()
+	ensureAgentStartupGrace(ctx, pane, now)
 	var status AgentState
 	switch detected {
 	case AgentDone:
+		clearAgentPendingIdle(ctx, pane)
 		if visible {
 			status = AgentIdle
 		} else {
 			status = AgentDone
 		}
 	case AgentAborted:
+		clearAgentPendingIdle(ctx, pane)
 		if visible {
 			status = AgentIdle
 		} else {
@@ -81,6 +159,7 @@ func UpdateAgentStatusTracking(
 		}
 	case AgentIdle:
 		if visible {
+			clearAgentPendingIdle(ctx, pane)
 			status = AgentIdle
 		} else if previousStatus == AgentDone {
 			status = AgentDone
@@ -88,19 +167,31 @@ func UpdateAgentStatusTracking(
 			status = AgentAborted
 		} else if lifecycleAuthority &&
 			(previousState == AgentWorking || previousState == AgentBlocked) {
-			status = AgentDone
+			if tickAgentPendingIdle(ctx, pane, now) {
+				clearAgentPendingIdle(ctx, pane)
+				if inAgentStartupGrace(ctx, pane, now) {
+					status = AgentIdle
+				} else {
+					status = AgentDone
+				}
+			} else {
+				status = holdLifecycleWorkingStatus(previousStatus)
+				semantic = previousState
+			}
 		} else {
 			status = AgentIdle
 		}
 	case AgentWorking, AgentBlocked, AgentUnknown:
+		clearAgentPendingIdle(ctx, pane)
 		status = detected
 	default:
+		clearAgentPendingIdle(ctx, pane)
 		status = AgentUnknown
 	}
 	_ = setPaneOption(ctx, pane, "@agent_last_state", string(semantic))
 	_ = setPaneOption(ctx, pane, "@agent_last_status", string(status))
 	if visible {
-		_ = setPaneOption(ctx, pane, "@agent_last_seen", fmt.Sprintf("%d", time.Now().Unix()))
+		_ = setPaneOption(ctx, pane, "@agent_last_seen", fmt.Sprintf("%d", now.Unix()))
 	}
 	return status, nil
 }
