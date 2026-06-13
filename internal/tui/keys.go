@@ -29,14 +29,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.clampCursor()
 			return m, m.previewForSelection()
 		case "up":
-			if m.cursor > 0 {
-				m.cursor--
-			}
+			m.cursor = wrapCursorUp(m.cursor, len(m.visibleItems()))
 			return m, m.previewForSelection()
 		case "down":
-			if m.cursor < len(m.visibleItems())-1 {
-				m.cursor++
-			}
+			m.cursor = wrapCursorDown(m.cursor, len(m.visibleItems()))
 			return m, m.previewForSelection()
 		case "ctrl+c":
 			return m, tea.Quit
@@ -88,14 +84,10 @@ func (m Model) handleActionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+c", "q", "esc":
 		return m, tea.Quit
 	case "up", "k":
-		if m.cursor > 0 {
-			m.cursor--
-		}
+		m.cursor = wrapCursorUp(m.cursor, len(m.visibleItems()))
 		return m, m.previewForSelection()
 	case "down", "j":
-		if m.cursor < len(m.visibleItems())-1 {
-			m.cursor++
-		}
+		m.cursor = wrapCursorDown(m.cursor, len(m.visibleItems()))
 		return m, m.previewForSelection()
 	case "pgup", "ctrl+u":
 		m.cursor = max(0, m.cursor-10)
@@ -280,14 +272,10 @@ func (m Model) handleIntegrationKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case "up", "k":
-		if m.integration.cursor > 0 {
-			m.integration.cursor--
-		}
+		m.integration.cursor = wrapCursorUp(m.integration.cursor, len(m.integration.rows))
 		return m, nil
 	case "down", "j":
-		if m.integration.cursor < len(m.integration.rows)-1 {
-			m.integration.cursor++
-		}
+		m.integration.cursor = wrapCursorDown(m.integration.cursor, len(m.integration.rows))
 		return m, nil
 	case " ":
 		if len(m.integration.rows) == 0 {

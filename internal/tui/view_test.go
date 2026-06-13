@@ -104,6 +104,132 @@ func TestSearchModeArrowNavigationKeepsInputActive(t *testing.T) {
 	}
 }
 
+func TestWrapCursorHelpers(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		up    bool
+		cur   int
+		count int
+		want  int
+	}{
+		{name: "up from first wraps to last", up: true, cur: 0, count: 3, want: 2},
+		{name: "down from last wraps to first", up: false, cur: 2, count: 3, want: 0},
+		{name: "up in middle stays", up: true, cur: 1, count: 3, want: 0},
+		{name: "down in middle stays", up: false, cur: 1, count: 3, want: 2},
+		{name: "single item up stays", up: true, cur: 0, count: 1, want: 0},
+		{name: "single item down stays", up: false, cur: 0, count: 1, want: 0},
+		{name: "empty list stays", up: true, cur: 0, count: 0, want: 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var got int
+			if tt.up {
+				got = wrapCursorUp(tt.cur, tt.count)
+			} else {
+				got = wrapCursorDown(tt.cur, tt.count)
+			}
+			if got != tt.want {
+				t.Fatalf("cursor=%d count=%d: got %d, want %d", tt.cur, tt.count, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestListSelectionWrapsAtEdges(t *testing.T) {
+	m := newTestModel(t)
+	m.items = []sessionmgr.Item{
+		{Kind: sessionmgr.KindSession, Name: "first"},
+		{Kind: sessionmgr.KindSession, Name: "middle"},
+		{Kind: sessionmgr.KindSession, Name: "last"},
+	}
+	m.cursor = 0
+
+	for _, key := range []tea.KeyMsg{upMsg(), keyMsg("k")} {
+		m.cursor = 0
+		model, _ := m.handleActionKey(key)
+		m = model.(Model)
+		if m.cursor != 2 {
+			t.Fatalf("%q from first item: cursor=%d, want 2", key.String(), m.cursor)
+		}
+	}
+
+	for _, key := range []tea.KeyMsg{downMsg(), keyMsg("j")} {
+		m.cursor = 2
+		model, _ := m.handleActionKey(key)
+		m = model.(Model)
+		if m.cursor != 0 {
+			t.Fatalf("%q from last item: cursor=%d, want 0", key.String(), m.cursor)
+		}
+	}
+}
+
+func TestListSelectionDoesNotWrapWithSingleItem(t *testing.T) {
+	m := newTestModel(t)
+	m.items = []sessionmgr.Item{{Kind: sessionmgr.KindSession, Name: "only"}}
+	m.cursor = 0
+
+	for _, key := range []tea.KeyMsg{upMsg(), downMsg(), keyMsg("k"), keyMsg("j")} {
+		model, _ := m.handleActionKey(key)
+		m = model.(Model)
+		if m.cursor != 0 {
+			t.Fatalf("%q with one item: cursor=%d, want 0", key.String(), m.cursor)
+		}
+	}
+}
+
+func TestSearchModeWrapsAtEdges(t *testing.T) {
+	m := newTestModel(t)
+	m.items = []sessionmgr.Item{
+		{Kind: sessionmgr.KindSession, Name: "api"},
+		{Kind: sessionmgr.KindSession, Name: "app"},
+		{Kind: sessionmgr.KindSession, Name: "web"},
+	}
+	m.inputMode = modeSearch
+	m.query = ""
+	m.searchInput.SetValue("")
+	m.searchInput.Focus()
+	m.cursor = 0
+
+	model, _ := m.handleKey(upMsg())
+	m = model.(Model)
+	if m.cursor != 2 {
+		t.Fatalf("up in search mode from first: cursor=%d, want 2", m.cursor)
+	}
+
+	m.cursor = 2
+	model, _ = m.handleKey(downMsg())
+	m = model.(Model)
+	if m.cursor != 0 {
+		t.Fatalf("down in search mode from last: cursor=%d, want 0", m.cursor)
+	}
+}
+
+func TestIntegrationPromptWrapsAtEdges(t *testing.T) {
+	m := newTestModel(t)
+	m.integration.active = true
+	m.integration.rows = []integrations.Recommendation{
+		{Target: integrations.TargetPi},
+		{Target: integrations.TargetClaude},
+		{Target: integrations.TargetCodex},
+	}
+	m.integration.cursor = 0
+
+	model, _ := m.handleIntegrationKey(upMsg())
+	m = model.(Model)
+	if m.integration.cursor != 2 {
+		t.Fatalf("up from first integration: cursor=%d, want 2", m.integration.cursor)
+	}
+
+	m.integration.cursor = 2
+	model, _ = m.handleIntegrationKey(downMsg())
+	m = model.(Model)
+	if m.integration.cursor != 0 {
+		t.Fatalf("down from last integration: cursor=%d, want 0", m.integration.cursor)
+	}
+}
+
 func TestTabsUseCurrentAgentsFourthAndNoTrailingCWD(t *testing.T) {
 	m := newTestModel(t)
 	out := sessionmgr.StripANSI(m.renderTabs())

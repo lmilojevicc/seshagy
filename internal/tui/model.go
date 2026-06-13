@@ -178,6 +178,32 @@ func (m *Model) clampCursor() {
 	}
 }
 
+func wrapCursorUp(cursor, count int) int {
+	if count < 2 {
+		if count == 0 {
+			return 0
+		}
+		return min(cursor, count-1)
+	}
+	if cursor <= 0 {
+		return count - 1
+	}
+	return cursor - 1
+}
+
+func wrapCursorDown(cursor, count int) int {
+	if count < 2 {
+		if count == 0 {
+			return 0
+		}
+		return min(cursor, count-1)
+	}
+	if cursor >= count-1 {
+		return 0
+	}
+	return cursor + 1
+}
+
 func (m Model) visibleItems() []sessionmgr.Item {
 	if m.query == "" && !m.agentStateFilteringActive() {
 		return m.items
