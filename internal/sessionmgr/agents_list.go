@@ -65,9 +65,9 @@ func ParseAgents(raw []byte, sessionFilter string) []Item {
 		}
 		name := parts[11]
 		hookReported := name != ""
+		title := cleanField(parts[10])
 		if name == "" {
 			command := cleanField(parts[9])
-			title := cleanField(parts[10])
 			name = detectAgentName(command, title)
 			if name == "" {
 				continue
@@ -76,12 +76,12 @@ func ParseAgents(raw []byte, sessionFilter string) []Item {
 				continue
 			}
 		}
-		state := NormalizeAgentState(parts[12])
-		message := cleanField(parts[13])
 		source := cleanField(parts[15])
 		if source == "" && !hookReported {
 			source = "process"
 		}
+		state := resolveAgentState(parts[12], name, source, title)
+		message := cleanField(parts[13])
 		sessionID := cleanField(parts[16])
 		seq := cleanField(parts[17])
 		path := ContractHome(parts[4])

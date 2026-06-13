@@ -123,6 +123,10 @@ States normalize to:
 working  blocked  aborted  done  idle  unknown
 ```
 
+When hooks are silent, session-only and process-detected agents can infer
+`working` or `blocked` from OSC pane titles (for example Braille spinners or
+"Action Required") without scraping pane contents.
+
 Check and install integrations:
 
 ```sh

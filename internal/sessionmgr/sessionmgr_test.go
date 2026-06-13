@@ -243,6 +243,129 @@ func TestParseAgentsStillListsNonHookCapableProcessAgents(t *testing.T) {
 	}
 }
 
+func TestInferStateFromTitle(t *testing.T) {
+	tests := []struct {
+		agent string
+		title string
+		want  AgentState
+	}{
+		{"claude", "⠋ Thinking…", AgentWorking},
+		{"codex", "⠙ llm-proxy", AgentWorking},
+		{"cursor", "foo ⋯ bar", AgentWorking},
+		{"claude", "[ . ] Action Required | task", AgentBlocked},
+		{"codex", "Waiting for approval", AgentBlocked},
+		{"cursor", "Permission needed", AgentBlocked},
+		{"claude", "Approve changes", AgentBlocked},
+		{"claude", "", AgentUnknown},
+		{"claude", "Claude Code", AgentUnknown},
+		{"gemini", "⠋ working", AgentWorking},
+	}
+	for _, tt := range tests {
+		if got := InferStateFromTitle(tt.agent, tt.title); got != tt.want {
+			t.Fatalf(
+				"InferStateFromTitle(%q, %q) = %q, want %q",
+				tt.agent,
+				tt.title,
+				got,
+				tt.want,
+			)
+		}
+	}
+}
+
+func TestParseAgentsInfersStateFromTitleWhenHooksSilent(t *testing.T) {
+	fields := []string{
+		"%4",
+		"work",
+		"1",
+		"1",
+		"/Users/milo/Projects/seshagy",
+		"1",
+		"1",
+		"1",
+		"0",
+		"gemini",
+		"⠋ Gemini",
+		"",
+		"",
+		"",
+		"",
+		"",
+		"",
+		"",
+	}
+	raw := []byte(strings.Join(fields, paneSep) + "\n")
+	got := ParseAgents(raw, "")
+	if len(got) != 1 {
+		t.Fatalf("len = %d, want 1", len(got))
+	}
+	if got[0].AgentState != AgentWorking {
+		t.Fatalf("AgentState = %q, want %q", got[0].AgentState, AgentWorking)
+	}
+}
+
+func TestParseAgentsDoesNotOverrideLifecycleHookStateFromTitle(t *testing.T) {
+	fields := []string{
+		"%3",
+		"work",
+		"1",
+		"0",
+		"/Users/milo/Projects/seshagy",
+		"1",
+		"1",
+		"1",
+		"0",
+		"claude",
+		"⠋ Action Required",
+		"claude",
+		"working",
+		"",
+		"",
+		"seshagy:claude",
+		"session-123",
+		"42",
+	}
+	raw := []byte(strings.Join(fields, paneSep) + "\n")
+	got := ParseAgents(raw, "")
+	if len(got) != 1 {
+		t.Fatalf("len = %d, want 1", len(got))
+	}
+	if got[0].AgentState != AgentWorking {
+		t.Fatalf("AgentState = %q, want hook-reported %q", got[0].AgentState, AgentWorking)
+	}
+}
+
+func TestParseAgentsDoesNotInferTitleForLifecycleAgentWithSilentHooks(t *testing.T) {
+	fields := []string{
+		"%3",
+		"work",
+		"1",
+		"0",
+		"/Users/milo/Projects/seshagy",
+		"1",
+		"1",
+		"1",
+		"0",
+		"claude",
+		"⠋ Thinking…",
+		"claude",
+		"",
+		"",
+		"",
+		"seshagy:claude",
+		"session-123",
+		"42",
+	}
+	raw := []byte(strings.Join(fields, paneSep) + "\n")
+	got := ParseAgents(raw, "")
+	if len(got) != 1 {
+		t.Fatalf("len = %d, want 1", len(got))
+	}
+	if got[0].AgentState != AgentUnknown {
+		t.Fatalf("AgentState = %q, want %q", got[0].AgentState, AgentUnknown)
+	}
+}
+
 func TestListFDirsWithCustomCommand(t *testing.T) {
 	got, err := ListFDirsWithCommand(
 		context.Background(),
