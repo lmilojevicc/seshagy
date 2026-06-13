@@ -205,12 +205,15 @@ func TestExplainAgentManifestFallbackForLifecycleAgentWithSilentHooks(t *testing
 	if err != nil {
 		t.Fatalf("ExplainAgent() error = %v", err)
 	}
-	if !strings.Contains(out, "manifest fallback: rule dynamic_workflow_prompt → blocked") {
+	if !strings.Contains(
+		out,
+		"manifest fallback: rule dynamic_workflow_prompt (region whole_recent) → blocked",
+	) {
 		t.Fatalf("expected manifest fallback match for lifecycle agent in:\n%s", out)
 	}
 }
 
-func TestExplainAgentManifestFallbackGeminiNoRule(t *testing.T) {
+func TestExplainAgentManifestFallbackGeminiIdleFallback(t *testing.T) {
 	const pane = "%8"
 	fields := agentExplainFields(pane, map[int]string{
 		0:  pane,
@@ -227,7 +230,39 @@ func TestExplainAgentManifestFallbackGeminiNoRule(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ExplainAgent() error = %v", err)
 	}
-	if !strings.Contains(out, "manifest fallback: manifest skipped") {
-		t.Fatalf("expected manifest skipped when no rule matches in:\n%s", out)
+	if !strings.Contains(
+		out,
+		"manifest fallback: fallback default_known_agent_idle_fallback → idle",
+	) {
+		t.Fatalf("expected idle fallback when no rule matches in:\n%s", out)
+	}
+}
+
+func TestExplainAgentManifestFallbackSkipsTitleInference(t *testing.T) {
+	const pane = "%9"
+	fields := agentExplainFields(pane, map[int]string{
+		0:  pane,
+		9:  "claude",
+		10: "⠋ Thinking…",
+		11: "",
+		12: "",
+		15: "",
+		16: "",
+		17: "",
+	})
+	installExplainFakeTmux(t, pane, fields)
+
+	out, err := ExplainAgent(context.Background(), pane, LoadOptions{ManifestFallback: true})
+	if err != nil {
+		t.Fatalf("ExplainAgent() error = %v", err)
+	}
+	if strings.Contains(out, "state source: title inference:") {
+		t.Fatalf(
+			"expected title inference to be skipped when manifest fallback enabled in:\n%s",
+			out,
+		)
+	}
+	if !strings.Contains(out, "state source: default (unknown)") {
+		t.Fatalf("expected default unknown state source in:\n%s", out)
 	}
 }

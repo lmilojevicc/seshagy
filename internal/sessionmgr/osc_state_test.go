@@ -75,14 +75,14 @@ func TestShouldSupplementStateFromTitle(t *testing.T) {
 }
 
 func TestResolveAgentStateLifecycleSilentHooksUseTitle(t *testing.T) {
-	got := resolveAgentState("", "claude", "seshagy:claude", "⠋ Thinking…")
+	got := resolveAgentState("", "claude", "seshagy:claude", "⠋ Thinking…", false)
 	if got != AgentWorking {
 		t.Fatalf("resolveAgentState() = %q, want %q", got, AgentWorking)
 	}
 }
 
 func TestResolveAgentStateLifecycleHookWorkingIgnoresBlockedTitle(t *testing.T) {
-	got := resolveAgentState("working", "claude", "seshagy:claude", "Action Required")
+	got := resolveAgentState("working", "claude", "seshagy:claude", "Action Required", false)
 	if got != AgentWorking {
 		t.Fatalf("resolveAgentState() = %q, want hook-reported %q", got, AgentWorking)
 	}

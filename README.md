@@ -131,13 +131,16 @@ When hooks are silent, session-only and process-detected agents can infer
 "Action Required") without scraping pane contents.
 
 Optional screen manifest fallback (`[agents] manifest_fallback = true` in
-`config.toml`) adds a conservative second pass when hooks are silent and state
-is still `unknown`. Seshagy captures the last 20 pane lines and matches bundled
-per-agent TOML rules (Claude, Codex, and Grok to start). Hook-reported
-`working`, `blocked`, and `idle` are never overridden by title inference or
-manifest fallback.
-Bundled rules currently cover common blocked prompts and a few working signals;
-remote manifest fetch is not implemented yet.
+`config.toml`) adds a Herdr-derived second pass when hooks are silent and state
+is still `unknown`. Seshagy captures the last 30 pane lines and matches bundled
+per-agent TOML rules for 17 agents (Claude, Codex, Cursor, Gemini, Grok,
+Copilot, Antigravity, and others). Rules support screen regions, OSC title
+matching, nested gates, `line_regex`, and `skip_state_update` for neutral UI
+states such as transcript viewers. Known agents with no matching rule fall back
+to `idle`. Hook-reported `working`, `blocked`, and `idle` are never overridden
+by title inference or manifest fallback. When manifest fallback is enabled,
+OSC title inference is deferred to manifest `osc_title` rules instead of the
+legacy title heuristics. Remote manifest fetch is not implemented yet.
 
 Check and install integrations:
 

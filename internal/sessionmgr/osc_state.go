@@ -74,9 +74,15 @@ func shouldSupplementStateFromTitle(
 	return hookStateAllowsFallback(hookStateRaw, state)
 }
 
-func resolveAgentState(hookStateRaw, agentName, source, title string) AgentState {
+func resolveAgentState(
+	hookStateRaw, agentName, source, title string,
+	skipTitleInference bool,
+) AgentState {
 	state := NormalizeAgentState(hookStateRaw)
 	if !shouldSupplementStateFromTitle(hookStateRaw, state, agentName, source) {
+		return state
+	}
+	if skipTitleInference {
 		return state
 	}
 	if inferred := InferStateFromTitle(agentName, title); inferred != AgentUnknown {

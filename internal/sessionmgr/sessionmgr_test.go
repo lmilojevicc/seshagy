@@ -76,7 +76,7 @@ func TestParseAgentsSkipsNonAgentsAndFormatsLocation(t *testing.T) {
 		"42",
 	}
 	raw := []byte(strings.Join(fields, paneSep) + "\n")
-	got := ParseAgents(raw, "")
+	got := ParseAgents(raw, "", LoadOptions{})
 	if len(got) != 1 {
 		t.Fatalf("len = %d", len(got))
 	}
@@ -111,7 +111,7 @@ func TestParseAgentsToleratesLegacyFormatWithoutSessionMetadata(t *testing.T) {
 		"",
 	}
 	raw := []byte(strings.Join(fields, paneSep) + "\n")
-	got := ParseAgents(raw, "")
+	got := ParseAgents(raw, "", LoadOptions{})
 	if len(got) != 1 {
 		t.Fatalf("len = %d", len(got))
 	}
@@ -146,7 +146,7 @@ func TestParseAgentsRequiresHookReportedAgentName(t *testing.T) {
 		"",
 	}
 	raw := []byte(strings.Join(fields, paneSep) + "\n")
-	if got := ParseAgents(raw, ""); len(got) != 0 {
+	if got := ParseAgents(raw, "", LoadOptions{}); len(got) != 0 {
 		t.Fatalf("expected hook-capable pane without @agent_name to be ignored, got %#v", got)
 	}
 }
@@ -173,7 +173,7 @@ func TestParseAgentsSkipsHookCapableWithoutHookReport(t *testing.T) {
 		"",
 	}
 	raw := []byte(strings.Join(fields, paneSep) + "\n")
-	if got := ParseAgents(raw, ""); len(got) != 0 {
+	if got := ParseAgents(raw, "", LoadOptions{}); len(got) != 0 {
 		t.Fatalf("expected claude pane without hook report to be skipped, got %#v", got)
 	}
 }
@@ -200,7 +200,7 @@ func TestParseAgentsListsHookReportedHookCapableAgent(t *testing.T) {
 		"99",
 	}
 	raw := []byte(strings.Join(fields, paneSep) + "\n")
-	got := ParseAgents(raw, "")
+	got := ParseAgents(raw, "", LoadOptions{})
 	if len(got) != 1 {
 		t.Fatalf("len = %d, want 1", len(got))
 	}
@@ -234,7 +234,7 @@ func TestParseAgentsStillListsNonHookCapableProcessAgents(t *testing.T) {
 		"",
 	}
 	raw := []byte(strings.Join(fields, paneSep) + "\n")
-	got := ParseAgents(raw, "")
+	got := ParseAgents(raw, "", LoadOptions{})
 	if len(got) != 1 {
 		t.Fatalf("len = %d, want 1", len(got))
 	}
@@ -295,7 +295,7 @@ func TestParseAgentsInfersStateFromTitleWhenHooksSilent(t *testing.T) {
 		"",
 	}
 	raw := []byte(strings.Join(fields, paneSep) + "\n")
-	got := ParseAgents(raw, "")
+	got := ParseAgents(raw, "", LoadOptions{})
 	if len(got) != 1 {
 		t.Fatalf("len = %d, want 1", len(got))
 	}
@@ -326,7 +326,7 @@ func TestParseAgentsDoesNotOverrideLifecycleHookStateFromTitle(t *testing.T) {
 		"42",
 	}
 	raw := []byte(strings.Join(fields, paneSep) + "\n")
-	got := ParseAgents(raw, "")
+	got := ParseAgents(raw, "", LoadOptions{})
 	if len(got) != 1 {
 		t.Fatalf("len = %d, want 1", len(got))
 	}
@@ -357,7 +357,7 @@ func TestParseAgentsInfersTitleForLifecycleAgentWithSilentHooks(t *testing.T) {
 		"42",
 	}
 	raw := []byte(strings.Join(fields, paneSep) + "\n")
-	got := ParseAgents(raw, "")
+	got := ParseAgents(raw, "", LoadOptions{})
 	if len(got) != 1 {
 		t.Fatalf("len = %d, want 1", len(got))
 	}

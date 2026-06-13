@@ -54,6 +54,7 @@ type Item struct {
 	AgentUpdated   string
 	AgentSessionID string
 	AgentSeq       string
+	PaneTitle      string
 	Visible        bool
 }
 

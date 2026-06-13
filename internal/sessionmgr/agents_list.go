@@ -19,7 +19,7 @@ func ListAgents(ctx context.Context, sessionFilter string, opts LoadOptions) ([]
 		}
 		return nil, fmt.Errorf("tmux list-panes: %w", err)
 	}
-	items := ParseAgents(out, sessionFilter)
+	items := ParseAgents(out, sessionFilter, opts)
 	if opts.ManifestFallback {
 		applyManifestFallback(ctx, items)
 	}
@@ -63,15 +63,25 @@ func applyManifestFallback(ctx context.Context, items []Item) {
 		if err != nil {
 			continue
 		}
-		match, ok := detectStateFromManifest(items[i].AgentName, screen)
-		if !ok {
+		result := detectManifest(items[i].AgentName, manifestDetectionInput{
+			screen:      screen,
+			oscTitle:    strings.TrimSpace(StripANSI(items[i].PaneTitle)),
+			oscProgress: "",
+		})
+		if result.SkipStateUpdate {
 			continue
 		}
-		items[i].AgentState = match.State
+		if result.FallbackReason != "" {
+			items[i].AgentState = result.State
+			continue
+		}
+		if result.Matched && result.State != AgentUnknown {
+			items[i].AgentState = result.State
+		}
 	}
 }
 
-func ParseAgents(raw []byte, sessionFilter string) []Item {
+func ParseAgents(raw []byte, sessionFilter string, opts LoadOptions) []Item {
 	text := strings.TrimSpace(string(raw))
 	if text == "" {
 		return nil
@@ -105,7 +115,7 @@ func ParseAgents(raw []byte, sessionFilter string) []Item {
 		if source == "" && !hookReported {
 			source = "process"
 		}
-		state := resolveAgentState(parts[12], name, source, title)
+		state := resolveAgentState(parts[12], name, source, title, opts.ManifestFallback)
 		message := cleanField(parts[13])
 		sessionID := cleanField(parts[16])
 		seq := cleanField(parts[17])
@@ -128,6 +138,7 @@ func ParseAgents(raw []byte, sessionFilter string) []Item {
 			AgentSource:    source,
 			AgentSessionID: sessionID,
 			AgentSeq:       seq,
+			PaneTitle:      title,
 			Visible:        parts[5] == "1" && parts[6] == "1" && parts[7] != "0",
 		})
 	}

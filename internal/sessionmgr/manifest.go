@@ -15,12 +15,27 @@ import (
 //go:embed manifests/*.toml
 var manifestFS embed.FS
 
-const manifestCaptureLines = 20
+const (
+	manifestCaptureLines          = 30
+	defaultKnownAgentIdleFallback = "default_known_agent_idle_fallback"
+	maxRulesPerManifest           = 128
+	maxGateDepth                  = 8
+	maxTotalGates                 = 512
+	maxMatchersPerGate            = 32
+	maxTotalMatchers              = 1024
+	maxMatcherChars               = 512
+)
 
-type manifestMatch struct {
-	State          AgentState
-	VisibleBlocker bool
-	RuleID         string
+type manifestDetectionResult struct {
+	State           AgentState
+	Matched         bool
+	SkipStateUpdate bool
+	VisibleIdle     bool
+	VisibleBlocker  bool
+	VisibleWorking  bool
+	RuleID          string
+	Region          string
+	FallbackReason  string
 }
 
 type agentManifest struct {
@@ -30,24 +45,29 @@ type agentManifest struct {
 }
 
 type manifestRule struct {
-	ID             string         `toml:"id"`
-	State          string         `toml:"state"`
-	Priority       int            `toml:"priority"`
-	Region         string         `toml:"region"`
-	VisibleBlocker bool           `toml:"visible_blocker"`
-	Contains       []string       `toml:"contains"`
-	Regex          []string       `toml:"regex"`
-	All            []manifestGate `toml:"all"`
-	Any            []manifestGate `toml:"any"`
-	Not            []manifestGate `toml:"not"`
+	ID              string         `toml:"id"`
+	State           string         `toml:"state"`
+	Priority        int            `toml:"priority"`
+	Region          string         `toml:"region"`
+	VisibleIdle     bool           `toml:"visible_idle"`
+	VisibleBlocker  bool           `toml:"visible_blocker"`
+	VisibleWorking  bool           `toml:"visible_working"`
+	SkipStateUpdate bool           `toml:"skip_state_update"`
+	Contains        []string       `toml:"contains"`
+	Regex           []string       `toml:"regex"`
+	LineRegex       []string       `toml:"line_regex"`
+	All             []manifestGate `toml:"all"`
+	Any             []manifestGate `toml:"any"`
+	Not             []manifestGate `toml:"not"`
 }
 
 type manifestGate struct {
-	All      []manifestGate `toml:"all"`
-	Any      []manifestGate `toml:"any"`
-	Not      []manifestGate `toml:"not"`
-	Contains []string       `toml:"contains"`
-	Regex    []string       `toml:"regex"`
+	All       []manifestGate `toml:"all"`
+	Any       []manifestGate `toml:"any"`
+	Not       []manifestGate `toml:"not"`
+	Contains  []string       `toml:"contains"`
+	Regex     []string       `toml:"regex"`
+	LineRegex []string       `toml:"line_regex"`
 }
 
 type compiledManifest struct {
@@ -56,26 +76,38 @@ type compiledManifest struct {
 }
 
 type compiledManifestRule struct {
-	id             string
-	state          AgentState
-	priority       int
-	region         string
-	visibleBlocker bool
-	gate           compiledGate
+	id              string
+	state           AgentState
+	priority        int
+	region          string
+	visibleIdle     bool
+	visibleBlocker  bool
+	visibleWorking  bool
+	skipStateUpdate bool
+	gate            compiledGate
 }
 
 type compiledGate struct {
-	all      []compiledGate
-	any      []compiledGate
-	not      []compiledGate
-	contains []string
-	regex    []*regexp.Regexp
+	all       []compiledGate
+	any       []compiledGate
+	not       []compiledGate
+	contains  []string
+	regex     []*regexp.Regexp
+	lineRegex []*regexp.Regexp
+}
+
+type manifestComplexity struct {
+	totalGates    int
+	totalMatchers int
 }
 
 var (
 	manifestOnce    sync.Once
 	manifestByAgent map[string]*compiledManifest
 	manifestErr     error
+
+	manifestBrailleClass = "[\U00002800-\U000028FF]"
+	reManifestHexEscape  = regexp.MustCompile(`\\x\{([0-9A-Fa-f]+)\}`)
 )
 
 func initManifests() {
@@ -118,6 +150,16 @@ func compileManifest(parsed agentManifest) (*compiledManifest, error) {
 	if len(parsed.Rules) == 0 {
 		return nil, fmt.Errorf("manifest %q must contain at least one rule", parsed.ID)
 	}
+	if len(parsed.Rules) > maxRulesPerManifest {
+		return nil, fmt.Errorf(
+			"manifest %q contains %d rules, max is %d",
+			parsed.ID,
+			len(parsed.Rules),
+			maxRulesPerManifest,
+		)
+	}
+
+	complexity := manifestComplexity{}
 	compiled := &compiledManifest{agent: parsed.ID}
 	for _, rule := range parsed.Rules {
 		if strings.TrimSpace(rule.ID) == "" {
@@ -131,93 +173,297 @@ func compileManifest(parsed agentManifest) (*compiledManifest, error) {
 			return nil, fmt.Errorf("rule %q: %w", rule.ID, err)
 		}
 		state := NormalizeAgentState(rule.State)
-		if rule.VisibleBlocker && state != AgentBlocked {
-			return nil, fmt.Errorf("rule %q sets visible_blocker without blocked state", rule.ID)
+		if rule.SkipStateUpdate {
+			if state != AgentUnknown {
+				return nil, fmt.Errorf(
+					"rule %q uses skip_state_update without state = \"unknown\"",
+					rule.ID,
+				)
+			}
+			if rule.VisibleIdle || rule.VisibleBlocker || rule.VisibleWorking {
+				return nil, fmt.Errorf(
+					"rule %q uses skip_state_update with visible state evidence",
+					rule.ID,
+				)
+			}
 		}
-		gate, err := compileManifestGate(manifestGate{
-			All:      rule.All,
-			Any:      rule.Any,
-			Not:      rule.Not,
-			Contains: rule.Contains,
-			Regex:    rule.Regex,
-		})
+		gate, err := compileManifestGate(manifestGateFromRule(rule), "rule", 0, &complexity)
 		if err != nil {
 			return nil, fmt.Errorf("rule %q: %w", rule.ID, err)
 		}
 		compiled.rules = append(compiled.rules, compiledManifestRule{
-			id:             rule.ID,
-			state:          state,
-			priority:       rule.Priority,
-			region:         region,
-			visibleBlocker: rule.VisibleBlocker,
-			gate:           gate,
+			id:              rule.ID,
+			state:           state,
+			priority:        rule.Priority,
+			region:          region,
+			visibleIdle:     rule.VisibleIdle,
+			visibleBlocker:  rule.VisibleBlocker,
+			visibleWorking:  rule.VisibleWorking,
+			skipStateUpdate: rule.SkipStateUpdate,
+			gate:            gate,
 		})
 	}
 	return compiled, nil
 }
 
-func compileManifestGate(gate manifestGate) (compiledGate, error) {
+func manifestGateFromRule(rule manifestRule) manifestGate {
+	return manifestGate{
+		All:       rule.All,
+		Any:       rule.Any,
+		Not:       rule.Not,
+		Contains:  rule.Contains,
+		Regex:     rule.Regex,
+		LineRegex: rule.LineRegex,
+	}
+}
+
+func compileManifestGate(
+	gate manifestGate,
+	context string,
+	depth int,
+	complexity *manifestComplexity,
+) (compiledGate, error) {
+	if depth > maxGateDepth {
+		return compiledGate{}, fmt.Errorf("%s exceeds max gate depth %d", context, maxGateDepth)
+	}
+	complexity.totalGates++
+	if complexity.totalGates > maxTotalGates {
+		return compiledGate{}, fmt.Errorf("manifest exceeds max gate count %d", maxTotalGates)
+	}
+	if err := validateMatcherLimits(gate, context, complexity); err != nil {
+		return compiledGate{}, err
+	}
+	if !gateHasPositiveMatcher(gate) {
+		return compiledGate{}, fmt.Errorf("%s must contain a positive matcher", context)
+	}
+
 	compiled := compiledGate{
 		contains: lowerStrings(gate.Contains),
 	}
 	for _, pattern := range gate.Regex {
-		re, err := regexp.Compile(pattern)
+		re, err := compileManifestRegex(pattern, context, "regex")
 		if err != nil {
-			return compiledGate{}, fmt.Errorf("invalid regex %q: %w", pattern, err)
+			return compiledGate{}, err
 		}
 		compiled.regex = append(compiled.regex, re)
 	}
+	for _, pattern := range gate.LineRegex {
+		re, err := compileManifestRegex(pattern, context, "line_regex")
+		if err != nil {
+			return compiledGate{}, err
+		}
+		compiled.lineRegex = append(compiled.lineRegex, re)
+	}
 	for _, nested := range gate.All {
-		child, err := compileManifestGate(nested)
+		child, err := compileManifestGate(nested, "all gate", depth+1, complexity)
 		if err != nil {
 			return compiledGate{}, err
 		}
 		compiled.all = append(compiled.all, child)
 	}
 	for _, nested := range gate.Any {
-		child, err := compileManifestGate(nested)
+		child, err := compileManifestGate(nested, "any gate", depth+1, complexity)
 		if err != nil {
 			return compiledGate{}, err
 		}
 		compiled.any = append(compiled.any, child)
 	}
 	for _, nested := range gate.Not {
-		child, err := compileManifestGate(nested)
+		if !gateHasAnyMatcher(nested) {
+			return compiledGate{}, fmt.Errorf("%s contains an empty not gate", context)
+		}
+		child, err := compileManifestNotGate(nested, depth+1, complexity)
 		if err != nil {
 			return compiledGate{}, err
 		}
 		compiled.not = append(compiled.not, child)
 	}
-	if !gateHasMatcher(gate) {
-		return compiledGate{}, fmt.Errorf("gate must contain a matcher")
+	return compiled, nil
+}
+
+func compileManifestNotGate(
+	gate manifestGate,
+	depth int,
+	complexity *manifestComplexity,
+) (compiledGate, error) {
+	if depth > maxGateDepth {
+		return compiledGate{}, fmt.Errorf("not gate exceeds max gate depth %d", maxGateDepth)
+	}
+	complexity.totalGates++
+	if complexity.totalGates > maxTotalGates {
+		return compiledGate{}, fmt.Errorf("manifest exceeds max gate count %d", maxTotalGates)
+	}
+	if err := validateMatcherLimits(gate, "not gate", complexity); err != nil {
+		return compiledGate{}, err
+	}
+	if !gateHasAnyMatcher(gate) {
+		return compiledGate{}, fmt.Errorf("not gate must contain a matcher")
+	}
+
+	compiled := compiledGate{
+		contains: lowerStrings(gate.Contains),
+	}
+	for _, pattern := range gate.Regex {
+		re, err := compileManifestRegex(pattern, "not gate", "regex")
+		if err != nil {
+			return compiledGate{}, err
+		}
+		compiled.regex = append(compiled.regex, re)
+	}
+	for _, pattern := range gate.LineRegex {
+		re, err := compileManifestRegex(pattern, "not gate", "line_regex")
+		if err != nil {
+			return compiledGate{}, err
+		}
+		compiled.lineRegex = append(compiled.lineRegex, re)
+	}
+	for _, nested := range gate.All {
+		child, err := compileManifestGate(nested, "not all gate", depth+1, complexity)
+		if err != nil {
+			return compiledGate{}, err
+		}
+		compiled.all = append(compiled.all, child)
+	}
+	for _, nested := range gate.Any {
+		child, err := compileManifestGate(nested, "not any gate", depth+1, complexity)
+		if err != nil {
+			return compiledGate{}, err
+		}
+		compiled.any = append(compiled.any, child)
+	}
+	for _, nested := range gate.Not {
+		child, err := compileManifestNotGate(nested, depth+1, complexity)
+		if err != nil {
+			return compiledGate{}, err
+		}
+		compiled.not = append(compiled.not, child)
 	}
 	return compiled, nil
 }
 
-func gateHasMatcher(gate manifestGate) bool {
-	if len(gate.Contains) > 0 || len(gate.Regex) > 0 {
+func compileManifestRegex(pattern, context, field string) (*regexp.Regexp, error) {
+	normalized, err := normalizeManifestRegexPattern(pattern)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"%s contains invalid %s pattern %q: %w",
+			context,
+			field,
+			pattern,
+			err,
+		)
+	}
+	re, err := regexp.Compile(normalized)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"%s contains invalid %s pattern %q: %w",
+			context,
+			field,
+			pattern,
+			err,
+		)
+	}
+	return re, nil
+}
+
+func normalizeManifestRegexPattern(pattern string) (string, error) {
+	pattern = strings.ReplaceAll(pattern, `\p{Alphabetic}`, `\p{Letter}`)
+	pattern = strings.ReplaceAll(pattern, `[\x{2800}-\x{28FF}]`, manifestBrailleClass)
+	pattern = strings.ReplaceAll(pattern, `[\u2800-\u28FF]`, manifestBrailleClass)
+
+	var normalizeErr error
+	pattern = reManifestHexEscape.ReplaceAllStringFunc(pattern, func(match string) string {
+		if normalizeErr != nil {
+			return match
+		}
+		submatches := reManifestHexEscape.FindStringSubmatch(match)
+		if len(submatches) < 2 {
+			normalizeErr = fmt.Errorf("invalid hex escape %q", match)
+			return match
+		}
+		code, err := strconv.ParseUint(submatches[1], 16, 32)
+		if err != nil {
+			normalizeErr = fmt.Errorf("invalid hex escape %q: %w", match, err)
+			return match
+		}
+		return string(rune(code))
+	})
+	if normalizeErr != nil {
+		return "", normalizeErr
+	}
+	return pattern, nil
+}
+
+func validateMatcherLimits(
+	gate manifestGate,
+	context string,
+	complexity *manifestComplexity,
+) error {
+	matcherCount := len(gate.Contains) + len(gate.Regex) + len(gate.LineRegex)
+	if matcherCount > maxMatchersPerGate {
+		return fmt.Errorf(
+			"%s has %d direct matchers, max is %d",
+			context,
+			matcherCount,
+			maxMatchersPerGate,
+		)
+	}
+	complexity.totalMatchers += matcherCount
+	if complexity.totalMatchers > maxTotalMatchers {
+		return fmt.Errorf("manifest exceeds max matcher count %d", maxTotalMatchers)
+	}
+	for _, value := range gate.Contains {
+		if len([]rune(value)) > maxMatcherChars {
+			return fmt.Errorf("%s matcher exceeds max length %d", context, maxMatcherChars)
+		}
+	}
+	for _, value := range gate.Regex {
+		if len([]rune(value)) > maxMatcherChars {
+			return fmt.Errorf("%s matcher exceeds max length %d", context, maxMatcherChars)
+		}
+	}
+	for _, value := range gate.LineRegex {
+		if len([]rune(value)) > maxMatcherChars {
+			return fmt.Errorf("%s matcher exceeds max length %d", context, maxMatcherChars)
+		}
+	}
+	return nil
+}
+
+func gateHasPositiveMatcher(gate manifestGate) bool {
+	if len(gate.Contains) > 0 || len(gate.Regex) > 0 || len(gate.LineRegex) > 0 {
 		return true
 	}
 	for _, nested := range gate.All {
-		if gateHasMatcher(nested) {
+		if gateHasPositiveMatcher(nested) {
 			return true
 		}
 	}
 	for _, nested := range gate.Any {
-		if gateHasMatcher(nested) {
-			return true
-		}
-	}
-	for _, nested := range gate.Not {
-		if gateHasMatcher(nested) {
+		if gateHasPositiveMatcher(nested) {
 			return true
 		}
 	}
 	return false
 }
 
+func gateHasAnyMatcher(gate manifestGate) bool {
+	return gateHasPositiveMatcher(gate) || len(gate.Not) > 0
+}
+
 func validateManifestRegion(region string) error {
-	if region == "whole_recent" {
+	switch region {
+	case "whole_recent",
+		"after_last_prompt_marker",
+		"before_current_prompt_marker",
+		"whole_recent_without_current_prompt_marker",
+		"current_prompt_block_marker",
+		"after_current_prompt_block_marker",
+		"prompt_box_body",
+		"above_prompt_box",
+		"last_non_empty_above_prompt_box",
+		"after_last_horizontal_rule",
+		"osc_title",
+		"osc_progress":
 		return nil
 	}
 	if _, ok := manifestRegionCount(region, "bottom_lines"); ok {
@@ -241,18 +487,19 @@ func manifestForAgent(agentName string) (*compiledManifest, error) {
 	return manifestByAgent[agentName], nil
 }
 
-func detectStateFromManifest(agentName, screen string) (manifestMatch, bool) {
+func detectManifest(agentName string, input manifestDetectionInput) manifestDetectionResult {
 	manifest, err := manifestForAgent(agentName)
 	if err != nil || manifest == nil {
-		return manifestMatch{}, false
+		return manifestDetectionResult{}
 	}
+
 	var (
 		best      *compiledManifestRule
 		bestScore int
 	)
 	for i := range manifest.rules {
 		rule := &manifest.rules[i]
-		regionText := manifestRegion(screen, rule.region)
+		regionText := manifestRegion(input, rule.region)
 		if !compiledGateMatches(rule.gate, regionText) {
 			continue
 		}
@@ -261,14 +508,35 @@ func detectStateFromManifest(agentName, screen string) (manifestMatch, bool) {
 			bestScore = rule.priority
 		}
 	}
-	if best == nil || best.state == AgentUnknown {
-		return manifestMatch{}, false
+
+	if best == nil {
+		return manifestDetectionResult{
+			State:          AgentIdle,
+			FallbackReason: defaultKnownAgentIdleFallback,
+		}
 	}
-	return manifestMatch{
-		State:          best.state,
-		VisibleBlocker: best.visibleBlocker && best.state == AgentBlocked,
-		RuleID:         best.id,
-	}, true
+
+	state := best.state
+	if best.skipStateUpdate {
+		state = AgentUnknown
+	}
+
+	result := manifestDetectionResult{
+		State:           state,
+		Matched:         true,
+		SkipStateUpdate: best.skipStateUpdate,
+		RuleID:          best.id,
+		Region:          best.region,
+	}
+	switch state {
+	case AgentIdle:
+		result.VisibleIdle = best.visibleIdle
+	case AgentWorking:
+		result.VisibleWorking = best.visibleWorking
+	case AgentBlocked:
+		result.VisibleBlocker = best.visibleBlocker
+	}
+	return result
 }
 
 func shouldApplyManifestFallback(state AgentState, agentName, source string) bool {
@@ -279,7 +547,7 @@ func shouldApplyManifestFallback(state AgentState, agentName, source string) boo
 
 func manifestExplainLine(
 	ctx context.Context,
-	pane, agentName, source string,
+	pane, agentName, source, title string,
 	state AgentState,
 ) string {
 	if !shouldApplyManifestFallback(state, agentName, source) {
@@ -289,11 +557,48 @@ func manifestExplainLine(
 	if err != nil {
 		return "manifest skipped"
 	}
-	match, ok := detectStateFromManifest(agentName, screen)
-	if !ok {
+	result := detectManifest(agentName, manifestDetectionInput{
+		screen:      screen,
+		oscTitle:    strings.TrimSpace(StripANSI(title)),
+		oscProgress: "",
+	})
+	return formatManifestExplain(result)
+}
+
+func formatManifestExplain(result manifestDetectionResult) string {
+	if result.FallbackReason != "" {
+		return fmt.Sprintf("fallback %s → %s", result.FallbackReason, agentStateLabel(result.State))
+	}
+	if !result.Matched {
 		return "manifest skipped"
 	}
-	return fmt.Sprintf("rule %s → %s", match.RuleID, agentStateLabel(match.State))
+	if result.SkipStateUpdate {
+		return fmt.Sprintf(
+			"rule %s (region %s) → skip [skip_state_update]",
+			result.RuleID,
+			result.Region,
+		)
+	}
+	line := fmt.Sprintf(
+		"rule %s (region %s) → %s",
+		result.RuleID,
+		result.Region,
+		agentStateLabel(result.State),
+	)
+	var flags []string
+	if result.VisibleIdle {
+		flags = append(flags, "visible_idle")
+	}
+	if result.VisibleBlocker {
+		flags = append(flags, "visible_blocker")
+	}
+	if result.VisibleWorking {
+		flags = append(flags, "visible_working")
+	}
+	if len(flags) > 0 {
+		line += " [" + strings.Join(flags, ", ") + "]"
+	}
+	return line
 }
 
 type manifestCaptureCache map[string]string
@@ -331,6 +636,11 @@ func compiledGateMatches(gate compiledGate, text string) bool {
 			return false
 		}
 	}
+	for _, re := range gate.lineRegex {
+		if !lineRegexMatches(re, text) {
+			return false
+		}
+	}
 	for _, nested := range gate.all {
 		if !compiledGateMatches(nested, text) {
 			return false
@@ -356,20 +666,13 @@ func compiledGateMatches(gate compiledGate, text string) bool {
 	return true
 }
 
-func manifestRegion(screen, spec string) string {
-	spec = strings.TrimSpace(spec)
-	switch spec {
-	case "", "whole_recent":
-		return screen
-	default:
-		if count, ok := manifestRegionCount(spec, "bottom_lines"); ok {
-			return manifestBottomLines(screen, count)
+func lineRegexMatches(re *regexp.Regexp, text string) bool {
+	for _, line := range manifestLines(text) {
+		if re.MatchString(line) {
+			return true
 		}
-		if count, ok := manifestRegionCount(spec, "bottom_non_empty_lines"); ok {
-			return manifestBottomNonEmptyLines(screen, count)
-		}
-		return ""
 	}
+	return false
 }
 
 func manifestRegionCount(spec, name string) (int, bool) {
@@ -393,13 +696,13 @@ func manifestRegionCount(spec, name string) (int, bool) {
 }
 
 func manifestBottomLines(content string, count int) string {
-	lines := strings.Split(content, "\n")
+	lines := manifestLines(content)
 	start := max(len(lines)-count, 0)
 	return manifestSliceFromLineIndex(content, lines, start)
 }
 
 func manifestBottomNonEmptyLines(content string, count int) string {
-	lines := strings.Split(content, "\n")
+	lines := manifestLines(content)
 	startIndex := -1
 	seen := 0
 	for i := len(lines) - 1; i >= 0; i-- {
@@ -425,14 +728,7 @@ func manifestSliceFromLineIndex(content string, lines []string, index int) strin
 	if index >= len(lines) {
 		return ""
 	}
-	offset := 0
-	for i := 0; i < index && i < len(lines); i++ {
-		offset += len(lines[i]) + 1
-	}
-	if offset > len(content) {
-		offset = len(content)
-	}
-	return content[offset:]
+	return content[lineStartOffset(content, lines, index):]
 }
 
 func lowerStrings(values []string) []string {

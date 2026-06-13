@@ -58,20 +58,26 @@ func ExplainAgent(ctx context.Context, pane string, opts LoadOptions) (string, e
 	if len(parts) < 18 {
 		return "", fmt.Errorf("unexpected pane metadata fields: %d", len(parts))
 	}
-	info := buildAgentExplain(ctx, resolved, parts)
+	info := buildAgentExplain(ctx, resolved, parts, opts.ManifestFallback)
 	if opts.ManifestFallback {
 		info.ManifestFallback = manifestExplainLine(
 			ctx,
 			resolved,
 			info.AgentName,
 			info.AgentSource,
+			info.Title,
 			info.DetectedStatus,
 		)
 	}
 	return formatAgentExplain(info), nil
 }
 
-func buildAgentExplain(ctx context.Context, pane string, parts []string) agentExplain {
+func buildAgentExplain(
+	ctx context.Context,
+	pane string,
+	parts []string,
+	skipTitleInference bool,
+) agentExplain {
 	command := cleanField(parts[9])
 	title := cleanField(parts[10])
 	hookName := cleanField(parts[11])
@@ -137,7 +143,9 @@ func buildAgentExplain(ctx context.Context, pane string, parts []string) agentEx
 			agentStateLabel(detected),
 		)
 	default:
-		if shouldSupplementStateFromTitle(hookStateRaw, detected, name, info.AgentSource) {
+		if skipTitleInference {
+			info.StateSource = "default (unknown)"
+		} else if shouldSupplementStateFromTitle(hookStateRaw, detected, name, info.AgentSource) {
 			if inferred := InferStateFromTitle(name, title); inferred != AgentUnknown {
 				detected = inferred
 				info.StateSource = fmt.Sprintf("title inference: %s", agentStateLabel(inferred))
