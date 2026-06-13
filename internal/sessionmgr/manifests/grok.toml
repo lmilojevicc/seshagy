@@ -1,0 +1,17 @@
+id = "grok"
+aliases = ["grok-build"]
+
+[[rules]]
+id = "permission_scope_selector"
+state = "blocked"
+priority = 300
+region = "whole_recent"
+visible_blocker = true
+contains = ["yes, proceed", "no, reject"]
+
+[[rules]]
+id = "waiting_tool_working"
+state = "working"
+priority = 120
+region = "bottom_non_empty_lines(20)"
+contains = ["waiting"]

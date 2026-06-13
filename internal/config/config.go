@@ -26,10 +26,15 @@ const (
 type Config struct {
 	Sources     SourcesConfig     `toml:"sources"`
 	Directories DirectoriesConfig `toml:"directories"`
+	Agents      AgentsConfig      `toml:"agents"`
 	Theme       ThemeConfig       `toml:"theme"`
 	Icons       IconsConfig       `toml:"icons"`
 	TypeFirst   TypeFirstConfig   `toml:"type_first"`
 	Setup       SetupConfig       `toml:"setup"`
+}
+
+type AgentsConfig struct {
+	ManifestFallback bool `toml:"manifest_fallback"`
 }
 
 type SourcesConfig struct {
@@ -378,7 +383,10 @@ func (c Config) DefaultSource() sessionmgr.SourceMode {
 
 func (c Config) LoadOptions() sessionmgr.LoadOptions {
 	c.Normalize()
-	return sessionmgr.LoadOptions{FDCommand: c.Directories.FDCommand}
+	return sessionmgr.LoadOptions{
+		FDCommand:        c.Directories.FDCommand,
+		ManifestFallback: c.Agents.ManifestFallback,
+	}
 }
 
 func SourceModeName(mode sessionmgr.SourceMode) string {

@@ -1,0 +1,18 @@
+id = "claude"
+aliases = ["claude-code"]
+
+[[rules]]
+id = "dynamic_workflow_prompt"
+state = "blocked"
+priority = 980
+region = "whole_recent"
+visible_blocker = true
+contains = ["run a dynamic workflow?", "esc to cancel"]
+
+[[rules]]
+id = "bash_permission_prompt"
+state = "blocked"
+priority = 850
+region = "bottom_non_empty_lines(20)"
+visible_blocker = true
+contains = ["do you want to proceed?"]

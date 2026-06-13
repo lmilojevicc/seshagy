@@ -5,7 +5,8 @@ import "context"
 type SourceMode int
 
 type LoadOptions struct {
-	FDCommand string
+	FDCommand        string
+	ManifestFallback bool
 }
 
 const (
@@ -26,13 +27,13 @@ func LoadWithOptions(ctx context.Context, mode SourceMode, opts LoadOptions) ([]
 	case ModeSessions:
 		return ListSessions(ctx)
 	case ModeAgents:
-		return ListAgents(ctx, "")
+		return ListAgents(ctx, "", opts)
 	case ModeCurrentAgents:
 		session, err := CurrentTmuxSession(ctx)
 		if err != nil {
 			return nil, err
 		}
-		return ListAgents(ctx, session)
+		return ListAgents(ctx, session, opts)
 	case ModeZoxide:
 		return ListZoxideDirs(ctx)
 	case ModeFD:
@@ -45,7 +46,7 @@ func LoadWithOptions(ctx context.Context, mode SourceMode, opts LoadOptions) ([]
 		if err != nil {
 			return nil, err
 		}
-		agents, err := ListAgents(ctx, "")
+		agents, err := ListAgents(ctx, "", opts)
 		if err != nil {
 			return nil, err
 		}

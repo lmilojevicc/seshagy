@@ -10,7 +10,7 @@ import (
 	"github.com/lmilojevicc/seshagy/internal/integrations"
 )
 
-func ListAgents(ctx context.Context, sessionFilter string) ([]Item, error) {
+func ListAgents(ctx context.Context, sessionFilter string, opts LoadOptions) ([]Item, error) {
 	out, err := tmuxCommand(ctx, "list-panes", "-a", "-F", agentFormat).Output()
 	if err != nil {
 		var ee *exec.ExitError
@@ -20,6 +20,9 @@ func ListAgents(ctx context.Context, sessionFilter string) ([]Item, error) {
 		return nil, fmt.Errorf("tmux list-panes: %w", err)
 	}
 	items := ParseAgents(out, sessionFilter)
+	if opts.ManifestFallback {
+		applyManifestFallback(ctx, items)
+	}
 	for i := range items {
 		pane := items[i].PaneID
 		detected := items[i].AgentState
@@ -44,6 +47,27 @@ func ListAgents(ctx context.Context, sessionFilter string) ([]Item, error) {
 		}
 	}
 	return items, nil
+}
+
+func applyManifestFallback(ctx context.Context, items []Item) {
+	for i := range items {
+		if !shouldApplyManifestFallback(
+			items[i].AgentState,
+			items[i].AgentName,
+			items[i].AgentSource,
+		) {
+			continue
+		}
+		screen, err := CaptureAgentPane(ctx, items[i].PaneID, manifestCaptureLines)
+		if err != nil {
+			continue
+		}
+		match, ok := detectStateFromManifest(items[i].AgentName, screen)
+		if !ok {
+			continue
+		}
+		items[i].AgentState = match.State
+	}
 }
 
 func ParseAgents(raw []byte, sessionFilter string) []Item {

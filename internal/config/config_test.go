@@ -24,6 +24,15 @@ func TestLoadDefaultWhenMissing(t *testing.T) {
 	if cfg.LoadOptions().FDCommand != sessionmgr.DefaultFDCommand {
 		t.Fatalf("default fd command = %q", cfg.LoadOptions().FDCommand)
 	}
+	if cfg.Agents.ManifestFallback {
+		t.Fatalf("default manifest fallback = %v, want false", cfg.Agents.ManifestFallback)
+	}
+	if cfg.LoadOptions().ManifestFallback {
+		t.Fatalf(
+			"default load options manifest fallback = %v, want false",
+			cfg.LoadOptions().ManifestFallback,
+		)
+	}
 	if cfg.Theme.Colors.FocusedBorder != "13" || cfg.Theme.Colors.ActiveTab != "default" ||
 		cfg.Theme.Colors.Border != "8" ||
 		cfg.Theme.Colors.InactiveTab != "8" ||

@@ -1,0 +1,20 @@
+id = "codex"
+
+[[rules]]
+id = "live_strong_blocker"
+state = "blocked"
+priority = 900
+region = "whole_recent"
+visible_blocker = true
+any = [
+  { contains = ["press enter to confirm or esc to cancel"] },
+  { contains = ["allow command?"] },
+]
+
+[[rules]]
+id = "weak_blocker_yes_no"
+state = "blocked"
+priority = 600
+region = "bottom_non_empty_lines(20)"
+visible_blocker = true
+contains = ["[y/n]"]
