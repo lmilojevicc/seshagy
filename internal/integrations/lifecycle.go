@@ -12,7 +12,6 @@ var claudeLifecycleHooks = []lifecycleHook{
 	{"PreToolUse", "working"},
 	{"PostToolUse", "working"},
 	{"PostToolUseFailure", "working"},
-	{"SubagentStop", "working"},
 	{"PreCompact", "working"},
 	{"PermissionRequest", "blocked"},
 	{"Stop", "idle"},

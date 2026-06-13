@@ -216,7 +216,7 @@ func isPrintableKey(msg tea.KeyMsg) bool {
 
 func isUnprefixedNavigationKey(msg tea.KeyMsg) bool {
 	switch msg.String() {
-	case "enter", "up", "down", "pgup", "ctrl+u", "pgdown", "ctrl+d", "home", "end":
+	case "enter", "up", "down", "pgup", "ctrl+u", "pgdown", "ctrl+d", "home", "end", "V":
 		return true
 	default:
 		return false

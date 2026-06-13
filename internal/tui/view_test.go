@@ -494,6 +494,35 @@ func TestTypeFirstTypingFiltersAndPrefixRunsActions(t *testing.T) {
 	}
 }
 
+func TestTypeFirstVTogglesSessionIDExpand(t *testing.T) {
+	m := newTestModel(t)
+	m.config.TypeFirst.Enabled = true
+	m.config.TypeFirst.Prefix = appconfig.DefaultPrefix
+	m.items = []sessionmgr.Item{
+		{
+			Kind:           sessionmgr.KindAgent,
+			Name:           "pi",
+			AgentName:      "pi",
+			AgentState:     sessionmgr.AgentWorking,
+			PaneID:         "%1",
+			AgentSessionID: "session-1234567890abcdef",
+		},
+	}
+	m.cursor = 0
+
+	model, _ := m.handleKey(keyMsg("V"))
+	m = model.(Model)
+	if m.query != "" {
+		t.Fatalf("V should toggle session id, not filter; query = %q", m.query)
+	}
+	if m.expandedAgentSessionKey != m.items[0].Key() {
+		t.Fatalf("expected expanded session id, key = %q", m.expandedAgentSessionKey)
+	}
+	if m.status != "session id: session-1234567890abcdef" {
+		t.Fatalf("status after V = %q", m.status)
+	}
+}
+
 func TestTypeFirstPrefixIsConfigurableAndUnprefixedActionsWarn(t *testing.T) {
 	m := newTestModel(t)
 	m.config.TypeFirst.Enabled = true

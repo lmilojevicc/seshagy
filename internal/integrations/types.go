@@ -310,7 +310,7 @@ func specs() []spec {
 		{
 			TargetGrok,
 			"Grok Build",
-			[]string{"grok", "grok-build", "agent"},
+			[]string{"grok", "grok-build"},
 			grokDir,
 			func() string { return filepath.Join(grokDir(), "hooks", shellHookName) },
 			installGrok,

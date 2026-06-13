@@ -86,7 +86,11 @@ func runAgent(ctx context.Context, args []string) error {
 		if len(args) != 2 {
 			return errors.New("usage: seshagy agent explain <pane-id>")
 		}
-		out, err := sessionmgr.ExplainAgent(ctx, args[1])
+		cfg, err := appconfig.Load()
+		if err != nil {
+			return err
+		}
+		out, err := sessionmgr.ExplainAgent(ctx, args[1], cfg.LoadOptions())
 		if err != nil {
 			return err
 		}
@@ -379,7 +383,7 @@ Usage:
 TUI keys:
   enter attach/create/focus   q quit   / filter   r refresh   R rename
   x kill session/pane         y yazi   i hooks    m mode     1-6 modes
-  p preview                   ? help
+  p preview                   V session id expand   ? help
 
 Config:
   Config lives at $XDG_CONFIG_HOME/seshagy/config.toml, or
@@ -400,11 +404,13 @@ Agent flags:
 
 Hook integrations:
   Supported targets: pi, claude, codex, copilot, droid, opencode, qodercli, cursor, kimi, grok, kilo, hermes.
-  The TUI asks before installing missing hooks for detected agents only on the
-  first launch. After that, use the TUI's i key or this integration command.
-  Pi, OpenCode, Kimi Code, Kilo Code, and Hermes Agent report lifecycle state directly. Claude, Codex,
-  Copilot, Droid, Qoder CLI, Cursor, and Grok report session/presence as unknown with
-  optional native session ids. Hook-capable agents are not listed from process
-  detection alone; install the integration so hooks report @agent_* metadata.
+  The TUI prompts to install missing hooks when new integrations are available
+  (first launch or after upgrading seshagy). Press i anytime or use this
+  integration command. Pi, OpenCode, Kimi Code, Kilo Code, and Hermes install
+  plugin integrations that report lifecycle state directly. Claude, Codex,
+  Copilot, Droid, Qoder CLI, Cursor, and Grok install shell-hook integrations
+  that map hook events to working/blocked/idle lifecycle state. Hook-capable
+  agents are not listed from process detection alone; install the integration
+  so hooks report @agent_* metadata.
 `
 }
