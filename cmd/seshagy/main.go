@@ -140,9 +140,7 @@ func runManifest(args []string) error {
 		if err != nil {
 			return err
 		}
-		if len(output.Updated) > 0 {
-			sessionmgr.ReloadManifests()
-		}
+		sessionmgr.ReloadManifests()
 		if jsonOutput {
 			return encodeJSON(output)
 		}
@@ -165,7 +163,7 @@ func runManifest(args []string) error {
 
 func printManifestStatus(catalogURL string, jsonOutput bool) error {
 	status := sessionmgr.LoadManifestUpdateStatus()
-	summaries := sessionmgr.ManifestSummaries()
+	summaries := sessionmgr.ReloadManifests()
 	resolvedCatalog := sessionmgr.ResolveManifestCatalogURL(catalogURL)
 	if jsonOutput {
 		return encodeJSON(map[string]any{
@@ -194,6 +192,16 @@ func printManifestStatus(catalogURL string, jsonOutput bool) error {
 			line += fmt.Sprintf(" (cached remote %s)", summary.CachedRemoteVersion)
 		}
 		fmt.Println(line)
+		if agentStatus, ok := status.AgentStatus(
+			summary.AgentID,
+		); ok &&
+			agentStatus.LastResult != "" {
+			updateLine := fmt.Sprintf("  update: %s", agentStatus.LastResult)
+			if agentStatus.LastError != nil && *agentStatus.LastError != "" {
+				updateLine += fmt.Sprintf(" (%s)", *agentStatus.LastError)
+			}
+			fmt.Println(updateLine)
+		}
 		if summary.Warning != "" {
 			fmt.Printf("  warning: %s\n", summary.Warning)
 		}

@@ -6,7 +6,10 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 )
 
@@ -66,6 +69,28 @@ func withManifestStateDir(t *testing.T, fn func(t *testing.T)) {
 	fn(t)
 }
 
+func resetManifestCacheForTest(t *testing.T) {
+	t.Helper()
+	manifestMu.Lock()
+	manifestByAgent = nil
+	manifestErr = nil
+	manifestLoaded = false
+	manifestMu.Unlock()
+}
+
+func TestManifestSummariesColdStartNeedsReload(t *testing.T) {
+	resetManifestCacheForTest(t)
+	t.Cleanup(func() { ReloadManifests() })
+
+	if summaries := ManifestSummaries(); len(summaries) != 0 {
+		t.Fatalf("ManifestSummaries() = %d entries before reload, want 0", len(summaries))
+	}
+	summaries := ReloadManifests()
+	if len(summaries) == 0 {
+		t.Fatal("ReloadManifests() returned no summaries")
+	}
+}
+
 func TestManifestVersionComparesDottedNumericSegments(t *testing.T) {
 	left, err := ParseManifestVersion("2026.6.10.1")
 	if err != nil {
@@ -119,6 +144,105 @@ func TestProcessAgentManifestUpdateCommitsNewerManifest(t *testing.T) {
 		}
 		if string(got) != content {
 			t.Fatalf("cached manifest mismatch")
+		}
+	})
+}
+
+func TestProcessAgentManifestUpdateRejectsOlderThanBundled(t *testing.T) {
+	withManifestStateDir(t, func(t *testing.T) {
+		bundledVersion, ok, err := bundledManifestVersion("codex")
+		if err != nil {
+			t.Fatalf("bundledManifestVersion() = %v", err)
+		}
+		if !ok {
+			t.Fatal("expected bundled codex manifest")
+		}
+		olderParts := strings.Split(bundledVersion.String(), ".")
+		last, err := strconv.ParseUint(olderParts[len(olderParts)-1], 10, 64)
+		if err != nil || last == 0 {
+			t.Fatalf("unexpected bundled version %s", bundledVersion)
+		}
+		olderParts[len(olderParts)-1] = fmt.Sprintf("%d", last-1)
+		olderVersion := strings.Join(olderParts, ".")
+		older := remoteManifestFixture(olderVersion, "older-than-bundled")
+		if _, err := processAgentManifestUpdate("codex", older); err == nil {
+			t.Fatal("expected bundled version floor error")
+		}
+		if _, err := os.Stat(remoteManifestPath("codex")); err == nil {
+			t.Fatal("expected no cached remote manifest after bundled floor rejection")
+		}
+	})
+}
+
+func TestProcessAgentManifestUpdateRejectsUncompilableManifest(t *testing.T) {
+	withManifestStateDir(t, func(t *testing.T) {
+		bundledVersion, ok, err := bundledManifestVersion("codex")
+		if err != nil {
+			t.Fatalf("bundledManifestVersion() = %v", err)
+		}
+		if !ok {
+			t.Fatal("expected bundled codex manifest")
+		}
+		parts := strings.Split(bundledVersion.String(), ".")
+		last, err := strconv.ParseUint(parts[len(parts)-1], 10, 64)
+		if err != nil {
+			t.Fatalf("parse bundled version segment: %v", err)
+		}
+		parts[len(parts)-1] = fmt.Sprintf("%d", last+1)
+		newerVersion := strings.Join(parts, ".")
+		content := fmt.Sprintf(`
+id = "codex"
+version = %q
+min_engine_version = 1
+updated_at = "2026-06-10T12:00:00Z"
+
+[[rules]]
+id = "bad_regex"
+state = "idle"
+regex = ["["]
+`, newerVersion)
+		if _, err := processAgentManifestUpdate("codex", content); err == nil {
+			t.Fatal("expected compile error")
+		}
+		if _, err := os.Stat(remoteManifestPath("codex")); err == nil {
+			t.Fatal("expected no cached remote manifest after compile rejection")
+		}
+	})
+}
+
+func TestCheckAndUpdateManifestsReturnsSaveError(t *testing.T) {
+	withManifestStateDir(t, func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/index.toml":
+				_, _ = w.Write([]byte(`
+schema_version = 1
+
+[[agents]]
+id = "codex"
+path = "codex.toml"
+`))
+			case "/codex.toml":
+				_, _ = w.Write([]byte(remoteManifestFixture("2026.06.10.3", "save-error-ready")))
+			default:
+				http.NotFound(w, r)
+			}
+		}))
+		t.Cleanup(server.Close)
+
+		if err := os.MkdirAll(filepath.Dir(manifestStatusPath()), 0o700); err != nil {
+			t.Fatalf("MkdirAll(status dir) = %v", err)
+		}
+		if err := os.Mkdir(manifestStatusPath(), 0o500); err != nil {
+			t.Fatalf("Mkdir(status path) = %v", err)
+		}
+
+		_, err := checkAndUpdateFromURL(server.URL + "/index.toml")
+		if err == nil {
+			t.Fatal("expected save error")
+		}
+		if !strings.Contains(err.Error(), "save manifest update status") {
+			t.Fatalf("unexpected error: %v", err)
 		}
 	})
 }
@@ -263,6 +387,57 @@ path = "codex.toml"
 	})
 }
 
+func TestCheckAndUpdateManifestsSerializesConcurrentUpdates(t *testing.T) {
+	withManifestStateDir(t, func(t *testing.T) {
+		var active atomic.Int32
+		var overlap atomic.Bool
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/index.toml":
+				_, _ = w.Write([]byte(`
+schema_version = 1
+
+[[agents]]
+id = "codex"
+path = "codex.toml"
+`))
+			case "/codex.toml":
+				active.Add(1)
+				if active.Load() > 1 {
+					overlap.Store(true)
+				}
+				defer active.Add(-1)
+				_, _ = w.Write([]byte(remoteManifestFixture("2026.06.10.3", "concurrent-ready")))
+			default:
+				http.NotFound(w, r)
+			}
+		}))
+		t.Cleanup(server.Close)
+
+		catalogURL := server.URL + "/index.toml"
+		const workers = 8
+		var wg sync.WaitGroup
+		errs := make(chan error, workers)
+		for range workers {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				if _, err := CheckAndUpdateManifests(catalogURL); err != nil {
+					errs <- err
+				}
+			}()
+		}
+		wg.Wait()
+		close(errs)
+		for err := range errs {
+			t.Fatalf("CheckAndUpdateManifests() error = %v", err)
+		}
+		if overlap.Load() {
+			t.Fatal("concurrent manifest update detected")
+		}
+	})
+}
+
 func TestParseManifestCatalogRejectsDuplicatesAndUnsafePaths(t *testing.T) {
 	if _, err := parseManifestCatalog(`
 schema_version = 1
@@ -286,6 +461,17 @@ id = "codex"
 path = "../codex.toml"
 `); err == nil {
 		t.Fatal("expected unsafe path error")
+	}
+
+	unsafePaths := []string{
+		`agents\codex.toml`,
+		`foo/../../codex.toml`,
+		`./../codex.toml`,
+	}
+	for _, path := range unsafePaths {
+		if err := validateCatalogManifestPath(path); err == nil {
+			t.Fatalf("validateCatalogManifestPath(%q) expected error", path)
+		}
 	}
 }
 

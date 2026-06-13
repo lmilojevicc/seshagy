@@ -7,8 +7,10 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/BurntSushi/toml"
@@ -29,7 +31,23 @@ type catalogAgentEntry struct {
 	path    string
 }
 
+var manifestUpdateMu sync.Mutex
+
+var manifestFetchHTTPClient = &http.Client{
+	CheckRedirect: func(req *http.Request, via []*http.Request) error {
+		if req.URL.Scheme != "https" {
+			return fmt.Errorf("redirect to non-https URL %q is not allowed", req.URL.String())
+		}
+		if len(via) >= 10 {
+			return fmt.Errorf("stopped after 10 redirects")
+		}
+		return nil
+	},
+}
+
 func CheckAndUpdateManifests(catalogURL string) (ManifestUpdateOutput, error) {
+	manifestUpdateMu.Lock()
+	defer manifestUpdateMu.Unlock()
 	return checkAndUpdateFromURL(ResolveManifestCatalogURL(catalogURL))
 }
 
@@ -86,8 +104,10 @@ func checkAndUpdateFromURL(catalogURL string) (ManifestUpdateOutput, error) {
 	}
 
 	if err := saveManifestUpdateStatus(status); err != nil {
-		failed := fmt.Sprintf("failed_to_save_status: %v", err)
-		status.LastResult = &failed
+		return ManifestUpdateOutput{Updated: updated, Status: status}, fmt.Errorf(
+			"save manifest update status: %w",
+			err,
+		)
 	}
 	return ManifestUpdateOutput{Updated: updated, Status: status}, nil
 }
@@ -96,6 +116,15 @@ func processAgentManifestUpdate(agentID, content string) (*ManifestUpdateCommit,
 	parsed, err := parseRemoteManifestForAgent(agentID, content)
 	if err != nil {
 		return nil, err
+	}
+	if bundledVersion, ok, err := bundledManifestVersion(agentID); err != nil {
+		return nil, err
+	} else if ok && CompareManifestVersion(parsed.version, bundledVersion) < 0 {
+		return nil, fmt.Errorf(
+			"remote version %s is older than bundled %s",
+			parsed.version,
+			bundledVersion,
+		)
 	}
 	if current, ok := cachedRemoteVersion(agentID); ok {
 		switch CompareManifestVersion(parsed.version, current) {
@@ -118,6 +147,9 @@ func processAgentManifestUpdate(agentID, content string) (*ManifestUpdateCommit,
 			}
 			return nil, nil
 		}
+	}
+	if _, err := compileManifest(parsed.manifest); err != nil {
+		return nil, fmt.Errorf("compile manifest: %w", err)
 	}
 	if err := commitRemoteManifest(agentID, content); err != nil {
 		return nil, err
@@ -170,7 +202,18 @@ func validateCatalogManifestPath(path string) error {
 	if strings.Contains(path, "://") || strings.HasPrefix(path, "/") {
 		return fmt.Errorf("absolute or remote paths are not allowed")
 	}
-	for _, part := range strings.Split(path, "/") {
+	if strings.Contains(path, `\`) {
+		return fmt.Errorf("backslashes are not allowed")
+	}
+	cleaned := filepath.ToSlash(path)
+	cleaned = filepath.Clean(cleaned)
+	if cleaned == "" || cleaned == "." {
+		return fmt.Errorf("empty path is not allowed")
+	}
+	if cleaned == ".." || strings.HasPrefix(cleaned, "../") || strings.Contains(cleaned, "/../") {
+		return fmt.Errorf("path traversal is not allowed")
+	}
+	for _, part := range strings.Split(cleaned, "/") {
 		if part == ".." {
 			return fmt.Errorf("path traversal is not allowed")
 		}
@@ -242,7 +285,7 @@ func fetchManifestText(rawURL string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("create request for %q: %w", rawURL, err)
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := manifestFetchHTTPClient.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("failed to fetch %q: %w", rawURL, err)
 	}
@@ -307,6 +350,36 @@ func recordAgentUpdateFailure(
 		LastResult:      "failed",
 		LastError:       &errMsg,
 	}
+}
+
+func bundledManifestVersion(agentID string) (ManifestVersion, bool, error) {
+	agentID = strings.ToLower(strings.TrimSpace(agentID))
+	entries, err := manifestFS.ReadDir("manifests")
+	if err != nil {
+		return ManifestVersion{}, false, err
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".toml") {
+			continue
+		}
+		data, err := manifestFS.ReadFile("manifests/" + entry.Name())
+		if err != nil {
+			return ManifestVersion{}, false, err
+		}
+		manifest, err := parseLocalManifest(string(data))
+		if err != nil {
+			return ManifestVersion{}, false, err
+		}
+		if !manifestMatchesAgentID(&manifest, agentID) {
+			continue
+		}
+		version, err := ParseManifestVersion(strings.TrimSpace(manifest.Version))
+		if err != nil {
+			return ManifestVersion{}, false, err
+		}
+		return version, true, nil
+	}
+	return ManifestVersion{}, false, nil
 }
 
 func bundledManifestAgentIDs() (map[string]bool, error) {
