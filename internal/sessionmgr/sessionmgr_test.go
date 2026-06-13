@@ -698,6 +698,8 @@ func TestDetectAgentNameFromCommand(t *testing.T) {
 		{"droid-build", "droid"},
 		{"grok", "grok"},
 		{"grok-build", "grok"},
+		{"grok-macos-aarc", "grok"},
+		{"grok_macos_aarc", "grok"},
 		{"agent", ""},
 		{"hermes", "hermes"},
 		{"hermes-agent", "hermes"},
@@ -717,6 +719,30 @@ func TestDetectAgentNameFromCommand(t *testing.T) {
 	}
 	if got := detectAgentName("agent", "Grok Build"); got != "grok" {
 		t.Errorf("detectAgentName(%q, %q) = %q, want %q", "agent", "Grok Build", got, "grok")
+	}
+}
+
+func TestDetectAgentNameFromWrappedCommand(t *testing.T) {
+	tests := []struct {
+		command string
+		want    string
+	}{
+		{"node /home/user/.local/bin/gemini", "gemini"},
+		{"node /nix/store/abc/bin/opencode", "opencode"},
+		{"/usr/bin/node /path/to/codex-local", "codex"},
+		{"python3 /nix/store/abc/bin/gemini", "gemini"},
+		{"bash -c /opt/bin/droid-agent", "droid"},
+		{"node -e console.log()", ""},
+		{"node --require /tmp/foo.js /path/to/hermes", "hermes"},
+		{"/nix/store/hash/bin/grok-macos-aarc", "grok"},
+		{"node", ""},
+		{"python3", ""},
+	}
+	for _, tt := range tests {
+		got := detectAgentName(tt.command, "")
+		if got != tt.want {
+			t.Errorf("detectAgentName(%q, \"\") = %q, want %q", tt.command, got, tt.want)
+		}
 	}
 }
 
