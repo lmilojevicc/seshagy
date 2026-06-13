@@ -1,6 +1,7 @@
 package sessionmgr
 
 import (
+	"context"
 	"embed"
 	"fmt"
 	"regexp"
@@ -275,6 +276,48 @@ func shouldApplyManifestFallback(state AgentState, agentName, source string) boo
 		return false
 	}
 	return !HasLifecycleAuthority(agentName, source)
+}
+
+func manifestExplainLine(
+	ctx context.Context,
+	pane, agentName, source string,
+	state AgentState,
+) string {
+	if !shouldApplyManifestFallback(state, agentName, source) {
+		return "manifest skipped"
+	}
+	screen, err := captureAgentPaneCached(ctx, nil, pane, manifestCaptureLines)
+	if err != nil {
+		return "manifest skipped"
+	}
+	match, ok := detectStateFromManifest(agentName, screen)
+	if !ok {
+		return "manifest skipped"
+	}
+	return fmt.Sprintf("rule %s → %s", match.RuleID, agentStateLabel(match.State))
+}
+
+type manifestCaptureCache map[string]string
+
+func captureAgentPaneCached(
+	ctx context.Context,
+	cache manifestCaptureCache,
+	pane string,
+	lines int,
+) (string, error) {
+	if cache != nil {
+		if screen, ok := cache[pane]; ok {
+			return screen, nil
+		}
+	}
+	screen, err := CaptureAgentPane(ctx, pane, lines)
+	if err != nil {
+		return "", err
+	}
+	if cache != nil {
+		cache[pane] = screen
+	}
+	return screen, nil
 }
 
 func compiledGateMatches(gate compiledGate, text string) bool {

@@ -50,6 +50,7 @@ func ListAgents(ctx context.Context, sessionFilter string, opts LoadOptions) ([]
 }
 
 func applyManifestFallback(ctx context.Context, items []Item) {
+	cache := make(manifestCaptureCache)
 	for i := range items {
 		if !shouldApplyManifestFallback(
 			items[i].AgentState,
@@ -58,7 +59,7 @@ func applyManifestFallback(ctx context.Context, items []Item) {
 		) {
 			continue
 		}
-		screen, err := CaptureAgentPane(ctx, items[i].PaneID, manifestCaptureLines)
+		screen, err := captureAgentPaneCached(ctx, cache, items[i].PaneID, manifestCaptureLines)
 		if err != nil {
 			continue
 		}
@@ -145,7 +146,7 @@ func CaptureAgentPane(ctx context.Context, pane string, lines int) (string, erro
 	if lines > 0 {
 		args = append(args, "-S", fmt.Sprintf("-%d", lines))
 	}
-	out, err := tmuxCommand(ctx, args...).Output()
+	out, err := tmuxOutput(ctx, args...)
 	if err != nil {
 		return "", fmt.Errorf("tmux capture-pane: %w", err)
 	}

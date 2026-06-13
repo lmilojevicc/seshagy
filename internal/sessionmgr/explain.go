@@ -26,6 +26,7 @@ type agentExplain struct {
 	StateSource      string
 	HookStateRaw     string
 	EffectiveStatus  AgentState
+	DetectedStatus   AgentState
 	TrackingOverride bool
 
 	AgentSource    string
@@ -41,9 +42,10 @@ type agentExplain struct {
 	LastSeen   string
 
 	IntegrationStatus string
+	ManifestFallback  string
 }
 
-func ExplainAgent(ctx context.Context, pane string) (string, error) {
+func ExplainAgent(ctx context.Context, pane string, opts LoadOptions) (string, error) {
 	resolved, err := ResolvePane(ctx, pane)
 	if err != nil {
 		return "", err
@@ -57,6 +59,15 @@ func ExplainAgent(ctx context.Context, pane string) (string, error) {
 		return "", fmt.Errorf("unexpected pane metadata fields: %d", len(parts))
 	}
 	info := buildAgentExplain(ctx, resolved, parts)
+	if opts.ManifestFallback {
+		info.ManifestFallback = manifestExplainLine(
+			ctx,
+			resolved,
+			info.AgentName,
+			info.AgentSource,
+			info.DetectedStatus,
+		)
+	}
 	return formatAgentExplain(info), nil
 }
 
@@ -148,6 +159,7 @@ func buildAgentExplain(ctx context.Context, pane string, parts []string) agentEx
 	} else {
 		info.EffectiveStatus = detected
 	}
+	info.DetectedStatus = detected
 
 	semantic := semanticAgentState(detected)
 	if info.LastStatus != "" && info.EffectiveStatus != semantic {
@@ -258,6 +270,11 @@ func formatAgentExplain(info agentExplain) string {
 	if info.IntegrationStatus != "" {
 		b.WriteByte('\n')
 		fmt.Fprintf(&b, "integration: %s\n", info.IntegrationStatus)
+	}
+
+	if info.ManifestFallback != "" {
+		b.WriteByte('\n')
+		fmt.Fprintf(&b, "manifest fallback: %s\n", info.ManifestFallback)
 	}
 
 	return b.String()

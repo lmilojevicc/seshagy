@@ -1,6 +1,9 @@
 package sessionmgr
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 func TestDetectStateFromManifestClaudeBlocked(t *testing.T) {
 	screen := "Some output above\nRun a dynamic workflow? (esc to cancel)\n"
@@ -114,6 +117,62 @@ func TestShouldApplyManifestFallback(t *testing.T) {
 				t.Fatalf("shouldApplyManifestFallback() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestManifestExplainLineShowsMatchedRule(t *testing.T) {
+	const pane = "%9"
+	screen := "tool output\nAllow command? [y/n]\n"
+	origOut := tmuxOutput
+	tmuxOutput = func(ctx context.Context, args ...string) ([]byte, error) {
+		if len(args) >= 4 && args[0] == "capture-pane" && args[3] == pane {
+			return []byte(screen), nil
+		}
+		return nil, nil
+	}
+	t.Cleanup(func() { tmuxOutput = origOut })
+
+	got := manifestExplainLine(context.Background(), pane, "codex", "process", AgentUnknown)
+	if got != "manifest skipped" {
+		t.Fatalf("manifestExplainLine() = %q, want manifest skipped for lifecycle authority", got)
+	}
+
+	got = manifestExplainLine(context.Background(), pane, "gemini", "process", AgentUnknown)
+	if got != "manifest skipped" {
+		t.Fatalf("manifestExplainLine() = %q, want manifest skipped for unsupported manifest", got)
+	}
+}
+
+func TestCaptureAgentPaneCachedReusesPaneCapture(t *testing.T) {
+	const pane = "%10"
+	calls := 0
+	origOut := tmuxOutput
+	tmuxOutput = func(ctx context.Context, args ...string) ([]byte, error) {
+		if len(args) >= 4 && args[0] == "capture-pane" && args[3] == pane {
+			calls++
+			return []byte("cached screen\n"), nil
+		}
+		return nil, nil
+	}
+	t.Cleanup(func() { tmuxOutput = origOut })
+
+	cache := make(manifestCaptureCache)
+	for range 2 {
+		screen, err := captureAgentPaneCached(
+			context.Background(),
+			cache,
+			pane,
+			manifestCaptureLines,
+		)
+		if err != nil {
+			t.Fatalf("captureAgentPaneCached() error = %v", err)
+		}
+		if screen != "cached screen\n" {
+			t.Fatalf("screen = %q, want cached screen", screen)
+		}
+	}
+	if calls != 1 {
+		t.Fatalf("capture-pane calls = %d, want 1", calls)
 	}
 }
 

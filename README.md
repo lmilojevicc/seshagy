@@ -173,6 +173,7 @@ installed agent so hook versions stay current.
 | `i` | open integration installer prompt |
 | `m` | change classic/type-first input mode |
 | `p` | toggle preview pane |
+| `V` | expand/collapse native agent session id on selected pane |
 | `?` / `h` | toggle help |
 | `q` / `esc` / `ctrl-c` | quit |
 
@@ -194,6 +195,7 @@ seshagy --get-session-agents        # alias
 seshagy --get-zoxide
 seshagy --get-fd
 seshagy --delete-item '<rendered line from --get-all>'
+seshagy agent explain <pane-id>   # show why a pane has its agent state
 ```
 
 Agent metadata helpers:
