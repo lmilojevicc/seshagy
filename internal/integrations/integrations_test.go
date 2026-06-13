@@ -928,13 +928,16 @@ func TestReinstallClaudeIsIdempotent(t *testing.T) {
 
 func TestShellHookSessionActionReportsUnknownWithSessionIDAndSeq(t *testing.T) {
 	asset := shellHookAsset(TargetCursor, "/bin/seshagy")
-	for _, want := range []string{"next_seq()", "time.time_ns()", `date +%s%N`, `seq="$(next_seq)"`, "session_id", "sessionId", "conversation_id", "conversationId", `state="unknown"`, `--state "$state"`, `--session-id "$session_id"`, `--seq "$seq"`, `--release-agent --source "$source" --seq "$seq"`} {
+	for _, want := range []string{"next_seq()", "time.time_ns()", "Time::HiRes", `date +%s`, "seshagy-seq", `seq="$(next_seq)"`, "session_id", "sessionId", "conversation_id", "conversationId", `state="unknown"`, `--state "$state"`, `--session-id "$session_id"`, `--seq "$seq"`, `--release-agent --source "$source" --seq "$seq"`} {
 		if !strings.Contains(asset, want) {
 			t.Fatalf("shell hook asset missing %q:\n%s", want, asset)
 		}
 	}
 	if strings.Contains(asset, "$$ %") {
 		t.Fatalf("shell seq should not use pid modulo ordering:\n%s", asset)
+	}
+	if strings.Contains(asset, `date +%s%N`) {
+		t.Fatalf("shell seq must not use date +%%s%%N (broken on macOS):\n%s", asset)
 	}
 	if strings.Contains(asset, `session|start) state="idle"`) ||
 		strings.Contains(asset, `session|start)\n    state="idle"`) {

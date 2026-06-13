@@ -25,7 +25,8 @@ var droidLifecycleHooks = []lifecycleHook{
 	{"PreToolUse", "working"},
 	{"PostToolUse", "working"},
 	{"Notification", "blocked"},
-	{"SubagentStop", "working"},
+	// SubagentStop omitted: Herdr documents this event revives idle panes when
+	// mapped to working; the parent agent may already be idle after Stop.
 	{"PreCompact", "working"},
 	{"Stop", "idle"},
 	{"SessionEnd", "release"},
@@ -39,7 +40,8 @@ var qodercliLifecycleHooks = []lifecycleHook{
 	{"PostToolUse", "working"},
 	{"PostToolUseFailure", "working"},
 	{"SubagentStart", "working"},
-	{"SubagentStop", "working"},
+	// SubagentStop omitted: Herdr documents this event revives idle panes when
+	// mapped to working; the parent agent may already be idle after Stop.
 	{"PreCompact", "working"},
 	{"Notification", "blocked"},
 	{"PermissionRequest", "blocked"},

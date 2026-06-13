@@ -1,6 +1,9 @@
 package sessionmgr
 
-import "strings"
+import (
+	"strings"
+	"time"
+)
 
 // InferStateFromTitle infers agent state from OSC pane titles when hooks are
 // silent. Braille spinner and blocked-title patterns are validated for claude,
@@ -39,19 +42,27 @@ func titleLooksBlocked(titleLower string) bool {
 	return false
 }
 
+var workingSpinnerRunes = map[rune]struct{}{
+	'⠋': {}, '⠙': {}, '⠹': {}, '⠸': {}, '⠼': {},
+	'⠴': {}, '⠦': {}, '⠧': {}, '⠇': {}, '⠏': {},
+}
+
 func titleHasWorkingSpinner(title string) bool {
 	if strings.Contains(title, "⋯") {
 		return true
 	}
 	for _, r := range title {
-		if r >= 0x2800 && r <= 0x28FF {
+		if _, ok := workingSpinnerRunes[r]; ok {
 			return true
 		}
 	}
 	return false
 }
 
-func hookStateAllowsFallback(hookStateRaw string, state AgentState) bool {
+func hookStateAllowsFallback(hookStateRaw string, state AgentState, stale bool) bool {
+	if stale {
+		return true
+	}
 	hookStateRaw = strings.TrimSpace(hookStateRaw)
 	if hookStateRaw == "" || state == AgentUnknown {
 		return true
@@ -67,26 +78,62 @@ func shouldSupplementStateFromTitle(
 	hookStateRaw string,
 	state AgentState,
 	agentName,
-	source string,
+	source,
+	agentUpdated string,
+	now time.Time,
 ) bool {
 	_ = agentName
 	_ = source
-	return hookStateAllowsFallback(hookStateRaw, state)
+	stale := isHookStateStale(state, agentUpdated, now)
+	return hookStateAllowsFallback(hookStateRaw, state, stale)
 }
 
 func resolveAgentState(
-	hookStateRaw, agentName, source, title string,
+	hookStateRaw, agentName, source, title, agentUpdated string,
 	skipTitleInference bool,
 ) AgentState {
+	return resolveAgentStateAt(
+		hookStateRaw,
+		agentName,
+		source,
+		title,
+		agentUpdated,
+		skipTitleInference,
+		time.Now(),
+	)
+}
+
+func resolveAgentStateAt(
+	hookStateRaw, agentName, source, title, agentUpdated string,
+	skipTitleInference bool,
+	now time.Time,
+) AgentState {
 	state := NormalizeAgentState(hookStateRaw)
-	if !shouldSupplementStateFromTitle(hookStateRaw, state, agentName, source) {
+	effectiveState, stale := effectiveHookStateForFallback(state, agentUpdated, now)
+	if !shouldSupplementStateFromTitle(
+		hookStateRaw,
+		state,
+		agentName,
+		source,
+		agentUpdated,
+		now,
+	) {
+		if stale {
+			return effectiveState
+		}
 		return state
 	}
 	if skipTitleInference {
+		if stale {
+			return effectiveState
+		}
 		return state
 	}
 	if inferred := InferStateFromTitle(agentName, title); inferred != AgentUnknown {
 		return inferred
+	}
+	if stale {
+		return effectiveState
 	}
 	return state
 }

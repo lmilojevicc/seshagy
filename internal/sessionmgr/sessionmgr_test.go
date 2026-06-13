@@ -258,6 +258,7 @@ func TestInferStateFromTitle(t *testing.T) {
 		{"claude", "Approve changes", AgentBlocked},
 		{"claude", "", AgentUnknown},
 		{"claude", "Claude Code", AgentUnknown},
+		{"claude", "⠀ blank braille", AgentUnknown},
 		{"gemini", "⠋ working", AgentWorking},
 	}
 	for _, tt := range tests {

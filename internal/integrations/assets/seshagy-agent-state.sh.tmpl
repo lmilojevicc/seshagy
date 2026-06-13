@@ -14,8 +14,27 @@ next_seq() {
   if command -v python3 >/dev/null 2>&1; then
     python3 -c 'import time; print(time.time_ns())' 2>/dev/null && return 0
   fi
+  if command -v perl >/dev/null 2>&1; then
+    perl -MTime::HiRes=time -e 'print int(time()*1e9)' 2>/dev/null && return 0
+  fi
   if command -v date >/dev/null 2>&1; then
-    date +%%s%%N 2>/dev/null && return 0
+    base="$(date +%%s 2>/dev/null || true)"
+    if [ -n "$base" ]; then
+      # BSD date lacks nanoseconds; use second precision plus counter.
+      counter_file="${TMPDIR:-/tmp}/seshagy-seq-${TMUX_PANE:-$$}"
+      n=0
+      prev_base=""
+      if [ -f "$counter_file" ]; then
+        IFS=" " read -r n prev_base _ < "$counter_file" 2>/dev/null || n=0
+        [ "$prev_base" = "$base" ] || n=0
+      fi
+      n=$((n + 1))
+      printf '%%s %%s\n' "$n" "$base" > "$counter_file" 2>/dev/null || true
+      echo $((base * 1000000 + n))
+      return 0
+    fi
+    # Last resort: second precision only; sub-second reports may share seq.
+    date +%%s 2>/dev/null && return 0
   fi
   echo 0
 }
