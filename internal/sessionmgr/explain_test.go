@@ -2,8 +2,10 @@ package sessionmgr
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func agentExplainFields(paneID string, overrides map[int]string) []string {
@@ -26,6 +28,7 @@ func agentExplainFields(paneID string, overrides map[int]string) []string {
 		"seshagy:claude",
 		"session-123",
 		"42",
+		"12345",
 	}
 	for idx, value := range overrides {
 		fields[idx] = value
@@ -158,14 +161,45 @@ func TestExplainAgentHookCapableWithoutHookReport(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ExplainAgent() error = %v", err)
 	}
-	if !strings.Contains(
-		out,
-		"listed: false (hook-capable agent \"claude\" requires @agent_name from an integration)",
-	) {
-		t.Fatalf("expected hook-capable skip reason in:\n%s", out)
+	for _, want := range []string{
+		"listed: true",
+		"identity source: process detection (command/title)",
+		"agent name: claude",
+		"@agent_source: unhooked",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("ExplainAgent() missing %q in:\n%s", want, out)
+		}
 	}
-	if !strings.Contains(out, "identity source: process detection (command/title)") {
-		t.Fatalf("expected process identity source in:\n%s", out)
+}
+
+func TestExplainAgentStaleHookState(t *testing.T) {
+	const pane = "%10"
+	now := time.Unix(1_700_000_000, 0)
+	staleUpdated := strconv.FormatInt(now.Add(-10*time.Minute).Unix(), 10)
+	fields := agentExplainFields(pane, map[int]string{
+		0:  pane,
+		12: "working",
+		14: staleUpdated,
+	})
+	installExplainFakeTmux(t, pane, fields)
+
+	origNow := agentResolveNow
+	agentResolveNow = func() time.Time { return now }
+	t.Cleanup(func() { agentResolveNow = origNow })
+
+	out, err := ExplainAgent(context.Background(), pane, LoadOptions{})
+	if err != nil {
+		t.Fatalf("ExplainAgent() error = %v", err)
+	}
+	for _, want := range []string{
+		"state source: hook state stale (TTL exceeded)",
+		"hook freshness: stale (TTL exceeded)",
+		"@agent_state: working",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("ExplainAgent() missing %q in:\n%s", want, out)
+		}
 	}
 }
 

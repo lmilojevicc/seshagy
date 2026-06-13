@@ -10,7 +10,15 @@ const paneSep = "\x1f"
 
 var ansiRE = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 
-const agentFormat = "#{pane_id}" + paneSep + "#{session_name}" + paneSep + "#{window_index}" + paneSep + "#{pane_index}" + paneSep + "#{pane_current_path}" + paneSep + "#{pane_active}" + paneSep + "#{window_active}" + paneSep + "#{session_attached}" + paneSep + "#{pane_dead}" + paneSep + "#{pane_current_command}" + paneSep + "#{pane_title}" + paneSep + "#{@agent_name}" + paneSep + "#{@agent_state}" + paneSep + "#{@agent_message}" + paneSep + "#{@agent_updated}" + paneSep + "#{@agent_source}" + paneSep + "#{@agent_session_id}" + paneSep + "#{@agent_seq}"
+const (
+	agentPaneMinFields = 18
+	agentPanePIDIndex  = 18
+
+	agentSourceUnhooked            = "unhooked"
+	agentMessageInstallIntegration = "install integration"
+)
+
+const agentFormat = "#{pane_id}" + paneSep + "#{session_name}" + paneSep + "#{window_index}" + paneSep + "#{pane_index}" + paneSep + "#{pane_current_path}" + paneSep + "#{pane_active}" + paneSep + "#{window_active}" + paneSep + "#{session_attached}" + paneSep + "#{pane_dead}" + paneSep + "#{pane_current_command}" + paneSep + "#{pane_title}" + paneSep + "#{@agent_name}" + paneSep + "#{@agent_state}" + paneSep + "#{@agent_message}" + paneSep + "#{@agent_updated}" + paneSep + "#{@agent_source}" + paneSep + "#{@agent_session_id}" + paneSep + "#{@agent_seq}" + paneSep + "#{pane_pid}"
 
 func showPaneOption(ctx context.Context, pane, opt string) (string, error) {
 	out, err := tmuxOutput(ctx, "show-option", "-qvpt", pane, opt)
@@ -37,6 +45,13 @@ func paneVisibleNow(ctx context.Context, pane string) bool {
 	}
 	parts := strings.Fields(out)
 	return len(parts) >= 3 && parts[0] == "1" && parts[1] == "1" && parts[2] != "0"
+}
+
+func panePIDFromParts(parts []string) string {
+	if len(parts) > agentPanePIDIndex {
+		return cleanField(parts[agentPanePIDIndex])
+	}
+	return ""
 }
 
 func cleanField(s string) string {

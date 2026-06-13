@@ -146,12 +146,17 @@ func TestParseAgentsRequiresHookReportedAgentName(t *testing.T) {
 		"",
 	}
 	raw := []byte(strings.Join(fields, paneSep) + "\n")
-	if got := ParseAgents(raw, "", LoadOptions{}); len(got) != 0 {
-		t.Fatalf("expected hook-capable pane without @agent_name to be ignored, got %#v", got)
+	got := ParseAgents(raw, "", LoadOptions{})
+	if len(got) != 1 {
+		t.Fatalf("len = %d, want 1 unhooked claude agent", len(got))
+	}
+	if got[0].AgentSource != agentSourceUnhooked ||
+		got[0].AgentMessage != agentMessageInstallIntegration {
+		t.Fatalf("unexpected unhooked claude agent: %#v", got[0])
 	}
 }
 
-func TestParseAgentsSkipsHookCapableWithoutHookReport(t *testing.T) {
+func TestParseAgentsListsUnhookedHookCapableAgent(t *testing.T) {
 	fields := []string{
 		"%3",
 		"work",
@@ -173,8 +178,15 @@ func TestParseAgentsSkipsHookCapableWithoutHookReport(t *testing.T) {
 		"",
 	}
 	raw := []byte(strings.Join(fields, paneSep) + "\n")
-	if got := ParseAgents(raw, "", LoadOptions{}); len(got) != 0 {
-		t.Fatalf("expected claude pane without hook report to be skipped, got %#v", got)
+	got := ParseAgents(raw, "", LoadOptions{})
+	if len(got) != 1 {
+		t.Fatalf("len = %d, want 1 unhooked claude agent", len(got))
+	}
+	if got[0].AgentName != "claude" ||
+		got[0].AgentSource != agentSourceUnhooked ||
+		got[0].AgentState != AgentUnknown ||
+		got[0].AgentMessage != agentMessageInstallIntegration {
+		t.Fatalf("unexpected unhooked claude agent: %#v", got[0])
 	}
 }
 
@@ -836,51 +848,70 @@ func TestDetectAgentNameFromCommand(t *testing.T) {
 		{"vim", ""},
 	}
 	for _, tt := range tests {
-		got := detectAgentName(tt.command, "")
+		got := detectAgentName(tt.command, "", "")
 		if got != tt.want {
-			t.Errorf("detectAgentName(%q, \"\") = %q, want %q", tt.command, got, tt.want)
+			t.Errorf("detectAgentName(%q, \"\", \"\") = %q, want %q", tt.command, got, tt.want)
 		}
 	}
-	if got := detectAgentName("agent", "Grok Build"); got != "grok" {
-		t.Errorf("detectAgentName(%q, %q) = %q, want %q", "agent", "Grok Build", got, "grok")
+	if got := detectAgentName("agent", "Grok Build", ""); got != "grok" {
+		t.Errorf("detectAgentName(%q, %q, \"\") = %q, want %q", "agent", "Grok Build", got, "grok")
 	}
 }
 
 func TestDetectAgentNameFromWrappedCommand(t *testing.T) {
+	const panePID = "4242"
+	argvByPID := map[string]string{
+		panePID: "",
+	}
+	readProcessArgsHook = func(pid string) string {
+		if pid != panePID {
+			return ""
+		}
+		return argvByPID[pid]
+	}
+	t.Cleanup(func() { readProcessArgsHook = nil })
 	tests := []struct {
 		command string
+		argv    string
 		want    string
 	}{
-		{"node /home/user/.local/bin/gemini", "gemini"},
-		{"node /nix/store/abc/bin/opencode", "opencode"},
-		{"/usr/bin/node /path/to/codex-local", "codex"},
-		{"python3 /nix/store/abc/bin/gemini", "gemini"},
-		{"bash -c /opt/bin/droid-agent", "droid"},
-		{"node -e console.log()", ""},
-		{"node --require /tmp/foo.js /path/to/hermes", "hermes"},
-		{"/nix/store/hash/bin/grok-macos-aarc", "grok"},
-		{"node", ""},
-		{"python3", ""},
-		{"echo gemini", ""},
-		{"node gemini", ""},
-		{"python3 -m pip install gemini", ""},
+		{"node", "node /home/user/.local/bin/gemini", "gemini"},
+		{"node", "node /nix/store/abc/bin/opencode", "opencode"},
+		{"node", "/usr/bin/node /path/to/codex-local", "codex"},
+		{"python3", "python3 /nix/store/abc/bin/gemini", "gemini"},
+		{"bash", "bash -c /opt/bin/droid-agent", "droid"},
+		{"node", "node -e console.log()", ""},
+		{"node", "node --require /tmp/foo.js /path/to/hermes", "hermes"},
+		{"node", "/nix/store/hash/bin/grok-macos-aarc", "grok"},
+		{"node", "node", ""},
+		{"python3", "python3", ""},
+		{"echo", "echo gemini", ""},
+		{"node", "node gemini", ""},
+		{"python3", "python3 -m pip install gemini", ""},
 	}
 	for _, tt := range tests {
-		got := detectAgentName(tt.command, "")
+		argvByPID[panePID] = tt.argv
+		got := detectAgentName(tt.command, "", panePID)
 		if got != tt.want {
-			t.Errorf("detectAgentName(%q, \"\") = %q, want %q", tt.command, got, tt.want)
+			t.Errorf(
+				"detectAgentName(%q, \"\", %q) = %q, want %q",
+				tt.command,
+				panePID,
+				got,
+				tt.want,
+			)
 		}
 	}
 }
 
 func TestDetectAgentNameStripsExtensions(t *testing.T) {
-	if got := detectAgentName("opencode.exe", ""); got != "opencode" {
+	if got := detectAgentName("opencode.exe", "", ""); got != "opencode" {
 		t.Errorf("got %q, want opencode", got)
 	}
-	if got := detectAgentName("codex.cmd", ""); got != "codex" {
+	if got := detectAgentName("codex.cmd", "", ""); got != "codex" {
 		t.Errorf("got %q, want codex", got)
 	}
-	if got := detectAgentName("pi.js", ""); got != "pi" {
+	if got := detectAgentName("pi.js", "", ""); got != "pi" {
 		t.Errorf("got %q, want pi", got)
 	}
 }

@@ -89,7 +89,7 @@ func ParseAgents(raw []byte, sessionFilter string, opts LoadOptions) []Item {
 	var items []Item
 	for _, line := range strings.Split(text, "\n") {
 		parts := strings.Split(line, paneSep)
-		if len(parts) < 18 {
+		if len(parts) < agentPaneMinFields {
 			continue
 		}
 		if parts[8] == "1" {
@@ -101,22 +101,39 @@ func ParseAgents(raw []byte, sessionFilter string, opts LoadOptions) []Item {
 		name := parts[11]
 		hookReported := name != ""
 		title := cleanField(parts[10])
+		panePID := panePIDFromParts(parts)
+		unhooked := false
 		if name == "" {
 			command := cleanField(parts[9])
-			name = detectAgentName(command, title)
+			name = detectAgentName(command, title, panePID)
 			if name == "" {
 				continue
 			}
 			if integrations.HookCapableAgent(name) {
-				continue
+				unhooked = true
 			}
 		}
 		source := cleanField(parts[15])
-		if source == "" && !hookReported {
+		switch {
+		case unhooked:
+			source = agentSourceUnhooked
+		case source == "" && !hookReported:
 			source = "process"
 		}
-		state := resolveAgentState(parts[12], name, source, title, opts.ManifestFallback)
+		agentUpdated := cleanField(parts[14])
+		state := resolveAgentStateAt(
+			parts[12],
+			name,
+			source,
+			title,
+			agentUpdated,
+			opts.ManifestFallback,
+			agentResolveNow(),
+		)
 		message := cleanField(parts[13])
+		if unhooked && message == "" {
+			message = agentMessageInstallIntegration
+		}
 		sessionID := cleanField(parts[16])
 		seq := cleanField(parts[17])
 		path := ContractHome(parts[4])

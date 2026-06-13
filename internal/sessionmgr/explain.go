@@ -25,6 +25,7 @@ type agentExplain struct {
 
 	StateSource      string
 	HookStateRaw     string
+	HookStateStale   bool
 	EffectiveStatus  AgentState
 	DetectedStatus   AgentState
 	TrackingOverride bool
@@ -55,7 +56,7 @@ func ExplainAgent(ctx context.Context, pane string, opts LoadOptions) (string, e
 		return "", fmt.Errorf("pane metadata: %w", err)
 	}
 	parts := strings.Split(line, paneSep)
-	if len(parts) < 18 {
+	if len(parts) < agentPaneMinFields {
 		return "", fmt.Errorf("unexpected pane metadata fields: %d", len(parts))
 	}
 	info := buildAgentExplain(ctx, resolved, parts, opts.ManifestFallback)
@@ -109,51 +110,67 @@ func buildAgentExplain(
 
 	hookReported := hookName != ""
 	name := hookName
+	panePID := panePIDFromParts(parts)
 	if name == "" {
-		name = detectAgentName(command, title)
+		name = detectAgentName(command, title, panePID)
 		if name != "" {
 			info.IdentitySource = "process detection (command/title)"
-			if info.AgentSource == "" {
-				info.AgentSource = "process"
-			}
 		}
 	} else {
 		info.IdentitySource = "hook (@agent_name)"
 	}
 	info.AgentName = name
 
+	unhooked := !hookReported && integrations.HookCapableAgent(name)
 	if name == "" {
 		info.Listed = false
 		info.SkipReason = "no agent identity (missing @agent_name and process detection)"
-	} else if !hookReported && integrations.HookCapableAgent(name) {
-		info.Listed = false
-		info.SkipReason = fmt.Sprintf(
-			"hook-capable agent %q requires @agent_name from an integration",
-			name,
-		)
+	} else if unhooked {
+		info.Listed = true
+		if info.AgentSource == "" {
+			info.AgentSource = agentSourceUnhooked
+		}
 	} else {
 		info.Listed = true
+		if !hookReported && info.AgentSource == "" {
+			info.AgentSource = "process"
+		}
 	}
 
+	now := agentResolveNow()
 	detected := NormalizeAgentState(hookStateRaw)
-	switch {
-	case hookStateRaw != "":
-		info.StateSource = fmt.Sprintf(
-			"hook (@agent_state): %s",
-			agentStateLabel(detected),
-		)
-	default:
-		if skipTitleInference {
-			info.StateSource = "default (unknown)"
-		} else if shouldSupplementStateFromTitle(hookStateRaw, detected, name, info.AgentSource) {
-			if inferred := InferStateFromTitle(name, title); inferred != AgentUnknown {
-				detected = inferred
-				info.StateSource = fmt.Sprintf("title inference: %s", agentStateLabel(inferred))
+	stale := isHookStateStale(detected, info.AgentUpdated, now)
+	info.HookStateStale = stale
+	if stale {
+		info.StateSource = "hook state stale (TTL exceeded)"
+		detected = AgentUnknown
+	} else {
+		switch {
+		case hookStateRaw != "":
+			info.StateSource = fmt.Sprintf(
+				"hook (@agent_state): %s",
+				agentStateLabel(detected),
+			)
+		default:
+			if skipTitleInference {
+				info.StateSource = "default (unknown)"
+			} else if shouldSupplementStateFromTitle(
+				hookStateRaw,
+				NormalizeAgentState(hookStateRaw),
+				name,
+				info.AgentSource,
+				info.AgentUpdated,
+				now,
+			) {
+				if inferred := InferStateFromTitle(name, title); inferred != AgentUnknown {
+					detected = inferred
+					info.StateSource = fmt.Sprintf("title inference: %s", agentStateLabel(inferred))
+				} else {
+					info.StateSource = "default (unknown)"
+				}
 			} else {
 				info.StateSource = "default (unknown)"
 			}
-		} else {
-			info.StateSource = "default (unknown)"
 		}
 	}
 
@@ -243,6 +260,9 @@ func formatAgentExplain(info agentExplain) string {
 	fmt.Fprintf(&b, "state source: %s\n", info.StateSource)
 	if info.HookStateRaw != "" {
 		fmt.Fprintf(&b, "@agent_state: %s\n", info.HookStateRaw)
+		if info.HookStateStale {
+			fmt.Fprintf(&b, "hook freshness: stale (TTL exceeded)\n")
+		}
 	}
 	fmt.Fprintf(&b, "effective status: %s", agentStateLabel(info.EffectiveStatus))
 	if info.TrackingOverride {

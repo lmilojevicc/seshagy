@@ -7,9 +7,9 @@ import (
 
 // detectAgentName is the legacy fallback used by ParseAgents when a pane has no
 // hook-reported @agent_name. It infers an agent identity from the pane's
-// foreground command and title. Hook-reported metadata always takes priority;
-// this only runs when that metadata is absent.
-func detectAgentName(command, title string) string {
+// foreground command, optional process argv, and title. Hook-reported metadata
+// always takes priority; this only runs when that metadata is absent.
+func detectAgentName(command, title, panePID string) string {
 	rawCommand := command
 	basename := normalizeAgentLookupName(filepath.Base(command))
 	titleLower := strings.ToLower(title)
@@ -40,7 +40,16 @@ func detectAgentName(command, title string) string {
 		return name
 	}
 
-	// Runtimes and unrecognized binaries may wrap the real agent in argv or path.
+	// tmux pane_current_command is basename-only; read full argv for runtimes.
+	if isRuntime(basename) && panePID != "" {
+		if argv := readProcessArgs(panePID); argv != "" {
+			if name := agentNameFromWrappedCommand(argv); name != "" {
+				return name
+			}
+		}
+	}
+
+	// Non-runtime commands may still carry a wrapped path in the raw command.
 	if name := agentNameFromWrappedCommand(rawCommand); name != "" {
 		return name
 	}

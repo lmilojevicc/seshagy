@@ -1,6 +1,9 @@
 package sessionmgr
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestShouldSupplementStateFromTitle(t *testing.T) {
 	tests := []struct {
@@ -67,6 +70,8 @@ func TestShouldSupplementStateFromTitle(t *testing.T) {
 				tt.state,
 				tt.agent,
 				tt.source,
+				"",
+				time.Time{},
 			); got != tt.want {
 				t.Fatalf("shouldSupplementStateFromTitle() = %v, want %v", got, tt.want)
 			}
@@ -75,14 +80,14 @@ func TestShouldSupplementStateFromTitle(t *testing.T) {
 }
 
 func TestResolveAgentStateLifecycleSilentHooksUseTitle(t *testing.T) {
-	got := resolveAgentState("", "claude", "seshagy:claude", "⠋ Thinking…", false)
+	got := resolveAgentState("", "claude", "seshagy:claude", "⠋ Thinking…", "", false)
 	if got != AgentWorking {
 		t.Fatalf("resolveAgentState() = %q, want %q", got, AgentWorking)
 	}
 }
 
 func TestResolveAgentStateLifecycleHookWorkingIgnoresBlockedTitle(t *testing.T) {
-	got := resolveAgentState("working", "claude", "seshagy:claude", "Action Required", false)
+	got := resolveAgentState("working", "claude", "seshagy:claude", "Action Required", "", false)
 	if got != AgentWorking {
 		t.Fatalf("resolveAgentState() = %q, want hook-reported %q", got, AgentWorking)
 	}

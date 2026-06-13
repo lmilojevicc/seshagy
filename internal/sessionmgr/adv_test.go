@@ -15,7 +15,7 @@ func TestAdversarialWrappedCommandFalsePositives(t *testing.T) {
 		{"sh -c gemini", ""},
 	}
 	for _, tt := range cases {
-		got := detectAgentName(tt.command, tt.title)
+		got := detectAgentName(tt.command, tt.title, "")
 		if got == "gemini" {
 			t.Errorf("false positive gemini from %q", tt.command)
 		}

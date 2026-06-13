@@ -12,8 +12,9 @@ Run one command to get a keyboard-first view where you can:
 
 It is intentionally tmux-native. Hook-capable agents report identity and state
 through `@agent_*` pane metadata from installed integrations; seshagy does not
-scrape pane text. Agents without hook support may still appear via process
-detection, but their state stays `unknown` unless explicitly reported.
+scrape pane text. Hook-capable agents detected without integrations appear as
+`unhooked` with an install hint. Agents without hook support may still appear
+via process detection, but their state stays `unknown` unless explicitly reported.
 
 ## Quick start
 
