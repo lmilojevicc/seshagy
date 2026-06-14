@@ -60,6 +60,8 @@ for key in ("session_id", "sessionId", "conversation_id", "conversationId"):
 reject_unsafe_value() {
   case "$1" in
     *[\"\'\\$]*) return 1 ;;
+    *'
+'*) return 1 ;;
   esac
   return 0
 }

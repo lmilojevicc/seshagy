@@ -1118,6 +1118,19 @@ func TestShellHookRejectsUnsafeMessageAndSessionID(t *testing.T) {
 	if err := sessionCmd.Run(); err == nil {
 		t.Fatal("expected hook to reject unsafe session_id")
 	}
+
+	newlineMessageCmd := exec.Command("sh", hookPath, "cursor", "working", "bad\nmessage")
+	newlineMessageCmd.Env = env
+	if err := newlineMessageCmd.Run(); err == nil {
+		t.Fatal("expected hook to reject newline in message")
+	}
+
+	newlineSessionCmd := exec.Command("sh", hookPath, "cursor", "session")
+	newlineSessionCmd.Env = env
+	newlineSessionCmd.Stdin = strings.NewReader(`{"session_id":"bad\nid"}`)
+	if err := newlineSessionCmd.Run(); err == nil {
+		t.Fatal("expected hook to reject newline in session_id")
+	}
 }
 
 func TestPiExtensionUsesHerdrLikeLifecycleStateMachine(t *testing.T) {
