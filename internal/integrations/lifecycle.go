@@ -14,6 +14,8 @@ var claudeLifecycleHooks = []lifecycleHook{
 	{"PostToolUseFailure", "working"},
 	{"PreCompact", "working"},
 	{"PermissionRequest", "blocked"},
+	// Claude has no PermissionResult; PermissionDenied fires after user/auto denial.
+	{"PermissionDenied", "idle"},
 	{"Stop", "idle"},
 	{"SessionEnd", "release"},
 }
@@ -24,7 +26,9 @@ var droidLifecycleHooks = []lifecycleHook{
 	{"UserPromptSubmit", "working"},
 	{"PreToolUse", "working"},
 	{"PostToolUse", "working"},
+	// Droid surfaces permission waits via Notification; PostToolUse unblocks approval.
 	{"Notification", "blocked"},
+	{"PermissionRequest", "blocked"},
 	// SubagentStop omitted: Herdr documents this event revives idle panes when
 	// mapped to working; the parent agent may already be idle after Stop.
 	{"PreCompact", "working"},
@@ -45,6 +49,8 @@ var qodercliLifecycleHooks = []lifecycleHook{
 	{"PreCompact", "working"},
 	{"Notification", "blocked"},
 	{"PermissionRequest", "blocked"},
+	// Qoder SDK documents PermissionDenied after pipeline denial; PostToolUse covers approval.
+	{"PermissionDenied", "idle"},
 	{"Stop", "idle"},
 	{"SessionEnd", "release"},
 }
@@ -55,6 +61,8 @@ var codexLifecycleHooks = []lifecycleHook{
 	{"UserPromptSubmit", "working"},
 	{"PreToolUse", "working"},
 	{"PermissionRequest", "blocked"},
+	// Codex has no PermissionResult; PostToolUse unblocks after approved tool runs.
+	{"PostToolUse", "working"},
 	{"Stop", "idle"},
 	{"SessionEnd", "release"},
 }
@@ -66,6 +74,8 @@ var copilotLifecycleHooks = []lifecycleHook{
 	{"PreToolUse", "working"},
 	{"PostToolUse", "working"},
 	{"PostToolUseFailure", "working"},
+	// permissionRequest fires before the approval UI; PostToolUse unblocks after allow.
+	{"PermissionRequest", "blocked"},
 	{"Stop", "idle"},
 	{"SessionEnd", "release"},
 }
@@ -91,7 +101,9 @@ var grokLifecycleHooks = []lifecycleHook{
 	{"PostToolUse", "working"},
 	{"PostToolUseFailure", "working"},
 	{"PreCompact", "working"},
+	// Grok Build also emits Notification for permission waits; PostToolUse unblocks approval.
 	{"Notification", "blocked"},
+	{"PermissionRequest", "blocked"},
 	{"Stop", "idle"},
 	{"SessionEnd", "release"},
 }

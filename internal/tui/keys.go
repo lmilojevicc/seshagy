@@ -261,10 +261,6 @@ func (m Model) clearFilterText() (tea.Model, tea.Cmd) {
 func (m Model) handleIntegrationKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c", "q":
-		return m, tea.Quit
-	case "esc", "s":
-		m.integration.active = false
-		m.status = "hook installation skipped"
 		if m.integration.startupPrompt {
 			if err := recordIntegrationPromptDismissed(); err != nil {
 				m.status = err.Error()
@@ -272,6 +268,10 @@ func (m Model) handleIntegrationKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			m.integration.startupPrompt = false
 		}
+		return m, tea.Quit
+	case "esc", "s":
+		m.integration.active = false
+		m.status = "hook installation skipped"
 		return m, nil
 	case "up", "k":
 		m.integration.cursor = wrapCursorUp(m.integration.cursor, len(m.integration.rows))

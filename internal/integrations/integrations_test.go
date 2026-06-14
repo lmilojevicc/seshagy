@@ -328,6 +328,53 @@ func TestInstallNestedLifecycleTargetsWriteLifecycleHooksAndCleanStale(t *testin
 	}
 }
 
+func TestInstallNestedLifecycleTargetsRemoveLegacySubagentStop(t *testing.T) {
+	tests := []struct {
+		name    string
+		dirName string
+		target  Target
+		install func(string) ([]string, error)
+	}{
+		{name: "droid", dirName: ".factory", target: TargetDroid, install: installDroid},
+		{name: "qoder", dirName: ".qoder", target: TargetQodercli, install: installQodercli},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			dir := filepath.Join(home, tt.dirName)
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			settingsPath := filepath.Join(dir, "settings.json")
+			root := map[string]any{"hooks": map[string]any{
+				"SubagentStop": []any{map[string]any{"hooks": []any{
+					map[string]any{
+						"type": "command",
+						"command": "bash /old/seshagy-agent-state.sh " + string(
+							tt.target,
+						) + " working",
+					},
+				}}},
+			}}
+			if err := writeJSONObject(settingsPath, root); err != nil {
+				t.Fatal(err)
+			}
+
+			if _, err := tt.install("/bin/seshagy"); err != nil {
+				t.Fatal(err)
+			}
+			hooks := readJSON(t, settingsPath)["hooks"].(map[string]any)
+			if managedCommandPresent(nestedHookCommandsOnly(t, hooks, "SubagentStop")) {
+				t.Fatalf(
+					"legacy SubagentStop hook should be removed: %#v",
+					hooks["SubagentStop"],
+				)
+			}
+		})
+	}
+}
+
 func TestInstallDroidCleansLegacyHooksJSON(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
