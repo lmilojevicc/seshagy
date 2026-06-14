@@ -35,4 +35,4 @@ GitHub Actions runs formatting, linting, vet, tests, vulnerability checks, and b
 
 ## Agent-Specific Instructions
 
-Do not scrape terminal pane contents when adding agent features; this project relies on explicit tmux `@agent_*` metadata reported by hooks/plugins. Preserve sequence handling for agent report/release flows so stale updates cannot resurrect cleared state.
+Do not scrape terminal pane contents when adding agent features; this project relies on explicit tmux `@agent_*` metadata reported by hooks/plugins. The opt-in `manifest_fallback` setting is an exception: it captures the last 30 pane lines for Herdr screen-rule matching when hooks are silent. Preserve sequence handling for agent report/release flows so stale updates cannot resurrect cleared state.

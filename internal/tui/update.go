@@ -35,7 +35,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if len(msg.recs) > 0 {
 			m.integration.active = true
-			m.integration.startupPrompt = msg.startup
+			if msg.startup {
+				m.integration.startupPrompt = true
+			}
 			m.status = "install hook integrations for detected agents"
 		} else if m.integration.active {
 			m.integration.active = false

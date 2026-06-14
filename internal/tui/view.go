@@ -582,6 +582,7 @@ func (m Model) renderFooter() string {
 				s.key.Render(m.config.PrefixKey()) + " actions",
 				s.key.Render(m.config.PrefixKey()+" m") + " mode",
 				s.key.Render("backspace") + " edit",
+				s.key.Render("V") + " session id",
 			}, s.muted.Render(" · "))
 		} else {
 			helpParts := []string{
@@ -606,6 +607,7 @@ func (m Model) renderFooter() string {
 				s.key.Render("y")+" yazi",
 				s.key.Render("i")+" hooks",
 				s.key.Render("p")+" preview",
+				s.key.Render("V")+" session id",
 			)
 			help = strings.Join(helpParts, s.muted.Render(" · "))
 		}

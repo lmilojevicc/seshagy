@@ -141,7 +141,10 @@ states such as transcript viewers. Known agents with no matching rule fall back
 to `idle`. Hook-reported `working`, `blocked`, and `idle` are never overridden
 by title inference or manifest fallback. When manifest fallback is enabled,
 OSC title inference is deferred to manifest `osc_title` rules instead of the
-legacy title heuristics. Remote manifest fetch is not implemented yet.
+legacy title heuristics. Remote manifest rules can be fetched from a catalog
+URL; use `seshagy manifest status|update|reload [--json]` to inspect or refresh
+them. When hooks stop reporting, stale hook state is cleared after a 5-minute
+TTL so title inference and manifest fallback can recover.
 
 Check and install integrations:
 
@@ -231,6 +234,10 @@ seshagy integration uninstall <target>
 seshagy config path
 seshagy config show
 seshagy config init [--force]
+
+seshagy manifest status [--json]
+seshagy manifest update [--json]
+seshagy manifest reload [--json]
 ```
 
 ## Configuration
@@ -271,6 +278,11 @@ mode = "icons" # "icons", "text", or "none"
 [type_first]
 enabled = false
 prefix = "ctrl+x"
+
+[agents]
+manifest_fallback = false   # opt-in: capture last 30 pane lines for screen rules
+manifest_auto_update = true # background catalog fetch on TUI startup
+manifest_catalog_url = ""   # defaults to Herdr catalog when empty
 ```
 
 The config also controls theme colors and icon colors. The TUI uses terminal
