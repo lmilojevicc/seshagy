@@ -205,6 +205,34 @@ seshagy --delete-item '<rendered line from --get-all>'
 seshagy agent explain <pane-id>   # show why a pane has its agent state
 ```
 
+All commands above (plus `config`, `integration`, `manifest`, and `--version`)
+support a trailing `--json` flag for machine-readable JSON on stdout. Human text
+output is unchanged when `--json` is omitted.
+
+Successful responses include top-level `schema_version` and `ok` fields. With
+`--json`, errors also print JSON on stdout (not stderr), for example
+`{"schema_version":1,"ok":false,"error":"...","code":"usage|error"}`.
+Scripts should check the exit code and the `ok` field.
+
+`--get-* --json` returns structured fields per item (`kind`, `pane_id`, `state`,
+and so on). Use `line_plain` for ANSI-free text suitable for parsing; `line`
+keeps TUI styling for display.
+
+Manifest `--json` keys are snake_case (`agent_id`, `last_check_unix`, …).
+Earlier releases used PascalCase (`AgentID`, `LastCheckUnix`); update payloads
+once used `{}` for `version`, which is now a string.
+
+`config show --json` returns normalized JSON config, not TOML.
+
+Example:
+
+```sh
+seshagy --get-agents --json
+seshagy integration status --json
+seshagy agent explain %13 --json
+seshagy config show --json
+```
+
 Agent metadata helpers:
 
 ```sh

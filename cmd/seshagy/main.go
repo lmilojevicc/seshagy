@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -19,7 +18,15 @@ import (
 var version = "dev"
 
 func main() {
-	if err := run(os.Args[1:]); err != nil {
+	args := os.Args[1:]
+	if err := run(args); err != nil {
+		if hasJSONFlag(args) {
+			if encErr := encodeJSONError(err); encErr != nil {
+				fmt.Fprintf(os.Stderr, "seshagy: %v\n", encErr)
+			}
+			os.Exit(1)
+			return
+		}
 		fmt.Fprintf(os.Stderr, "seshagy: %v\n", err)
 		os.Exit(1)
 	}
@@ -36,6 +43,13 @@ func run(args []string) error {
 		fmt.Print(helpText())
 		return nil
 	case "--version", "version":
+		rest, jsonOutput := stripJSONFlag(args[1:])
+		if len(rest) > 0 {
+			return errors.New(joinUsage("--version", "[--json]"))
+		}
+		if jsonOutput {
+			return encodeSuccess(map[string]string{"version": version})
+		}
 		fmt.Println(version)
 		return nil
 	case "integration", "integrations", "hook", "hooks":
@@ -47,53 +61,102 @@ func run(args []string) error {
 	case "manifest", "manifests":
 		return runManifest(args[1:])
 	case "--get-sessions":
-		return printItems(ctx, sessionmgr.ModeSessions)
+		return runGetItems(ctx, args[1:], sessionmgr.ModeSessions, "--get-sessions")
 	case "--get-agents":
-		return printItems(ctx, sessionmgr.ModeAgents)
+		return runGetItems(ctx, args[1:], sessionmgr.ModeAgents, "--get-agents")
 	case "--get-current-session-agents", "--get-session-agents":
-		return printItems(ctx, sessionmgr.ModeCurrentAgents)
+		return runGetItems(
+			ctx,
+			args[1:],
+			sessionmgr.ModeCurrentAgents,
+			"--get-current-session-agents",
+		)
 	case "--get-zoxide":
-		return printItems(ctx, sessionmgr.ModeZoxide)
+		return runGetItems(ctx, args[1:], sessionmgr.ModeZoxide, "--get-zoxide")
 	case "--get-fd":
-		return printItems(ctx, sessionmgr.ModeFD)
+		return runGetItems(ctx, args[1:], sessionmgr.ModeFD, "--get-fd")
 	case "--get-all":
-		return printItems(ctx, sessionmgr.ModeAll)
+		return runGetItems(ctx, args[1:], sessionmgr.ModeAll, "--get-all")
 	case "--delete-item":
-		if len(args) < 2 {
+		line, jsonOutput := parseDeleteItemArgs(args[1:])
+		if line == "" {
 			return errors.New("--delete-item requires a rendered item line")
 		}
-		return deleteItem(ctx, strings.Join(args[1:], " "))
+		return deleteItem(ctx, line, jsonOutput)
 	case "--report-agent":
-		report, err := parseReportArgs(args[1:])
+		rest, jsonOutput := stripJSONFlag(args[1:])
+		report, err := parseReportArgs(rest)
 		if err != nil {
 			return err
 		}
-		return sessionmgr.ReportAgent(ctx, report)
+		if err := sessionmgr.ReportAgent(ctx, report); err != nil {
+			return err
+		}
+		if jsonOutput {
+			return encodeSuccess(map[string]any{
+				"applied":    true,
+				"pane":       report.Pane,
+				"agent_name": report.Name,
+				"state":      report.State,
+			})
+		}
+		return nil
 	case "--release-agent":
-		release, err := parseReleaseArgs(args[1:])
+		rest, jsonOutput := stripJSONFlag(args[1:])
+		release, err := parseReleaseArgs(rest)
 		if err != nil {
 			return err
 		}
-		return sessionmgr.ReleaseAgent(ctx, release)
+		if err := sessionmgr.ReleaseAgent(ctx, release); err != nil {
+			return err
+		}
+		if jsonOutput {
+			return encodeSuccess(map[string]any{
+				"released": true,
+				"pane":     release.Pane,
+			})
+		}
+		return nil
 	default:
 		return tui.Run()
 	}
 }
 
+func runGetItems(
+	ctx context.Context,
+	args []string,
+	mode sessionmgr.SourceMode,
+	flag string,
+) error {
+	rest, jsonOutput := stripJSONFlag(args)
+	if len(rest) > 0 {
+		return errors.New(modeUsage(flag))
+	}
+	return printItems(ctx, mode, jsonOutput)
+}
+
 func runAgent(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: seshagy agent explain <pane-id>")
+		return errors.New(joinUsage("agent", "explain", "<pane-id>", "[--json]"))
 	}
 	switch args[0] {
 	case "explain":
-		if len(args) != 2 {
-			return errors.New("usage: seshagy agent explain <pane-id>")
+		rest, jsonOutput := stripJSONFlag(args[1:])
+		if len(rest) != 1 {
+			return errors.New(joinUsage("agent", "explain", "<pane-id>", "[--json]"))
 		}
 		cfg, err := appconfig.Load()
 		if err != nil {
 			return err
 		}
-		out, err := sessionmgr.ExplainAgent(ctx, args[1], cfg.LoadOptions())
+		if jsonOutput {
+			report, err := sessionmgr.ExplainAgentReport(ctx, rest[0], cfg.LoadOptions())
+			if err != nil {
+				return err
+			}
+			return encodeSuccess(report)
+		}
+		out, err := sessionmgr.ExplainAgent(ctx, rest[0], cfg.LoadOptions())
 		if err != nil {
 			return err
 		}
@@ -103,22 +166,14 @@ func runAgent(ctx context.Context, args []string) error {
 		}
 		return nil
 	default:
-		return errors.New("usage: seshagy agent explain <pane-id>")
+		return errors.New(joinUsage("agent", "explain", "<pane-id>", "[--json]"))
 	}
 }
 
 func runManifest(args []string) error {
-	if len(args) == 0 {
-		return errors.New("usage: seshagy manifest status|update|reload [--json]")
-	}
-	jsonOutput := false
-	cmdArgs := args
-	if len(args) > 0 && args[len(args)-1] == "--json" {
-		jsonOutput = true
-		cmdArgs = args[:len(args)-1]
-	}
-	if len(cmdArgs) == 0 {
-		return errors.New("usage: seshagy manifest status|update|reload [--json]")
+	rest, jsonOutput := stripJSONFlag(args)
+	if len(rest) == 0 {
+		return errors.New(joinUsage("manifest", "status|update|reload", "[--json]"))
 	}
 
 	cfg, err := appconfig.Load()
@@ -126,15 +181,15 @@ func runManifest(args []string) error {
 		return err
 	}
 
-	switch cmdArgs[0] {
+	switch rest[0] {
 	case "status":
-		if len(cmdArgs) != 1 {
-			return errors.New("usage: seshagy manifest status [--json]")
+		if len(rest) != 1 {
+			return errors.New(joinUsage("manifest", "status", "[--json]"))
 		}
 		return printManifestStatus(cfg.Agents.ManifestCatalogURL, jsonOutput)
 	case "update":
-		if len(cmdArgs) != 1 {
-			return errors.New("usage: seshagy manifest update [--json]")
+		if len(rest) != 1 {
+			return errors.New(joinUsage("manifest", "update", "[--json]"))
 		}
 		output, err := sessionmgr.CheckAndUpdateManifests(cfg.Agents.ManifestCatalogURL)
 		if err != nil {
@@ -142,22 +197,25 @@ func runManifest(args []string) error {
 		}
 		sessionmgr.ReloadManifests()
 		if jsonOutput {
-			return encodeJSON(output)
+			return encodeSuccess(sessionmgr.ManifestUpdateOutputToJSON(output))
 		}
 		printManifestUpdateResult(output)
 		return nil
 	case "reload":
-		if len(cmdArgs) != 1 {
-			return errors.New("usage: seshagy manifest reload [--json]")
+		if len(rest) != 1 {
+			return errors.New(joinUsage("manifest", "reload", "[--json]"))
 		}
 		summaries := sessionmgr.ReloadManifests()
 		if jsonOutput {
-			return encodeJSON(map[string]any{"reloaded": len(summaries), "agents": summaries})
+			return encodeSuccess(map[string]any{
+				"reloaded": len(summaries),
+				"agents":   sessionmgr.AgentManifestSummariesToJSON(summaries),
+			})
 		}
 		fmt.Printf("reloaded %d agent manifests\n", len(summaries))
 		return nil
 	default:
-		return errors.New("usage: seshagy manifest status|update|reload [--json]")
+		return errors.New(joinUsage("manifest", "status|update|reload", "[--json]"))
 	}
 }
 
@@ -166,10 +224,10 @@ func printManifestStatus(catalogURL string, jsonOutput bool) error {
 	summaries := sessionmgr.ActiveManifestSummaries()
 	resolvedCatalog := sessionmgr.ResolveManifestCatalogURL(catalogURL)
 	if jsonOutput {
-		return encodeJSON(map[string]any{
-			"status":  status,
-			"agents":  summaries,
+		return encodeSuccess(map[string]any{
 			"catalog": resolvedCatalog,
+			"status":  sessionmgr.ManifestUpdateStatusToJSON(status),
+			"agents":  sessionmgr.AgentManifestSummariesToJSON(summaries),
 		})
 	}
 	fmt.Printf("catalog: %s\n", resolvedCatalog)
@@ -225,25 +283,37 @@ func printManifestUpdateResult(output sessionmgr.ManifestUpdateOutput) {
 	}
 }
 
-func encodeJSON(value any) error {
-	data, err := json.MarshalIndent(value, "", "  ")
-	if err != nil {
-		return err
-	}
-	fmt.Println(string(data))
-	return nil
-}
-
 func runConfig(args []string) error {
-	if len(args) == 0 || args[0] == "path" {
+	rest, jsonOutput := stripJSONFlag(args)
+	if len(rest) == 0 {
+		if jsonOutput {
+			return encodeSuccess(map[string]string{"path": appconfig.Path()})
+		}
 		fmt.Println(appconfig.Path())
 		return nil
 	}
-	switch args[0] {
+	switch rest[0] {
+	case "path":
+		if len(rest) != 1 {
+			return errors.New(joinUsage("config", "path", "[--json]"))
+		}
+		if jsonOutput {
+			return encodeSuccess(map[string]string{"path": appconfig.Path()})
+		}
+		fmt.Println(appconfig.Path())
+		return nil
 	case "show":
+		if len(rest) != 1 {
+			return errors.New(joinUsage("config", "show", "[--json]"))
+		}
 		cfg, err := appconfig.Load()
 		if err != nil {
 			return err
+		}
+		if jsonOutput {
+			return encodeSuccess(map[string]any{
+				"config": cfg,
+			})
 		}
 		data, err := appconfig.Marshal(cfg)
 		if err != nil {
@@ -252,26 +322,45 @@ func runConfig(args []string) error {
 		fmt.Println(string(data))
 		return nil
 	case "init":
-		force := len(args) == 2 && args[1] == "--force"
-		if len(args) > 2 || (len(args) == 2 && !force) {
-			return errors.New("usage: seshagy config init [--force]")
+		force := len(rest) == 2 && rest[1] == "--force"
+		if len(rest) > 2 || (len(rest) == 2 && !force) {
+			return errors.New(joinUsage("config", "init", "[--force]", "[--json]"))
 		}
+		created := true
 		if appconfig.Exists() && !force {
 			return fmt.Errorf("config already exists: %s", appconfig.Path())
+		}
+		if appconfig.Exists() {
+			created = false
 		}
 		if err := appconfig.Save(appconfig.Default()); err != nil {
 			return err
 		}
+		if jsonOutput {
+			return encodeSuccess(map[string]any{
+				"path":    appconfig.Path(),
+				"created": created,
+				"forced":  force,
+			})
+		}
 		fmt.Println(appconfig.Path())
 		return nil
 	default:
-		return errors.New("usage: seshagy config path|show|init [--force]")
+		return errors.New(joinUsage("config", "path|show|init", "[--force]", "[--json]"))
 	}
 }
 
 func runIntegration(args []string) error {
-	if len(args) == 0 || args[0] == "status" {
-		for _, rec := range integrations.Scan() {
+	rest, jsonOutput := stripJSONFlag(args)
+	if len(rest) == 0 || rest[0] == "status" {
+		if len(rest) > 1 {
+			return errors.New(joinUsage("integration", "status", "[--json]"))
+		}
+		recs := integrations.Scan()
+		if jsonOutput {
+			return encodeSuccess(integrations.ScanToJSON(recs))
+		}
+		for _, rec := range recs {
 			availability := "not found"
 			if rec.AgentAvailable {
 				availability = "found"
@@ -294,15 +383,19 @@ func runIntegration(args []string) error {
 		}
 		return nil
 	}
-	if len(args) != 2 || (args[0] != "install" && args[0] != "uninstall") {
-		return errors.New("usage: seshagy integration status|install <target>|uninstall <target>")
+	if len(rest) != 2 || (rest[0] != "install" && rest[0] != "uninstall") {
+		return errors.New(joinUsage(
+			"integration",
+			"status|install <target>|uninstall <target>",
+			"[--json]",
+		))
 	}
-	target, err := integrations.ParseTarget(args[1])
+	target, err := integrations.ParseTarget(rest[1])
 	if err != nil {
 		return err
 	}
 	var messages []string
-	if args[0] == "install" {
+	if rest[0] == "install" {
 		messages, err = integrations.Install(target)
 	} else {
 		messages, err = integrations.Uninstall(target)
@@ -310,13 +403,20 @@ func runIntegration(args []string) error {
 	if err != nil {
 		return err
 	}
+	if jsonOutput {
+		return encodeSuccess(map[string]any{
+			"target":   target,
+			"action":   rest[0],
+			"messages": messages,
+		})
+	}
 	for _, message := range messages {
 		fmt.Println(message)
 	}
 	return nil
 }
 
-func printItems(ctx context.Context, mode sessionmgr.SourceMode) error {
+func printItems(ctx context.Context, mode sessionmgr.SourceMode, jsonOutput bool) error {
 	cfg, err := appconfig.Load()
 	if err != nil {
 		return err
@@ -325,6 +425,9 @@ func printItems(ctx context.Context, mode sessionmgr.SourceMode) error {
 	if err != nil {
 		return err
 	}
+	if jsonOutput {
+		return encodeSuccess(sessionmgr.ItemsToJSON(mode, items, cfg.IconSet()))
+	}
 	icons := cfg.IconSet()
 	for _, item := range items {
 		fmt.Println(sessionmgr.FormatLineWithIcons(item, icons))
@@ -332,7 +435,7 @@ func printItems(ctx context.Context, mode sessionmgr.SourceMode) error {
 	return nil
 }
 
-func deleteItem(ctx context.Context, raw string) error {
+func deleteItem(ctx context.Context, raw string, jsonOutput bool) error {
 	cfg, err := appconfig.Load()
 	if err != nil {
 		return err
@@ -343,9 +446,30 @@ func deleteItem(ctx context.Context, raw string) error {
 	}
 	switch item.Kind {
 	case sessionmgr.KindSession:
-		return sessionmgr.KillSession(ctx, item.Name)
+		if err := sessionmgr.KillSession(ctx, item.Name); err != nil {
+			return err
+		}
+		if jsonOutput {
+			return encodeSuccess(map[string]any{
+				"deleted": true,
+				"kind":    item.Kind,
+				"name":    item.Name,
+			})
+		}
+		return nil
 	case sessionmgr.KindAgent:
-		return sessionmgr.KillAgentPane(ctx, item.PaneID)
+		if err := sessionmgr.KillAgentPane(ctx, item.PaneID); err != nil {
+			return err
+		}
+		if jsonOutput {
+			return encodeSuccess(map[string]any{
+				"deleted":    true,
+				"kind":       item.Kind,
+				"pane_id":    item.PaneID,
+				"agent_name": item.AgentName,
+			})
+		}
+		return nil
 	default:
 		return fmt.Errorf("--delete-item: %s items cannot be deleted", item.Kind)
 	}
@@ -493,25 +617,36 @@ func helpText() string {
 
 Usage:
   seshagy                         open the Bubble Tea dashboard
-  seshagy --get-all               print sessions, agents, zoxide dirs, fd dirs
-  seshagy --get-sessions          print tmux sessions
-  seshagy --get-agents            print detected/tracked agent panes
-  seshagy --get-current-session-agents
-  seshagy --get-zoxide            print zoxide directories
-  seshagy --get-fd                print fd directories
-  seshagy --delete-item <line>    kill a rendered session/agent line
-  seshagy --report-agent [flags]  set tmux pane @agent_* metadata
-  seshagy --release-agent [flags] clear tmux pane @agent_* metadata
-  seshagy agent explain <pane>    show why a pane has its agent state
-  seshagy manifest status [--json] show active manifest sources and update status (use reload to refresh)
+  seshagy --get-all [--json]      print sessions, agents, zoxide dirs, fd dirs
+  seshagy --get-sessions [--json] print tmux sessions
+  seshagy --get-agents [--json]   print detected/tracked agent panes
+  seshagy --get-current-session-agents [--json]
+  seshagy --get-zoxide [--json]   print zoxide directories
+  seshagy --get-fd [--json]       print fd directories
+  seshagy --delete-item <line> [--json]
+                                  kill a rendered session/agent line
+  seshagy --report-agent [flags] [--json]
+                                  set tmux pane @agent_* metadata
+  seshagy --release-agent [flags] [--json]
+                                  clear tmux pane @agent_* metadata
+  seshagy agent explain <pane> [--json]
+                                  show why a pane has its agent state
+  seshagy manifest status [--json] show active manifest sources and update status
   seshagy manifest update [--json] fetch remote manifest catalog updates
   seshagy manifest reload [--json] re-read agent manifests from disk
-  seshagy integration status      list detected agents and hook status
-  seshagy integration install pi  install one hook/plugin integration
-  seshagy integration uninstall pi
-  seshagy config path             print config file path
-  seshagy config show             print effective config
-  seshagy config init             write default config if missing
+  seshagy integration status [--json]
+                                  list detected agents and hook status
+  seshagy integration install pi [--json]
+  seshagy integration uninstall pi [--json]
+  seshagy config path [--json]    print config file path
+  seshagy config show [--json]    print effective config
+  seshagy config init [--force] [--json]
+  seshagy --version [--json]
+
+Scripting:
+  Append --json to any command above for machine-readable JSON on stdout.
+  Responses include schema_version and ok; errors also print JSON on stdout.
+  Human text output is unchanged when --json is omitted.
 
 TUI keys:
   enter attach/create/focus   q quit   / filter   r refresh   R rename

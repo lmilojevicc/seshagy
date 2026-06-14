@@ -24,73 +24,73 @@ const (
 )
 
 type Config struct {
-	Sources     SourcesConfig     `toml:"sources"`
-	Directories DirectoriesConfig `toml:"directories"`
-	Agents      AgentsConfig      `toml:"agents"`
-	Theme       ThemeConfig       `toml:"theme"`
-	Icons       IconsConfig       `toml:"icons"`
-	TypeFirst   TypeFirstConfig   `toml:"type_first"`
-	Setup       SetupConfig       `toml:"setup"`
+	Sources     SourcesConfig     `toml:"sources"     json:"sources"`
+	Directories DirectoriesConfig `toml:"directories" json:"directories"`
+	Agents      AgentsConfig      `toml:"agents"      json:"agents"`
+	Theme       ThemeConfig       `toml:"theme"       json:"theme"`
+	Icons       IconsConfig       `toml:"icons"       json:"icons"`
+	TypeFirst   TypeFirstConfig   `toml:"type_first"  json:"type_first"`
+	Setup       SetupConfig       `toml:"setup"       json:"setup"`
 }
 
 type AgentsConfig struct {
-	ManifestFallback   bool   `toml:"manifest_fallback"`
-	ManifestAutoUpdate bool   `toml:"manifest_auto_update"`
-	ManifestCatalogURL string `toml:"manifest_catalog_url"`
+	ManifestFallback   bool   `toml:"manifest_fallback"    json:"manifest_fallback"`
+	ManifestAutoUpdate bool   `toml:"manifest_auto_update" json:"manifest_auto_update"`
+	ManifestCatalogURL string `toml:"manifest_catalog_url" json:"manifest_catalog_url"`
 }
 
 type SourcesConfig struct {
-	Default string   `toml:"default"`
-	Order   []string `toml:"order"`
+	Default string   `toml:"default" json:"default"`
+	Order   []string `toml:"order"   json:"order"`
 }
 
 type DirectoriesConfig struct {
-	FDCommand string `toml:"fd_command"`
+	FDCommand string `toml:"fd_command" json:"fd_command"`
 }
 
 type ThemeConfig struct {
-	Colors ThemeColorsConfig `toml:"colors"`
+	Colors ThemeColorsConfig `toml:"colors" json:"colors"`
 }
 
 type ThemeColorsConfig struct {
-	FocusedBorder string `toml:"focused_border"`
-	ActiveTab     string `toml:"active_tab"`
-	Border        string `toml:"border"`
-	InactiveTab   string `toml:"inactive_tab"`
-	Title         string `toml:"title"`
-	Accent        string `toml:"accent"`
-	Key           string `toml:"key"`
-	Muted         string `toml:"muted"`
-	Success       string `toml:"success"`
-	Info          string `toml:"info"`
-	Warning       string `toml:"warning"`
-	Danger        string `toml:"danger"`
+	FocusedBorder string `toml:"focused_border" json:"focused_border"`
+	ActiveTab     string `toml:"active_tab"     json:"active_tab"`
+	Border        string `toml:"border"         json:"border"`
+	InactiveTab   string `toml:"inactive_tab"   json:"inactive_tab"`
+	Title         string `toml:"title"          json:"title"`
+	Accent        string `toml:"accent"         json:"accent"`
+	Key           string `toml:"key"            json:"key"`
+	Muted         string `toml:"muted"          json:"muted"`
+	Success       string `toml:"success"        json:"success"`
+	Info          string `toml:"info"           json:"info"`
+	Warning       string `toml:"warning"        json:"warning"`
+	Danger        string `toml:"danger"         json:"danger"`
 }
 
 type IconsConfig struct {
-	Mode    string     `toml:"mode"`
-	Enabled *bool      `toml:"enabled,omitempty"`
-	ASCII   bool       `toml:"ascii,omitempty"`
-	Session IconConfig `toml:"session"`
-	Zoxide  IconConfig `toml:"zoxide"`
-	FD      IconConfig `toml:"fd"`
-	Agent   IconConfig `toml:"agent"`
+	Mode    string     `toml:"mode"              json:"mode"`
+	Enabled *bool      `toml:"enabled,omitempty" json:"enabled,omitempty"`
+	ASCII   bool       `toml:"ascii,omitempty"   json:"ascii,omitempty"`
+	Session IconConfig `toml:"session"           json:"session"`
+	Zoxide  IconConfig `toml:"zoxide"            json:"zoxide"`
+	FD      IconConfig `toml:"fd"                json:"fd"`
+	Agent   IconConfig `toml:"agent"             json:"agent"`
 }
 
 type IconConfig struct {
-	Icon  string `toml:"icon"`
-	Label string `toml:"label"`
-	ASCII string `toml:"ascii,omitempty"`
-	Color string `toml:"color"`
+	Icon  string `toml:"icon"            json:"icon"`
+	Label string `toml:"label"           json:"label"`
+	ASCII string `toml:"ascii,omitempty" json:"ascii,omitempty"`
+	Color string `toml:"color"           json:"color"`
 }
 
 type TypeFirstConfig struct {
-	Enabled bool   `toml:"enabled"`
-	Prefix  string `toml:"prefix"`
+	Enabled bool   `toml:"enabled" json:"enabled"`
+	Prefix  string `toml:"prefix"  json:"prefix"`
 }
 
 type SetupConfig struct {
-	TypeFirstPromptSeen bool `toml:"type_first_prompt_seen"`
+	TypeFirstPromptSeen bool `toml:"type_first_prompt_seen" json:"type_first_prompt_seen"`
 }
 
 func Default() Config {

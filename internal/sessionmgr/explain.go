@@ -43,6 +43,7 @@ type agentExplain struct {
 	LastSeen   string
 
 	IntegrationStatus string
+	Integration       *IntegrationExplainJSON
 	ManifestFallback  string
 	ManifestSource    string
 	ManifestVersion   string
@@ -51,17 +52,41 @@ type agentExplain struct {
 }
 
 func ExplainAgent(ctx context.Context, pane string, opts LoadOptions) (string, error) {
-	resolved, err := ResolvePane(ctx, pane)
+	info, err := buildAgentExplainInfo(ctx, pane, opts)
 	if err != nil {
 		return "", err
 	}
+	return formatAgentExplain(info), nil
+}
+
+func ExplainAgentReport(
+	ctx context.Context,
+	pane string,
+	opts LoadOptions,
+) (AgentExplainReport, error) {
+	info, err := buildAgentExplainInfo(ctx, pane, opts)
+	if err != nil {
+		return AgentExplainReport{}, err
+	}
+	return agentExplainToReport(info), nil
+}
+
+func buildAgentExplainInfo(
+	ctx context.Context,
+	pane string,
+	opts LoadOptions,
+) (agentExplain, error) {
+	resolved, err := ResolvePane(ctx, pane)
+	if err != nil {
+		return agentExplain{}, err
+	}
 	line, err := displayPane(ctx, resolved, agentFormat)
 	if err != nil {
-		return "", fmt.Errorf("pane metadata: %w", err)
+		return agentExplain{}, fmt.Errorf("pane metadata: %w", err)
 	}
 	parts := strings.Split(line, paneSep)
 	if len(parts) < agentPaneMinFields {
-		return "", fmt.Errorf("unexpected pane metadata fields: %d", len(parts))
+		return agentExplain{}, fmt.Errorf("unexpected pane metadata fields: %d", len(parts))
 	}
 	info := buildAgentExplain(ctx, resolved, parts, opts.ManifestFallback)
 	if opts.ManifestFallback {
@@ -77,7 +102,7 @@ func ExplainAgent(ctx context.Context, pane string, opts LoadOptions) (string, e
 	if info.AgentName != "" {
 		applyManifestExplainMeta(&info)
 	}
-	return formatAgentExplain(info), nil
+	return info, nil
 }
 
 func buildAgentExplain(
@@ -200,7 +225,7 @@ func buildAgentExplain(
 	}
 
 	if integrations.HookCapableAgent(name) {
-		info.IntegrationStatus = integrationStatusLine(name)
+		info.IntegrationStatus, info.Integration = integrationExplain(name)
 	}
 
 	return info
@@ -229,26 +254,36 @@ func applyManifestExplainMeta(info *agentExplain) {
 	info.ManifestWarning = meta.Warning
 }
 
-func integrationStatusLine(agentName string) string {
+func integrationExplain(agentName string) (string, *IntegrationExplainJSON) {
 	target, ok := authorityTarget(agentName)
 	if !ok {
-		return fmt.Sprintf("%s: unknown integration target", agentName)
+		return fmt.Sprintf("%s: unknown integration target", agentName), nil
 	}
 	for _, rec := range integrations.Scan() {
 		if rec.Target != target {
 			continue
 		}
 		state := string(rec.State)
+		proseState := state
 		if rec.State == integrations.StatusCurrent {
-			state = fmt.Sprintf("current (v%d)", rec.Version)
+			proseState = fmt.Sprintf("current (v%d)", rec.Version)
 		}
-		line := fmt.Sprintf("%s: %s (%s authority)", rec.Label, state, rec.Authority)
+		line := fmt.Sprintf("%s: %s (%s authority)", rec.Label, proseState, rec.Authority)
 		if !rec.Installable && rec.AgentAvailable && rec.Reason != "" {
 			line += "; " + rec.Reason
 		}
-		return line
+		structured := &IntegrationExplainJSON{
+			Label:     rec.Label,
+			Target:    string(rec.Target),
+			State:     state,
+			Authority: string(rec.Authority),
+		}
+		if rec.State == integrations.StatusCurrent {
+			structured.Version = rec.Version
+		}
+		return line, structured
 	}
-	return fmt.Sprintf("%s: integration not found", agentName)
+	return fmt.Sprintf("%s: integration not found", agentName), nil
 }
 
 func formatAgentExplain(info agentExplain) string {
