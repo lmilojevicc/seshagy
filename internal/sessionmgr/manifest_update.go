@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -33,10 +34,90 @@ type catalogAgentEntry struct {
 
 var manifestUpdateMu sync.Mutex
 
+const (
+	manifestAllowFileCatalogEnv = "SESHAGY_MANIFEST_ALLOW_FILE_CATALOG"
+	manifestAllowHTTPCatalogEnv = "SESHAGY_MANIFEST_ALLOW_HTTP_CATALOG"
+)
+
+type manifestFetchPolicy struct {
+	allowHTTP      bool
+	allowFile      bool
+	allowPrivateIP bool
+}
+
+func manifestFetchPolicyFromEnv() manifestFetchPolicy {
+	allowFile := strings.TrimSpace(os.Getenv(manifestAllowFileCatalogEnv)) == "1"
+	allowHTTP := strings.TrimSpace(os.Getenv(manifestAllowHTTPCatalogEnv)) == "1"
+	return manifestFetchPolicy{
+		allowHTTP:      allowHTTP,
+		allowFile:      allowFile,
+		allowPrivateIP: allowHTTP || allowFile,
+	}
+}
+
+func validateManifestCatalogURL(rawURL string, policy manifestFetchPolicy) error {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("catalog URL %q is invalid: %w", rawURL, err)
+	}
+	switch parsed.Scheme {
+	case "https":
+		return validateManifestFetchHost(parsed.Hostname(), policy)
+	case "http":
+		if !policy.allowHTTP {
+			return fmt.Errorf(
+				"catalog URL must use https:// (set %s=1 for local development)",
+				manifestAllowHTTPCatalogEnv,
+			)
+		}
+		return validateManifestFetchHost(parsed.Hostname(), policy)
+	case "file":
+		if !policy.allowFile {
+			return fmt.Errorf(
+				"file:// catalog URLs require %s=1",
+				manifestAllowFileCatalogEnv,
+			)
+		}
+		return nil
+	default:
+		return fmt.Errorf("unsupported catalog URL scheme %q", parsed.Scheme)
+	}
+}
+
+func validateManifestFetchHost(host string, policy manifestFetchPolicy) error {
+	host = strings.TrimSpace(host)
+	if host == "" {
+		return fmt.Errorf("catalog URL has an empty host")
+	}
+	ips, err := net.LookupIP(host)
+	if err != nil {
+		return fmt.Errorf("resolve catalog host %q: %w", host, err)
+	}
+	if len(ips) == 0 {
+		return fmt.Errorf("catalog host %q has no addresses", host)
+	}
+	for _, ip := range ips {
+		if isBlockedManifestFetchIP(ip) && !policy.allowPrivateIP {
+			return fmt.Errorf("catalog fetch blocked for private/metadata IP %s", ip)
+		}
+	}
+	return nil
+}
+
+func isBlockedManifestFetchIP(ip net.IP) bool {
+	return ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsPrivate()
+}
+
 var manifestFetchHTTPClient = &http.Client{
 	CheckRedirect: func(req *http.Request, via []*http.Request) error {
 		if req.URL.Scheme != "https" {
-			return fmt.Errorf("redirect to non-https URL %q is not allowed", req.URL.String())
+			policy := manifestFetchPolicyFromEnv()
+			if req.URL.Scheme != "http" || !policy.allowHTTP {
+				return fmt.Errorf("redirect to non-https URL %q is not allowed", req.URL.String())
+			}
+		}
+		if err := validateManifestFetchHost(req.URL.Hostname(), manifestFetchPolicy{}); err != nil {
+			return err
 		}
 		if len(via) >= 10 {
 			return fmt.Errorf("stopped after 10 redirects")
@@ -52,7 +133,11 @@ func CheckAndUpdateManifests(catalogURL string) (ManifestUpdateOutput, error) {
 }
 
 func checkAndUpdateFromURL(catalogURL string) (ManifestUpdateOutput, error) {
-	catalogContent, err := fetchManifestText(catalogURL)
+	policy := manifestFetchPolicyFromEnv()
+	if err := validateManifestCatalogURL(catalogURL, policy); err != nil {
+		return ManifestUpdateOutput{}, err
+	}
+	catalogContent, err := fetchManifestText(catalogURL, policy)
 	if err != nil {
 		return ManifestUpdateOutput{}, err
 	}
@@ -85,7 +170,7 @@ func checkAndUpdateFromURL(catalogURL string) (ManifestUpdateOutput, error) {
 		if err != nil {
 			return ManifestUpdateOutput{}, fmt.Errorf("catalog entry %s: %w", entry.agentID, err)
 		}
-		content, fetchErr := fetchManifestText(manifestURL)
+		content, fetchErr := fetchManifestText(manifestURL, policy)
 		switch {
 		case fetchErr != nil:
 			recordAgentUpdateFailure(&status, entry.agentID, checkTime, fetchErr.Error())
@@ -258,7 +343,10 @@ func filepathDir(path string) string {
 	return ""
 }
 
-func fetchManifestText(rawURL string) (string, error) {
+func fetchManifestText(rawURL string, policy manifestFetchPolicy) (string, error) {
+	if err := validateManifestCatalogURL(rawURL, policy); err != nil {
+		return "", err
+	}
 	if strings.HasPrefix(rawURL, "file://") {
 		parsed, err := url.Parse(rawURL)
 		if err != nil {

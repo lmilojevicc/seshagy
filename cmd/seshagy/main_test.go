@@ -1,6 +1,42 @@
 package main
 
-import "testing"
+import (
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+func manifestTestDirs(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	configDir := filepath.Join(dir, "config")
+	stateDir := filepath.Join(dir, "state")
+	if err := os.MkdirAll(configDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(stateDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_CONFIG_HOME", configDir)
+	t.Setenv("XDG_STATE_HOME", stateDir)
+}
+
+func remoteManifestFixture(version, contains string) string {
+	return fmt.Sprintf(`
+id = "codex"
+version = %q
+min_engine_version = 1
+updated_at = "2026-06-10T12:00:00Z"
+
+[[rules]]
+id = "idle"
+state = "idle"
+contains = [%q]
+`, version, contains)
+}
 
 func TestRunRoutingNoError(t *testing.T) {
 	cases := [][]string{
@@ -95,6 +131,69 @@ func TestParseReleaseArgsRejectsInvalidSeq(t *testing.T) {
 	for _, seq := range []string{"bad", "-1"} {
 		if _, err := parseReleaseArgs([]string{"--seq", seq}); err == nil {
 			t.Fatalf("parseReleaseArgs should reject seq %q", seq)
+		}
+	}
+}
+
+func TestRunManifestRoutingErrors(t *testing.T) {
+	manifestTestDirs(t)
+	cases := [][]string{
+		{"manifest"},
+		{"manifest", "bogus"},
+		{"manifest", "status", "extra"},
+		{"manifest", "update", "extra"},
+		{"manifest", "reload", "extra"},
+	}
+	for _, args := range cases {
+		if err := run(args); err == nil {
+			t.Fatalf("run(%v) expected error, got nil", args)
+		}
+	}
+}
+
+func TestRunManifestStatusAndReloadNoError(t *testing.T) {
+	manifestTestDirs(t)
+	cases := [][]string{
+		{"manifest", "status"},
+		{"manifest", "reload"},
+		{"manifest", "status", "--json"},
+		{"manifest", "reload", "--json"},
+	}
+	for _, args := range cases {
+		if err := run(args); err != nil {
+			t.Fatalf("run(%v) unexpected error: %v", args, err)
+		}
+	}
+}
+
+func TestRunManifestUpdateFromHTTPServer(t *testing.T) {
+	manifestTestDirs(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/index.toml":
+			_, _ = w.Write([]byte(`
+schema_version = 1
+
+[[agents]]
+id = "codex"
+path = "codex.toml"
+`))
+		case "/codex.toml":
+			_, _ = w.Write([]byte(remoteManifestFixture("2026.06.10.3", "cli-update-ready")))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	t.Setenv("SESHAGY_AGENT_DETECTION_MANIFEST_CATALOG_URL", server.URL+"/index.toml")
+	t.Setenv("SESHAGY_MANIFEST_ALLOW_HTTP_CATALOG", "1")
+
+	for _, args := range [][]string{
+		{"manifest", "update"},
+		{"manifest", "update", "--json"},
+	} {
+		if err := run(args); err != nil {
+			t.Fatalf("run(%v) unexpected error: %v", args, err)
 		}
 	}
 }

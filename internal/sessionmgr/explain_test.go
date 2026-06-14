@@ -264,11 +264,8 @@ func TestExplainAgentManifestFallbackGeminiIdleFallback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ExplainAgent() error = %v", err)
 	}
-	if !strings.Contains(
-		out,
-		"manifest fallback: fallback default_known_agent_idle_fallback → idle",
-	) {
-		t.Fatalf("expected idle fallback when no rule matches in:\n%s", out)
+	if !strings.Contains(out, "manifest fallback: manifest skipped") {
+		t.Fatalf("expected manifest skipped when no rule matches in:\n%s", out)
 	}
 }
 

@@ -148,7 +148,7 @@ func runManifest(args []string) error {
 		return nil
 	case "reload":
 		if len(cmdArgs) != 1 {
-			return errors.New("usage: seshagy manifest reload")
+			return errors.New("usage: seshagy manifest reload [--json]")
 		}
 		summaries := sessionmgr.ReloadManifests()
 		if jsonOutput {
@@ -163,7 +163,7 @@ func runManifest(args []string) error {
 
 func printManifestStatus(catalogURL string, jsonOutput bool) error {
 	status := sessionmgr.LoadManifestUpdateStatus()
-	summaries := sessionmgr.ReloadManifests()
+	summaries := sessionmgr.ActiveManifestSummaries()
 	resolvedCatalog := sessionmgr.ResolveManifestCatalogURL(catalogURL)
 	if jsonOutput {
 		return encodeJSON(map[string]any{
@@ -174,7 +174,10 @@ func printManifestStatus(catalogURL string, jsonOutput bool) error {
 	}
 	fmt.Printf("catalog: %s\n", resolvedCatalog)
 	if status.LastCheckUnix != nil {
-		fmt.Printf("last check: %d\n", *status.LastCheckUnix)
+		fmt.Printf(
+			"last check: %s\n",
+			time.Unix(int64(*status.LastCheckUnix), 0).UTC().Format(time.RFC3339),
+		)
 	}
 	if status.LastResult != nil {
 		fmt.Printf("last result: %s\n", *status.LastResult)
@@ -500,9 +503,9 @@ Usage:
   seshagy --report-agent [flags]  set tmux pane @agent_* metadata
   seshagy --release-agent [flags] clear tmux pane @agent_* metadata
   seshagy agent explain <pane>    show why a pane has its agent state
-  seshagy manifest status         show active manifest sources and update status
-  seshagy manifest update         fetch remote manifest catalog updates
-  seshagy manifest reload         re-read agent manifests from disk
+  seshagy manifest status [--json] show active manifest sources and update status (use reload to refresh)
+  seshagy manifest update [--json] fetch remote manifest catalog updates
+  seshagy manifest reload [--json] re-read agent manifests from disk
   seshagy integration status      list detected agents and hook status
   seshagy integration install pi  install one hook/plugin integration
   seshagy integration uninstall pi

@@ -88,20 +88,16 @@ func TestDetectManifestGrokPermissionScope(t *testing.T) {
 	}
 }
 
-func TestDetectManifestKnownAgentNoMatchIdleFallback(t *testing.T) {
+func TestDetectManifestKnownAgentNoMatchStaysUnknown(t *testing.T) {
 	result := detectManifest("claude", manifestDetectionInput{screen: "plain shell prompt\n"})
 	if result.Matched {
 		t.Fatal("expected no rule match")
 	}
-	if result.State != AgentIdle {
-		t.Fatalf("State = %q, want %q", result.State, AgentIdle)
+	if result.State != AgentUnknown {
+		t.Fatalf("State = %q, want %q", result.State, AgentUnknown)
 	}
-	if result.FallbackReason != defaultKnownAgentIdleFallback {
-		t.Fatalf(
-			"FallbackReason = %q, want %q",
-			result.FallbackReason,
-			defaultKnownAgentIdleFallback,
-		)
+	if result.FallbackReason != "" {
+		t.Fatalf("FallbackReason = %q, want empty", result.FallbackReason)
 	}
 }
 
@@ -216,8 +212,8 @@ func TestManifestExplainLineShowsMatchedRule(t *testing.T) {
 	}
 
 	got = manifestExplainLine(context.Background(), pane, "gemini", "process", "", AgentUnknown)
-	if !strings.Contains(got, "fallback default_known_agent_idle_fallback") {
-		t.Fatalf("manifestExplainLine() = %q, want idle fallback for gemini", got)
+	if got != "manifest skipped" {
+		t.Fatalf("manifestExplainLine() = %q, want manifest skipped for gemini", got)
 	}
 }
 

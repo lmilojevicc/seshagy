@@ -32,6 +32,8 @@ func withManifestStateDir(t *testing.T, fn func(t *testing.T)) {
 	oldConfig := os.Getenv("XDG_CONFIG_HOME")
 	oldState := os.Getenv("XDG_STATE_HOME")
 	oldCatalog := os.Getenv(manifestCatalogURLEnv)
+	oldAllowHTTP := os.Getenv(manifestAllowHTTPCatalogEnv)
+	oldAllowFile := os.Getenv(manifestAllowFileCatalogEnv)
 
 	dir := t.TempDir()
 	configDir := filepath.Join(dir, "config")
@@ -45,6 +47,7 @@ func withManifestStateDir(t *testing.T, fn func(t *testing.T)) {
 	t.Setenv("XDG_CONFIG_HOME", configDir)
 	t.Setenv("XDG_STATE_HOME", stateDir)
 	t.Setenv(manifestCatalogURLEnv, "")
+	t.Setenv(manifestAllowHTTPCatalogEnv, "1")
 
 	ReloadManifests()
 	t.Cleanup(func() {
@@ -62,6 +65,16 @@ func withManifestStateDir(t *testing.T, fn func(t *testing.T)) {
 			os.Unsetenv(manifestCatalogURLEnv)
 		} else {
 			os.Setenv(manifestCatalogURLEnv, oldCatalog)
+		}
+		if oldAllowHTTP == "" {
+			os.Unsetenv(manifestAllowHTTPCatalogEnv)
+		} else {
+			os.Setenv(manifestAllowHTTPCatalogEnv, oldAllowHTTP)
+		}
+		if oldAllowFile == "" {
+			os.Unsetenv(manifestAllowFileCatalogEnv)
+		} else {
+			os.Setenv(manifestAllowFileCatalogEnv, oldAllowFile)
 		}
 		ReloadManifests()
 	})
@@ -483,5 +496,118 @@ func TestManifestAutoUpdateEnabledRespectsEnv(t *testing.T) {
 	t.Setenv("SESHAGY_MANIFEST_AUTO_UPDATE", "")
 	if !ManifestAutoUpdateEnabled(true) {
 		t.Fatal("expected auto update enabled from config")
+	}
+}
+
+func TestValidateManifestCatalogURLRejectsHTTPWithoutDevOptIn(t *testing.T) {
+	t.Setenv(manifestAllowHTTPCatalogEnv, "")
+	policy := manifestFetchPolicyFromEnv()
+	if err := validateManifestCatalogURL("http://example.com/index.toml", policy); err == nil {
+		t.Fatal("expected http catalog URL rejection")
+	}
+}
+
+func TestValidateManifestCatalogURLRejectsFileWithoutOptIn(t *testing.T) {
+	t.Setenv(manifestAllowFileCatalogEnv, "")
+	policy := manifestFetchPolicyFromEnv()
+	if err := validateManifestCatalogURL("file:///tmp/index.toml", policy); err == nil {
+		t.Fatal("expected file catalog URL rejection")
+	}
+}
+
+func TestValidateManifestCatalogURLAllowsHTTPS(t *testing.T) {
+	t.Setenv(manifestAllowHTTPCatalogEnv, "")
+	policy := manifestFetchPolicyFromEnv()
+	if err := validateManifestCatalogURL("https://example.com/index.toml", policy); err != nil {
+		t.Fatalf("validateManifestCatalogURL() = %v", err)
+	}
+}
+
+func TestValidateManifestFetchHostBlocksPrivateIPs(t *testing.T) {
+	policy := manifestFetchPolicy{allowPrivateIP: false}
+	cases := []string{"127.0.0.1", "10.0.0.1", "172.16.0.1", "192.168.1.1", "169.254.169.254"}
+	for _, host := range cases {
+		if err := validateManifestFetchHost(host, policy); err == nil {
+			t.Fatalf("validateManifestFetchHost(%q) expected error", host)
+		} else if !strings.Contains(err.Error(), "private/metadata IP") {
+			t.Fatalf(
+				"validateManifestFetchHost(%q) = %v, want private/metadata IP error",
+				host,
+				err,
+			)
+		}
+	}
+}
+
+func TestManifestFetchHTTPClientRejectsRedirectToPrivateIP(t *testing.T) {
+	t.Setenv(manifestAllowHTTPCatalogEnv, "1")
+	t.Setenv(manifestAllowFileCatalogEnv, "")
+
+	redirectTarget := httptest.NewServer(
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte("secret"))
+		}),
+	)
+	t.Cleanup(redirectTarget.Close)
+
+	req, err := http.NewRequest(http.MethodGet, "https://example.com/start", nil)
+	if err != nil {
+		t.Fatalf("NewRequest() = %v", err)
+	}
+	via := []*http.Request{req}
+
+	nextReq, err := http.NewRequest(http.MethodGet, redirectTarget.URL, nil)
+	if err != nil {
+		t.Fatalf("NewRequest(redirect) = %v", err)
+	}
+	err = manifestFetchHTTPClient.CheckRedirect(nextReq, via)
+	if err == nil {
+		t.Fatal("expected redirect to private IP to be blocked")
+	}
+	if !strings.Contains(err.Error(), "private/metadata IP") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestFetchManifestTextRejectsRedirectToPrivateIP(t *testing.T) {
+	t.Setenv(manifestAllowHTTPCatalogEnv, "1")
+	policy := manifestFetchPolicyFromEnv()
+
+	redirectTarget := httptest.NewServer(
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte("secret"))
+		}),
+	)
+	t.Cleanup(redirectTarget.Close)
+
+	redirector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, redirectTarget.URL, http.StatusFound)
+	}))
+	t.Cleanup(redirector.Close)
+
+	_, err := fetchManifestText(redirector.URL, policy)
+	if err == nil {
+		t.Fatal("expected redirect to private IP to be blocked")
+	}
+	if !strings.Contains(err.Error(), "private/metadata IP") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestFetchManifestTextAllowsLocalhostCatalogWithDevOptIn(t *testing.T) {
+	t.Setenv(manifestAllowHTTPCatalogEnv, "1")
+	policy := manifestFetchPolicyFromEnv()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("local catalog"))
+	}))
+	t.Cleanup(server.Close)
+
+	got, err := fetchManifestText(server.URL, policy)
+	if err != nil {
+		t.Fatalf("fetchManifestText() = %v", err)
+	}
+	if got != "local catalog" {
+		t.Fatalf("got = %q, want local catalog", got)
 	}
 }

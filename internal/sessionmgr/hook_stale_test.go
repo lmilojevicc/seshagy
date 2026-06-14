@@ -72,6 +72,64 @@ func TestResolveAgentStateStaleHookWithoutInferenceReturnsUnknown(t *testing.T) 
 	}
 }
 
+func TestApplyManifestFallbackStaleHookNoMatchStaysUnknown(t *testing.T) {
+	const pane = "%14"
+	screen := "plain shell output with no manifest markers\n"
+	origOut := tmuxOutput
+	tmuxOutput = func(ctx context.Context, args ...string) ([]byte, error) {
+		if len(args) >= 4 && args[0] == "capture-pane" && args[3] == pane {
+			return []byte(screen), nil
+		}
+		return nil, nil
+	}
+	t.Cleanup(func() { tmuxOutput = origOut })
+
+	now := time.Unix(1_700_000_000, 0)
+	staleUpdated := strconv.FormatInt(now.Add(-10*time.Minute).Unix(), 10)
+	fields := []string{
+		"%14",
+		"work",
+		"1",
+		"0",
+		"/Users/milo/Projects/seshagy",
+		"1",
+		"1",
+		"1",
+		"0",
+		"claude",
+		"Claude Code",
+		"claude",
+		"working",
+		"",
+		staleUpdated,
+		"seshagy:claude",
+		"session-123",
+		"42",
+		"12345",
+	}
+	raw := []byte(strings.Join(fields, paneSep) + "\n")
+
+	origNow := agentResolveNow
+	agentResolveNow = func() time.Time { return now }
+	t.Cleanup(func() { agentResolveNow = origNow })
+
+	got := ParseAgents(raw, "", LoadOptions{ManifestFallback: true})
+	if len(got) != 1 {
+		t.Fatalf("len = %d, want 1", len(got))
+	}
+	if got[0].AgentState != AgentUnknown {
+		t.Fatalf("AgentState before fallback = %q, want %q", got[0].AgentState, AgentUnknown)
+	}
+	applyManifestFallback(context.Background(), got)
+	if got[0].AgentState != AgentUnknown {
+		t.Fatalf(
+			"AgentState = %q, want %q when stale hook screen matches no rule",
+			got[0].AgentState,
+			AgentUnknown,
+		)
+	}
+}
+
 func TestApplyManifestFallbackRecoversStaleHookState(t *testing.T) {
 	const pane = "%13"
 	screen := "Some output above\nRun a dynamic workflow? (esc to cancel)\n"

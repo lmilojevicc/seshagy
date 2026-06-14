@@ -16,14 +16,13 @@ import (
 var manifestFS embed.FS
 
 const (
-	manifestCaptureLines          = 30
-	defaultKnownAgentIdleFallback = "default_known_agent_idle_fallback"
-	maxRulesPerManifest           = 128
-	maxGateDepth                  = 8
-	maxTotalGates                 = 512
-	maxMatchersPerGate            = 32
-	maxTotalMatchers              = 1024
-	maxMatcherChars               = 512
+	manifestCaptureLines = 30
+	maxRulesPerManifest  = 128
+	maxGateDepth         = 8
+	maxTotalGates        = 512
+	maxMatchersPerGate   = 32
+	maxTotalMatchers     = 1024
+	maxMatcherChars      = 512
 )
 
 type manifestDetectionResult struct {
@@ -451,6 +450,16 @@ func ManifestSummaries() []AgentManifestSummary {
 	return manifestSummariesLocked()
 }
 
+func ActiveManifestSummaries() []AgentManifestSummary {
+	ensureManifestsLoaded()
+	manifestMu.RLock()
+	defer manifestMu.RUnlock()
+	if manifestErr != nil {
+		return nil
+	}
+	return manifestSummariesLocked()
+}
+
 func ManifestInfoForAgent(agentName string) (LoadedManifestInfo, bool) {
 	entry, err := manifestEntryForAgent(agentName)
 	if err != nil || entry == nil {
@@ -854,10 +863,7 @@ func detectManifest(agentName string, input manifestDetectionInput) manifestDete
 	}
 
 	if best == nil {
-		return manifestDetectionResult{
-			State:          AgentIdle,
-			FallbackReason: defaultKnownAgentIdleFallback,
-		}
+		return manifestDetectionResult{State: AgentUnknown}
 	}
 
 	state := best.state

@@ -71,10 +71,6 @@ func applyManifestFallback(ctx context.Context, items []Item) {
 		if result.SkipStateUpdate {
 			continue
 		}
-		if result.FallbackReason != "" {
-			items[i].AgentState = result.State
-			continue
-		}
 		if result.Matched && result.State != AgentUnknown {
 			items[i].AgentState = result.State
 		}
