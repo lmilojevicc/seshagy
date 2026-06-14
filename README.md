@@ -205,6 +205,16 @@ seshagy --delete-item '<rendered line from --get-all>'
 seshagy agent explain <pane-id>   # show why a pane has its agent state
 ```
 
+Append `--json` to any CLI helper above (and to `config`, `integration`, and
+`manifest` subcommands) for machine-readable JSON on stdout. Human text output
+is unchanged when `--json` is omitted. Example:
+
+```sh
+seshagy --get-agents --json
+seshagy integration status --json
+seshagy agent explain %13 --json
+```
+
 Agent metadata helpers:
 
 ```sh

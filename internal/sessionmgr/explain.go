@@ -51,17 +51,29 @@ type agentExplain struct {
 }
 
 func ExplainAgent(ctx context.Context, pane string, opts LoadOptions) (string, error) {
-	resolved, err := ResolvePane(ctx, pane)
+	report, err := ExplainAgentReport(ctx, pane, opts)
 	if err != nil {
 		return "", err
 	}
+	return formatAgentExplain(reportToAgentExplain(report)), nil
+}
+
+func ExplainAgentReport(
+	ctx context.Context,
+	pane string,
+	opts LoadOptions,
+) (AgentExplainReport, error) {
+	resolved, err := ResolvePane(ctx, pane)
+	if err != nil {
+		return AgentExplainReport{}, err
+	}
 	line, err := displayPane(ctx, resolved, agentFormat)
 	if err != nil {
-		return "", fmt.Errorf("pane metadata: %w", err)
+		return AgentExplainReport{}, fmt.Errorf("pane metadata: %w", err)
 	}
 	parts := strings.Split(line, paneSep)
 	if len(parts) < agentPaneMinFields {
-		return "", fmt.Errorf("unexpected pane metadata fields: %d", len(parts))
+		return AgentExplainReport{}, fmt.Errorf("unexpected pane metadata fields: %d", len(parts))
 	}
 	info := buildAgentExplain(ctx, resolved, parts, opts.ManifestFallback)
 	if opts.ManifestFallback {
@@ -77,7 +89,43 @@ func ExplainAgent(ctx context.Context, pane string, opts LoadOptions) (string, e
 	if info.AgentName != "" {
 		applyManifestExplainMeta(&info)
 	}
-	return formatAgentExplain(info), nil
+	return agentExplainToReport(info), nil
+}
+
+func reportToAgentExplain(report AgentExplainReport) agentExplain {
+	return agentExplain{
+		PaneID:             report.PaneID,
+		Location:           report.Location,
+		Path:               report.Path,
+		Visible:            report.Visible,
+		Listed:             report.Listed,
+		SkipReason:         report.SkipReason,
+		IdentitySource:     report.IdentitySource,
+		AgentName:          report.AgentName,
+		Command:            report.Command,
+		Title:              report.Title,
+		StateSource:        report.StateSource,
+		HookStateRaw:       report.HookState,
+		HookStateStale:     report.HookStateStale,
+		EffectiveStatus:    report.EffectiveStatus,
+		DetectedStatus:     report.DetectedStatus,
+		TrackingOverride:   report.TrackingOverride,
+		AgentSource:        report.Source,
+		AgentSeq:           report.Seq,
+		AgentSessionID:     report.SessionID,
+		AgentMessage:       report.Message,
+		AgentUpdated:       report.UpdatedAt,
+		LifecycleAuthority: report.LifecycleAuthority,
+		LastState:          report.LastState,
+		LastStatus:         report.LastStatus,
+		LastSeen:           report.LastSeen,
+		IntegrationStatus:  report.Integration,
+		ManifestFallback:   report.ManifestFallback,
+		ManifestSource:     report.ManifestSource,
+		ManifestVersion:    report.ManifestVersion,
+		CachedRemoteVer:    report.CachedRemoteVer,
+		ManifestWarning:    report.ManifestWarning,
+	}
 }
 
 func buildAgentExplain(
