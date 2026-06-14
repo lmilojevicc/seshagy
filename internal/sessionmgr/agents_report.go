@@ -38,7 +38,7 @@ func ResolvePane(ctx context.Context, pane string) (string, error) {
 		pane = os.Getenv("TMUX_PANE")
 	}
 	if pane == "" && InTmux() {
-		out, err := tmuxCommand(ctx, "display-message", "-p", "#{pane_id}").Output()
+		out, err := tmuxOutput(ctx, "display-message", "-p", "#{pane_id}")
 		if err == nil {
 			pane = strings.TrimSpace(string(out))
 		}
@@ -46,7 +46,7 @@ func ResolvePane(ctx context.Context, pane string) (string, error) {
 	if pane == "" {
 		return "", fmt.Errorf("--pane is required outside tmux")
 	}
-	out, err := tmuxCommand(ctx, "display-message", "-p", "-t", pane, "#{pane_id}").Output()
+	out, err := tmuxOutput(ctx, "display-message", "-p", "-t", pane, "#{pane_id}")
 	if err != nil {
 		return "", fmt.Errorf("pane not found: %s", pane)
 	}
