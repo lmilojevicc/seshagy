@@ -272,9 +272,6 @@ order = ["all", "sessions", "agents", "current-agents", "zoxide", "fd"]
 [directories]
 fd_command = 'fd -H -a -d 2 -t d -E .Trash . "$HOME"'
 
-[icons]
-mode = "icons" # "icons", "text", or "none"
-
 [type_first]
 enabled = false
 prefix = "ctrl+x"
@@ -285,9 +282,100 @@ manifest_auto_update = true # background catalog fetch on TUI startup
 manifest_catalog_url = ""   # defaults to Herdr catalog when empty
 ```
 
-The config also controls theme colors and icon colors. The TUI uses terminal
-default foreground/background colors with ANSI accents, so changing your
-terminal theme usually rethemes seshagy without extra config.
+### Theme colors
+
+`[theme.colors]` controls TUI accents. Values can be:
+
+- an ANSI palette index (`"8"`, `"13"`, …),
+- a hex color (`"#cba6f7"`),
+- or `"default"` to inherit the terminal foreground (used by `active_tab` by default).
+
+| Key | Used for |
+| --- | --- |
+| `focused_border` | border on the focused pane |
+| `active_tab` | selected source tab label |
+| `inactive_tab` | unselected source tabs |
+| `border` | pane borders |
+| `title` | pane titles and headings |
+| `accent` | emphasis text and the top accent bar |
+| `key` | key names in help/footer |
+| `muted` | subtitles and secondary text |
+| `success` | success status messages |
+| `info` | informational status messages |
+| `warning` | warning status messages |
+| `danger` | error/danger status messages |
+
+Example:
+
+```toml
+[theme]
+  [theme.colors]
+    focused_border = "#cba6f7"
+    active_tab = "default"
+    border = "#313244"
+    inactive_tab = "#6c7086"
+    title = "#b4befe"
+    accent = "#cba6f7"
+    key = "#f9e2af"
+    muted = "#7f849c"
+    success = "#a6e3a1"
+    info = "#89dceb"
+    warning = "#f9e2af"
+    danger = "#f38ba8"
+```
+
+The TUI keeps the terminal's default foreground/background for list text and
+selection (reverse video), so changing your terminal theme still rethemes most
+of seshagy without extra config.
+
+### Icons
+
+`[icons]` controls row prefixes in the list pane.
+
+`mode` selects how icons render:
+
+- `"icons"` — Nerd Font glyphs (default)
+- `"text"` — single-letter labels
+- `"none"` — no prefix
+
+Each source kind can be customized under `[icons.session]`, `[icons.zoxide]`,
+`[icons.fd]`, and `[icons.agent]`:
+
+| Key | Purpose |
+| --- | --- |
+| `icon` | glyph shown in `icons` mode (include trailing space if desired) |
+| `label` | text shown in `text` mode |
+| `color` | ANSI index or hex color for that icon |
+
+Example (defaults from `seshagy config init`):
+
+```toml
+[icons]
+mode = "icons"
+
+  [icons.session]
+    icon = " "
+    label = "S"
+    color = "10"
+
+  [icons.zoxide]
+    icon = "󰉖 "
+    label = "Z"
+    color = "14"
+
+  [icons.fd]
+    icon = "󰥩 "
+    label = "F"
+    color = "11"
+
+  [icons.agent]
+    icon = "  "
+    label = "A"
+    color = "13"
+```
+
+Run `seshagy config init` to write the full default `config.toml`, then edit
+colors and icons there. `seshagy config show` prints the resolved config.
 
 ## Limits and expectations
 
