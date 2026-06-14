@@ -18,7 +18,7 @@ type modeCache struct {
 func cacheTTL(mode sessionmgr.SourceMode) time.Duration {
 	switch mode {
 	case sessionmgr.ModeAgents, sessionmgr.ModeCurrentAgents, sessionmgr.ModeAll:
-		return 3 * time.Second
+		return 2 * time.Second
 	default:
 		return 15 * time.Second
 	}
@@ -57,6 +57,15 @@ func (m Model) applyCacheEntry(mode sessionmgr.SourceMode) Model {
 }
 
 func (m Model) invalidateAllCaches() Model {
+	if m.inflightRefresh != nil {
+		if m.refreshGen == nil {
+			m.refreshGen = make(map[sessionmgr.SourceMode]uint64)
+		}
+		for mode := range m.inflightRefresh {
+			m.refreshGen[mode]++
+		}
+	}
+	m.inflightRefresh = make(map[sessionmgr.SourceMode]uint64)
 	m.cache = make(map[sessionmgr.SourceMode]modeCache)
 	return m
 }

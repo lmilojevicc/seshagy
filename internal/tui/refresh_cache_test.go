@@ -185,6 +185,46 @@ func TestBackgroundRefreshingFooterState(t *testing.T) {
 	}
 }
 
+func TestInvalidateAllCachesDropsInflightRefresh(t *testing.T) {
+	m := New()
+	m.source = sessionmgr.ModeSessions
+	m.refreshGen = map[sessionmgr.SourceMode]uint64{
+		sessionmgr.ModeAgents: 1,
+	}
+	m.inflightRefresh = map[sessionmgr.SourceMode]uint64{
+		sessionmgr.ModeAgents: 1,
+	}
+	m.cache = map[sessionmgr.SourceMode]modeCache{
+		sessionmgr.ModeAgents: {items: testItems("old-agent"), fetchedAt: time.Now()},
+	}
+
+	got := m.invalidateAllCaches()
+	if got.inflightRefresh[sessionmgr.ModeAgents] != 0 {
+		t.Fatalf(
+			"inflight gen = %d, want 0 after invalidation",
+			got.inflightRefresh[sessionmgr.ModeAgents],
+		)
+	}
+	if got.refreshGen[sessionmgr.ModeAgents] != 2 {
+		t.Fatalf("refreshGen = %d, want 2 after bump", got.refreshGen[sessionmgr.ModeAgents])
+	}
+	if len(got.cache) != 0 {
+		t.Fatalf("cache not cleared = %#v", got.cache)
+	}
+
+	model, cmd := got.handleRefreshMsg(refreshMsg{
+		source: sessionmgr.ModeAgents,
+		gen:    1,
+		items:  testItems("stale-agent"),
+	})
+	if cmd != nil {
+		t.Fatal("expected no follow-up command for dropped refresh")
+	}
+	if _, ok := model.cache[sessionmgr.ModeAgents]; ok {
+		t.Fatal("stale refresh repopulated cache after invalidation")
+	}
+}
+
 func TestHandleRefreshMsgStoresErrorInCache(t *testing.T) {
 	m := New()
 	m.source = sessionmgr.ModeAgents

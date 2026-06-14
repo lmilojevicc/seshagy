@@ -129,7 +129,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.err = msg.err
 			m.status = msg.err.Error()
-			return m, nil
+			m = m.invalidateAllCaches()
+			var refresh tea.Cmd
+			m, refresh = m.beginRefresh(m.source, true)
+			return m, tea.Batch(refresh, m.previewForSelection())
 		}
 		m.err = nil
 		m.status = msg.status
