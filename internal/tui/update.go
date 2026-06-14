@@ -18,7 +18,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.renameInput.Width = max(20, msg.Width/3)
 		return m, m.previewForSelection()
 	case tickMsg:
-		return m, tea.Batch(refreshCmd(m.source, m.config.LoadOptions()), tickCmd())
+		if m.integration.active || m.setup.active {
+			return m, tickCmd()
+		}
+		if m.cacheFresh(m.source) {
+			return m, tickCmd()
+		}
+		var cmd tea.Cmd
+		m, cmd = m.beginRefresh(m.source, false)
+		return m, tea.Batch(cmd, tickCmd())
 	case integrationsMsg:
 		if msg.err != nil {
 			m.status = msg.err.Error()
@@ -65,7 +73,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.integration.startupPrompt = false
 		}
 		m.integration.active = false
-		return m, tea.Batch(integrationsCmd(), refreshCmd(m.source, m.config.LoadOptions()))
+		m = m.invalidateAllCaches()
+		var refresh tea.Cmd
+		m, refresh = m.beginRefresh(m.source, true)
+		return m, tea.Batch(integrationsCmd(), refresh)
 	case setupMsg:
 		if msg.err != nil {
 			m.err = msg.err
@@ -79,17 +90,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, startupIntegrationsCmd()
 	case refreshMsg:
-		m.loading = false
-		if msg.err != nil {
-			m.err = msg.err
-			m.status = msg.err.Error()
-			return m, nil
-		}
-		m.err = nil
-		m.items = msg.items
-		m.clampCursor()
-		m.status = fmt.Sprintf("loaded %d item%s", len(msg.items), plural(len(msg.items)))
-		return m, m.previewForSelection()
+		return m.handleRefreshMsg(msg)
 	case previewMsg:
 		if msg.key != m.selectedKey() {
 			return m, nil
@@ -120,7 +121,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.status = "returned from tmux"
 		}
-		return m, tea.Batch(refreshCmd(m.source, m.config.LoadOptions()), m.previewForSelection())
+		m = m.invalidateAllCaches()
+		var refresh tea.Cmd
+		m, refresh = m.beginRefresh(m.source, true)
+		return m, tea.Batch(refresh, m.previewForSelection())
 	case actionDoneMsg:
 		if msg.err != nil {
 			m.err = msg.err
@@ -129,7 +133,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.err = nil
 		m.status = msg.status
-		return m, tea.Batch(refreshCmd(m.source, m.config.LoadOptions()), m.previewForSelection())
+		m = m.invalidateAllCaches()
+		var refresh tea.Cmd
+		m, refresh = m.beginRefresh(m.source, true)
+		return m, tea.Batch(refresh, m.previewForSelection())
 	case yaziDoneMsg:
 		if msg.err != nil {
 			m.status = msg.err.Error()

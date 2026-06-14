@@ -188,6 +188,10 @@ func UpdateAgentStatusTracking(
 		clearAgentPendingIdle(ctx, pane)
 		status = AgentUnknown
 	}
+	if string(semantic) == strings.TrimSpace(previousRaw) &&
+		string(status) == strings.TrimSpace(previousStatusRaw) {
+		return status, nil
+	}
 	_ = setPaneOption(ctx, pane, "@agent_last_state", string(semantic))
 	_ = setPaneOption(ctx, pane, "@agent_last_status", string(status))
 	if visible {

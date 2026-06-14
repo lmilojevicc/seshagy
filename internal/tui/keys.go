@@ -104,9 +104,13 @@ func (m Model) handleActionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "enter":
 		return m.activateSelected()
 	case "r", "ctrl+r":
-		m.loading = true
 		m.status = "refreshing"
-		return m, refreshCmd(m.source, m.config.LoadOptions())
+		if len(m.items) == 0 {
+			m.loading = true
+		}
+		var cmd tea.Cmd
+		m, cmd = m.beginRefresh(m.source, true)
+		return m, cmd
 	case "x", "ctrl+x":
 		return m.deleteSelected()
 	case "R":
@@ -396,9 +400,17 @@ func (m Model) toggleAgentSessionIDExpand() (tea.Model, tea.Cmd) {
 func (m Model) switchSource(source sessionmgr.SourceMode) (tea.Model, tea.Cmd) {
 	m.source = source
 	m.cursor = 0
-	m.loading = true
-	m.status = "loading " + modeName(source)
-	return m, refreshCmd(source, m.config.LoadOptions())
+	if m.cacheFresh(source) {
+		m = m.applyCacheEntry(source)
+		m.loading = false
+	} else {
+		m.items = nil
+		m.loading = true
+		m.status = "loading " + modeName(source)
+	}
+	var refresh tea.Cmd
+	m, refresh = m.beginRefresh(source, false)
+	return m, tea.Batch(refresh, m.previewForSelection())
 }
 
 func (m Model) cycleAgentStateFilter() (tea.Model, tea.Cmd) {

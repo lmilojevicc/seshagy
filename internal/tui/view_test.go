@@ -358,7 +358,7 @@ func TestConfiguredSourceOrderAndDefault(t *testing.T) {
 func TestRefreshUsesConfiguredFDCommand(t *testing.T) {
 	m := newTestModel(t)
 	m.config.Directories.FDCommand = `printf '%s\n' /tmp/seshagy-tui-fd`
-	msg, ok := refreshCmd(sessionmgr.ModeFD, m.config.LoadOptions())().(refreshMsg)
+	msg, ok := refreshCmd(sessionmgr.ModeFD, 1, m.config.LoadOptions())().(refreshMsg)
 	if !ok || msg.err != nil {
 		t.Fatalf("refreshCmd = %#v, ok=%v", msg, ok)
 	}

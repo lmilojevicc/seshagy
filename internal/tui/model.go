@@ -53,6 +53,10 @@ type Model struct {
 	status                  string
 	err                     error
 
+	cache           map[sessionmgr.SourceMode]modeCache
+	refreshGen      map[sessionmgr.SourceMode]uint64
+	inflightRefresh map[sessionmgr.SourceMode]uint64
+
 	integration integrationPrompt
 	setup       setupPrompt
 }
@@ -75,8 +79,10 @@ type setupPrompt struct {
 }
 
 type refreshMsg struct {
-	items []sessionmgr.Item
-	err   error
+	source sessionmgr.SourceMode
+	gen    uint64
+	items  []sessionmgr.Item
+	err    error
 }
 
 type previewMsg struct {
@@ -135,16 +141,22 @@ func New() Model {
 	rename.Prompt = "rename > "
 	rename.CharLimit = 128
 	m := Model{
-		styles:      stylesFromConfig(cfg),
-		config:      cfg,
-		source:      cfg.DefaultSource(),
-		showPreview: true,
-		showHelp:    true,
-		searchInput: search,
-		renameInput: rename,
-		integration: integrationPrompt{selected: map[integrations.Target]bool{}},
-		setup:       setupPrompt{cursor: 1},
+		styles:          stylesFromConfig(cfg),
+		config:          cfg,
+		source:          cfg.DefaultSource(),
+		showPreview:     true,
+		showHelp:        true,
+		searchInput:     search,
+		renameInput:     rename,
+		cache:           make(map[sessionmgr.SourceMode]modeCache),
+		refreshGen:      make(map[sessionmgr.SourceMode]uint64),
+		inflightRefresh: make(map[sessionmgr.SourceMode]uint64),
+		integration:     integrationPrompt{selected: map[integrations.Target]bool{}},
+		setup:           setupPrompt{cursor: 1},
+		loading:         true,
 	}
+	m.refreshGen[m.source] = 1
+	m.inflightRefresh[m.source] = 1
 	if cfgErr != nil {
 		m.err = cfgErr
 		m.status = cfgErr.Error()
@@ -165,7 +177,7 @@ func Run() error {
 
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(
-		refreshCmd(m.source, m.config.LoadOptions()),
+		refreshCmd(m.source, m.inflightRefresh[m.source], m.config.LoadOptions()),
 		startupSetupCmd(m.config),
 		tickCmd(),
 	)

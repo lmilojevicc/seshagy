@@ -546,6 +546,13 @@ func (m Model) renderFooter() string {
 		input = m.renameInput.View()
 	default:
 		input = m.status
+		if m.backgroundRefreshing() {
+			if input == "" || input == "ready" {
+				input = "refreshing…"
+			} else {
+				input += " · refreshing…"
+			}
+		}
 		if input == "" {
 			input = "ready"
 		}

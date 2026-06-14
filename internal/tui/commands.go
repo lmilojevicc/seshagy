@@ -13,12 +13,12 @@ import (
 	"github.com/lmilojevicc/seshagy/internal/sessionmgr"
 )
 
-func refreshCmd(source sessionmgr.SourceMode, opts sessionmgr.LoadOptions) tea.Cmd {
+func refreshCmd(source sessionmgr.SourceMode, gen uint64, opts sessionmgr.LoadOptions) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 		defer cancel()
 		items, err := sessionmgr.LoadWithOptions(ctx, source, opts)
-		return refreshMsg{items: items, err: err}
+		return refreshMsg{source: source, gen: gen, items: items, err: err}
 	}
 }
 
