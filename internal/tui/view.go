@@ -174,9 +174,9 @@ func (m Model) renderIntegrationPrompt(height int) string {
 	lines = append(lines, "", clampText(strings.Join([]string{
 		s.key.Render("space") + " toggle",
 		s.key.Render("enter") + " install selected",
-		s.key.Render("s/esc") + " skip",
+		s.key.Render("s/esc") + " skip until next launch",
 		s.key.Render("r") + " rescan",
-		s.key.Render("q") + " quit",
+		s.key.Render("q") + " dismiss for this version",
 	}, s.muted.Render(" · ")), innerW))
 	content := trimHeight(strings.Join(lines, "\n"), innerH)
 	box := s.paneFocus.Width(width - 2).Height(innerH).Render(content)

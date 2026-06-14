@@ -29,6 +29,7 @@ var droidLifecycleHooks = []lifecycleHook{
 	// Droid surfaces permission waits via Notification; PostToolUse unblocks approval.
 	{"Notification", "blocked"},
 	{"PermissionRequest", "blocked"},
+	{"PermissionDenied", "idle"},
 	// SubagentStop omitted: Herdr documents this event revives idle panes when
 	// mapped to working; the parent agent may already be idle after Stop.
 	{"PreCompact", "working"},
@@ -76,6 +77,7 @@ var copilotLifecycleHooks = []lifecycleHook{
 	{"PostToolUseFailure", "working"},
 	// permissionRequest fires before the approval UI; PostToolUse unblocks after allow.
 	{"PermissionRequest", "blocked"},
+	{"PermissionDenied", "idle"},
 	{"Stop", "idle"},
 	{"SessionEnd", "release"},
 }
@@ -104,6 +106,7 @@ var grokLifecycleHooks = []lifecycleHook{
 	// Grok Build also emits Notification for permission waits; PostToolUse unblocks approval.
 	{"Notification", "blocked"},
 	{"PermissionRequest", "blocked"},
+	{"PermissionDenied", "idle"},
 	{"Stop", "idle"},
 	{"SessionEnd", "release"},
 }

@@ -140,6 +140,45 @@ func TestShouldStartupIntegrationPromptUpgradeDoesNotBumpWithoutPrompt(t *testin
 }
 
 func TestDismissStartupIntegrationPromptWithoutRecordingVersion(t *testing.T) {
+	for _, key := range []string{"esc", "s"} {
+		t.Run(key, func(t *testing.T) {
+			t.Setenv("XDG_STATE_HOME", t.TempDir())
+			oldVersion := integrations.CurrentInstallVersion() - 1
+			if oldVersion < 1 {
+				t.Fatalf(
+					"CurrentInstallVersion() = %d, need at least 2 for upgrade test",
+					integrations.CurrentInstallVersion(),
+				)
+			}
+			if err := writeIntegrationPromptVersion(oldVersion); err != nil {
+				t.Fatal(err)
+			}
+
+			m := New()
+			m.integration.active = true
+			m.integration.startupPrompt = true
+
+			model, _ := m.handleIntegrationKey(keyMsg(key))
+			m = model.(Model)
+			if m.integration.startupPrompt {
+				t.Fatal("startupPrompt should be cleared after temporary skip")
+			}
+			if m.integration.active {
+				t.Fatal("integration prompt should close after temporary skip")
+			}
+
+			stored, _, err := promptVersionState()
+			if err != nil {
+				t.Fatalf("promptVersionState error: %v", err)
+			}
+			if stored != oldVersion {
+				t.Fatalf("stored = %d, want %d without completing install", stored, oldVersion)
+			}
+		})
+	}
+}
+
+func TestSkipStartupIntegrationPromptThenManualQuitDoesNotRecordVersion(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	oldVersion := integrations.CurrentInstallVersion() - 1
 	if oldVersion < 1 {
@@ -158,19 +197,28 @@ func TestDismissStartupIntegrationPromptWithoutRecordingVersion(t *testing.T) {
 
 	model, _ := m.handleIntegrationKey(keyMsg("esc"))
 	m = model.(Model)
-	if !m.integration.startupPrompt {
-		t.Fatal("startupPrompt should stay true after temporary skip")
+
+	model, _ = m.handleKey(keyMsg("i"))
+	m = model.(Model)
+	if !m.integration.active {
+		t.Fatal("integration prompt should open after manual i")
 	}
-	if m.integration.active {
-		t.Fatal("integration prompt should close after temporary skip")
+	if m.integration.startupPrompt {
+		t.Fatal("startupPrompt should stay false after temporary skip")
 	}
+
+	_, _ = m.handleIntegrationKey(keyMsg("q"))
 
 	stored, _, err := promptVersionState()
 	if err != nil {
 		t.Fatalf("promptVersionState error: %v", err)
 	}
 	if stored != oldVersion {
-		t.Fatalf("stored = %d, want %d without completing install", stored, oldVersion)
+		t.Fatalf(
+			"stored = %d, want %d after manual quit following temporary skip",
+			stored,
+			oldVersion,
+		)
 	}
 }
 

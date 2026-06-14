@@ -270,6 +270,9 @@ func (m Model) handleIntegrationKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Quit
 	case "esc", "s":
+		if m.integration.startupPrompt {
+			m.integration.startupPrompt = false
+		}
 		m.integration.active = false
 		m.status = "hook installation skipped"
 		return m, nil
