@@ -7,14 +7,15 @@ import (
 
 // ItemJSON is the script-friendly representation of a list item.
 type ItemJSON struct {
-	Kind     string `json:"kind"`
-	Key      string `json:"key,omitempty"`
-	Name     string `json:"name,omitempty"`
-	Target   string `json:"target,omitempty"`
-	Path     string `json:"path,omitempty"`
-	Line     string `json:"line,omitempty"`
-	Attached bool   `json:"attached,omitempty"`
-	Windows  int    `json:"windows,omitempty"`
+	Kind      string `json:"kind"`
+	Key       string `json:"key,omitempty"`
+	Name      string `json:"name,omitempty"`
+	Target    string `json:"target,omitempty"`
+	Path      string `json:"path,omitempty"`
+	Line      string `json:"line,omitempty"`
+	LinePlain string `json:"line_plain,omitempty"`
+	Attached  bool   `json:"attached"`
+	Windows   int    `json:"windows,omitempty"`
 
 	CreatedAt  *time.Time `json:"created_at,omitempty"`
 	ActivityAt *time.Time `json:"activity_at,omitempty"`
@@ -25,21 +26,24 @@ type ItemJSON struct {
 	Pane      string `json:"pane,omitempty"`
 	Location  string `json:"location,omitempty"`
 	PaneTitle string `json:"pane_title,omitempty"`
-	Visible   bool   `json:"visible,omitempty"`
+	Visible   bool   `json:"visible"`
 
-	AgentName string     `json:"agent_name,omitempty"`
-	State     AgentState `json:"state,omitempty"`
-	Message   string     `json:"message,omitempty"`
-	Source    string     `json:"source,omitempty"`
-	UpdatedAt string     `json:"updated_at,omitempty"`
-	SessionID string     `json:"session_id,omitempty"`
-	Seq       string     `json:"seq,omitempty"`
+	AgentName        string     `json:"agent_name,omitempty"`
+	State            AgentState `json:"state,omitempty"`
+	Message          string     `json:"message,omitempty"`
+	Source           string     `json:"source,omitempty"`
+	UpdatedAt        string     `json:"updated_at,omitempty"`
+	UpdatedAtRFC3339 string     `json:"updated_at_rfc3339,omitempty"`
+	SessionID        string     `json:"session_id,omitempty"`
+	Seq              string     `json:"seq,omitempty"`
 }
 
 // ItemsJSON wraps a mode query result.
 type ItemsJSON struct {
-	Mode  string     `json:"mode"`
-	Items []ItemJSON `json:"items"`
+	SchemaVersion int        `json:"schema_version"`
+	Ok            bool       `json:"ok"`
+	Mode          string     `json:"mode"`
+	Items         []ItemJSON `json:"items"`
 }
 
 func SourceModeToken(mode SourceMode) string {
@@ -47,13 +51,15 @@ func SourceModeToken(mode SourceMode) string {
 }
 
 func ItemToJSON(item Item, icons IconSet) ItemJSON {
+	formattedLine := FormatLineWithIcons(item, icons)
 	out := ItemJSON{
 		Kind:      string(item.Kind),
 		Key:       item.Key(),
 		Name:      item.Name,
 		Target:    item.Target,
 		Path:      item.Path,
-		Line:      FormatLineWithIcons(item, icons),
+		Line:      formattedLine,
+		LinePlain: StripANSI(formattedLine),
 		Attached:  item.Attached,
 		Windows:   item.Windows,
 		PaneID:    item.PaneID,
@@ -78,6 +84,9 @@ func ItemToJSON(item Item, icons IconSet) ItemJSON {
 		out.Message = item.AgentMessage
 		out.Source = item.AgentSource
 		out.UpdatedAt = item.AgentUpdated
+		if _, rfc := parseUpdatedAtRFC3339(item.AgentUpdated); rfc != "" {
+			out.UpdatedAtRFC3339 = rfc
+		}
 		out.SessionID = item.AgentSessionID
 		out.Seq = item.AgentSeq
 	}
@@ -89,17 +98,35 @@ func ItemsToJSON(mode SourceMode, items []Item, icons IconSet) ItemsJSON {
 	for _, item := range items {
 		out = append(out, ItemToJSON(item, icons))
 	}
-	return ItemsJSON{Mode: SourceModeToken(mode), Items: out}
+	return ItemsJSON{
+		SchemaVersion: 1,
+		Ok:            true,
+		Mode:          SourceModeToken(mode),
+		Items:         out,
+	}
+}
+
+const JSONSchemaVersion = 1
+
+// IntegrationExplainJSON is the structured integration status for agent explain.
+type IntegrationExplainJSON struct {
+	Label     string `json:"label"`
+	Target    string `json:"target"`
+	State     string `json:"state"`
+	Version   int    `json:"version,omitempty"`
+	Authority string `json:"authority"`
 }
 
 // AgentExplainReport is the structured explain payload for JSON output.
 type AgentExplainReport struct {
-	PaneID     string `json:"pane_id"`
-	Location   string `json:"location"`
-	Path       string `json:"path,omitempty"`
-	Visible    bool   `json:"visible"`
-	Listed     bool   `json:"listed"`
-	SkipReason string `json:"skip_reason,omitempty"`
+	Ok            bool   `json:"ok"`
+	SchemaVersion int    `json:"schema_version"`
+	PaneID        string `json:"pane_id"`
+	Location      string `json:"location"`
+	Path          string `json:"path,omitempty"`
+	Visible       bool   `json:"visible"`
+	Listed        bool   `json:"listed"`
+	SkipReason    string `json:"skip_reason,omitempty"`
 
 	IdentitySource string `json:"identity_source"`
 	AgentName      string `json:"agent_name,omitempty"`
@@ -126,16 +153,18 @@ type AgentExplainReport struct {
 	LastSeen        string `json:"last_seen,omitempty"`
 	LastSeenRFC3339 string `json:"last_seen_rfc3339,omitempty"`
 
-	Integration      string `json:"integration,omitempty"`
-	ManifestFallback string `json:"manifest_fallback,omitempty"`
-	ManifestSource   string `json:"manifest_source,omitempty"`
-	ManifestVersion  string `json:"manifest_version,omitempty"`
-	CachedRemoteVer  string `json:"cached_remote_version,omitempty"`
-	ManifestWarning  string `json:"manifest_warning,omitempty"`
+	Integration      *IntegrationExplainJSON `json:"integration,omitempty"`
+	ManifestFallback string                  `json:"manifest_fallback,omitempty"`
+	ManifestSource   string                  `json:"manifest_source,omitempty"`
+	ManifestVersion  string                  `json:"manifest_version,omitempty"`
+	CachedRemoteVer  string                  `json:"cached_remote_version,omitempty"`
+	ManifestWarning  string                  `json:"manifest_warning,omitempty"`
 }
 
 func agentExplainToReport(info agentExplain) AgentExplainReport {
 	report := AgentExplainReport{
+		Ok:                 true,
+		SchemaVersion:      JSONSchemaVersion,
 		PaneID:             info.PaneID,
 		Location:           info.Location,
 		Path:               info.Path,
@@ -161,7 +190,7 @@ func agentExplainToReport(info agentExplain) AgentExplainReport {
 		LastState:          info.LastState,
 		LastStatus:         info.LastStatus,
 		LastSeen:           info.LastSeen,
-		Integration:        info.IntegrationStatus,
+		Integration:        info.Integration,
 		ManifestFallback:   info.ManifestFallback,
 		ManifestSource:     info.ManifestSource,
 		ManifestVersion:    info.ManifestVersion,
@@ -176,6 +205,14 @@ func agentExplainToReport(info agentExplain) AgentExplainReport {
 }
 
 func parseLastSeenRFC3339(raw string) (timestamp, rfc3339 string) {
+	return parseUnixTimestampRFC3339(raw)
+}
+
+func parseUpdatedAtRFC3339(raw string) (timestamp, rfc3339 string) {
+	return parseUnixTimestampRFC3339(raw)
+}
+
+func parseUnixTimestampRFC3339(raw string) (timestamp, rfc3339 string) {
 	if raw == "" {
 		return "", ""
 	}
@@ -281,8 +318,10 @@ func ManifestUpdateCommitToJSON(commit ManifestUpdateCommit) ManifestUpdateCommi
 
 // ManifestUpdateOutputJSON is the JSON view of a manifest update result.
 type ManifestUpdateOutputJSON struct {
-	Updated []ManifestUpdateCommitJSON `json:"updated"`
-	Status  ManifestUpdateStatusJSON   `json:"status"`
+	Ok            bool                       `json:"ok"`
+	SchemaVersion int                        `json:"schema_version"`
+	Updated       []ManifestUpdateCommitJSON `json:"updated"`
+	Status        ManifestUpdateStatusJSON   `json:"status"`
 }
 
 func ManifestUpdateOutputToJSON(output ManifestUpdateOutput) ManifestUpdateOutputJSON {
@@ -291,7 +330,9 @@ func ManifestUpdateOutputToJSON(output ManifestUpdateOutput) ManifestUpdateOutpu
 		updated = append(updated, ManifestUpdateCommitToJSON(commit))
 	}
 	return ManifestUpdateOutputJSON{
-		Updated: updated,
-		Status:  ManifestUpdateStatusToJSON(output.Status),
+		Ok:            true,
+		SchemaVersion: JSONSchemaVersion,
+		Updated:       updated,
+		Status:        ManifestUpdateStatusToJSON(output.Status),
 	}
 }

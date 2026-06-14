@@ -175,10 +175,20 @@ func ParseActionLineWithIcons(raw string, icons IconSet) (Item, bool) {
 		return Item{Kind: KindSession, Name: name, Target: name}, name != ""
 	case hasIconPrefix(clean, icons, KindAgent):
 		pane := AgentPaneFromLine(clean)
-		return Item{Kind: KindAgent, PaneID: pane, Target: pane}, pane != ""
+		return Item{
+			Kind:      KindAgent,
+			PaneID:    pane,
+			Target:    pane,
+			AgentName: AgentNameFromLine(clean),
+		}, pane != ""
 	case strings.HasPrefix(clean, "["):
 		pane := AgentPaneFromLine(clean)
-		return Item{Kind: KindAgent, PaneID: pane, Target: pane}, pane != ""
+		return Item{
+			Kind:      KindAgent,
+			PaneID:    pane,
+			Target:    pane,
+			AgentName: AgentNameFromLine(clean),
+		}, pane != ""
 	case hasIconPrefix(clean, icons, KindZoxide):
 		path := strings.TrimSpace(
 			strings.TrimPrefix(clean, matchedIconPrefix(clean, icons, KindZoxide)),
@@ -198,7 +208,12 @@ func parseNoIconActionLine(clean string) (Item, bool) {
 	if strings.HasPrefix(clean, "[") {
 		pane := AgentPaneFromLine(clean)
 		if pane != "" {
-			return Item{Kind: KindAgent, PaneID: pane, Target: pane}, true
+			return Item{
+				Kind:      KindAgent,
+				PaneID:    pane,
+				Target:    pane,
+				AgentName: AgentNameFromLine(clean),
+			}, true
 		}
 	}
 	if looksPathLine(clean) {
@@ -277,6 +292,14 @@ func hexToRGB(hex string) (int, int, int, bool) {
 		return 0, 0, 0, false
 	}
 	return int(n >> 16), int((n >> 8) & 0xff), int(n & 0xff), true
+}
+
+func AgentNameFromLine(clean string) string {
+	parts := strings.Split(clean, "\t")
+	if len(parts) < 2 {
+		return ""
+	}
+	return strings.TrimSpace(parts[1])
 }
 
 func AgentPaneFromLine(clean string) string {

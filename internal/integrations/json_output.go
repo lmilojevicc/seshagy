@@ -17,7 +17,9 @@ type RecommendationJSON struct {
 
 // RecommendationsJSON wraps integration scan results.
 type RecommendationsJSON struct {
-	Integrations []RecommendationJSON `json:"integrations"`
+	Ok            bool                 `json:"ok"`
+	SchemaVersion int                  `json:"schema_version"`
+	Integrations  []RecommendationJSON `json:"integrations"`
 }
 
 func RecommendationToJSON(rec Recommendation) RecommendationJSON {
@@ -41,5 +43,9 @@ func ScanToJSON(recs []Recommendation) RecommendationsJSON {
 	for _, rec := range recs {
 		out = append(out, RecommendationToJSON(rec))
 	}
-	return RecommendationsJSON{Integrations: out}
+	return RecommendationsJSON{
+		Ok:            true,
+		SchemaVersion: 1,
+		Integrations:  out,
+	}
 }

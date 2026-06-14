@@ -18,7 +18,15 @@ import (
 var version = "dev"
 
 func main() {
-	if err := run(os.Args[1:]); err != nil {
+	args := os.Args[1:]
+	if err := run(args); err != nil {
+		if hasJSONFlag(args) {
+			if encErr := encodeJSONError(err); encErr != nil {
+				fmt.Fprintf(os.Stderr, "seshagy: %v\n", encErr)
+			}
+			os.Exit(1)
+			return
+		}
 		fmt.Fprintf(os.Stderr, "seshagy: %v\n", err)
 		os.Exit(1)
 	}
@@ -40,7 +48,7 @@ func run(args []string) error {
 			return errors.New(joinUsage("--version", "[--json]"))
 		}
 		if jsonOutput {
-			return encodeJSON(map[string]string{"version": version})
+			return encodeSuccess(map[string]string{"version": version})
 		}
 		fmt.Println(version)
 		return nil
@@ -70,11 +78,11 @@ func run(args []string) error {
 	case "--get-all":
 		return runGetItems(ctx, args[1:], sessionmgr.ModeAll, "--get-all")
 	case "--delete-item":
-		rest, jsonOutput := stripJSONFlag(args[1:])
-		if len(rest) < 1 {
+		line, jsonOutput := parseDeleteItemArgs(args[1:])
+		if line == "" {
 			return errors.New("--delete-item requires a rendered item line")
 		}
-		return deleteItem(ctx, strings.Join(rest, " "), jsonOutput)
+		return deleteItem(ctx, line, jsonOutput)
 	case "--report-agent":
 		rest, jsonOutput := stripJSONFlag(args[1:])
 		report, err := parseReportArgs(rest)
@@ -85,11 +93,11 @@ func run(args []string) error {
 			return err
 		}
 		if jsonOutput {
-			return encodeJSON(map[string]any{
-				"applied": true,
-				"pane":    report.Pane,
-				"agent":   report.Name,
-				"state":   report.State,
+			return encodeSuccess(map[string]any{
+				"applied":    true,
+				"pane":       report.Pane,
+				"agent_name": report.Name,
+				"state":      report.State,
 			})
 		}
 		return nil
@@ -103,7 +111,7 @@ func run(args []string) error {
 			return err
 		}
 		if jsonOutput {
-			return encodeJSON(map[string]any{
+			return encodeSuccess(map[string]any{
 				"released": true,
 				"pane":     release.Pane,
 			})
@@ -146,7 +154,7 @@ func runAgent(ctx context.Context, args []string) error {
 			if err != nil {
 				return err
 			}
-			return encodeJSON(report)
+			return encodeSuccess(report)
 		}
 		out, err := sessionmgr.ExplainAgent(ctx, rest[0], cfg.LoadOptions())
 		if err != nil {
@@ -189,7 +197,7 @@ func runManifest(args []string) error {
 		}
 		sessionmgr.ReloadManifests()
 		if jsonOutput {
-			return encodeJSON(sessionmgr.ManifestUpdateOutputToJSON(output))
+			return encodeSuccess(sessionmgr.ManifestUpdateOutputToJSON(output))
 		}
 		printManifestUpdateResult(output)
 		return nil
@@ -199,7 +207,7 @@ func runManifest(args []string) error {
 		}
 		summaries := sessionmgr.ReloadManifests()
 		if jsonOutput {
-			return encodeJSON(map[string]any{
+			return encodeSuccess(map[string]any{
 				"reloaded": len(summaries),
 				"agents":   sessionmgr.AgentManifestSummariesToJSON(summaries),
 			})
@@ -216,7 +224,7 @@ func printManifestStatus(catalogURL string, jsonOutput bool) error {
 	summaries := sessionmgr.ActiveManifestSummaries()
 	resolvedCatalog := sessionmgr.ResolveManifestCatalogURL(catalogURL)
 	if jsonOutput {
-		return encodeJSON(map[string]any{
+		return encodeSuccess(map[string]any{
 			"catalog": resolvedCatalog,
 			"status":  sessionmgr.ManifestUpdateStatusToJSON(status),
 			"agents":  sessionmgr.AgentManifestSummariesToJSON(summaries),
@@ -279,7 +287,7 @@ func runConfig(args []string) error {
 	rest, jsonOutput := stripJSONFlag(args)
 	if len(rest) == 0 {
 		if jsonOutput {
-			return encodeJSON(map[string]string{"path": appconfig.Path()})
+			return encodeSuccess(map[string]string{"path": appconfig.Path()})
 		}
 		fmt.Println(appconfig.Path())
 		return nil
@@ -290,7 +298,7 @@ func runConfig(args []string) error {
 			return errors.New(joinUsage("config", "path", "[--json]"))
 		}
 		if jsonOutput {
-			return encodeJSON(map[string]string{"path": appconfig.Path()})
+			return encodeSuccess(map[string]string{"path": appconfig.Path()})
 		}
 		fmt.Println(appconfig.Path())
 		return nil
@@ -303,7 +311,9 @@ func runConfig(args []string) error {
 			return err
 		}
 		if jsonOutput {
-			return encodeJSON(cfg)
+			return encodeSuccess(map[string]any{
+				"config": cfg,
+			})
 		}
 		data, err := appconfig.Marshal(cfg)
 		if err != nil {
@@ -327,7 +337,7 @@ func runConfig(args []string) error {
 			return err
 		}
 		if jsonOutput {
-			return encodeJSON(map[string]any{
+			return encodeSuccess(map[string]any{
 				"path":    appconfig.Path(),
 				"created": created,
 				"forced":  force,
@@ -348,7 +358,7 @@ func runIntegration(args []string) error {
 		}
 		recs := integrations.Scan()
 		if jsonOutput {
-			return encodeJSON(integrations.ScanToJSON(recs))
+			return encodeSuccess(integrations.ScanToJSON(recs))
 		}
 		for _, rec := range recs {
 			availability := "not found"
@@ -394,7 +404,7 @@ func runIntegration(args []string) error {
 		return err
 	}
 	if jsonOutput {
-		return encodeJSON(map[string]any{
+		return encodeSuccess(map[string]any{
 			"target":   target,
 			"action":   rest[0],
 			"messages": messages,
@@ -416,7 +426,7 @@ func printItems(ctx context.Context, mode sessionmgr.SourceMode, jsonOutput bool
 		return err
 	}
 	if jsonOutput {
-		return encodeJSON(sessionmgr.ItemsToJSON(mode, items, cfg.IconSet()))
+		return encodeSuccess(sessionmgr.ItemsToJSON(mode, items, cfg.IconSet()))
 	}
 	icons := cfg.IconSet()
 	for _, item := range items {
@@ -440,7 +450,7 @@ func deleteItem(ctx context.Context, raw string, jsonOutput bool) error {
 			return err
 		}
 		if jsonOutput {
-			return encodeJSON(map[string]any{
+			return encodeSuccess(map[string]any{
 				"deleted": true,
 				"kind":    item.Kind,
 				"name":    item.Name,
@@ -452,11 +462,11 @@ func deleteItem(ctx context.Context, raw string, jsonOutput bool) error {
 			return err
 		}
 		if jsonOutput {
-			return encodeJSON(map[string]any{
-				"deleted": true,
-				"kind":    item.Kind,
-				"pane_id": item.PaneID,
-				"agent":   item.AgentName,
+			return encodeSuccess(map[string]any{
+				"deleted":    true,
+				"kind":       item.Kind,
+				"pane_id":    item.PaneID,
+				"agent_name": item.AgentName,
 			})
 		}
 		return nil
@@ -634,7 +644,8 @@ Usage:
   seshagy --version [--json]
 
 Scripting:
-  Append --json to any command above for machine-readable output on stdout.
+  Append --json to any command above for machine-readable JSON on stdout.
+  Responses include schema_version and ok; errors also print JSON on stdout.
   Human text output is unchanged when --json is omitted.
 
 TUI keys:

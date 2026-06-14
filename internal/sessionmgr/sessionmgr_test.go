@@ -730,6 +730,55 @@ func TestDetectTmuxPopup(t *testing.T) {
 	}
 }
 
+func TestAgentNameFromLine(t *testing.T) {
+	tests := []struct {
+		line string
+		want string
+	}{
+		{IconAgent + " [idle]\tpi\t%7\twork:2.1\t~/Projects/x", "pi"},
+		{"[working]\tclaude\tagent-mind:1.1\t~/repo", "claude"},
+		{IconSession + " demo", ""},
+		{"[idle]\t", ""},
+	}
+	for _, tt := range tests {
+		if got := AgentNameFromLine(StripANSI(tt.line)); got != tt.want {
+			t.Errorf("AgentNameFromLine(%q) = %q, want %q", tt.line, got, tt.want)
+		}
+	}
+}
+
+func TestParseActionLineSetsAgentName(t *testing.T) {
+	line := FormatLine(Item{
+		Kind:       KindAgent,
+		AgentName:  "pi",
+		AgentState: AgentWorking,
+		PaneID:     "%7",
+		Location:   "work:2.1",
+		Path:       "~/Projects/x",
+	})
+	item, ok := ParseActionLine(line)
+	if !ok || item.Kind != KindAgent || item.PaneID != "%7" {
+		t.Fatalf("ParseActionLine(%q) = %#v, %v", line, item, ok)
+	}
+	if item.AgentName != "pi" {
+		t.Fatalf("AgentName = %q, want pi", item.AgentName)
+	}
+
+	icons := DefaultIconSet()
+	icons.Enabled = false
+	line = FormatLineWithIcons(Item{
+		Kind:       KindAgent,
+		AgentName:  "claude",
+		AgentState: AgentIdle,
+		Location:   "work:2.1",
+		Path:       "~/Projects/x",
+	}, icons)
+	item, ok = ParseActionLineWithIcons(line, icons)
+	if !ok || item.AgentName != "claude" {
+		t.Fatalf("ParseActionLineWithIcons(%q) = %#v, %v", line, item, ok)
+	}
+}
+
 func TestAgentPaneFromLine(t *testing.T) {
 	line := IconAgent + " [idle]\tpi\twork:2.1\t~/Projects/x"
 	if got := AgentPaneFromLine(line); got != "work:2.1" {
