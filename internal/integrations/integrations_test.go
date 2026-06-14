@@ -3,6 +3,7 @@ package integrations
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -831,6 +832,105 @@ func TestUninstallCopilotRemovesManagedHookEntriesOnly(t *testing.T) {
 	}
 }
 
+func TestUninstallPiRemovesExtension(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	pi := filepath.Join(home, ".pi", "agent")
+	if err := os.MkdirAll(filepath.Join(pi, "extensions"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	extPath := filepath.Join(pi, "extensions", "seshagy-agent-state.ts")
+	if err := os.WriteFile(extPath, []byte("ext"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := uninstallPi(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(extPath); !os.IsNotExist(err) {
+		t.Fatalf("pi extension should be removed, stat err=%v", err)
+	}
+}
+
+func TestUninstallOpencodeRemovesPlugin(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	opencode := filepath.Join(home, ".config", "opencode")
+	if err := os.MkdirAll(filepath.Join(opencode, "plugins"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := installOpencode("/bin/seshagy"); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := uninstallOpencode(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(
+		filepath.Join(opencode, "plugins", "seshagy-agent-state.js"),
+	); !os.IsNotExist(
+		err,
+	) {
+		t.Fatalf("opencode plugin should be removed, stat err=%v", err)
+	}
+}
+
+func TestUninstallQodercliRemovesManagedHookEntriesOnly(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	qoder := filepath.Join(home, ".qoder")
+	if err := os.MkdirAll(filepath.Join(qoder, "hooks"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	settingsPath := filepath.Join(qoder, "settings.json")
+	root := map[string]any{"hooks": map[string]any{
+		"SessionStart": []any{
+			map[string]any{
+				"hooks": []any{
+					map[string]any{
+						"type":    "command",
+						"command": "bash /old/seshagy-agent-state.sh qodercli session",
+					},
+				},
+			},
+		},
+		"UserPromptSubmit": []any{map[string]any{"hooks": []any{
+			map[string]any{
+				"type":    "command",
+				"command": "bash /old/seshagy-agent-state.sh qodercli working",
+			},
+			map[string]any{"type": "command", "command": "echo keep"},
+		}}},
+	}}
+	if err := writeJSONObject(settingsPath, root); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(qoder, "hooks", shellHookName),
+		[]byte("hook"),
+		0o755,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := uninstallQodercli(); err != nil {
+		t.Fatal(err)
+	}
+	hooks := readJSON(t, settingsPath)["hooks"].(map[string]any)
+	if managedCommandPresent(nestedHookCommandsOnly(t, hooks, "SessionStart")) ||
+		managedCommandPresent(nestedHookCommandsOnly(t, hooks, "UserPromptSubmit")) {
+		t.Fatalf("managed hooks should be removed: %#v", hooks)
+	}
+	userCommands := nestedHookCommandsOnly(t, hooks, "UserPromptSubmit")
+	if len(userCommands) != 1 || userCommands[0] != "echo keep" {
+		t.Fatalf("expected preserved user hook, got %#v", userCommands)
+	}
+	if _, err := os.Stat(filepath.Join(qoder, "hooks", shellHookName)); !os.IsNotExist(err) {
+		t.Fatalf("hook file should be removed, stat err=%v", err)
+	}
+}
+
 func TestUninstallCursorRemovesManagedHookEntriesOnly(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -928,7 +1028,7 @@ func TestReinstallClaudeIsIdempotent(t *testing.T) {
 
 func TestShellHookSessionActionReportsUnknownWithSessionIDAndSeq(t *testing.T) {
 	asset := shellHookAsset(TargetCursor, "/bin/seshagy")
-	for _, want := range []string{"next_seq()", "time.time_ns()", "Time::HiRes", `date +%s`, "seshagy-seq", `seq="$(next_seq)"`, "session_id", "sessionId", "conversation_id", "conversationId", `state="unknown"`, `--state "$state"`, `--session-id "$session_id"`, `--seq "$seq"`, `--release-agent --source "$source" --seq "$seq"`} {
+	for _, want := range []string{"next_seq()", "time.time_ns()", "Time::HiRes", `date +%s`, "seshagy-seq", `seq="$(next_seq)"`, "session_id", "sessionId", "conversation_id", "conversationId", `state="unknown"`, `--state "$state"`, `--session-id "$session_id"`, `--seq "$seq"`, `--release-agent --source "$source" --seq "$seq"`, "reject_unsafe_value", "Installed path is preferred", "SESHAGY_BIN is honored only when that path is missing"} {
 		if !strings.Contains(asset, want) {
 			t.Fatalf("shell hook asset missing %q:\n%s", want, asset)
 		}
@@ -942,6 +1042,34 @@ func TestShellHookSessionActionReportsUnknownWithSessionIDAndSeq(t *testing.T) {
 	if strings.Contains(asset, `session|start) state="idle"`) ||
 		strings.Contains(asset, `session|start)\n    state="idle"`) {
 		t.Fatalf("session action should not be converted to idle:\n%s", asset)
+	}
+}
+
+func TestShellHookRejectsUnsafeMessageAndSessionID(t *testing.T) {
+	home := t.TempDir()
+	binPath := filepath.Join(home, "seshagy")
+	writeExecutable(t, binPath)
+	hookPath := filepath.Join(home, "hook.sh")
+	if err := os.WriteFile(
+		hookPath,
+		[]byte(shellHookAsset(TargetCursor, binPath)),
+		0o755,
+	); err != nil {
+		t.Fatal(err)
+	}
+	env := append(os.Environ(), "TMUX_PANE=%0")
+
+	messageCmd := exec.Command("sh", hookPath, "cursor", "working", `bad"message`)
+	messageCmd.Env = env
+	if err := messageCmd.Run(); err == nil {
+		t.Fatal("expected hook to reject unsafe message")
+	}
+
+	sessionCmd := exec.Command("sh", hookPath, "cursor", "session")
+	sessionCmd.Env = env
+	sessionCmd.Stdin = strings.NewReader(`{"session_id":"bad$id"}`)
+	if err := sessionCmd.Run(); err == nil {
+		t.Fatal("expected hook to reject unsafe session_id")
 	}
 }
 

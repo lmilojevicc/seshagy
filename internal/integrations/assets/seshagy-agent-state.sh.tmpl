@@ -57,10 +57,20 @@ for key in ("session_id", "sessionId", "conversation_id", "conversationId"):
 ' 2>/dev/null || true)"
 }
 
+reject_unsafe_value() {
+  case "$1" in
+    *[\"\'\\$]*) return 1 ;;
+  esac
+  return 0
+}
+
 [ -n "${TMUX_PANE:-}" ] || exit 0
-bin="${SESHAGY_BIN:-}"
-if [ -z "$bin" ]; then
-  bin=%s
+# Installed path is preferred; SESHAGY_BIN is honored only when that path is missing.
+bin=%s
+if [ ! -x "$bin" ]; then
+  if [ -n "${SESHAGY_BIN:-}" ]; then
+    bin="$SESHAGY_BIN"
+  fi
 fi
 if [ ! -x "$bin" ]; then
   bin="$(command -v seshagy 2>/dev/null || true)"
@@ -81,6 +91,13 @@ case "$state" in
     ;;
   *) exit 0 ;;
 esac
+
+if [ -n "$message" ] && ! reject_unsafe_value "$message"; then
+  exit 1
+fi
+if [ -n "$session_id" ] && ! reject_unsafe_value "$session_id"; then
+  exit 1
+fi
 
 if [ -n "$message" ] && [ -n "$session_id" ]; then
   "$bin" --report-agent --agent "$agent" --state "$state" --source "$source" --message "$message" --session-id "$session_id" --seq "$seq" >/dev/null 2>&1 || true

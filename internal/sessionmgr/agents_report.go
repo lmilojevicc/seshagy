@@ -81,6 +81,12 @@ func reportAgentLocked(ctx context.Context, pane string, opts AgentReport) error
 	if !agentSeqStillCurrent(ctx, pane, opts.Seq, opts.SeqSeen) {
 		return nil
 	}
+	if !opts.SeqSeen {
+		existingSeq, _ := showPaneOption(ctx, pane, "@agent_seq")
+		if strings.TrimSpace(existingSeq) != "" {
+			return nil
+		}
+	}
 	// Write seq FIRST so concurrent reports with higher seq can't have
 	// their options overwritten by a lower-seq write that passed the
 	// pre-check but arrived after them.
@@ -221,11 +227,8 @@ func agentPaneOptions() []string {
 }
 
 func agentSeqStillCurrent(ctx context.Context, pane string, seq int64, seqSeen bool) bool {
-	if !seqSeen {
-		return true
-	}
 	existingSeq, _ := showPaneOption(ctx, pane, "@agent_seq")
-	return shouldApplyAgentSeq(existingSeq, seq, true)
+	return shouldApplyAgentSeq(existingSeq, seq, seqSeen)
 }
 
 func setAgentPaneOptionIfCurrent(
