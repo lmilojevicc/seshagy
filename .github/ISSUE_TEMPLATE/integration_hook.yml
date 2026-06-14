@@ -1,0 +1,140 @@
+name: Integration & hook install
+description: Installing, uninstalling, or upgrading an agent hook/plugin integration fails or behaves unexpectedly.
+title: "[Integration]: "
+labels: ["bug", "integrations", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report! This form is for problems **installing, uninstalling, or upgrading** an agent hook/plugin integration.
+
+        **Before you start:**
+        - **Agent is detected but its STATE is wrong at runtime** (wrong status, stale activity, not clearing)? Use the **Agent tracking & detection** form instead — that's a runtime issue, not an install issue.
+        - **After upgrading seshagy**, re-run `seshagy integration install <target>` for each agent so hook versions stay current. Many "broken after update" reports are just stale hooks.
+
+  - type: dropdown
+    id: target
+    attributes:
+      label: Which integration target?
+      options:
+        - pi (Pi)
+        - opencode (OpenCode)
+        - kimi (Kimi Code)
+        - claude (Claude Code)
+        - codex (Codex)
+        - copilot (GitHub Copilot CLI)
+        - droid (Factory Droid)
+        - qodercli (Qoder CLI)
+        - cursor (Cursor Agent)
+        - grok (Grok Build)
+        - kilo (Kilo Code)
+        - hermes (Hermes Agent)
+        - Other / unsure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: action
+    attributes:
+      label: Which action failed?
+      options:
+        - install
+        - uninstall
+        - status (shows wrong info)
+        - TUI install prompt (i)
+        - Upgrade (hooks stale after seshagy update)
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What you observed vs. what you expected.
+      placeholder: When I ran X, seshagy did Y. I expected Z.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: The exact commands or steps that trigger the problem.
+      placeholder: |
+        1. Run `seshagy integration install cursor`
+        2. ...
+        3. See the error
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: seshagy version
+      description: Run `seshagy version` and paste the output.
+      placeholder: e.g. v0.4.1
+    validations:
+      required: true
+
+  - type: input
+    id: os-version
+    attributes:
+      label: OS and version
+      placeholder: e.g. macOS 15.3, Ubuntu 24.04
+    validations:
+      required: true
+
+  - type: input
+    id: tmux-version
+    attributes:
+      label: tmux version
+      description: Run `tmux -V` and paste the output.
+      placeholder: e.g. tmux 3.5a
+    validations:
+      required: true
+
+  - type: textarea
+    id: integration-status
+    attributes:
+      label: "`seshagy integration status` output"
+      description: |
+        The key diagnostic. Run `seshagy integration status` and paste the **full** table (target, availability, state, authority, install path).
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: command-output
+    attributes:
+      label: Command output / error
+      description: |
+        Paste the exact command you ran (e.g. `seshagy integration install <target>` / `seshagy integration uninstall <target>`) and its full stdout/stderr.
+      render: shell
+
+  - type: textarea
+    id: agent-cli
+    attributes:
+      label: Agent CLI details
+      description: |
+        Which agent CLI and version, and where it's installed — e.g. the output of `which <agent-cli>` and `<agent-cli> --version`.
+
+        Note: Cursor Agent detection requires the `cursor-agent` command to be on PATH.
+
+  - type: textarea
+    id: config-files
+    attributes:
+      label: Relevant config / hook files
+      description: |
+        Anything relevant — e.g. the install path shown by `integration status`, and whether the agent's own config directory is in a non-standard location.
+      render: shell
+
+  - type: checkboxes
+    id: acknowledgements
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues and didn't find a duplicate.
+          required: true
+        - label: I confirmed the agent CLI is installed and available on my PATH.
+        - label: I'm on the latest seshagy version (and re-ran install after any upgrade).

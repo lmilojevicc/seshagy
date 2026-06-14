@@ -1,0 +1,115 @@
+name: Bug report
+description: Report a general bug in seshagy (TUI rendering, crashes, session/directory operations, config parsing, CLI helpers, etc.)
+title: "[Bug]: "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug report! A little detail goes a long way toward a fast fix.
+
+        **Before you start:**
+        - Please [search existing issues](https://github.com/lmilojevicc/seshagy/issues?q=is%3Aissue) first — your bug may already be reported.
+        - **Agent not showing / wrong agent state?** Use the **Agent tracking & detection** form instead.
+        - **Hook or plugin install problems?** Use the **Integration & hook** form instead.
+        - Everything else (TUI rendering, crashes, session/directory operations, config parsing, CLI helpers) belongs here.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Describe the bug and what you expected to happen instead.
+      placeholder: When I do X, seshagy does Y. I expected Z.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Numbered steps that reliably trigger the bug.
+      placeholder: |
+        1. Run `seshagy`
+        2. Navigate to the discovered directories list
+        3. Press <enter> on a zoxide result
+        4. See the error / crash
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: seshagy version
+      description: Run `seshagy version` and paste the output.
+      placeholder: e.g. v0.4.1
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install-method
+    attributes:
+      label: How did you install seshagy?
+      options:
+        - go install (@latest)
+        - go install from local checkout / make install
+        - GoReleaser release binary
+        - Other / not sure
+    validations:
+      required: true
+
+  - type: input
+    id: os-version
+    attributes:
+      label: OS and version
+      placeholder: e.g. macOS 15.3, Ubuntu 24.04
+    validations:
+      required: true
+
+  - type: input
+    id: tmux-version
+    attributes:
+      label: tmux version
+      description: Run `tmux -V` and paste the output.
+      placeholder: e.g. tmux 3.5a
+    validations:
+      required: true
+
+  - type: input
+    id: terminal
+    attributes:
+      label: Terminal emulator
+      placeholder: e.g. Ghostty, iTerm2, kitty, Alacritty, WezTerm
+
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: |
+        Strongly encouraged! Please paste the output of:
+
+        ```
+        seshagy version
+        seshagy config show
+        seshagy integration status
+        tmux -V
+        ```
+
+        Note: `seshagy config show` may include theme/icons settings — feel free to redact any sensitive paths.
+      render: shell
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs / error output
+      description: stderr output, panic traces, or anything else that looks relevant.
+      render: shell
+
+  - type: checkboxes
+    id: acknowledgements
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues and didn't find a duplicate.
+          required: true
+        - label: I'm on the latest version, or I'm willing to retry on the latest version.
+        - label: This is reproducible and not a one-off.

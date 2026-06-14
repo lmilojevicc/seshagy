@@ -1,0 +1,180 @@
+name: Agent tracking & detection
+description: An agent pane is missing, shows the wrong state, won't clear, or is detected incorrectly.
+title: "[Agent]: "
+labels: ["bug", "agents", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve agent tracking!
+
+        **How seshagy detects agents:** it never scrapes pane text. It tracks agents that report
+        `@agent_*` tmux pane metadata (hook-capable agents need an installed integration) or that
+        are process-detected. Hook-capable agents without an installed integration show up as
+        `unhooked`. Process-detected agents (e.g. Gemini, Antigravity) stay `unknown` unless state
+        is reported. Lifecycle states normalize to: `working`, `blocked`, `aborted`, `done`,
+        `idle`, `unknown`.
+
+        **Please run these diagnostics before filing** (you'll paste output below):
+        - `seshagy agent explain <pane-id>` — explains WHY a pane has its current state (most useful)
+        - `seshagy version`
+        - `seshagy integration status`
+        - `seshagy --get-agents`
+        - `seshagy config show`
+        - `tmux -V`
+
+  - type: dropdown
+    id: agent
+    attributes:
+      label: Which agent?
+      description: Pick the agent involved.
+      options:
+        - Pi (pi)
+        - OpenCode (opencode)
+        - Kimi Code (kimi)
+        - Claude Code (claude)
+        - Codex (codex)
+        - GitHub Copilot CLI (copilot)
+        - Factory Droid (droid)
+        - Qoder CLI (qodercli)
+        - Cursor Agent (cursor)
+        - Grok Build (grok)
+        - Kilo Code (kilo)
+        - Hermes Agent (hermes)
+        - Gemini
+        - Antigravity (agy)
+        - Other (process-detected)
+        - Other / unsure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: problem-kind
+    attributes:
+      label: What kind of problem?
+      options:
+        - Agent pane not appearing at all
+        - Agent appears but as "unhooked"
+        - Wrong lifecycle state (e.g. shows idle while working)
+        - State stuck / won't clear after agent exits
+        - Wrong agent identity / mislabeled
+        - Duplicate agent entries
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: expected-vs-observed
+    attributes:
+      label: Expected state vs. observed state
+      description: A one-liner contrasting what you expected with what seshagy showed.
+      placeholder: "expected working, saw idle"
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: How can we get the agent into this state?
+      placeholder: |
+        1. Start <agent> in a tmux pane
+        2. ...
+        3. seshagy shows ...
+    validations:
+      required: true
+
+  - type: input
+    id: seshagy-version
+    attributes:
+      label: seshagy version
+      description: Output of `seshagy version`.
+    validations:
+      required: true
+
+  - type: input
+    id: tmux-version
+    attributes:
+      label: tmux version
+      description: Output of `tmux -V`.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: hook-installed
+    attributes:
+      label: Is the integration/hook installed for this agent?
+      options:
+        - Yes, installed via seshagy integration install
+        - "No"
+        - Not applicable (process-detected agent like Gemini/Antigravity)
+        - Unsure
+    validations:
+      required: false
+
+  - type: dropdown
+    id: manifest-fallback
+    attributes:
+      label: Is `[agents] manifest_fallback` enabled?
+      description: Check `seshagy config show` if unsure.
+      options:
+        - No (default)
+        - "Yes"
+        - Unsure
+    validations:
+      required: false
+
+  - type: textarea
+    id: agent-explain
+    attributes:
+      label: "`seshagy agent explain <pane-id>` output"
+      description: |
+        The single most useful diagnostic. Find the pane id from `seshagy --get-agents`, or use the
+        raw tmux pane id (e.g. `%3`). Run `seshagy agent explain <pane-id>` and paste the full output.
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: diagnostics-bundle
+    attributes:
+      label: Diagnostics bundle
+      description: |
+        Strongly encouraged. Paste the output of:
+        `seshagy version`, `seshagy integration status`, `seshagy --get-agents`, and `seshagy config show`.
+      render: shell
+    validations:
+      required: false
+
+  - type: textarea
+    id: tmux-metadata
+    attributes:
+      label: Raw tmux pane metadata
+      description: |
+        Shows the raw `@agent_*` values and pane titles that drive detection. Run:
+        `tmux show-options -p -t <pane-id>`
+        `tmux list-panes -a -F '#{pane_id} #{pane_title} #{pane_current_command}'`
+      render: shell
+    validations:
+      required: false
+
+  - type: textarea
+    id: manifest-status
+    attributes:
+      label: "`seshagy manifest status --json` output"
+      description: Only needed if `[agents] manifest_fallback` is enabled.
+      render: shell
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: before-submitting
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues for this problem.
+          required: true
+        - label: The integration is installed for this agent, OR the agent is process-detected (e.g. Gemini/Antigravity).
+          required: false
+        - label: I'm on the latest seshagy version, or willing to retry on it.
+          required: false

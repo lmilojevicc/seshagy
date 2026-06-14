@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question or usage help
+    url: https://github.com/lmilojevicc/seshagy/discussions
+    about: Ask how to use seshagy, configure sources, or set up agent hooks. Keep the issue tracker for confirmed bugs and concrete proposals.
+  - name: README and CLI reference
+    url: https://github.com/lmilojevicc/seshagy/blob/main/README.md
+    about: Most config, key bindings, agent tracking, and integration questions are answered here. Also try `seshagy --help`.
