@@ -391,7 +391,7 @@ func TestConfiguredASCIIIconsRenderInTUI(t *testing.T) {
 	model, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 28})
 	m = model.(Model)
 	out := sessionmgr.StripANSI(m.View())
-	for _, want := range []string{"S ◌ demo", "Z ~/code/demo", "F ~/src/demo", "A ▶ pi"} {
+	for _, want := range []string{"S demo", "Z ~/code/demo", "F ~/src/demo", "A [working] pi"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("configured ascii icon output missing %q\n%s", want, out)
 		}
@@ -417,6 +417,28 @@ func TestDefaultIconsRenderWithConfiguredDisplaySpacing(t *testing.T) {
 	)
 	if got := sessionmgr.StripANSI(agentPrimary); got != sessionmgr.IconAgent+"  ▶ pi" {
 		t.Fatalf("default agent icon spacing = %q, want two spaces after icon", got)
+	}
+}
+
+func TestTextModeAgentDetailRendersStateLabel(t *testing.T) {
+	m := newTestModel(t)
+	cfg := appconfig.Default()
+	cfg.Icons.Mode = appconfig.IconModeText
+	cfg.Icons.Agent.Label = "A"
+	m.config = cfg
+
+	item := sessionmgr.Item{
+		Kind:       sessionmgr.KindAgent,
+		AgentName:  "pi",
+		AgentState: sessionmgr.AgentWorking,
+		PaneID:     "%1",
+	}
+	detail := sessionmgr.StripANSI(strings.Join(m.detailLines(item, 40), "\n"))
+	if !strings.Contains(detail, "state     working") {
+		t.Fatalf("text-mode agent detail should render raw state\n%s", detail)
+	}
+	if strings.Contains(detail, "[working]") || strings.Contains(detail, "state     ▶ working") {
+		t.Fatalf("text-mode agent detail should not render brackets or glyph\n%s", detail)
 	}
 }
 
@@ -451,6 +473,130 @@ func TestNoIconsAgentRowsRenderStateLabel(t *testing.T) {
 	)
 	if got := sessionmgr.StripANSI(agentPrimary); got != "[working] pi" {
 		t.Fatalf("no-icons agent primary = %q, want [working] pi", got)
+	}
+}
+
+func TestAgentStateOverrideIconsModeTextUsesIconsInListAndDetail(t *testing.T) {
+	m := newTestModel(t)
+	cfg := appconfig.Default()
+	cfg.Icons.Mode = appconfig.IconModeText
+	cfg.Icons.AgentStateMode = appconfig.AgentStateModeIcons
+	m.config = cfg
+
+	item := sessionmgr.Item{
+		Kind:       sessionmgr.KindAgent,
+		AgentName:  "pi",
+		AgentState: sessionmgr.AgentWorking,
+	}
+	primary, _ := m.rowParts(item)
+	if got := sessionmgr.StripANSI(primary); got != "A ▶ pi" {
+		t.Fatalf("agent_state=icons list row = %q, want icon state", got)
+	}
+
+	detail := sessionmgr.StripANSI(strings.Join(m.detailLines(item, 40), "\n"))
+	if !strings.Contains(detail, "state     ▶ working") {
+		t.Fatalf("agent_state=icons detail should show icon + raw state\n%s", detail)
+	}
+	if strings.Contains(detail, "[working]") {
+		t.Fatalf("agent_state=icons detail should not show bracket label\n%s", detail)
+	}
+}
+
+func TestAgentStateTextOverridesIconsModeInListAndDetail(t *testing.T) {
+	m := newTestModel(t)
+	cfg := appconfig.Default()
+	cfg.Icons.Mode = appconfig.IconModeIcons
+	cfg.Icons.AgentStateMode = appconfig.AgentStateModeText
+	m.config = cfg
+
+	item := sessionmgr.Item{
+		Kind:       sessionmgr.KindAgent,
+		AgentName:  "pi",
+		AgentState: sessionmgr.AgentWorking,
+	}
+	primary, _ := m.rowParts(item)
+	if got := sessionmgr.StripANSI(primary); got != sessionmgr.IconAgent+"  [working] pi" {
+		t.Fatalf("icons mode + agent_state=text list row = %q, want text state label", got)
+	}
+
+	detail := sessionmgr.StripANSI(strings.Join(m.detailLines(item, 40), "\n"))
+	if !strings.Contains(detail, "state     working") {
+		t.Fatalf("icons mode + agent_state=text detail should show raw state\n%s", detail)
+	}
+	if strings.Contains(detail, "state     ▶ working") || strings.Contains(detail, "[working]") {
+		t.Fatalf(
+			"icons mode + agent_state=text detail should not show glyph or bracket label\n%s",
+			detail,
+		)
+	}
+}
+
+func TestIconsModeAgentDetailRendersGlyphAndRawState(t *testing.T) {
+	m := newTestModel(t)
+	item := sessionmgr.Item{
+		Kind:       sessionmgr.KindAgent,
+		AgentName:  "pi",
+		AgentState: sessionmgr.AgentWorking,
+	}
+	detail := sessionmgr.StripANSI(strings.Join(m.detailLines(item, 40), "\n"))
+	if !strings.Contains(detail, "state     ▶ working") {
+		t.Fatalf("icons-mode agent detail should render glyph + raw state\n%s", detail)
+	}
+}
+
+func TestCustomAgentStateIconInList(t *testing.T) {
+	m := newTestModel(t)
+	cfg := appconfig.Default()
+	cfg.Icons.Mode = appconfig.IconModeIcons
+	cfg.Icons.AgentStateMode = appconfig.AgentStateModeIcons
+	cfg.Icons.AgentState.Working.Icon = "★"
+	m.config = cfg
+
+	item := sessionmgr.Item{
+		Kind:       sessionmgr.KindAgent,
+		AgentName:  "pi",
+		AgentState: sessionmgr.AgentWorking,
+	}
+	primary, _ := m.rowParts(item)
+	if got := sessionmgr.StripANSI(primary); !strings.Contains(got, "★ pi") {
+		t.Fatalf("custom working icon list row = %q, want ★ pi", got)
+	}
+}
+
+func TestCustomAgentStateLabelInTextMode(t *testing.T) {
+	m := newTestModel(t)
+	cfg := appconfig.Default()
+	cfg.Icons.Mode = appconfig.IconModeIcons
+	cfg.Icons.AgentStateMode = appconfig.AgentStateModeText
+	cfg.Icons.AgentState.Working.Label = "busy"
+	m.config = cfg
+
+	item := sessionmgr.Item{
+		Kind:       sessionmgr.KindAgent,
+		AgentName:  "pi",
+		AgentState: sessionmgr.AgentWorking,
+	}
+	primary, _ := m.rowParts(item)
+	if got := sessionmgr.StripANSI(primary); !strings.Contains(got, "[busy] pi") {
+		t.Fatalf("custom working label list row = %q, want [busy] pi", got)
+	}
+}
+
+func TestPartialAgentStateOverrideKeepsDefaultGlyph(t *testing.T) {
+	m := newTestModel(t)
+	cfg := appconfig.Default()
+	cfg.Icons.Mode = appconfig.IconModeIcons
+	cfg.Icons.AgentState.Blocked.Color = "11"
+	m.config = cfg
+
+	item := sessionmgr.Item{
+		Kind:       sessionmgr.KindAgent,
+		AgentName:  "pi",
+		AgentState: sessionmgr.AgentBlocked,
+	}
+	primary, _ := m.rowParts(item)
+	if got := sessionmgr.StripANSI(primary); !strings.Contains(got, "◆ pi") {
+		t.Fatalf("partial override blocked list row = %q, want default ◆ glyph", got)
 	}
 }
 

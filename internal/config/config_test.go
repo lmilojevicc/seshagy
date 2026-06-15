@@ -266,6 +266,156 @@ func TestIconModes(t *testing.T) {
 	}
 }
 
+func TestNormalizeAgentStateMode(t *testing.T) {
+	tests := map[string]string{
+		"":        AgentStateModeInherit,
+		"inherit": AgentStateModeInherit,
+		"default": AgentStateModeInherit,
+		"icon":    AgentStateModeIcons,
+		"icons":   AgentStateModeIcons,
+		"glyphs":  AgentStateModeIcons,
+		"glyph":   AgentStateModeIcons,
+		"text":    AgentStateModeText,
+		"label":   AgentStateModeText,
+		"labels":  AgentStateModeText,
+		"unknown": AgentStateModeInherit,
+	}
+	for in, want := range tests {
+		if got := normalizeAgentStateMode(in); got != want {
+			t.Fatalf("normalizeAgentStateMode(%q) = %q, want %q", in, got, want)
+		}
+	}
+	if got := normalizeAgentStateMode(" GLYPHS "); got != AgentStateModeIcons {
+		t.Fatalf("normalizeAgentStateMode(%q) = %q, want %q", " GLYPHS ", got, AgentStateModeIcons)
+	}
+}
+
+func TestIconSetAgentStateProjection(t *testing.T) {
+	cfg := Default()
+	icons := cfg.IconSet()
+	if icons.AgentStateMode != AgentStateModeInherit {
+		t.Fatalf("default agent_state_mode = %q, want inherit", icons.AgentStateMode)
+	}
+	if !icons.AgentStateUsesIcons() || icons.AgentStateUsesLabels() {
+		t.Fatalf(
+			"inherit + icons mode projection = icons:%v labels:%v",
+			icons.AgentStateUsesIcons(),
+			icons.AgentStateUsesLabels(),
+		)
+	}
+
+	cfg.Icons.Mode = IconModeText
+	icons = cfg.IconSet()
+	if icons.AgentStateUsesIcons() || !icons.AgentStateUsesLabels() {
+		t.Fatalf(
+			"inherit + text mode projection = icons:%v labels:%v",
+			icons.AgentStateUsesIcons(),
+			icons.AgentStateUsesLabels(),
+		)
+	}
+
+	cfg.Icons.AgentStateMode = AgentStateModeIcons
+	icons = cfg.IconSet()
+	if !icons.AgentStateUsesIcons() || icons.AgentStateUsesLabels() {
+		t.Fatalf(
+			"icons override + text mode projection = icons:%v labels:%v",
+			icons.AgentStateUsesIcons(),
+			icons.AgentStateUsesLabels(),
+		)
+	}
+
+	cfg.Icons.Mode = IconModeIcons
+	cfg.Icons.AgentStateMode = AgentStateModeText
+	icons = cfg.IconSet()
+	if icons.AgentStateUsesIcons() || !icons.AgentStateUsesLabels() {
+		t.Fatalf(
+			"agent_state_mode=text overrides icons mode projection = icons:%v labels:%v",
+			icons.AgentStateUsesIcons(),
+			icons.AgentStateUsesLabels(),
+		)
+	}
+}
+
+func TestLoadAgentStateModeConfig(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	path := Path()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	data := []byte(`
+[icons]
+mode = "icons"
+agent_state_mode = "text"
+`)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	loaded, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if loaded.Icons.AgentStateMode != AgentStateModeText {
+		t.Fatalf("loaded agent_state_mode = %q, want text", loaded.Icons.AgentStateMode)
+	}
+}
+
+func TestLoadPerStateAgentStateConfig(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	path := Path()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	data := []byte(`
+[icons]
+mode = "icons"
+
+[icons.agent_state.working]
+icon = "▶"
+label = "working"
+color = "10"
+
+[icons.agent_state.blocked]
+icon = "◆"
+label = "blocked"
+color = "11"
+`)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	loaded, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if loaded.Icons.AgentState.Working.Icon != "▶" {
+		t.Fatalf("working icon = %q, want ▶", loaded.Icons.AgentState.Working.Icon)
+	}
+	if loaded.Icons.AgentState.Blocked.Color != "11" {
+		t.Fatalf("blocked color = %q, want 11", loaded.Icons.AgentState.Blocked.Color)
+	}
+	icons := loaded.IconSet()
+	if got := icons.ForState(sessionmgr.AgentWorking).Icon; got != "▶" {
+		t.Fatalf("projected working icon = %q, want ▶", got)
+	}
+	if got := icons.ForState(sessionmgr.AgentBlocked).Color; got != "11" {
+		t.Fatalf("projected blocked color = %q, want 11", got)
+	}
+}
+
+func TestNormalizeAgentStatePartialOverride(t *testing.T) {
+	cfg := Default()
+	cfg.Icons.AgentState.Working.Icon = "★"
+	cfg.Icons.AgentState.Working.Label = ""
+	cfg.Normalize()
+	if cfg.Icons.AgentState.Working.Icon != "★" {
+		t.Fatalf("working icon = %q, want ★", cfg.Icons.AgentState.Working.Icon)
+	}
+	if cfg.Icons.AgentState.Working.Label != "working" {
+		t.Fatalf("working label = %q, want working", cfg.Icons.AgentState.Working.Label)
+	}
+}
+
 func TestLoadMigratesLegacyASCIIConfig(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)

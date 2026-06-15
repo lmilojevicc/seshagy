@@ -314,7 +314,7 @@ func (m Model) rowParts(item sessionmgr.Item) (string, string) {
 	case sessionmgr.KindSession:
 		icons := m.config.IconSet()
 		state := ""
-		if icons.Enabled {
+		if !icons.ASCII && icons.Enabled {
 			state = s.info.Render("◌")
 			if item.Attached {
 				state = s.success.Render("●")
@@ -324,9 +324,9 @@ func (m Model) rowParts(item sessionmgr.Item) (string, string) {
 		return rowText(m.iconFor(item.Kind), state, name), ago(item.Activity)
 	case sessionmgr.KindAgent:
 		icons := m.config.IconSet()
-		state := renderAgentState(s, item.AgentState)
-		if !icons.Enabled {
-			state = renderAgentStateLabel(s, item.AgentState)
+		state := renderAgentState(s, icons, item.AgentState)
+		if icons.AgentStateUsesLabels() {
+			state = renderAgentStateLabel(s, icons, item.AgentState)
 		}
 		message := item.AgentMessage
 		if message == "" {
@@ -437,11 +437,13 @@ func (m Model) detailLines(item sessionmgr.Item, width int) []string {
 		if suffix == "" {
 			suffix = item.AgentSource
 		}
+		icons := m.config.IconSet()
+		stateValue := renderAgentStateDetail(s, item.AgentState, icons)
 		lines := []string{
 			s.title.Render(item.AgentName),
 			s.muted.Render("agent pane"),
 			"",
-			kv(s, "state", renderAgentState(s, item.AgentState)+" "+string(item.AgentState)),
+			kv(s, "state", stateValue),
 			kv(s, "pane", item.PaneID),
 			kv(s, "where", item.Location),
 			kv(s, "path", item.Path),
@@ -666,37 +668,56 @@ func titleForMode(mode sessionmgr.SourceMode) string {
 	return mode.Names().Title
 }
 
-func renderAgentState(s styles, state sessionmgr.AgentState) string {
+func renderAgentState(s styles, icons sessionmgr.IconSet, state sessionmgr.AgentState) string {
+	style := icons.ForState(state)
+	return renderAgentStateStyled(s, state, style.Icon, style.Color)
+}
+
+func renderAgentStateLabel(s styles, icons sessionmgr.IconSet, state sessionmgr.AgentState) string {
+	style := icons.ForState(state)
+	label := style.ASCII
+	if label == "" {
+		label = agentStateText(state)
+	}
+	return renderAgentStateStyled(s, state, "["+label+"]", style.Color)
+}
+
+func renderAgentStateRaw(s styles, icons sessionmgr.IconSet, state sessionmgr.AgentState) string {
+	style := icons.ForState(state)
+	label := style.ASCII
+	if label == "" {
+		label = agentStateText(state)
+	}
+	return renderAgentStateStyled(s, state, label, style.Color)
+}
+
+func renderAgentStateStyled(s styles, state sessionmgr.AgentState, text, color string) string {
+	if strings.TrimSpace(color) != "" {
+		return lipgloss.NewStyle().Foreground(lipgloss.Color(color)).Render(text)
+	}
 	switch state {
-	case sessionmgr.AgentWorking:
-		return s.success.Render("▶")
+	case sessionmgr.AgentWorking, sessionmgr.AgentDone:
+		return s.success.Render(text)
 	case sessionmgr.AgentBlocked:
-		return s.warning.Render("◆")
+		return s.warning.Render(text)
 	case sessionmgr.AgentAborted:
-		return s.danger.Render("■")
-	case sessionmgr.AgentDone:
-		return s.success.Render("✓")
+		return s.danger.Render(text)
 	case sessionmgr.AgentIdle:
-		return s.info.Render("◌")
+		return s.info.Render(text)
 	default:
-		return s.muted.Render("?")
+		return s.muted.Render(text)
 	}
 }
 
-func renderAgentStateLabel(s styles, state sessionmgr.AgentState) string {
-	label := "[" + agentStateText(state) + "]"
-	switch state {
-	case sessionmgr.AgentWorking, sessionmgr.AgentDone:
-		return s.success.Render(label)
-	case sessionmgr.AgentBlocked:
-		return s.warning.Render(label)
-	case sessionmgr.AgentAborted:
-		return s.danger.Render(label)
-	case sessionmgr.AgentIdle:
-		return s.info.Render(label)
-	default:
-		return s.muted.Render(label)
+func renderAgentStateDetail(
+	s styles,
+	state sessionmgr.AgentState,
+	icons sessionmgr.IconSet,
+) string {
+	if icons.AgentStateUsesIcons() {
+		return rowText(renderAgentState(s, icons, state), string(state))
 	}
+	return renderAgentStateRaw(s, icons, state)
 }
 
 func agentStateText(state sessionmgr.AgentState) string {

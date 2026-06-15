@@ -21,6 +21,10 @@ const (
 	IconModeIcons  = "icons"
 	IconModeText   = "text"
 	IconModeNone   = "none"
+
+	AgentStateModeInherit = "inherit"
+	AgentStateModeIcons   = "icons"
+	AgentStateModeText    = "text"
 )
 
 type Config struct {
@@ -68,13 +72,24 @@ type ThemeColorsConfig struct {
 }
 
 type IconsConfig struct {
-	Mode    string     `toml:"mode"              json:"mode"`
-	Enabled *bool      `toml:"enabled,omitempty" json:"enabled,omitempty"`
-	ASCII   bool       `toml:"ascii,omitempty"   json:"ascii,omitempty"`
-	Session IconConfig `toml:"session"           json:"session"`
-	Zoxide  IconConfig `toml:"zoxide"            json:"zoxide"`
-	FD      IconConfig `toml:"fd"                json:"fd"`
-	Agent   IconConfig `toml:"agent"             json:"agent"`
+	Mode           string            `toml:"mode"                       json:"mode"`
+	AgentStateMode string            `toml:"agent_state_mode,omitempty" json:"agent_state_mode,omitempty"`
+	Enabled        *bool             `toml:"enabled,omitempty"          json:"enabled,omitempty"`
+	ASCII          bool              `toml:"ascii,omitempty"            json:"ascii,omitempty"`
+	Session        IconConfig        `toml:"session"                    json:"session"`
+	Zoxide         IconConfig        `toml:"zoxide"                     json:"zoxide"`
+	FD             IconConfig        `toml:"fd"                         json:"fd"`
+	Agent          IconConfig        `toml:"agent"                      json:"agent"`
+	AgentState     AgentStatesConfig `toml:"agent_state"                json:"agent_state"`
+}
+
+type AgentStatesConfig struct {
+	Working IconConfig `toml:"working" json:"working"`
+	Blocked IconConfig `toml:"blocked" json:"blocked"`
+	Aborted IconConfig `toml:"aborted" json:"aborted"`
+	Done    IconConfig `toml:"done"    json:"done"`
+	Idle    IconConfig `toml:"idle"    json:"idle"`
+	Unknown IconConfig `toml:"unknown" json:"unknown"`
 }
 
 type IconConfig struct {
@@ -112,11 +127,12 @@ func Default() Config {
 			Danger:        "9",
 		}},
 		Icons: IconsConfig{
-			Mode:    IconModeIcons,
-			Session: IconConfig{Icon: sessionmgr.IconSession + " ", Label: "S", Color: "10"},
-			Zoxide:  IconConfig{Icon: sessionmgr.IconZoxide + " ", Label: "Z", Color: "14"},
-			FD:      IconConfig{Icon: sessionmgr.IconFD + " ", Label: "F", Color: "11"},
-			Agent:   IconConfig{Icon: sessionmgr.IconAgent + "  ", Label: "A", Color: "13"},
+			Mode:       IconModeIcons,
+			AgentState: defaultAgentStatesConfig(),
+			Session:    IconConfig{Icon: sessionmgr.IconSession + " ", Label: "S", Color: "10"},
+			Zoxide:     IconConfig{Icon: sessionmgr.IconZoxide + " ", Label: "Z", Color: "14"},
+			FD:         IconConfig{Icon: sessionmgr.IconFD + " ", Label: "F", Color: "11"},
+			Agent:      IconConfig{Icon: sessionmgr.IconAgent + "  ", Label: "A", Color: "13"},
 		},
 		TypeFirst: TypeFirstConfig{Enabled: false, Prefix: DefaultPrefix},
 		Agents: AgentsConfig{
@@ -186,6 +202,7 @@ func (c *Config) Normalize() {
 	}
 	normalizeThemeColors(&c.Theme.Colors, defaults.Theme.Colors)
 	c.Icons.Mode = normalizeIconMode(c.Icons.Mode)
+	c.Icons.AgentStateMode = normalizeAgentStateMode(c.Icons.AgentStateMode)
 	if c.Icons.Enabled != nil && !*c.Icons.Enabled {
 		c.Icons.Mode = IconModeNone
 	} else if c.Icons.ASCII {
@@ -283,6 +300,7 @@ func (c *Config) Normalize() {
 	if strings.TrimSpace(c.Icons.Agent.Color) == "" {
 		c.Icons.Agent.Color = defaults.Icons.Agent.Color
 	}
+	normalizeAgentStatesConfig(&c.Icons.AgentState, defaults.Icons.AgentState)
 	if strings.TrimSpace(c.TypeFirst.Prefix) == "" {
 		c.TypeFirst.Prefix = DefaultPrefix
 	}
@@ -331,8 +349,10 @@ func (c Config) IconSet() sessionmgr.IconSet {
 	c.Normalize()
 	enabled := c.Icons.Mode != IconModeNone
 	return sessionmgr.IconSet{
-		Enabled: enabled,
-		ASCII:   c.Icons.Mode == IconModeText,
+		Enabled:        enabled,
+		ASCII:          c.Icons.Mode == IconModeText,
+		AgentStateMode: c.Icons.AgentStateMode,
+		AgentStates:    projectAgentStateStyles(c.Icons.AgentState),
 		Session: sessionmgr.IconStyle{
 			Icon:  c.Icons.Session.Icon,
 			ASCII: c.Icons.Session.Label,
@@ -470,5 +490,82 @@ func normalizeIconMode(mode string) string {
 		return IconModeNone
 	default:
 		return IconModeIcons
+	}
+}
+
+func defaultAgentStatesConfig() AgentStatesConfig {
+	return AgentStatesConfig{
+		Working: IconConfig{Icon: "▶", Label: "working"},
+		Blocked: IconConfig{Icon: "◆", Label: "blocked"},
+		Aborted: IconConfig{Icon: "■", Label: "aborted"},
+		Done:    IconConfig{Icon: "✓", Label: "done"},
+		Idle:    IconConfig{Icon: "◌", Label: "idle"},
+		Unknown: IconConfig{Icon: "?", Label: "unknown"},
+	}
+}
+
+func normalizeAgentStatesConfig(states *AgentStatesConfig, defaults AgentStatesConfig) {
+	normalizeAgentStateIcon(&states.Working, defaults.Working)
+	normalizeAgentStateIcon(&states.Blocked, defaults.Blocked)
+	normalizeAgentStateIcon(&states.Aborted, defaults.Aborted)
+	normalizeAgentStateIcon(&states.Done, defaults.Done)
+	normalizeAgentStateIcon(&states.Idle, defaults.Idle)
+	normalizeAgentStateIcon(&states.Unknown, defaults.Unknown)
+}
+
+func normalizeAgentStateIcon(state *IconConfig, defaults IconConfig) {
+	if strings.TrimSpace(state.Icon) == "" {
+		state.Icon = defaults.Icon
+	}
+	if strings.TrimSpace(state.Label) == "" {
+		state.Label = defaults.Label
+	}
+}
+
+func projectAgentStateStyles(states AgentStatesConfig) sessionmgr.AgentStateStyles {
+	return sessionmgr.AgentStateStyles{
+		Working: sessionmgr.IconStyle{
+			Icon:  states.Working.Icon,
+			ASCII: states.Working.Label,
+			Color: states.Working.Color,
+		},
+		Blocked: sessionmgr.IconStyle{
+			Icon:  states.Blocked.Icon,
+			ASCII: states.Blocked.Label,
+			Color: states.Blocked.Color,
+		},
+		Aborted: sessionmgr.IconStyle{
+			Icon:  states.Aborted.Icon,
+			ASCII: states.Aborted.Label,
+			Color: states.Aborted.Color,
+		},
+		Done: sessionmgr.IconStyle{
+			Icon:  states.Done.Icon,
+			ASCII: states.Done.Label,
+			Color: states.Done.Color,
+		},
+		Idle: sessionmgr.IconStyle{
+			Icon:  states.Idle.Icon,
+			ASCII: states.Idle.Label,
+			Color: states.Idle.Color,
+		},
+		Unknown: sessionmgr.IconStyle{
+			Icon:  states.Unknown.Icon,
+			ASCII: states.Unknown.Label,
+			Color: states.Unknown.Color,
+		},
+	}
+}
+
+func normalizeAgentStateMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "", "inherit", "default":
+		return AgentStateModeInherit
+	case "icon", "icons", "glyphs", "glyph":
+		return AgentStateModeIcons
+	case "text", "label", "labels":
+		return AgentStateModeText
+	default:
+		return AgentStateModeInherit
 	}
 }
