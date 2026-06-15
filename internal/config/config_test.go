@@ -268,17 +268,20 @@ func TestIconModes(t *testing.T) {
 
 func TestNormalizeAgentStateMode(t *testing.T) {
 	tests := map[string]string{
-		"":        AgentStateModeInherit,
-		"inherit": AgentStateModeInherit,
-		"default": AgentStateModeInherit,
-		"icon":    AgentStateModeIcons,
-		"icons":   AgentStateModeIcons,
-		"glyphs":  AgentStateModeIcons,
-		"glyph":   AgentStateModeIcons,
-		"text":    AgentStateModeText,
-		"label":   AgentStateModeText,
-		"labels":  AgentStateModeText,
-		"unknown": AgentStateModeInherit,
+		"":         AgentStateModeInherit,
+		"inherit":  AgentStateModeInherit,
+		"default":  AgentStateModeInherit,
+		"icon":     AgentStateModeIcons,
+		"icons":    AgentStateModeIcons,
+		"glyphs":   AgentStateModeIcons,
+		"glyph":    AgentStateModeIcons,
+		"text":     AgentStateModeText,
+		"label":    AgentStateModeText,
+		"labels":   AgentStateModeText,
+		"none":     AgentStateModeNone,
+		"off":      AgentStateModeNone,
+		"no-icons": AgentStateModeNone,
+		"unknown":  AgentStateModeInherit,
 	}
 	for in, want := range tests {
 		if got := normalizeAgentStateMode(in); got != want {
@@ -287,6 +290,33 @@ func TestNormalizeAgentStateMode(t *testing.T) {
 	}
 	if got := normalizeAgentStateMode(" GLYPHS "); got != AgentStateModeIcons {
 		t.Fatalf("normalizeAgentStateMode(%q) = %q, want %q", " GLYPHS ", got, AgentStateModeIcons)
+	}
+}
+
+func TestNormalizeTmuxStateMode(t *testing.T) {
+	tests := map[string]string{
+		"":         TmuxStateModeInherit,
+		"inherit":  TmuxStateModeInherit,
+		"default":  TmuxStateModeInherit,
+		"icon":     TmuxStateModeIcons,
+		"icons":    TmuxStateModeIcons,
+		"glyphs":   TmuxStateModeIcons,
+		"glyph":    TmuxStateModeIcons,
+		"text":     TmuxStateModeText,
+		"label":    TmuxStateModeText,
+		"labels":   TmuxStateModeText,
+		"none":     TmuxStateModeNone,
+		"off":      TmuxStateModeNone,
+		"no-icons": TmuxStateModeNone,
+		"unknown":  TmuxStateModeInherit,
+	}
+	for in, want := range tests {
+		if got := normalizeTmuxStateMode(in); got != want {
+			t.Fatalf("normalizeTmuxStateMode(%q) = %q, want %q", in, got, want)
+		}
+	}
+	if got := normalizeTmuxStateMode(" GLYPHS "); got != TmuxStateModeIcons {
+		t.Fatalf("normalizeTmuxStateMode(%q) = %q, want %q", " GLYPHS ", got, TmuxStateModeIcons)
 	}
 }
 
@@ -333,6 +363,165 @@ func TestIconSetAgentStateProjection(t *testing.T) {
 			icons.AgentStateUsesIcons(),
 			icons.AgentStateUsesLabels(),
 		)
+	}
+
+	cfg.Icons.AgentStateMode = AgentStateModeNone
+	icons = cfg.IconSet()
+	if icons.AgentStateUsesIcons() || icons.AgentStateUsesLabels() || !icons.AgentStateHidden() {
+		t.Fatalf(
+			"agent_state_mode=none projection = icons:%v labels:%v hidden:%v",
+			icons.AgentStateUsesIcons(),
+			icons.AgentStateUsesLabels(),
+			icons.AgentStateHidden(),
+		)
+	}
+}
+
+func TestIconSetTmuxStateProjection(t *testing.T) {
+	cfg := Default()
+	icons := cfg.IconSet()
+	if icons.TmuxStateMode != TmuxStateModeInherit {
+		t.Fatalf("default tmux_state_mode = %q, want inherit", icons.TmuxStateMode)
+	}
+	if !icons.TmuxStateUsesIcons() || icons.TmuxStateUsesLabels() {
+		t.Fatalf(
+			"inherit + icons mode projection = icons:%v labels:%v",
+			icons.TmuxStateUsesIcons(),
+			icons.TmuxStateUsesLabels(),
+		)
+	}
+
+	cfg.Icons.Mode = IconModeText
+	icons = cfg.IconSet()
+	if icons.TmuxStateUsesIcons() || !icons.TmuxStateUsesLabels() {
+		t.Fatalf(
+			"inherit + text mode projection = icons:%v labels:%v",
+			icons.TmuxStateUsesIcons(),
+			icons.TmuxStateUsesLabels(),
+		)
+	}
+
+	cfg.Icons.TmuxStateMode = TmuxStateModeIcons
+	icons = cfg.IconSet()
+	if !icons.TmuxStateUsesIcons() || icons.TmuxStateUsesLabels() {
+		t.Fatalf(
+			"icons override + text mode projection = icons:%v labels:%v",
+			icons.TmuxStateUsesIcons(),
+			icons.TmuxStateUsesLabels(),
+		)
+	}
+
+	cfg.Icons.Mode = IconModeIcons
+	cfg.Icons.TmuxStateMode = TmuxStateModeText
+	icons = cfg.IconSet()
+	if icons.TmuxStateUsesIcons() || !icons.TmuxStateUsesLabels() {
+		t.Fatalf(
+			"tmux_state_mode=text overrides icons mode projection = icons:%v labels:%v",
+			icons.TmuxStateUsesIcons(),
+			icons.TmuxStateUsesLabels(),
+		)
+	}
+
+	cfg.Icons.TmuxStateMode = TmuxStateModeNone
+	icons = cfg.IconSet()
+	if icons.TmuxStateUsesIcons() || icons.TmuxStateUsesLabels() || !icons.TmuxStateHidden() {
+		t.Fatalf(
+			"tmux_state_mode=none projection = icons:%v labels:%v hidden:%v",
+			icons.TmuxStateUsesIcons(),
+			icons.TmuxStateUsesLabels(),
+			icons.TmuxStateHidden(),
+		)
+	}
+}
+
+func TestDefaultTmuxStateDetachedColor(t *testing.T) {
+	cfg := Default()
+	if got := cfg.Icons.TmuxState.Detached.Color; got != "8" {
+		t.Fatalf("default detached color = %q, want 8", got)
+	}
+	icons := cfg.IconSet()
+	if got := icons.ForTmuxState(false).Color; got != "8" {
+		t.Fatalf("projected default detached color = %q, want 8", got)
+	}
+}
+
+func TestLoadTmuxStateModeConfig(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	path := Path()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	data := []byte(`
+[icons]
+mode = "icons"
+tmux_state_mode = "text"
+`)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	loaded, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if loaded.Icons.TmuxStateMode != TmuxStateModeText {
+		t.Fatalf("loaded tmux_state_mode = %q, want text", loaded.Icons.TmuxStateMode)
+	}
+}
+
+func TestLoadPerStateTmuxStateConfig(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	path := Path()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	data := []byte(`
+[icons]
+mode = "icons"
+
+[icons.tmux_state.attached]
+icon = "●"
+label = "attached"
+color = "10"
+
+[icons.tmux_state.detached]
+icon = "◌"
+label = "detached"
+color = "14"
+`)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	loaded, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if loaded.Icons.TmuxState.Attached.Icon != "●" {
+		t.Fatalf("attached icon = %q, want ●", loaded.Icons.TmuxState.Attached.Icon)
+	}
+	if loaded.Icons.TmuxState.Detached.Color != "14" {
+		t.Fatalf("detached color = %q, want 14", loaded.Icons.TmuxState.Detached.Color)
+	}
+	icons := loaded.IconSet()
+	if got := icons.ForTmuxState(true).Icon; got != "●" {
+		t.Fatalf("projected attached icon = %q, want ●", got)
+	}
+	if got := icons.ForTmuxState(false).Color; got != "14" {
+		t.Fatalf("projected detached color = %q, want 14", got)
+	}
+}
+
+func TestNormalizeTmuxStatePartialOverride(t *testing.T) {
+	cfg := Default()
+	cfg.Icons.TmuxState.Attached.Icon = "★"
+	cfg.Icons.TmuxState.Attached.Label = ""
+	cfg.Normalize()
+	if cfg.Icons.TmuxState.Attached.Icon != "★" {
+		t.Fatalf("attached icon = %q, want ★", cfg.Icons.TmuxState.Attached.Icon)
+	}
+	if cfg.Icons.TmuxState.Attached.Label != "attached" {
+		t.Fatalf("attached label = %q, want attached", cfg.Icons.TmuxState.Attached.Label)
 	}
 }
 

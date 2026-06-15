@@ -11,10 +11,17 @@ type IconSet struct {
 	ASCII          bool
 	AgentStateMode string
 	AgentStates    AgentStateStyles
+	TmuxStateMode  string
+	TmuxStates     TmuxStateStyles
 	Session        IconStyle
 	Zoxide         IconStyle
 	FD             IconStyle
 	Agent          IconStyle
+}
+
+type TmuxStateStyles struct {
+	Attached IconStyle
+	Detached IconStyle
 }
 
 type AgentStateStyles struct {
@@ -44,7 +51,18 @@ func DefaultIconSet() IconSet {
 	}
 }
 
+func (set IconSet) AgentStateHidden() bool {
+	return set.AgentStateMode == "none"
+}
+
+func (set IconSet) TmuxStateHidden() bool {
+	return set.TmuxStateMode == "none"
+}
+
 func (set IconSet) AgentStateUsesIcons() bool {
+	if set.AgentStateHidden() {
+		return false
+	}
 	switch set.AgentStateMode {
 	case "icons":
 		return true
@@ -56,7 +74,57 @@ func (set IconSet) AgentStateUsesIcons() bool {
 }
 
 func (set IconSet) AgentStateUsesLabels() bool {
+	if set.AgentStateHidden() {
+		return false
+	}
 	return !set.AgentStateUsesIcons()
+}
+
+func (set IconSet) TmuxStateUsesIcons() bool {
+	if set.TmuxStateHidden() {
+		return false
+	}
+	switch set.TmuxStateMode {
+	case "icons":
+		return true
+	case "text":
+		return false
+	default: // inherit
+		return set.Enabled && !set.ASCII
+	}
+}
+
+func (set IconSet) TmuxStateUsesLabels() bool {
+	if set.TmuxStateHidden() {
+		return false
+	}
+	return !set.TmuxStateUsesIcons()
+}
+
+func (set IconSet) ForTmuxState(attached bool) IconStyle {
+	style := set.rawTmuxState(attached)
+	defaults := defaultTmuxStateStyle(attached)
+	if style.Icon == "" {
+		style.Icon = defaults.Icon
+	}
+	if style.ASCII == "" {
+		style.ASCII = defaults.ASCII
+	}
+	return style
+}
+
+func defaultTmuxStateStyle(attached bool) IconStyle {
+	if attached {
+		return IconStyle{Icon: "●", ASCII: "attached"}
+	}
+	return IconStyle{Icon: "◌", ASCII: "detached"}
+}
+
+func (set IconSet) rawTmuxState(attached bool) IconStyle {
+	if attached {
+		return set.TmuxStates.Attached
+	}
+	return set.TmuxStates.Detached
 }
 
 func (set IconSet) ForState(state AgentState) IconStyle {

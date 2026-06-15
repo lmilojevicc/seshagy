@@ -376,7 +376,7 @@ func TestConfiguredASCIIIconsRenderInTUI(t *testing.T) {
 	model, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 28})
 	m = model.(Model)
 	out := sessionmgr.StripANSI(m.View())
-	for _, want := range []string{"S demo", "Z ~/code/demo", "F ~/src/demo", "A [working] pi"} {
+	for _, want := range []string{"S [detached] demo", "Z ~/code/demo", "F ~/src/demo", "A [working] pi"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("configured ascii icon output missing %q\n%s", want, out)
 		}
@@ -434,14 +434,14 @@ func TestNoIconsAgentRowsRenderStateLabel(t *testing.T) {
 	m.config = cfg
 
 	sessionPrimary, _ := m.rowParts(sessionmgr.Item{Kind: sessionmgr.KindSession, Name: "demo"})
-	if got := sessionmgr.StripANSI(sessionPrimary); got != "demo" {
-		t.Fatalf("no-icons session primary = %q, want no source or state prefix", got)
+	if got := sessionmgr.StripANSI(sessionPrimary); got != "[detached] demo" {
+		t.Fatalf("no-icons session primary = %q, want [detached] demo", got)
 	}
 	attachedPrimary, _ := m.rowParts(
 		sessionmgr.Item{Kind: sessionmgr.KindSession, Name: "attached", Attached: true},
 	)
-	if got := sessionmgr.StripANSI(attachedPrimary); got != "attached" {
-		t.Fatalf("no-icons attached session primary = %q, want no source or state prefix", got)
+	if got := sessionmgr.StripANSI(attachedPrimary); got != "[attached] attached" {
+		t.Fatalf("no-icons attached session primary = %q, want [attached] attached", got)
 	}
 	zoxidePrimary, _ := m.rowParts(
 		sessionmgr.Item{Kind: sessionmgr.KindZoxide, Path: "~/code/demo"},
@@ -582,6 +582,178 @@ func TestPartialAgentStateOverrideKeepsDefaultGlyph(t *testing.T) {
 	primary, _ := m.rowParts(item)
 	if got := sessionmgr.StripANSI(primary); !strings.Contains(got, "◆ pi") {
 		t.Fatalf("partial override blocked list row = %q, want default ◆ glyph", got)
+	}
+}
+
+func TestTextModeSessionDetailRendersAttachmentLabel(t *testing.T) {
+	m := newTestModel(t)
+	cfg := appconfig.Default()
+	cfg.Icons.Mode = appconfig.IconModeText
+	m.config = cfg
+
+	item := sessionmgr.Item{
+		Kind:     sessionmgr.KindSession,
+		Name:     "demo",
+		Attached: true,
+	}
+	detail := sessionmgr.StripANSI(strings.Join(m.detailLines(item, 40), "\n"))
+	if !strings.Contains(detail, "attached  "+"attached") {
+		t.Fatalf("text-mode session detail should render raw attachment label\n%s", detail)
+	}
+	if strings.Contains(detail, "[attached]") || strings.Contains(detail, "attached  ● attached") {
+		t.Fatalf("text-mode session detail should not render brackets or glyph\n%s", detail)
+	}
+}
+
+func TestTmuxStateOverrideIconsModeTextUsesIconsInListAndDetail(t *testing.T) {
+	m := newTestModel(t)
+	cfg := appconfig.Default()
+	cfg.Icons.Mode = appconfig.IconModeText
+	cfg.Icons.TmuxStateMode = appconfig.TmuxStateModeIcons
+	m.config = cfg
+
+	item := sessionmgr.Item{
+		Kind:     sessionmgr.KindSession,
+		Name:     "demo",
+		Attached: true,
+	}
+	primary, _ := m.rowParts(item)
+	if got := sessionmgr.StripANSI(primary); got != "S ● demo" {
+		t.Fatalf("tmux_state=icons list row = %q, want icon state", got)
+	}
+
+	detail := sessionmgr.StripANSI(strings.Join(m.detailLines(item, 40), "\n"))
+	if !strings.Contains(detail, "attached  ● attached") {
+		t.Fatalf("tmux_state=icons detail should show icon + raw label\n%s", detail)
+	}
+	if strings.Contains(detail, "[attached]") {
+		t.Fatalf("tmux_state=icons detail should not show bracket label\n%s", detail)
+	}
+}
+
+func TestTmuxStateTextOverridesIconsModeInListAndDetail(t *testing.T) {
+	m := newTestModel(t)
+	cfg := appconfig.Default()
+	cfg.Icons.Mode = appconfig.IconModeIcons
+	cfg.Icons.TmuxStateMode = appconfig.TmuxStateModeText
+	m.config = cfg
+
+	item := sessionmgr.Item{
+		Kind:     sessionmgr.KindSession,
+		Name:     "demo",
+		Attached: true,
+	}
+	primary, _ := m.rowParts(item)
+	if got := sessionmgr.StripANSI(primary); got != sessionmgr.IconSession+" [attached] demo" {
+		t.Fatalf("icons mode + tmux_state=text list row = %q, want text state label", got)
+	}
+
+	detail := sessionmgr.StripANSI(strings.Join(m.detailLines(item, 40), "\n"))
+	if !strings.Contains(detail, "attached  "+"attached") {
+		t.Fatalf("icons mode + tmux_state=text detail should show raw label\n%s", detail)
+	}
+	if strings.Contains(detail, "attached  ● attached") || strings.Contains(detail, "[attached]") {
+		t.Fatalf(
+			"icons mode + tmux_state=text detail should not show glyph or bracket label\n%s",
+			detail,
+		)
+	}
+}
+
+func TestIconsModeSessionDetailRendersGlyphAndRawLabel(t *testing.T) {
+	m := newTestModel(t)
+	item := sessionmgr.Item{
+		Kind:     sessionmgr.KindSession,
+		Name:     "demo",
+		Attached: true,
+	}
+	detail := sessionmgr.StripANSI(strings.Join(m.detailLines(item, 40), "\n"))
+	if !strings.Contains(detail, "attached  ● attached") {
+		t.Fatalf("icons-mode session detail should render glyph + raw label\n%s", detail)
+	}
+}
+
+func TestCustomTmuxStateIconInList(t *testing.T) {
+	m := newTestModel(t)
+	cfg := appconfig.Default()
+	cfg.Icons.Mode = appconfig.IconModeIcons
+	cfg.Icons.TmuxStateMode = appconfig.TmuxStateModeIcons
+	cfg.Icons.TmuxState.Attached.Icon = "★"
+	m.config = cfg
+
+	item := sessionmgr.Item{
+		Kind:     sessionmgr.KindSession,
+		Name:     "demo",
+		Attached: true,
+	}
+	primary, _ := m.rowParts(item)
+	if got := sessionmgr.StripANSI(primary); !strings.Contains(got, "★ demo") {
+		t.Fatalf("custom attached icon list row = %q, want ★ demo", got)
+	}
+}
+
+func TestTmuxStateModeNoneHidesListPrefix(t *testing.T) {
+	m := newTestModel(t)
+	cfg := appconfig.Default()
+	cfg.Icons.TmuxStateMode = appconfig.TmuxStateModeNone
+	m.config = cfg
+
+	item := sessionmgr.Item{Kind: sessionmgr.KindSession, Name: "demo", Attached: true}
+	primary, _ := m.rowParts(item)
+	if got := sessionmgr.StripANSI(primary); got != sessionmgr.IconSession+" demo" {
+		t.Fatalf("tmux_state=none list row = %q, want session icon + name only", got)
+	}
+
+	detail := sessionmgr.StripANSI(strings.Join(m.detailLines(item, 40), "\n"))
+	if !strings.Contains(detail, "attached  yes") {
+		t.Fatalf("tmux_state=none detail should show plain yes\n%s", detail)
+	}
+	if strings.Contains(detail, "●") || strings.Contains(detail, "[attached]") {
+		t.Fatalf("tmux_state=none detail should not show glyph or bracket label\n%s", detail)
+	}
+}
+
+func TestAgentStateModeNoneHidesListPrefix(t *testing.T) {
+	m := newTestModel(t)
+	cfg := appconfig.Default()
+	cfg.Icons.AgentStateMode = appconfig.AgentStateModeNone
+	m.config = cfg
+
+	item := sessionmgr.Item{
+		Kind:       sessionmgr.KindAgent,
+		AgentName:  "pi",
+		AgentState: sessionmgr.AgentWorking,
+	}
+	primary, _ := m.rowParts(item)
+	if got := sessionmgr.StripANSI(primary); got != sessionmgr.IconAgent+"  pi" {
+		t.Fatalf("agent_state=none list row = %q, want agent icon + name only", got)
+	}
+
+	detail := sessionmgr.StripANSI(strings.Join(m.detailLines(item, 40), "\n"))
+	if !strings.Contains(detail, "state     working") {
+		t.Fatalf("agent_state=none detail should show plain raw state\n%s", detail)
+	}
+	if strings.Contains(detail, "▶") || strings.Contains(detail, "[working]") {
+		t.Fatalf("agent_state=none detail should not show glyph or bracket label\n%s", detail)
+	}
+}
+
+func TestCustomTmuxStateLabelInTextMode(t *testing.T) {
+	m := newTestModel(t)
+	cfg := appconfig.Default()
+	cfg.Icons.Mode = appconfig.IconModeIcons
+	cfg.Icons.TmuxStateMode = appconfig.TmuxStateModeText
+	cfg.Icons.TmuxState.Attached.Label = "live"
+	m.config = cfg
+
+	item := sessionmgr.Item{
+		Kind:     sessionmgr.KindSession,
+		Name:     "demo",
+		Attached: true,
+	}
+	primary, _ := m.rowParts(item)
+	if got := sessionmgr.StripANSI(primary); !strings.Contains(got, "[live] demo") {
+		t.Fatalf("custom attached label list row = %q, want [live] demo", got)
 	}
 }
 

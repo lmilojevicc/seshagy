@@ -293,20 +293,23 @@ func (m Model) rowParts(item sessionmgr.Item) (string, string) {
 	switch item.Kind {
 	case sessionmgr.KindSession:
 		icons := m.config.IconSet()
-		state := ""
-		if !icons.ASCII && icons.Enabled {
-			state = s.info.Render("◌")
-			if item.Attached {
-				state = s.success.Render("●")
+		var state string
+		if !icons.TmuxStateHidden() {
+			state = renderTmuxState(s, icons, item.Attached)
+			if icons.TmuxStateUsesLabels() {
+				state = renderTmuxStateLabel(s, icons, item.Attached)
 			}
 		}
 		name := s.tabActive.Render(item.Name)
 		return rowText(m.iconFor(item.Kind), state, name), ago(item.Activity)
 	case sessionmgr.KindAgent:
 		icons := m.config.IconSet()
-		state := renderAgentState(s, icons, item.AgentState)
-		if icons.AgentStateUsesLabels() {
-			state = renderAgentStateLabel(s, icons, item.AgentState)
+		var state string
+		if !icons.AgentStateHidden() {
+			state = renderAgentState(s, icons, item.AgentState)
+			if icons.AgentStateUsesLabels() {
+				state = renderAgentStateLabel(s, icons, item.AgentState)
+			}
 		}
 		message := item.AgentMessage
 		if message == "" {
@@ -398,10 +401,8 @@ func (m Model) detailLines(item sessionmgr.Item, width int) []string {
 	s := m.styles
 	switch item.Kind {
 	case sessionmgr.KindSession:
-		attached := "no"
-		if item.Attached {
-			attached = s.success.Render("yes")
-		}
+		icons := m.config.IconSet()
+		attached := renderTmuxStateDetail(s, item.Attached, icons)
 		return []string{
 			s.title.Render(item.Name),
 			s.muted.Render("tmux session"),
@@ -642,6 +643,9 @@ func renderAgentStateDetail(
 	state sessionmgr.AgentState,
 	icons sessionmgr.IconSet,
 ) string {
+	if icons.AgentStateHidden() {
+		return agentStateText(state)
+	}
 	if icons.AgentStateUsesIcons() {
 		return rowText(renderAgentState(s, icons, state), string(state))
 	}
@@ -653,6 +657,68 @@ func agentStateText(state sessionmgr.AgentState) string {
 		return string(sessionmgr.AgentUnknown)
 	}
 	return string(state)
+}
+
+func renderTmuxState(s styles, icons sessionmgr.IconSet, attached bool) string {
+	style := icons.ForTmuxState(attached)
+	return renderTmuxStateStyled(s, attached, style.Icon, style.Color)
+}
+
+func renderTmuxStateLabel(s styles, icons sessionmgr.IconSet, attached bool) string {
+	style := icons.ForTmuxState(attached)
+	label := style.ASCII
+	if label == "" {
+		label = tmuxStateText(attached)
+	}
+	return renderTmuxStateStyled(s, attached, "["+label+"]", style.Color)
+}
+
+func renderTmuxStateRaw(s styles, icons sessionmgr.IconSet, attached bool) string {
+	style := icons.ForTmuxState(attached)
+	label := style.ASCII
+	if label == "" {
+		label = tmuxStateText(attached)
+	}
+	return renderTmuxStateStyled(s, attached, label, style.Color)
+}
+
+func renderTmuxStateStyled(s styles, attached bool, text, color string) string {
+	if strings.TrimSpace(color) != "" {
+		return lipgloss.NewStyle().Foreground(lipgloss.Color(color)).Render(text)
+	}
+	if attached {
+		return s.success.Render(text)
+	}
+	return s.muted.Render(text)
+}
+
+func renderTmuxStateDetail(
+	s styles,
+	attached bool,
+	icons sessionmgr.IconSet,
+) string {
+	if icons.TmuxStateHidden() {
+		if attached {
+			return "yes"
+		}
+		return "no"
+	}
+	if icons.TmuxStateUsesIcons() {
+		style := icons.ForTmuxState(attached)
+		label := style.ASCII
+		if label == "" {
+			label = tmuxStateText(attached)
+		}
+		return rowText(renderTmuxState(s, icons, attached), label)
+	}
+	return renderTmuxStateRaw(s, icons, attached)
+}
+
+func tmuxStateText(attached bool) string {
+	if attached {
+		return "attached"
+	}
+	return "detached"
 }
 
 func kv(s styles, key, value string) string {

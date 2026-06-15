@@ -374,6 +374,19 @@ prints the state name in brackets and ignores these settings.
   labels when `mode = "text"` or `"none"`
 - `"icons"` — per-state glyphs from `[icons.agent_state.*]` regardless of `mode`
 - `"text"` — per-state labels in brackets regardless of `mode`
+- `"none"` — hide state indicators in list rows; detail pane shows the raw state
+  string without glyphs or brackets
+
+`tmux_state_mode` selects how session attachment is shown in the TUI list and
+detail views. It overrides `mode` for attachment display only; source icons
+still follow `mode`. CLI output is unchanged.
+
+- `"inherit"` — follow `mode` (default): glyphs when `mode = "icons"`, bracketed
+  labels when `mode = "text"` or `"none"`
+- `"icons"` — per-state glyphs from `[icons.tmux_state.*]` regardless of `mode`
+- `"text"` — per-state labels in brackets regardless of `mode`
+- `"none"` — hide attachment indicators in list rows; detail pane shows plain
+  `yes` / `no` for the attached field
 
 Each source kind can be customized under `[icons.session]`, `[icons.zoxide]`,
 `[icons.fd]`, and `[icons.agent]`:
@@ -395,6 +408,15 @@ Agent state appearance is customized per state under
 | `label` | text shown when `agent_state_mode` resolves to text (wrapped in `[…]` in list rows) |
 | `color` | optional ANSI index or hex color; when empty, the TUI uses theme colors for that state |
 
+Session attachment appearance is customized under `[icons.tmux_state.attached]`
+and `[icons.tmux_state.detached]`:
+
+| Key | Purpose |
+| --- | --- |
+| `icon` | glyph shown when `tmux_state_mode` resolves to icons |
+| `label` | text shown when `tmux_state_mode` resolves to text (wrapped in `[…]` in list rows) |
+| `color` | optional ANSI index or hex color; when empty, the TUI uses theme success (attached) or muted (detached) |
+
 Default state glyphs and labels (from `seshagy config init`):
 
 | State | `icon` | `label` |
@@ -406,12 +428,20 @@ Default state glyphs and labels (from `seshagy config init`):
 | idle | `◌` | `idle` |
 | unknown | `?` | `unknown` |
 
+Default attachment glyphs, labels, and colors:
+
+| State | `icon` | `label` | `color` |
+| --- | --- | --- | --- |
+| attached | `●` | `attached` | `10` |
+| detached | `◌` | `detached` | `8` |
+
 Example (defaults from `seshagy config init`):
 
 ```toml
 [icons]
 mode = "icons"
 agent_state_mode = "inherit"
+tmux_state_mode = "inherit"
 
   [icons.session]
     icon = " "
@@ -440,6 +470,15 @@ agent_state_mode = "inherit"
   [icons.agent_state.blocked]
     icon = "◆"
     label = "blocked"
+
+  [icons.tmux_state.attached]
+    icon = "●"
+    label = "attached"
+
+  [icons.tmux_state.detached]
+    icon = "◌"
+    label = "detached"
+    color = "8"
 ```
 
 Nerd Font source icons with text state labels:
