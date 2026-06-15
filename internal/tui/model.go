@@ -45,13 +45,10 @@ type Model struct {
 	preview     string
 	previewKey  string
 	showPreview bool
-	// expandedAgentSessionKey holds the selected item key while its session id
-	// is shown in full in the agent preview footer and detail pane.
-	expandedAgentSessionKey string
-	showHelp                bool
-	loading                 bool
-	status                  string
-	err                     error
+	showHelp    bool
+	loading     bool
+	status      string
+	err         error
 
 	cache           map[sessionmgr.SourceMode]modeCache
 	refreshGen      map[sessionmgr.SourceMode]uint64

@@ -20,7 +20,7 @@ func newTestModel(t *testing.T) Model {
 	return New()
 }
 
-func TestAgentDetailAndPreviewShowSessionID(t *testing.T) {
+func TestAgentDetailShowsSessionID(t *testing.T) {
 	m := newTestModel(t)
 	model, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 32})
 	m = model.(Model)
@@ -38,27 +38,18 @@ func TestAgentDetailAndPreviewShowSessionID(t *testing.T) {
 	m.preview = "agent pane output"
 
 	detail := sessionmgr.StripANSI(strings.Join(m.detailLines(m.items[0], 40), "\n"))
-	if !strings.Contains(detail, "session") || !strings.Contains(detail, "session-12345678…") {
-		t.Fatalf("detail should show truncated session id\n%s", detail)
+	if !strings.Contains(detail, "session") ||
+		!strings.Contains(detail, "session-1234567890abcdef") {
+		t.Fatalf("detail should show session id clamped to width\n%s", detail)
 	}
 
 	preview := sessionmgr.StripANSI(m.renderPreviewPane(50, 12))
-	if !strings.Contains(preview, "session-12345678…") || !strings.Contains(preview, "V full") {
-		t.Fatalf("preview footer should show truncated session id and expand hint\n%s", preview)
+	if strings.Contains(preview, "session-1234567890abcdef") ||
+		strings.Contains(preview, "V full") {
+		t.Fatalf("preview should not show session id footer\n%s", preview)
 	}
-
-	model, _ = m.handleKey(keyMsg("V"))
-	m = model.(Model)
-	detail = sessionmgr.StripANSI(strings.Join(m.detailLines(m.items[0], 60), "\n"))
-	if !strings.Contains(detail, "session-1234567890abcdef") {
-		t.Fatalf("detail should show full session id after V\n%s", detail)
-	}
-	preview = sessionmgr.StripANSI(m.renderPreviewPane(50, 12))
-	if !strings.Contains(preview, "session-1234567890abcdef") {
-		t.Fatalf("preview footer should show full session id after V\n%s", preview)
-	}
-	if m.status != "session id: session-1234567890abcdef" {
-		t.Fatalf("status after expand = %q", m.status)
+	if !strings.Contains(preview, "agent pane output") {
+		t.Fatalf("preview should show pane output\n%s", preview)
 	}
 }
 
@@ -73,12 +64,6 @@ func TestAgentSessionIDHiddenWhenAbsent(t *testing.T) {
 	detail := sessionmgr.StripANSI(strings.Join(m.detailLines(item, 40), "\n"))
 	if strings.Contains(detail, "session") {
 		t.Fatalf("detail should omit session id when absent\n%s", detail)
-	}
-	m.items = []sessionmgr.Item{item}
-	m.preview = "output"
-	preview := sessionmgr.StripANSI(m.renderPreviewPane(50, 10))
-	if strings.Contains(preview, "V full") || strings.Contains(preview, "session") {
-		t.Fatalf("preview should omit session footer when absent\n%s", preview)
 	}
 }
 
@@ -637,35 +622,6 @@ func TestTypeFirstTypingFiltersAndPrefixRunsActions(t *testing.T) {
 	m = model.(Model)
 	if m.source != sessionmgr.ModeAgents || m.prefixArmed {
 		t.Fatalf("prefixed g should switch to agents, source=%v armed=%v", m.source, m.prefixArmed)
-	}
-}
-
-func TestTypeFirstVTogglesSessionIDExpand(t *testing.T) {
-	m := newTestModel(t)
-	m.config.TypeFirst.Enabled = true
-	m.config.TypeFirst.Prefix = appconfig.DefaultPrefix
-	m.items = []sessionmgr.Item{
-		{
-			Kind:           sessionmgr.KindAgent,
-			Name:           "pi",
-			AgentName:      "pi",
-			AgentState:     sessionmgr.AgentWorking,
-			PaneID:         "%1",
-			AgentSessionID: "session-1234567890abcdef",
-		},
-	}
-	m.cursor = 0
-
-	model, _ := m.handleKey(keyMsg("V"))
-	m = model.(Model)
-	if m.query != "" {
-		t.Fatalf("V should toggle session id, not filter; query = %q", m.query)
-	}
-	if m.expandedAgentSessionKey != m.items[0].Key() {
-		t.Fatalf("expected expanded session id, key = %q", m.expandedAgentSessionKey)
-	}
-	if m.status != "session id: session-1234567890abcdef" {
-		t.Fatalf("status after V = %q", m.status)
 	}
 }
 

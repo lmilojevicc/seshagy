@@ -130,8 +130,6 @@ func (m Model) handleActionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "p", "alt+p":
 		m.showPreview = !m.showPreview
 		return m, m.previewForSelection()
-	case "V":
-		return m.toggleAgentSessionIDExpand()
 	case "s":
 		return m.cycleAgentStateFilter()
 	case "S":
@@ -220,7 +218,7 @@ func isPrintableKey(msg tea.KeyMsg) bool {
 
 func isUnprefixedNavigationKey(msg tea.KeyMsg) bool {
 	switch msg.String() {
-	case "enter", "up", "down", "pgup", "ctrl+u", "pgdown", "ctrl+d", "home", "end", "V":
+	case "enter", "up", "down", "pgup", "ctrl+u", "pgdown", "ctrl+d", "home", "end":
 		return true
 	default:
 		return false
@@ -380,21 +378,6 @@ func (m Model) applyTypeFirstSetup(enabled bool) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	return m, startupIntegrationsCmd()
-}
-
-func (m Model) toggleAgentSessionIDExpand() (tea.Model, tea.Cmd) {
-	item, ok := m.selectedItem()
-	if !ok || item.Kind != sessionmgr.KindAgent || item.AgentSessionID == "" {
-		return m, nil
-	}
-	if m.expandedAgentSessionKey == item.Key() {
-		m.expandedAgentSessionKey = ""
-		m.status = "session id truncated"
-	} else {
-		m.expandedAgentSessionKey = item.Key()
-		m.status = "session id: " + item.AgentSessionID
-	}
-	return m, nil
 }
 
 func (m Model) switchSource(source sessionmgr.SourceMode) (tea.Model, tea.Cmd) {
