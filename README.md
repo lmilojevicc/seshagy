@@ -180,7 +180,6 @@ installed agent so hook versions stay current.
 | `i` | open integration installer prompt |
 | `m` | change classic/type-first input mode |
 | `p` | toggle preview pane |
-| `V` | expand/collapse native agent session id on selected pane |
 | `?` / `h` | toggle help |
 | `q` / `esc` / `ctrl-c` | quit |
 
@@ -360,11 +359,34 @@ of seshagy without extra config.
 
 `[icons]` controls row prefixes in the list pane.
 
-`mode` selects how icons render:
+`mode` selects how source-kind prefixes render:
 
 - `"icons"` — Nerd Font glyphs (default)
 - `"text"` — single-letter labels
 - `"none"` — no prefix
+
+`agent_state_mode` selects how agent pane state is shown in the TUI list and
+detail views. It overrides `mode` for state display only; source icons still
+follow `mode`. CLI output (`seshagy list`, fzf actions, and similar) always
+prints the state name in brackets and ignores these settings.
+
+- `"inherit"` — follow `mode` (default): glyphs when `mode = "icons"`, bracketed
+  labels when `mode = "text"` or `"none"`
+- `"icons"` — per-state glyphs from `[icons.agent_state.*]` regardless of `mode`
+- `"text"` — per-state labels in brackets regardless of `mode`
+- `"none"` — hide state indicators in list rows; detail pane shows the raw state
+  string without glyphs or brackets
+
+`tmux_state_mode` selects how session attachment is shown in the TUI list and
+detail views. It overrides `mode` for attachment display only; source icons
+still follow `mode`. CLI output is unchanged.
+
+- `"inherit"` — follow `mode` (default): glyphs when `mode = "icons"`, bracketed
+  labels when `mode = "text"` or `"none"`
+- `"icons"` — per-state glyphs from `[icons.tmux_state.*]` regardless of `mode`
+- `"text"` — per-state labels in brackets regardless of `mode`
+- `"none"` — hide attachment indicators in list rows; detail pane shows plain
+  `yes` / `no` for the attached field
 
 Each source kind can be customized under `[icons.session]`, `[icons.zoxide]`,
 `[icons.fd]`, and `[icons.agent]`:
@@ -375,11 +397,51 @@ Each source kind can be customized under `[icons.session]`, `[icons.zoxide]`,
 | `label` | text shown in `text` mode |
 | `color` | ANSI index or hex color for that icon |
 
+Agent state appearance is customized per state under
+`[icons.agent_state.working]`, `[icons.agent_state.blocked]`,
+`[icons.agent_state.aborted]`, `[icons.agent_state.done]`,
+`[icons.agent_state.idle]`, and `[icons.agent_state.unknown]`:
+
+| Key | Purpose |
+| --- | --- |
+| `icon` | glyph shown when `agent_state_mode` resolves to icons |
+| `label` | text shown when `agent_state_mode` resolves to text (wrapped in `[…]` in list rows) |
+| `color` | optional ANSI index or hex color; when empty, the TUI uses theme colors for that state |
+
+Session attachment appearance is customized under `[icons.tmux_state.attached]`
+and `[icons.tmux_state.detached]`:
+
+| Key | Purpose |
+| --- | --- |
+| `icon` | glyph shown when `tmux_state_mode` resolves to icons |
+| `label` | text shown when `tmux_state_mode` resolves to text (wrapped in `[…]` in list rows) |
+| `color` | optional ANSI index or hex color; when empty, the TUI uses theme success (attached) or muted (detached) |
+
+Default state glyphs and labels (from `seshagy config init`):
+
+| State | `icon` | `label` |
+| --- | --- | --- |
+| working | `▶` | `working` |
+| blocked | `◆` | `blocked` |
+| aborted | `■` | `aborted` |
+| done | `✓` | `done` |
+| idle | `◌` | `idle` |
+| unknown | `?` | `unknown` |
+
+Default attachment glyphs, labels, and colors:
+
+| State | `icon` | `label` | `color` |
+| --- | --- | --- | --- |
+| attached | `●` | `attached` | `10` |
+| detached | `◌` | `detached` | `8` |
+
 Example (defaults from `seshagy config init`):
 
 ```toml
 [icons]
 mode = "icons"
+agent_state_mode = "inherit"
+tmux_state_mode = "inherit"
 
   [icons.session]
     icon = " "
@@ -400,6 +462,47 @@ mode = "icons"
     icon = "  "
     label = "A"
     color = "13"
+
+  [icons.agent_state.working]
+    icon = "▶"
+    label = "working"
+
+  [icons.agent_state.blocked]
+    icon = "◆"
+    label = "blocked"
+
+  [icons.tmux_state.attached]
+    icon = "●"
+    label = "attached"
+
+  [icons.tmux_state.detached]
+    icon = "◌"
+    label = "detached"
+    color = "8"
+```
+
+Nerd Font source icons with text state labels:
+
+```toml
+[icons]
+mode = "icons"
+agent_state_mode = "text"
+```
+
+Custom per-state icons while keeping Nerd Font source prefixes:
+
+```toml
+[icons]
+mode = "icons"
+agent_state_mode = "icons"
+
+  [icons.agent_state.working]
+    icon = "󰄬 "
+    color = "10"
+
+  [icons.agent_state.blocked]
+    icon = "󰀦 "
+    color = "11"
 ```
 
 Run `seshagy config init` to write the full default `config.toml`, then edit

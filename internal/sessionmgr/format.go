@@ -7,12 +7,30 @@ import (
 )
 
 type IconSet struct {
-	Enabled bool
-	ASCII   bool
-	Session IconStyle
-	Zoxide  IconStyle
-	FD      IconStyle
-	Agent   IconStyle
+	Enabled        bool
+	ASCII          bool
+	AgentStateMode string
+	AgentStates    AgentStateStyles
+	TmuxStateMode  string
+	TmuxStates     TmuxStateStyles
+	Session        IconStyle
+	Zoxide         IconStyle
+	FD             IconStyle
+	Agent          IconStyle
+}
+
+type TmuxStateStyles struct {
+	Attached IconStyle
+	Detached IconStyle
+}
+
+type AgentStateStyles struct {
+	Working IconStyle
+	Blocked IconStyle
+	Aborted IconStyle
+	Done    IconStyle
+	Idle    IconStyle
+	Unknown IconStyle
 }
 
 type IconStyle struct {
@@ -30,6 +48,128 @@ func DefaultIconSet() IconSet {
 		Zoxide:  IconStyle{Icon: IconZoxide + " ", ASCII: "Z", Color: "14"},
 		FD:      IconStyle{Icon: IconFD + " ", ASCII: "F", Color: "11"},
 		Agent:   IconStyle{Icon: IconAgent + "  ", ASCII: "A", Color: "13"},
+	}
+}
+
+func (set IconSet) AgentStateHidden() bool {
+	return set.AgentStateMode == "none"
+}
+
+func (set IconSet) TmuxStateHidden() bool {
+	return set.TmuxStateMode == "none"
+}
+
+func (set IconSet) AgentStateUsesIcons() bool {
+	if set.AgentStateHidden() {
+		return false
+	}
+	switch set.AgentStateMode {
+	case "icons":
+		return true
+	case "text":
+		return false
+	default: // inherit
+		return set.Enabled && !set.ASCII
+	}
+}
+
+func (set IconSet) AgentStateUsesLabels() bool {
+	if set.AgentStateHidden() {
+		return false
+	}
+	return !set.AgentStateUsesIcons()
+}
+
+func (set IconSet) TmuxStateUsesIcons() bool {
+	if set.TmuxStateHidden() {
+		return false
+	}
+	switch set.TmuxStateMode {
+	case "icons":
+		return true
+	case "text":
+		return false
+	default: // inherit
+		return set.Enabled && !set.ASCII
+	}
+}
+
+func (set IconSet) TmuxStateUsesLabels() bool {
+	if set.TmuxStateHidden() {
+		return false
+	}
+	return !set.TmuxStateUsesIcons()
+}
+
+func (set IconSet) ForTmuxState(attached bool) IconStyle {
+	style := set.rawTmuxState(attached)
+	defaults := defaultTmuxStateStyle(attached)
+	if style.Icon == "" {
+		style.Icon = defaults.Icon
+	}
+	if style.ASCII == "" {
+		style.ASCII = defaults.ASCII
+	}
+	return style
+}
+
+func defaultTmuxStateStyle(attached bool) IconStyle {
+	if attached {
+		return IconStyle{Icon: "●", ASCII: "attached"}
+	}
+	return IconStyle{Icon: "◌", ASCII: "detached"}
+}
+
+func (set IconSet) rawTmuxState(attached bool) IconStyle {
+	if attached {
+		return set.TmuxStates.Attached
+	}
+	return set.TmuxStates.Detached
+}
+
+func (set IconSet) ForState(state AgentState) IconStyle {
+	style := set.rawState(state)
+	defaults := defaultStateStyle(state)
+	if style.Icon == "" {
+		style.Icon = defaults.Icon
+	}
+	if style.ASCII == "" {
+		style.ASCII = defaults.ASCII
+	}
+	return style
+}
+
+func defaultStateStyle(state AgentState) IconStyle {
+	switch state {
+	case AgentWorking:
+		return IconStyle{Icon: "▶", ASCII: "working"}
+	case AgentBlocked:
+		return IconStyle{Icon: "◆", ASCII: "blocked"}
+	case AgentAborted:
+		return IconStyle{Icon: "■", ASCII: "aborted"}
+	case AgentDone:
+		return IconStyle{Icon: "✓", ASCII: "done"}
+	case AgentIdle:
+		return IconStyle{Icon: "◌", ASCII: "idle"}
+	default:
+		return IconStyle{Icon: "?", ASCII: "unknown"}
+	}
+}
+
+func (set IconSet) rawState(state AgentState) IconStyle {
+	switch state {
+	case AgentWorking:
+		return set.AgentStates.Working
+	case AgentBlocked:
+		return set.AgentStates.Blocked
+	case AgentAborted:
+		return set.AgentStates.Aborted
+	case AgentDone:
+		return set.AgentStates.Done
+	case AgentIdle:
+		return set.AgentStates.Idle
+	default:
+		return set.AgentStates.Unknown
 	}
 }
 

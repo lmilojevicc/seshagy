@@ -11,26 +11,6 @@ import (
 	"github.com/lmilojevicc/seshagy/internal/sessionmgr"
 )
 
-const agentSessionIDPreviewMax = 16
-
-func (m Model) agentSessionIDExpanded(item sessionmgr.Item) bool {
-	return item.AgentSessionID != "" && m.expandedAgentSessionKey == item.Key()
-}
-
-func formatAgentSessionID(id string, full bool, maxW int) string {
-	if id == "" {
-		return ""
-	}
-	display := id
-	if !full {
-		runes := []rune(id)
-		if len(runes) > agentSessionIDPreviewMax {
-			display = string(runes[:agentSessionIDPreviewMax]) + "…"
-		}
-	}
-	return clampText(display, maxW)
-}
-
 func (m Model) View() string {
 	if m.width == 0 {
 		return "loading…"
@@ -313,20 +293,23 @@ func (m Model) rowParts(item sessionmgr.Item) (string, string) {
 	switch item.Kind {
 	case sessionmgr.KindSession:
 		icons := m.config.IconSet()
-		state := ""
-		if icons.Enabled {
-			state = s.info.Render("◌")
-			if item.Attached {
-				state = s.success.Render("●")
+		var state string
+		if !icons.TmuxStateHidden() {
+			state = renderTmuxState(s, icons, item.Attached)
+			if icons.TmuxStateUsesLabels() {
+				state = renderTmuxStateLabel(s, icons, item.Attached)
 			}
 		}
 		name := s.tabActive.Render(item.Name)
 		return rowText(m.iconFor(item.Kind), state, name), ago(item.Activity)
 	case sessionmgr.KindAgent:
 		icons := m.config.IconSet()
-		state := renderAgentState(s, item.AgentState)
-		if !icons.Enabled {
-			state = renderAgentStateLabel(s, item.AgentState)
+		var state string
+		if !icons.AgentStateHidden() {
+			state = renderAgentState(s, icons, item.AgentState)
+			if icons.AgentStateUsesLabels() {
+				state = renderAgentStateLabel(s, icons, item.AgentState)
+			}
 		}
 		message := item.AgentMessage
 		if message == "" {
@@ -418,10 +401,8 @@ func (m Model) detailLines(item sessionmgr.Item, width int) []string {
 	s := m.styles
 	switch item.Kind {
 	case sessionmgr.KindSession:
-		attached := "no"
-		if item.Attached {
-			attached = s.success.Render("yes")
-		}
+		icons := m.config.IconSet()
+		attached := renderTmuxStateDetail(s, item.Attached, icons)
 		return []string{
 			s.title.Render(item.Name),
 			s.muted.Render("tmux session"),
@@ -433,35 +414,19 @@ func (m Model) detailLines(item sessionmgr.Item, width int) []string {
 			kv(s, "created", ago(item.Created)),
 		}
 	case sessionmgr.KindAgent:
-		suffix := item.AgentMessage
-		if suffix == "" {
-			suffix = item.AgentSource
-		}
+		icons := m.config.IconSet()
+		stateValue := renderAgentStateDetail(s, item.AgentState, icons)
 		lines := []string{
 			s.title.Render(item.AgentName),
 			s.muted.Render("agent pane"),
 			"",
-			kv(s, "state", renderAgentState(s, item.AgentState)+" "+string(item.AgentState)),
+			kv(s, "state", stateValue),
 			kv(s, "pane", item.PaneID),
 			kv(s, "where", item.Location),
 			kv(s, "path", item.Path),
 		}
 		if item.AgentSessionID != "" {
-			lines = append(
-				lines,
-				kv(
-					s,
-					"session",
-					formatAgentSessionID(
-						item.AgentSessionID,
-						m.agentSessionIDExpanded(item),
-						width-8,
-					),
-				),
-			)
-		}
-		if suffix != "" {
-			lines = append(lines, kv(s, "note", clampText(suffix, width-8)))
+			lines = append(lines, kv(s, "session", clampText(item.AgentSessionID, width-8)))
 		}
 		return lines
 	case sessionmgr.KindZoxide, sessionmgr.KindFD:
@@ -482,57 +447,25 @@ func (m Model) renderPreviewPane(width, height int) string {
 	innerW := max(10, width-4)
 	innerH := max(4, height-2)
 	title := "Preview"
-	var sessionFooter string
 	if item, ok := m.selectedItem(); ok {
 		title = "Preview · " + item.DisplayName()
-		if item.Kind == sessionmgr.KindAgent && item.AgentSessionID != "" {
-			sessionFooter = m.renderAgentSessionIDFooter(item, innerW)
-		}
-	}
-	footerLines := 0
-	if sessionFooter != "" {
-		footerLines = 1
 	}
 	content := m.preview
 	if content == "" {
 		content = s.muted.Render("preview loading…")
 	}
 	lines := []string{s.title.Render(clampText(title, innerW)), ""}
-	contentH := max(1, innerH-len(lines)-footerLines)
+	contentH := max(1, innerH-len(lines))
 	previewLines := strings.Split(content, "\n")
 	for i := 0; i < contentH && i < len(previewLines); i++ {
 		lines = append(lines, clampText(previewLines[i], innerW))
 	}
-	for len(lines) < innerH-footerLines {
+	for len(lines) < innerH {
 		lines = append(lines, "")
-	}
-	if sessionFooter != "" {
-		lines = append(lines, sessionFooter)
 	}
 	return s.pane.Width(width - 2).
 		Height(height - 2).
 		Render(trimHeight(strings.Join(lines, "\n"), innerH))
-}
-
-func (m Model) renderAgentSessionIDFooter(item sessionmgr.Item, width int) string {
-	s := m.styles
-	full := m.agentSessionIDExpanded(item)
-	value := formatAgentSessionID(item.AgentSessionID, full, width-20)
-	line := kv(s, "session", value)
-	if lipgloss.Width(line) > width {
-		line = clampText(line, width)
-	}
-	if len([]rune(item.AgentSessionID)) > agentSessionIDPreviewMax {
-		hint := "V full"
-		if full {
-			hint = "V truncate"
-		}
-		hint = s.muted.Render(" · " + hint)
-		if lipgloss.Width(line)+lipgloss.Width(hint) <= width {
-			line += hint
-		}
-	}
-	return line
 }
 
 func (m Model) renderFooter() string {
@@ -589,7 +522,6 @@ func (m Model) renderFooter() string {
 				s.key.Render(m.config.PrefixKey()) + " actions",
 				s.key.Render(m.config.PrefixKey()+" m") + " mode",
 				s.key.Render("backspace") + " edit",
-				s.key.Render("V") + " session id",
 			}, s.muted.Render(" · "))
 		} else {
 			helpParts := []string{
@@ -614,7 +546,6 @@ func (m Model) renderFooter() string {
 				s.key.Render("y")+" yazi",
 				s.key.Render("i")+" hooks",
 				s.key.Render("p")+" preview",
-				s.key.Render("V")+" session id",
 			)
 			help = strings.Join(helpParts, s.muted.Render(" · "))
 		}
@@ -666,37 +597,59 @@ func titleForMode(mode sessionmgr.SourceMode) string {
 	return mode.Names().Title
 }
 
-func renderAgentState(s styles, state sessionmgr.AgentState) string {
+func renderAgentState(s styles, icons sessionmgr.IconSet, state sessionmgr.AgentState) string {
+	style := icons.ForState(state)
+	return renderAgentStateStyled(s, state, style.Icon, style.Color)
+}
+
+func renderAgentStateLabel(s styles, icons sessionmgr.IconSet, state sessionmgr.AgentState) string {
+	style := icons.ForState(state)
+	label := style.ASCII
+	if label == "" {
+		label = agentStateText(state)
+	}
+	return renderAgentStateStyled(s, state, "["+label+"]", style.Color)
+}
+
+func renderAgentStateRaw(s styles, icons sessionmgr.IconSet, state sessionmgr.AgentState) string {
+	style := icons.ForState(state)
+	label := style.ASCII
+	if label == "" {
+		label = agentStateText(state)
+	}
+	return renderAgentStateStyled(s, state, label, style.Color)
+}
+
+func renderAgentStateStyled(s styles, state sessionmgr.AgentState, text, color string) string {
+	if strings.TrimSpace(color) != "" {
+		return lipgloss.NewStyle().Foreground(lipgloss.Color(color)).Render(text)
+	}
 	switch state {
-	case sessionmgr.AgentWorking:
-		return s.success.Render("▶")
+	case sessionmgr.AgentWorking, sessionmgr.AgentDone:
+		return s.success.Render(text)
 	case sessionmgr.AgentBlocked:
-		return s.warning.Render("◆")
+		return s.warning.Render(text)
 	case sessionmgr.AgentAborted:
-		return s.danger.Render("■")
-	case sessionmgr.AgentDone:
-		return s.success.Render("✓")
+		return s.danger.Render(text)
 	case sessionmgr.AgentIdle:
-		return s.info.Render("◌")
+		return s.info.Render(text)
 	default:
-		return s.muted.Render("?")
+		return s.muted.Render(text)
 	}
 }
 
-func renderAgentStateLabel(s styles, state sessionmgr.AgentState) string {
-	label := "[" + agentStateText(state) + "]"
-	switch state {
-	case sessionmgr.AgentWorking, sessionmgr.AgentDone:
-		return s.success.Render(label)
-	case sessionmgr.AgentBlocked:
-		return s.warning.Render(label)
-	case sessionmgr.AgentAborted:
-		return s.danger.Render(label)
-	case sessionmgr.AgentIdle:
-		return s.info.Render(label)
-	default:
-		return s.muted.Render(label)
+func renderAgentStateDetail(
+	s styles,
+	state sessionmgr.AgentState,
+	icons sessionmgr.IconSet,
+) string {
+	if icons.AgentStateHidden() {
+		return agentStateText(state)
 	}
+	if icons.AgentStateUsesIcons() {
+		return rowText(renderAgentState(s, icons, state), string(state))
+	}
+	return renderAgentStateRaw(s, icons, state)
 }
 
 func agentStateText(state sessionmgr.AgentState) string {
@@ -704,6 +657,68 @@ func agentStateText(state sessionmgr.AgentState) string {
 		return string(sessionmgr.AgentUnknown)
 	}
 	return string(state)
+}
+
+func renderTmuxState(s styles, icons sessionmgr.IconSet, attached bool) string {
+	style := icons.ForTmuxState(attached)
+	return renderTmuxStateStyled(s, attached, style.Icon, style.Color)
+}
+
+func renderTmuxStateLabel(s styles, icons sessionmgr.IconSet, attached bool) string {
+	style := icons.ForTmuxState(attached)
+	label := style.ASCII
+	if label == "" {
+		label = tmuxStateText(attached)
+	}
+	return renderTmuxStateStyled(s, attached, "["+label+"]", style.Color)
+}
+
+func renderTmuxStateRaw(s styles, icons sessionmgr.IconSet, attached bool) string {
+	style := icons.ForTmuxState(attached)
+	label := style.ASCII
+	if label == "" {
+		label = tmuxStateText(attached)
+	}
+	return renderTmuxStateStyled(s, attached, label, style.Color)
+}
+
+func renderTmuxStateStyled(s styles, attached bool, text, color string) string {
+	if strings.TrimSpace(color) != "" {
+		return lipgloss.NewStyle().Foreground(lipgloss.Color(color)).Render(text)
+	}
+	if attached {
+		return s.success.Render(text)
+	}
+	return s.muted.Render(text)
+}
+
+func renderTmuxStateDetail(
+	s styles,
+	attached bool,
+	icons sessionmgr.IconSet,
+) string {
+	if icons.TmuxStateHidden() {
+		if attached {
+			return "yes"
+		}
+		return "no"
+	}
+	if icons.TmuxStateUsesIcons() {
+		style := icons.ForTmuxState(attached)
+		label := style.ASCII
+		if label == "" {
+			label = tmuxStateText(attached)
+		}
+		return rowText(renderTmuxState(s, icons, attached), label)
+	}
+	return renderTmuxStateRaw(s, icons, attached)
+}
+
+func tmuxStateText(attached bool) string {
+	if attached {
+		return "attached"
+	}
+	return "detached"
 }
 
 func kv(s styles, key, value string) string {
