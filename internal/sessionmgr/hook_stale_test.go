@@ -75,38 +75,19 @@ func TestResolveAgentStateStaleHookWithoutInferenceReturnsUnknown(t *testing.T) 
 func TestApplyManifestFallbackStaleHookNoMatchStaysUnknown(t *testing.T) {
 	const pane = "%14"
 	screen := "plain shell output with no manifest markers\n"
-	origOut := tmuxOutput
-	tmuxOutput = func(ctx context.Context, args ...string) ([]byte, error) {
-		if len(args) >= 4 && args[0] == "capture-pane" && args[3] == pane {
+	SetTmuxHooksForTest(t, func(_ context.Context, args ...string) ([]byte, error) {
+		if MatchCapturePane(pane)(args) {
 			return []byte(screen), nil
 		}
 		return nil, nil
-	}
-	t.Cleanup(func() { tmuxOutput = origOut })
+	}, nil)
 
 	now := time.Unix(1_700_000_000, 0)
 	staleUpdated := strconv.FormatInt(now.Add(-10*time.Minute).Unix(), 10)
-	fields := []string{
-		"%14",
-		"work",
-		"1",
-		"0",
-		"/Users/milo/Projects/seshagy",
-		"1",
-		"1",
-		"1",
-		"0",
-		"claude",
-		"Claude Code",
-		"claude",
-		"working",
-		"",
-		staleUpdated,
-		"seshagy:claude",
-		"session-123",
-		"42",
-		"12345",
-	}
+	fields := agentExplainFields(pane, map[int]string{
+		12: "working",
+		14: staleUpdated,
+	})
 	raw := []byte(strings.Join(fields, paneSep) + "\n")
 
 	origNow := agentResolveNow
@@ -133,38 +114,19 @@ func TestApplyManifestFallbackStaleHookNoMatchStaysUnknown(t *testing.T) {
 func TestApplyManifestFallbackRecoversStaleHookState(t *testing.T) {
 	const pane = "%13"
 	screen := "Some output above\nRun a dynamic workflow? (esc to cancel)\n"
-	origOut := tmuxOutput
-	tmuxOutput = func(ctx context.Context, args ...string) ([]byte, error) {
-		if len(args) >= 4 && args[0] == "capture-pane" && args[3] == pane {
+	SetTmuxHooksForTest(t, func(_ context.Context, args ...string) ([]byte, error) {
+		if MatchCapturePane(pane)(args) {
 			return []byte(screen), nil
 		}
 		return nil, nil
-	}
-	t.Cleanup(func() { tmuxOutput = origOut })
+	}, nil)
 
 	now := time.Unix(1_700_000_000, 0)
 	staleUpdated := strconv.FormatInt(now.Add(-10*time.Minute).Unix(), 10)
-	fields := []string{
-		"%13",
-		"work",
-		"1",
-		"0",
-		"/Users/milo/Projects/seshagy",
-		"1",
-		"1",
-		"1",
-		"0",
-		"claude",
-		"",
-		"claude",
-		"working",
-		"",
-		staleUpdated,
-		"seshagy:claude",
-		"session-123",
-		"42",
-		"12345",
-	}
+	fields := agentExplainFields(pane, map[int]string{
+		12: "working",
+		14: staleUpdated,
+	})
 	raw := []byte(strings.Join(fields, paneSep) + "\n")
 
 	origNow := agentResolveNow

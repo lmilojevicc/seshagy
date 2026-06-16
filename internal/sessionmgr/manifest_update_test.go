@@ -12,6 +12,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func remoteManifestFixture(version, contains string) string {
@@ -28,14 +29,51 @@ contains = [%q]
 `, version, contains)
 }
 
+func resetManifestCache() {
+	manifestMu.Lock()
+	manifestByAgent = nil
+	manifestErr = nil
+	manifestLoaded = false
+	manifestMu.Unlock()
+}
+
+func restoreManifestGlobals() {
+	StopManifestAutoUpdate()
+	resetManifestCache()
+	ReloadManifests()
+}
+
+func restoreManifestEnv(configHome, stateHome, catalogURL, allowHTTP string) {
+	setEnvOrUnset("XDG_CONFIG_HOME", configHome)
+	setEnvOrUnset("XDG_STATE_HOME", stateHome)
+	setEnvOrUnset(manifestCatalogURLEnv, catalogURL)
+	setEnvOrUnset(manifestAllowHTTPCatalogEnv, allowHTTP)
+}
+
+func setEnvOrUnset(key, value string) {
+	if value == "" {
+		_ = os.Unsetenv(key)
+		return
+	}
+	_ = os.Setenv(key, value)
+}
+
+func clearRemoteManifestFilesInStateDir(stateDir string) {
+	remoteDir := filepath.Join(stateDir, "seshagy", "agent-detection", "remote")
+	entries, err := os.ReadDir(remoteDir)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		_ = os.Remove(filepath.Join(remoteDir, entry.Name()))
+	}
+}
+
 func withManifestStateDir(t *testing.T, fn func(t *testing.T)) {
 	t.Helper()
-	oldConfig := os.Getenv("XDG_CONFIG_HOME")
-	oldState := os.Getenv("XDG_STATE_HOME")
-	oldCatalog := os.Getenv(manifestCatalogURLEnv)
-	oldAllowHTTP := os.Getenv(manifestAllowHTTPCatalogEnv)
-	oldAllowFile := os.Getenv(manifestAllowFileCatalogEnv)
-
 	dir := t.TempDir()
 	configDir := filepath.Join(dir, "config")
 	stateDir := filepath.Join(dir, "state")
@@ -45,38 +83,26 @@ func withManifestStateDir(t *testing.T, fn func(t *testing.T)) {
 	if err := os.MkdirAll(stateDir, 0o700); err != nil {
 		t.Fatalf("MkdirAll(state) = %v", err)
 	}
+
+	origConfigHome := os.Getenv("XDG_CONFIG_HOME")
+	origStateHome := os.Getenv("XDG_STATE_HOME")
+	origCatalogURL := os.Getenv(manifestCatalogURLEnv)
+	origAllowHTTP := os.Getenv(manifestAllowHTTPCatalogEnv)
+
 	t.Setenv("XDG_CONFIG_HOME", configDir)
 	t.Setenv("XDG_STATE_HOME", stateDir)
 	t.Setenv(manifestCatalogURLEnv, "")
 	t.Setenv(manifestAllowHTTPCatalogEnv, "1")
 
+	StopManifestAutoUpdateForTest(t)
+
 	ReloadManifests()
+
 	t.Cleanup(func() {
-		if oldConfig == "" {
-			os.Unsetenv("XDG_CONFIG_HOME")
-		} else {
-			os.Setenv("XDG_CONFIG_HOME", oldConfig)
-		}
-		if oldState == "" {
-			os.Unsetenv("XDG_STATE_HOME")
-		} else {
-			os.Setenv("XDG_STATE_HOME", oldState)
-		}
-		if oldCatalog == "" {
-			os.Unsetenv(manifestCatalogURLEnv)
-		} else {
-			os.Setenv(manifestCatalogURLEnv, oldCatalog)
-		}
-		if oldAllowHTTP == "" {
-			os.Unsetenv(manifestAllowHTTPCatalogEnv)
-		} else {
-			os.Setenv(manifestAllowHTTPCatalogEnv, oldAllowHTTP)
-		}
-		if oldAllowFile == "" {
-			os.Unsetenv(manifestAllowFileCatalogEnv)
-		} else {
-			os.Setenv(manifestAllowFileCatalogEnv, oldAllowFile)
-		}
+		StopManifestAutoUpdate()
+		clearRemoteManifestFilesInStateDir(stateDir)
+		restoreManifestEnv(origConfigHome, origStateHome, origCatalogURL, origAllowHTTP)
+		resetManifestCache()
 		ReloadManifests()
 	})
 
@@ -85,16 +111,12 @@ func withManifestStateDir(t *testing.T, fn func(t *testing.T)) {
 
 func resetManifestCacheForTest(t *testing.T) {
 	t.Helper()
-	manifestMu.Lock()
-	manifestByAgent = nil
-	manifestErr = nil
-	manifestLoaded = false
-	manifestMu.Unlock()
+	resetManifestCache()
+	t.Cleanup(restoreManifestGlobals)
 }
 
 func TestManifestSummariesColdStartNeedsReload(t *testing.T) {
 	resetManifestCacheForTest(t)
-	t.Cleanup(func() { ReloadManifests() })
 
 	if summaries := ManifestSummaries(); len(summaries) != 0 {
 		t.Fatalf("ManifestSummaries() = %d entries before reload, want 0", len(summaries))
@@ -390,7 +412,7 @@ path = "codex.toml"
 
 		output, err := checkAndUpdateFromURL(context.Background(), server.URL+"/index.toml")
 		if err != nil {
-			t.Fatalf("checkAndUpdateFromURL() error = %v", err)
+			t.Fatalf("checkAndUpdateFromURL(context.Background(), ) error = %v", err)
 		}
 		if len(output.Updated) != 1 {
 			t.Fatalf("updated = %d, want 1", len(output.Updated))
@@ -441,7 +463,16 @@ path = "codex.toml"
 				}
 			}()
 		}
-		wg.Wait()
+		done := make(chan struct{})
+		go func() {
+			wg.Wait()
+			close(done)
+		}()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Fatal("CheckAndUpdateManifests workers did not finish within timeout")
+		}
 		close(errs)
 		for err := range errs {
 			t.Fatalf("CheckAndUpdateManifests() error = %v", err)
@@ -595,6 +626,61 @@ func TestFetchManifestTextRejectsRedirectToPrivateIP(t *testing.T) {
 	}
 }
 
+func TestFetchManifestTextFileURL(t *testing.T) {
+	t.Setenv(manifestAllowFileCatalogEnv, "1")
+	policy := manifestFetchPolicyFromEnv()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "catalog.toml")
+	content := "schema_version = 1\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("WriteFile() = %v", err)
+	}
+
+	got, err := fetchManifestText(context.Background(), "file://"+path, policy)
+	if err != nil {
+		t.Fatalf("fetchManifestText(context.Background(), ) = %v", err)
+	}
+	if got != content {
+		t.Fatalf("got = %q, want %q", got, content)
+	}
+}
+
+func TestFetchManifestTextHTTPError(t *testing.T) {
+	t.Setenv(manifestAllowHTTPCatalogEnv, "1")
+	policy := manifestFetchPolicyFromEnv()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "missing", http.StatusNotFound)
+	}))
+	t.Cleanup(server.Close)
+
+	_, err := fetchManifestText(context.Background(), server.URL, policy)
+	if err == nil {
+		t.Fatal("expected HTTP error")
+	}
+	if !strings.Contains(err.Error(), "HTTP 404") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestAtomicWriteFileCreatesParentDir(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "nested", "manifest.toml")
+	data := []byte("id = \"codex\"\n")
+
+	if err := atomicWriteFile(path, data); err != nil {
+		t.Fatalf("atomicWriteFile() = %v", err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile() = %v", err)
+	}
+	if string(got) != string(data) {
+		t.Fatalf("file = %q, want %q", got, data)
+	}
+}
+
 func TestFetchManifestTextAllowsLocalhostCatalogWithDevOptIn(t *testing.T) {
 	t.Setenv(manifestAllowHTTPCatalogEnv, "1")
 	policy := manifestFetchPolicyFromEnv()
@@ -606,9 +692,205 @@ func TestFetchManifestTextAllowsLocalhostCatalogWithDevOptIn(t *testing.T) {
 
 	got, err := fetchManifestText(context.Background(), server.URL, policy)
 	if err != nil {
-		t.Fatalf("fetchManifestText() = %v", err)
+		t.Fatalf("fetchManifestText(context.Background(), ) = %v", err)
 	}
 	if got != "local catalog" {
 		t.Fatalf("got = %q, want local catalog", got)
 	}
+}
+
+func TestManifestUpdateStatusAgentStatus(t *testing.T) {
+	status := ManifestUpdateStatus{
+		Agents: map[string]AgentRemoteStatus{
+			"codex": {LastResult: "updated"},
+		},
+	}
+	agentStatus, ok := status.AgentStatus("codex")
+	if !ok || agentStatus.LastResult != "updated" {
+		t.Fatalf("AgentStatus(codex) = (%#v, %v)", agentStatus, ok)
+	}
+	if _, ok := status.AgentStatus("missing"); ok {
+		t.Fatal("AgentStatus(missing) should be false")
+	}
+}
+
+func TestManifestUpdateHelpers(t *testing.T) {
+	if got := filepathDir("/catalog/codex.toml"); got != "/catalog" {
+		t.Fatalf("filepathDir() = %q", got)
+	}
+	if got := filepathDir("codex.toml"); got != "" {
+		t.Fatalf("filepathDir(single) = %q, want empty", got)
+	}
+
+	joined, err := joinManifestCatalogURL("https://example.com/catalog", "codex.toml")
+	if err != nil || joined != "https://example.com/catalog/codex.toml" {
+		t.Fatalf("joinManifestCatalogURL() = (%q, %v)", joined, err)
+	}
+	fileJoined, err := joinManifestCatalogURL("file:///tmp/catalog", "codex.toml")
+	if err != nil || fileJoined != "file:///tmp/catalog/codex.toml" {
+		t.Fatalf("joinManifestCatalogURL(file) = (%q, %v)", fileJoined, err)
+	}
+
+	status := &ManifestUpdateStatus{Agents: map[string]AgentRemoteStatus{}}
+	recordAgentUpdateFailure(status, "codex", 123, "fetch failed")
+	agentStatus := status.Agents["codex"]
+	if agentStatus.LastResult != "failed" || agentStatus.LastError == nil ||
+		*agentStatus.LastError != "fetch failed" {
+		t.Fatalf("recordAgentUpdateFailure() = %#v", agentStatus)
+	}
+}
+
+func TestStartManifestAutoUpdateRunsOnceAndReloads(t *testing.T) {
+	withManifestStateDir(t, func(t *testing.T) {
+		var fetchCount atomic.Int32
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			fetchCount.Add(1)
+			switch r.URL.Path {
+			case "/index.toml":
+				_, _ = w.Write([]byte(`
+schema_version = 1
+
+[[agents]]
+id = "codex"
+path = "codex.toml"
+`))
+			case "/codex.toml":
+				_, _ = w.Write([]byte(remoteManifestFixture("2026.06.10.3", "auto-update-ready")))
+			default:
+				http.NotFound(w, r)
+			}
+		}))
+		t.Cleanup(server.Close)
+
+		SetManifestAutoUpdateIntervalForTest(t, time.Hour)
+		StopManifestAutoUpdateForTest(t)
+
+		resetManifestCacheForTest(t)
+		StartManifestAutoUpdate(server.URL+"/index.toml", true)
+
+		deadline := time.Now().Add(5 * time.Second)
+		var content []byte
+		var readErr error
+		for time.Now().Before(deadline) {
+			content, readErr = os.ReadFile(remoteManifestPath("codex"))
+			if readErr == nil {
+				break
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		if readErr != nil {
+			t.Fatalf("ReadFile(remote codex) error = %v", readErr)
+		}
+		if fetchCount.Load() < 2 {
+			t.Fatalf("fetch count = %d, want catalog and manifest fetches", fetchCount.Load())
+		}
+		if !strings.Contains(string(content), `version = "2026.06.10.3"`) ||
+			!strings.Contains(string(content), `contains = ["auto-update-ready"]`) {
+			t.Fatalf("remote manifest on disk = %q", content)
+		}
+
+		var codexSummary *AgentManifestSummary
+		for time.Now().Before(deadline) {
+			for _, summary := range ManifestSummaries() {
+				if summary.AgentID == "codex" && summary.ActiveSource.Kind == ManifestSourceRemote {
+					codexSummary = &summary
+					break
+				}
+			}
+			if codexSummary != nil {
+				break
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		if codexSummary == nil {
+			t.Fatal("expected codex remote manifest summary after auto-update reload")
+		}
+		if codexSummary.ActiveVersion != "2026.06.10.3" {
+			t.Fatalf("codex active version = %q, want 2026.06.10.3", codexSummary.ActiveVersion)
+		}
+
+		before := fetchCount.Load()
+		time.Sleep(50 * time.Millisecond)
+		if got := fetchCount.Load(); got != before {
+			t.Fatalf("fetch count after wait = %d, want %d (no ticker run yet)", got, before)
+		}
+	})
+}
+
+func TestStopManifestAutoUpdateReturnsPromptlyWhileFetchBlocked(t *testing.T) {
+	withManifestStateDir(t, func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			<-r.Context().Done()
+		}))
+		t.Cleanup(server.Close)
+
+		SetManifestAutoUpdateIntervalForTest(t, time.Hour)
+		StopManifestAutoUpdateForTest(t)
+
+		StartManifestAutoUpdate(server.URL+"/index.toml", true)
+
+		done := make(chan struct{})
+		go func() {
+			StopManifestAutoUpdate()
+			close(done)
+		}()
+
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+			t.Fatal("StopManifestAutoUpdate did not return within 1s while fetch blocked")
+		}
+	})
+}
+
+func TestStartManifestAutoUpdateIgnoresFetchErrors(t *testing.T) {
+	withManifestStateDir(t, func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/index.toml":
+				_, _ = w.Write([]byte(`
+schema_version = 1
+
+[[agents]]
+id = "codex"
+path = "codex.toml"
+`))
+			case "/codex.toml":
+				http.NotFound(w, r)
+			default:
+				http.NotFound(w, r)
+			}
+		}))
+		t.Cleanup(server.Close)
+
+		SetManifestAutoUpdateIntervalForTest(t, time.Hour)
+		StopManifestAutoUpdateForTest(t)
+		resetManifestCacheForTest(t)
+
+		StartManifestAutoUpdate(server.URL+"/index.toml", true)
+
+		deadline := time.Now().Add(2 * time.Second)
+		for time.Now().Before(deadline) {
+			status := LoadManifestUpdateStatus()
+			agentStatus, ok := status.AgentStatus("codex")
+			if ok && agentStatus.LastResult == "failed" {
+				if status.LastResult == nil || *status.LastResult != "checked" {
+					t.Fatalf(
+						"catalog check = %#v, want checked after per-agent fetch error",
+						status.LastResult,
+					)
+				}
+				if agentStatus.LastError == nil ||
+					!strings.Contains(*agentStatus.LastError, "HTTP 404") {
+					t.Fatalf("agent failure = %#v, want HTTP 404", agentStatus)
+				}
+				if _, err := os.Stat(remoteManifestPath("codex")); !os.IsNotExist(err) {
+					t.Fatal("expected no cached remote manifest after per-agent fetch error")
+				}
+				return
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		t.Fatal("expected per-agent fetch failure recorded in status")
+	})
 }
