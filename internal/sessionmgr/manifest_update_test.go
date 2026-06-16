@@ -1,6 +1,7 @@
 package sessionmgr
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -250,7 +251,7 @@ path = "codex.toml"
 			t.Fatalf("Mkdir(status path) = %v", err)
 		}
 
-		_, err := checkAndUpdateFromURL(server.URL + "/index.toml")
+		_, err := checkAndUpdateFromURL(context.Background(), server.URL+"/index.toml")
 		if err == nil {
 			t.Fatal("expected save error")
 		}
@@ -387,7 +388,7 @@ path = "codex.toml"
 		}))
 		t.Cleanup(server.Close)
 
-		output, err := checkAndUpdateFromURL(server.URL + "/index.toml")
+		output, err := checkAndUpdateFromURL(context.Background(), server.URL+"/index.toml")
 		if err != nil {
 			t.Fatalf("checkAndUpdateFromURL() error = %v", err)
 		}
@@ -585,7 +586,7 @@ func TestFetchManifestTextRejectsRedirectToPrivateIP(t *testing.T) {
 	}))
 	t.Cleanup(redirector.Close)
 
-	_, err := fetchManifestText(redirector.URL, policy)
+	_, err := fetchManifestText(context.Background(), redirector.URL, policy)
 	if err == nil {
 		t.Fatal("expected redirect to private IP to be blocked")
 	}
@@ -603,7 +604,7 @@ func TestFetchManifestTextAllowsLocalhostCatalogWithDevOptIn(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	got, err := fetchManifestText(server.URL, policy)
+	got, err := fetchManifestText(context.Background(), server.URL, policy)
 	if err != nil {
 		t.Fatalf("fetchManifestText() = %v", err)
 	}
