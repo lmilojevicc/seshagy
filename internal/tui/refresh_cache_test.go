@@ -246,3 +246,45 @@ func TestHandleRefreshMsgStoresErrorInCache(t *testing.T) {
 		t.Fatalf("model err = %v", got.err)
 	}
 }
+
+func TestHandleRefreshMsgSetsStatusFromWarning(t *testing.T) {
+	const warn = "manifest fallback used"
+	m := New()
+	m.source = sessionmgr.ModeSessions
+	m.inflightRefresh = map[sessionmgr.SourceMode]uint64{
+		sessionmgr.ModeSessions: 1,
+	}
+
+	got, _ := m.handleRefreshMsg(refreshMsg{
+		source:  sessionmgr.ModeSessions,
+		gen:     1,
+		items:   testItems("session-a", "session-b"),
+		warning: warn,
+	})
+	if got.status != warn {
+		t.Fatalf("status = %q, want warning %q", got.status, warn)
+	}
+	entry, ok := got.cache[sessionmgr.ModeSessions]
+	if !ok || entry.warning != warn {
+		t.Fatalf("cache warning = %q, ok=%v", entry.warning, ok)
+	}
+}
+
+func TestSwitchSourceAppliesCachedWarningStatus(t *testing.T) {
+	const warn = "partial agent list"
+	m := New()
+	m.source = sessionmgr.ModeSessions
+	m.cache = map[sessionmgr.SourceMode]modeCache{
+		sessionmgr.ModeAgents: {
+			items:     testItems("agent-a"),
+			fetchedAt: time.Now(),
+			warning:   warn,
+		},
+	}
+
+	model, _ := m.switchSource(sessionmgr.ModeAgents)
+	got := model.(Model)
+	if got.status != warn {
+		t.Fatalf("status = %q, want cached warning %q", got.status, warn)
+	}
+}
