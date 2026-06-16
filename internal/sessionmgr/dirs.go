@@ -25,10 +25,6 @@ func ListZoxideDirs(ctx context.Context) ([]Item, error) {
 	return dirItems(out, KindZoxide), nil
 }
 
-func ListFDirs(ctx context.Context) ([]Item, error) {
-	return ListFDirsWithCommand(ctx, DefaultFDCommand)
-}
-
 func ListFDirsWithCommand(ctx context.Context, command string) ([]Item, error) {
 	command = strings.TrimSpace(command)
 	if command == "" {
