@@ -26,16 +26,6 @@ const (
 	StateDisplayModeIcons   = "icons"
 	StateDisplayModeText    = "text"
 	StateDisplayModeNone    = "none"
-
-	AgentStateModeInherit = StateDisplayModeInherit
-	AgentStateModeIcons   = StateDisplayModeIcons
-	AgentStateModeText    = StateDisplayModeText
-	AgentStateModeNone    = StateDisplayModeNone
-
-	TmuxStateModeInherit = StateDisplayModeInherit
-	TmuxStateModeIcons   = StateDisplayModeIcons
-	TmuxStateModeText    = StateDisplayModeText
-	TmuxStateModeNone    = StateDisplayModeNone
 )
 
 type Config struct {
@@ -221,8 +211,8 @@ func (c *Config) Normalize() {
 	}
 	normalizeThemeColors(&c.Theme.Colors, defaults.Theme.Colors)
 	c.Icons.Mode = normalizeIconMode(c.Icons.Mode)
-	c.Icons.AgentStateMode = normalizeAgentStateMode(c.Icons.AgentStateMode)
-	c.Icons.TmuxStateMode = normalizeTmuxStateMode(c.Icons.TmuxStateMode)
+	c.Icons.AgentStateMode = normalizeStateDisplayMode(c.Icons.AgentStateMode)
+	c.Icons.TmuxStateMode = normalizeStateDisplayMode(c.Icons.TmuxStateMode)
 	if c.Icons.Enabled != nil && !*c.Icons.Enabled {
 		c.Icons.Mode = IconModeNone
 	} else if c.Icons.ASCII {
@@ -230,96 +220,16 @@ func (c *Config) Normalize() {
 	}
 	c.Icons.Enabled = nil
 	c.Icons.ASCII = false
-	if strings.TrimSpace(c.Icons.Session.Icon) == "" {
-		c.Icons.Session.Icon = defaults.Icons.Session.Icon
-	}
-	if c.Icons.Session.Icon == sessionmgr.IconSession {
-		c.Icons.Session.Icon = defaults.Icons.Session.Icon
-	}
-	if legacy := strings.TrimSpace(
-		c.Icons.Session.ASCII,
-	); legacy != "" &&
-		(strings.TrimSpace(c.Icons.Session.Label) == "" || c.Icons.Session.Label == defaults.Icons.Session.Label) {
-		c.Icons.Session.Label = legacy
-	}
-	if strings.TrimSpace(c.Icons.Session.Label) == "" {
-		c.Icons.Session.Label = strings.TrimSpace(c.Icons.Session.ASCII)
-	}
-	if strings.TrimSpace(c.Icons.Session.Label) == "" {
-		c.Icons.Session.Label = defaults.Icons.Session.Label
-	}
-	c.Icons.Session.ASCII = ""
-	if strings.TrimSpace(c.Icons.Session.Color) == "" {
-		c.Icons.Session.Color = defaults.Icons.Session.Color
-	}
-	if strings.TrimSpace(c.Icons.Zoxide.Icon) == "" {
-		c.Icons.Zoxide.Icon = defaults.Icons.Zoxide.Icon
-	}
-	if c.Icons.Zoxide.Icon == sessionmgr.IconZoxide {
-		c.Icons.Zoxide.Icon = defaults.Icons.Zoxide.Icon
-	}
-	if legacy := strings.TrimSpace(
-		c.Icons.Zoxide.ASCII,
-	); legacy != "" &&
-		(strings.TrimSpace(c.Icons.Zoxide.Label) == "" || c.Icons.Zoxide.Label == defaults.Icons.Zoxide.Label) {
-		c.Icons.Zoxide.Label = legacy
-	}
-	if strings.TrimSpace(c.Icons.Zoxide.Label) == "" {
-		c.Icons.Zoxide.Label = strings.TrimSpace(c.Icons.Zoxide.ASCII)
-	}
-	if strings.TrimSpace(c.Icons.Zoxide.Label) == "" {
-		c.Icons.Zoxide.Label = defaults.Icons.Zoxide.Label
-	}
-	c.Icons.Zoxide.ASCII = ""
-	if strings.TrimSpace(c.Icons.Zoxide.Color) == "" {
-		c.Icons.Zoxide.Color = defaults.Icons.Zoxide.Color
-	}
-	if strings.TrimSpace(c.Icons.FD.Icon) == "" {
-		c.Icons.FD.Icon = defaults.Icons.FD.Icon
-	}
-	if c.Icons.FD.Icon == sessionmgr.IconFD {
-		c.Icons.FD.Icon = defaults.Icons.FD.Icon
-	}
-	if legacy := strings.TrimSpace(
-		c.Icons.FD.ASCII,
-	); legacy != "" &&
-		(strings.TrimSpace(c.Icons.FD.Label) == "" || c.Icons.FD.Label == defaults.Icons.FD.Label) {
-		c.Icons.FD.Label = legacy
-	}
-	if strings.TrimSpace(c.Icons.FD.Label) == "" {
-		c.Icons.FD.Label = strings.TrimSpace(c.Icons.FD.ASCII)
-	}
-	if strings.TrimSpace(c.Icons.FD.Label) == "" {
-		c.Icons.FD.Label = defaults.Icons.FD.Label
-	}
-	c.Icons.FD.ASCII = ""
-	if strings.TrimSpace(c.Icons.FD.Color) == "" {
-		c.Icons.FD.Color = defaults.Icons.FD.Color
-	}
-	if strings.TrimSpace(c.Icons.Agent.Icon) == "" {
-		c.Icons.Agent.Icon = defaults.Icons.Agent.Icon
-	}
-	if c.Icons.Agent.Icon == sessionmgr.IconAgent ||
-		c.Icons.Agent.Icon == sessionmgr.IconAgent+" " ||
-		c.Icons.Agent.Icon == "󰚩" {
-		c.Icons.Agent.Icon = defaults.Icons.Agent.Icon
-	}
-	if legacy := strings.TrimSpace(
-		c.Icons.Agent.ASCII,
-	); legacy != "" &&
-		(strings.TrimSpace(c.Icons.Agent.Label) == "" || c.Icons.Agent.Label == defaults.Icons.Agent.Label) {
-		c.Icons.Agent.Label = legacy
-	}
-	if strings.TrimSpace(c.Icons.Agent.Label) == "" {
-		c.Icons.Agent.Label = strings.TrimSpace(c.Icons.Agent.ASCII)
-	}
-	if strings.TrimSpace(c.Icons.Agent.Label) == "" {
-		c.Icons.Agent.Label = defaults.Icons.Agent.Label
-	}
-	c.Icons.Agent.ASCII = ""
-	if strings.TrimSpace(c.Icons.Agent.Color) == "" {
-		c.Icons.Agent.Color = defaults.Icons.Agent.Color
-	}
+	normalizeKindIcon(&c.Icons.Session, defaults.Icons.Session, sessionmgr.IconSession)
+	normalizeKindIcon(&c.Icons.Zoxide, defaults.Icons.Zoxide, sessionmgr.IconZoxide)
+	normalizeKindIcon(&c.Icons.FD, defaults.Icons.FD, sessionmgr.IconFD)
+	normalizeKindIcon(
+		&c.Icons.Agent,
+		defaults.Icons.Agent,
+		sessionmgr.IconAgent,
+		sessionmgr.IconAgent+" ",
+		"󰚩",
+	)
 	normalizeAgentStatesConfig(&c.Icons.AgentState, defaults.Icons.AgentState)
 	normalizeTmuxStatesConfig(&c.Icons.TmuxState, defaults.Icons.TmuxState)
 	if strings.TrimSpace(c.TypeFirst.Prefix) == "" {
@@ -580,6 +490,40 @@ func projectAgentStateStyles(states AgentStatesConfig) sessionmgr.AgentStateStyl
 	}
 }
 
+func normalizeKindIcon(
+	icon *IconConfig,
+	defaults IconConfig,
+	bareIcon string,
+	legacyIcons ...string,
+) {
+	if strings.TrimSpace(icon.Icon) == "" {
+		icon.Icon = defaults.Icon
+	}
+	if icon.Icon == bareIcon {
+		icon.Icon = defaults.Icon
+	}
+	for _, legacy := range legacyIcons {
+		if icon.Icon == legacy {
+			icon.Icon = defaults.Icon
+			break
+		}
+	}
+	if legacy := strings.TrimSpace(icon.ASCII); legacy != "" &&
+		(strings.TrimSpace(icon.Label) == "" || icon.Label == defaults.Label) {
+		icon.Label = legacy
+	}
+	if strings.TrimSpace(icon.Label) == "" {
+		icon.Label = strings.TrimSpace(icon.ASCII)
+	}
+	if strings.TrimSpace(icon.Label) == "" {
+		icon.Label = defaults.Label
+	}
+	icon.ASCII = ""
+	if strings.TrimSpace(icon.Color) == "" {
+		icon.Color = defaults.Color
+	}
+}
+
 func normalizeStateDisplayMode(mode string) string {
 	switch strings.ToLower(strings.TrimSpace(mode)) {
 	case "", "inherit", "default":
@@ -593,10 +537,6 @@ func normalizeStateDisplayMode(mode string) string {
 	default:
 		return StateDisplayModeInherit
 	}
-}
-
-func normalizeAgentStateMode(mode string) string {
-	return normalizeStateDisplayMode(mode)
 }
 
 func defaultTmuxStatesConfig() TmuxStatesConfig {
@@ -633,8 +573,4 @@ func projectTmuxStateStyles(states TmuxStatesConfig) sessionmgr.TmuxStateStyles 
 			Color: states.Detached.Color,
 		},
 	}
-}
-
-func normalizeTmuxStateMode(mode string) string {
-	return normalizeStateDisplayMode(mode)
 }
