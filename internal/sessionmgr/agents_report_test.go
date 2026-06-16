@@ -691,6 +691,47 @@ func TestReleaseThenReportSeqOrdering(t *testing.T) {
 	}
 }
 
+func TestReleaseAgentRejectsSeqLessWhenSeqExists(t *testing.T) {
+	const pane = "%18"
+	ctx := context.Background()
+	SetFixedTrackTime(t, time.Unix(1_700_000_000, 0))
+	f := InstallReportFakeTmux(t, pane)
+
+	if _, err := ReportAgent(ctx, AgentReport{
+		Pane:       pane,
+		Name:       "pi",
+		State:      AgentWorking,
+		Source:     "hook",
+		SourceSeen: true,
+		Seq:        70,
+		SeqSeen:    true,
+	}); err != nil {
+		t.Fatalf("report seq 70: %v", err)
+	}
+	snap := map[string]string{
+		"@agent_name":  f.Get(pane, "@agent_name"),
+		"@agent_state": f.Get(pane, "@agent_state"),
+		"@agent_seq":   f.Get(pane, "@agent_seq"),
+	}
+
+	released, err := ReleaseAgent(ctx, AgentRelease{
+		Pane:       pane,
+		Source:     "hook",
+		SourceSeen: true,
+	})
+	if err != nil {
+		t.Fatalf("seq-less release: %v", err)
+	}
+	if released {
+		t.Fatal("seq-less release should not apply when @agent_seq exists")
+	}
+	for opt, want := range snap {
+		if got := f.Get(pane, opt); got != want {
+			t.Fatalf("seq-less release changed %s = %q, want %q", opt, got, want)
+		}
+	}
+}
+
 func TestReleaseAgentWithoutSourceClearsForeignMetadata(t *testing.T) {
 	// Release without --source skips source matching and clears metadata even when
 	// @agent_source was set by a different hook integration.

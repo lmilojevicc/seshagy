@@ -169,6 +169,12 @@ func releaseAgentLocked(ctx context.Context, resolved string, opts AgentRelease)
 	if !agentSeqStillCurrent(ctx, resolved, opts.Seq, opts.SeqSeen) {
 		return false
 	}
+	if !opts.SeqSeen {
+		existingSeq, _ := showPaneOption(ctx, resolved, "@agent_seq")
+		if strings.TrimSpace(existingSeq) != "" {
+			return false
+		}
+	}
 	// Write seq first to claim the epoch with strict > comparison.
 	if opts.SeqSeen {
 		if !setAgentPaneOptionIfCurrent(
