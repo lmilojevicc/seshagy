@@ -137,8 +137,19 @@ func run(args []string) error {
 		}
 		return nil
 	default:
-		return tui.Run()
+		return unknownCommandError(args)
 	}
+}
+
+func unknownCommandError(args []string) error {
+	rest, jsonOnly := stripJSONFlag(args)
+	if len(rest) == 0 {
+		if jsonOnly {
+			return errors.New(joinUsage("<command>", "[--json]"))
+		}
+		return errors.New(joinUsage("<command>"))
+	}
+	return fmt.Errorf("unknown command: %q", rest[0])
 }
 
 func runGetItems(
@@ -518,6 +529,7 @@ func printItems(ctx context.Context, mode sessionmgr.SourceMode, jsonOutput bool
 	}
 	return nil
 }
+
 func deleteItem(ctx context.Context, raw string, jsonOutput bool) error {
 	cfg, err := appconfig.Load()
 	if err != nil {
@@ -558,8 +570,10 @@ func deleteItem(ctx context.Context, raw string, jsonOutput bool) error {
 	}
 }
 
-func parseReportArgs(args []string) (sessionmgr.AgentReport, error) {
-	var opts sessionmgr.AgentReport
+func forEachFlag(
+	args []string,
+	handle func(arg, key string, nextValue func() (string, error)) error,
+) error {
 	for i := 0; i < len(args); {
 		arg := args[i]
 		key, val, hasInline := splitFlag(arg)
@@ -573,111 +587,110 @@ func parseReportArgs(args []string) (sessionmgr.AgentReport, error) {
 			i++
 			return args[i], nil
 		}
+		if err := handle(arg, key, nextValue); err != nil {
+			return err
+		}
+		i++
+	}
+	return nil
+}
+
+func parseReportArgs(args []string) (sessionmgr.AgentReport, error) {
+	var opts sessionmgr.AgentReport
+	err := forEachFlag(args, func(arg, key string, nextValue func() (string, error)) error {
 		switch key {
 		case "--pane":
 			v, err := nextValue()
 			if err != nil {
-				return opts, err
+				return err
 			}
 			opts.Pane = v
 		case "--agent", "--name":
 			v, err := nextValue()
 			if err != nil {
-				return opts, err
+				return err
 			}
 			opts.Name = v
 		case "--state", "--status":
 			v, err := nextValue()
 			if err != nil {
-				return opts, err
+				return err
 			}
 			opts.State = sessionmgr.NormalizeAgentState(v)
 		case "--message":
 			v, err := nextValue()
 			if err != nil {
-				return opts, err
+				return err
 			}
 			opts.Message = v
 			opts.MessageSeen = true
 		case "--source":
 			v, err := nextValue()
 			if err != nil {
-				return opts, err
+				return err
 			}
 			opts.Source = v
 			opts.SourceSeen = true
 		case "--session-id":
 			v, err := nextValue()
 			if err != nil {
-				return opts, err
+				return err
 			}
 			opts.SessionID = v
 			opts.SessionIDSeen = true
 		case "--seq":
 			v, err := nextValue()
 			if err != nil {
-				return opts, err
+				return err
 			}
 			seq, err := parseSeqFlag(v, key)
 			if err != nil {
-				return opts, err
+				return err
 			}
 			opts.Seq = seq
 			opts.SeqSeen = true
 		default:
-			return opts, fmt.Errorf("unknown --report-agent flag: %s", arg)
+			return fmt.Errorf("unknown --report-agent flag: %s", arg)
 		}
-		i++
-	}
-	return opts, nil
+		return nil
+	})
+	return opts, err
 }
 
 func parseReleaseArgs(args []string) (sessionmgr.AgentRelease, error) {
 	var opts sessionmgr.AgentRelease
-	for i := 0; i < len(args); {
-		arg := args[i]
-		key, val, hasInline := splitFlag(arg)
-		nextValue := func() (string, error) {
-			if hasInline {
-				return val, nil
-			}
-			if i+1 >= len(args) {
-				return "", fmt.Errorf("%s requires a value", arg)
-			}
-			i++
-			return args[i], nil
-		}
+	err := forEachFlag(args, func(arg, key string, nextValue func() (string, error)) error {
 		switch key {
 		case "--pane":
 			v, err := nextValue()
 			if err != nil {
-				return opts, err
+				return err
 			}
 			opts.Pane = v
 		case "--source":
 			v, err := nextValue()
 			if err != nil {
-				return opts, err
+				return err
 			}
 			opts.Source = v
 			opts.SourceSeen = true
 		case "--seq":
 			v, err := nextValue()
 			if err != nil {
-				return opts, err
+				return err
 			}
 			seq, err := parseSeqFlag(v, key)
 			if err != nil {
-				return opts, err
+				return err
 			}
 			opts.Seq = seq
 			opts.SeqSeen = true
 		default:
-			return opts, fmt.Errorf("unknown --release-agent flag: %s", arg)
+			return fmt.Errorf("unknown --release-agent flag: %s", arg)
 		}
-		i++
-	}
-	return opts, nil
+		return nil
+	})
+	return opts, err
 }
 
 func parseSeqFlag(raw, flag string) (int64, error) {
