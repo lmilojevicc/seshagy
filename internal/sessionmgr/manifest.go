@@ -917,7 +917,7 @@ func manifestExplainLine(
 
 func formatManifestExplain(result manifestDetectionResult) string {
 	if result.FallbackReason != "" {
-		return fmt.Sprintf("fallback %s → %s", result.FallbackReason, agentStateLabel(result.State))
+		return fmt.Sprintf("fallback %s → %s", result.FallbackReason, AgentStateLabel(result.State))
 	}
 	if !result.Matched {
 		return "manifest skipped"
@@ -933,7 +933,7 @@ func formatManifestExplain(result manifestDetectionResult) string {
 		"rule %s (region %s) → %s",
 		result.RuleID,
 		result.Region,
-		agentStateLabel(result.State),
+		AgentStateLabel(result.State),
 	)
 	var flags []string
 	if result.VisibleIdle {

@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/BurntSushi/toml"
@@ -127,17 +128,21 @@ var manifestFetchHTTPClient = &http.Client{
 }
 
 func CheckAndUpdateManifests(catalogURL string) (ManifestUpdateOutput, error) {
-	manifestUpdateMu.Lock()
-	defer manifestUpdateMu.Unlock()
-	return checkAndUpdateFromURL(ResolveManifestCatalogURL(catalogURL))
+	return checkAndUpdateManifests(context.Background(), catalogURL)
 }
 
-func checkAndUpdateFromURL(catalogURL string) (ManifestUpdateOutput, error) {
+func checkAndUpdateManifests(ctx context.Context, catalogURL string) (ManifestUpdateOutput, error) {
+	manifestUpdateMu.Lock()
+	defer manifestUpdateMu.Unlock()
+	return checkAndUpdateFromURL(ctx, ResolveManifestCatalogURL(catalogURL))
+}
+
+func checkAndUpdateFromURL(ctx context.Context, catalogURL string) (ManifestUpdateOutput, error) {
 	policy := manifestFetchPolicyFromEnv()
 	if err := validateManifestCatalogURL(catalogURL, policy); err != nil {
 		return ManifestUpdateOutput{}, err
 	}
-	catalogContent, err := fetchManifestText(catalogURL, policy)
+	catalogContent, err := fetchManifestText(ctx, catalogURL, policy)
 	if err != nil {
 		return ManifestUpdateOutput{}, err
 	}
@@ -170,7 +175,7 @@ func checkAndUpdateFromURL(catalogURL string) (ManifestUpdateOutput, error) {
 		if err != nil {
 			return ManifestUpdateOutput{}, fmt.Errorf("catalog entry %s: %w", entry.agentID, err)
 		}
-		content, fetchErr := fetchManifestText(manifestURL, policy)
+		content, fetchErr := fetchManifestText(ctx, manifestURL, policy)
 		switch {
 		case fetchErr != nil:
 			recordAgentUpdateFailure(&status, entry.agentID, checkTime, fetchErr.Error())
@@ -343,7 +348,11 @@ func filepathDir(path string) string {
 	return ""
 }
 
-func fetchManifestText(rawURL string, policy manifestFetchPolicy) (string, error) {
+func fetchManifestText(
+	ctx context.Context,
+	rawURL string,
+	policy manifestFetchPolicy,
+) (string, error) {
 	if err := validateManifestCatalogURL(rawURL, policy); err != nil {
 		return "", err
 	}
@@ -366,10 +375,10 @@ func fetchManifestText(rawURL string, policy manifestFetchPolicy) (string, error
 		return string(data), nil
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	reqCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return "", fmt.Errorf("create request for %q: %w", rawURL, err)
 	}
@@ -501,22 +510,69 @@ func ManifestAutoUpdateEnabled(configured bool) bool {
 	return configured
 }
 
+var manifestAutoUpdateInterval atomic.Int64
+
+func init() {
+	manifestAutoUpdateInterval.Store((30 * time.Minute).Nanoseconds())
+}
+
+func manifestAutoUpdateTickerInterval() time.Duration {
+	return time.Duration(manifestAutoUpdateInterval.Load())
+}
+
+var (
+	manifestAutoUpdateMu     sync.Mutex
+	manifestAutoUpdateCancel context.CancelFunc
+	manifestAutoUpdateDone   chan struct{}
+)
+
 func StartManifestAutoUpdate(catalogURL string, enabled bool) {
 	if !ManifestAutoUpdateEnabled(enabled) {
 		return
 	}
-	go func() {
-		runManifestAutoUpdate(catalogURL)
-		ticker := time.NewTicker(30 * time.Minute)
-		defer ticker.Stop()
-		for range ticker.C {
-			runManifestAutoUpdate(catalogURL)
-		}
-	}()
+	manifestAutoUpdateMu.Lock()
+	defer manifestAutoUpdateMu.Unlock()
+	stopManifestAutoUpdateLocked()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	manifestAutoUpdateCancel = cancel
+	manifestAutoUpdateDone = done
+	go runManifestAutoUpdateLoop(ctx, catalogURL, done)
 }
 
-func runManifestAutoUpdate(catalogURL string) {
-	output, err := CheckAndUpdateManifests(catalogURL)
+func StopManifestAutoUpdate() {
+	manifestAutoUpdateMu.Lock()
+	defer manifestAutoUpdateMu.Unlock()
+	stopManifestAutoUpdateLocked()
+}
+
+func stopManifestAutoUpdateLocked() {
+	if manifestAutoUpdateCancel == nil {
+		return
+	}
+	manifestAutoUpdateCancel()
+	<-manifestAutoUpdateDone
+	manifestAutoUpdateCancel = nil
+	manifestAutoUpdateDone = nil
+}
+
+func runManifestAutoUpdateLoop(ctx context.Context, catalogURL string, done chan struct{}) {
+	defer close(done)
+	runManifestAutoUpdate(ctx, catalogURL)
+	ticker := time.NewTicker(manifestAutoUpdateTickerInterval())
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			runManifestAutoUpdate(ctx, catalogURL)
+		}
+	}
+}
+
+func runManifestAutoUpdate(ctx context.Context, catalogURL string) {
+	output, err := checkAndUpdateManifests(ctx, catalogURL)
 	if err != nil {
 		return
 	}

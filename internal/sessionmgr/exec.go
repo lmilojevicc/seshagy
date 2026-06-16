@@ -53,7 +53,7 @@ func InTmuxPopup(ctx context.Context) (bool, error) {
 	if !InTmux() {
 		return false, nil
 	}
-	out, err := tmuxCommand(ctx, "display-message", "-p", "#{pane_id}").Output()
+	out, err := tmuxOutput(ctx, "display-message", "-p", "#{pane_id}")
 	if err != nil {
 		return false, err
 	}
@@ -73,7 +73,7 @@ func detectTmuxPopup(envPane, currentPane string) bool {
 }
 
 func CurrentTmuxSession(ctx context.Context) (string, error) {
-	out, err := tmuxCommand(ctx, "display-message", "-p", "#S").Output()
+	out, err := tmuxOutput(ctx, "display-message", "-p", "#S")
 	if err != nil {
 		return "", err
 	}

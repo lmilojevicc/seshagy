@@ -25,6 +25,15 @@ func showPaneOption(ctx context.Context, pane, opt string) (string, error) {
 	return strings.TrimSpace(string(out)), err
 }
 
+// PaneAgentState reads the current @agent_state from a pane.
+func PaneAgentState(ctx context.Context, pane string) (AgentState, error) {
+	raw, err := showPaneOption(ctx, pane, "@agent_state")
+	if err != nil {
+		return "", err
+	}
+	return NormalizeAgentState(raw), nil
+}
+
 func setPaneOption(ctx context.Context, pane, opt, value string) error {
 	return tmuxRun(ctx, "set-option", "-qpt", pane, opt, value)
 }

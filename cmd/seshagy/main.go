@@ -89,16 +89,30 @@ func run(args []string) error {
 		if err != nil {
 			return err
 		}
-		if err := sessionmgr.ReportAgent(ctx, report); err != nil {
+		resolved, err := sessionmgr.ResolvePane(ctx, report.Pane)
+		if err != nil {
+			return err
+		}
+		applied, err := sessionmgr.ReportAgent(ctx, report)
+		if err != nil {
 			return err
 		}
 		if jsonOutput {
-			return encodeSuccess(map[string]any{
-				"applied":    true,
-				"pane":       report.Pane,
+			payload := map[string]any{
+				"applied":    applied,
+				"pane":       resolved,
 				"agent_name": report.Name,
-				"state":      report.State,
-			})
+			}
+			if applied {
+				payload["state"] = report.State
+			} else if report.State != "" {
+				payload["requested_state"] = report.State
+				if actual, readErr := sessionmgr.PaneAgentState(ctx, resolved); readErr == nil &&
+					actual != "" {
+					payload["state"] = string(actual)
+				}
+			}
+			return encodeSuccess(payload)
 		}
 		return nil
 	case "--release-agent":
@@ -107,19 +121,35 @@ func run(args []string) error {
 		if err != nil {
 			return err
 		}
-		if err := sessionmgr.ReleaseAgent(ctx, release); err != nil {
+		resolved, err := sessionmgr.ResolvePane(ctx, release.Pane)
+		if err != nil {
+			return err
+		}
+		released, err := sessionmgr.ReleaseAgent(ctx, release)
+		if err != nil {
 			return err
 		}
 		if jsonOutput {
 			return encodeSuccess(map[string]any{
-				"released": true,
-				"pane":     release.Pane,
+				"released": released,
+				"pane":     resolved,
 			})
 		}
 		return nil
 	default:
-		return tui.Run()
+		return unknownCommandError(args)
 	}
+}
+
+func unknownCommandError(args []string) error {
+	rest, jsonOnly := stripJSONFlag(args)
+	if len(rest) == 0 {
+		if jsonOnly {
+			return errors.New(joinUsage("<command>", "[--json]"))
+		}
+		return errors.New(joinUsage("<command>"))
+	}
+	return fmt.Errorf("unknown command: %q", rest[0])
 }
 
 func runGetItems(
@@ -137,9 +167,60 @@ func runGetItems(
 
 func runAgent(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return errors.New(joinUsage("agent", "explain", "<pane-id>", "[--json]"))
+		return errors.New(agentUsage())
 	}
 	switch args[0] {
+	case "list":
+		rest, jsonOutput := stripJSONFlag(args[1:])
+		if len(rest) != 0 {
+			return errors.New(joinUsage("agent", "list", "[--json]"))
+		}
+		return printItems(ctx, sessionmgr.ModeAgents, jsonOutput)
+	case "track":
+		rest, jsonOutput := stripJSONFlag(args[1:])
+		if len(rest) != 1 {
+			return errors.New(joinUsage("agent", "track", "<pane-id>", "[--json]"))
+		}
+		cfg, err := appconfig.Load()
+		if err != nil {
+			return err
+		}
+		pane, err := sessionmgr.ResolvePane(ctx, rest[0])
+		if err != nil {
+			return err
+		}
+		state, err := sessionmgr.TrackAgentPane(ctx, pane, cfg.LoadOptions())
+		if err != nil {
+			return err
+		}
+		if jsonOutput {
+			return encodeSuccess(map[string]any{
+				"pane":  pane,
+				"state": string(state),
+			})
+		}
+		fmt.Printf("%s: %s\n", pane, state)
+		return nil
+	case "seen":
+		rest, jsonOutput := stripJSONFlag(args[1:])
+		if len(rest) != 1 {
+			return errors.New(joinUsage("agent", "seen", "<pane-id>", "[--json]"))
+		}
+		pane, err := sessionmgr.ResolvePane(ctx, rest[0])
+		if err != nil {
+			return err
+		}
+		seen, err := sessionmgr.MarkAgentSeen(ctx, pane)
+		if err != nil {
+			return err
+		}
+		if jsonOutput {
+			return encodeSuccess(map[string]any{
+				"pane": pane,
+				"seen": seen,
+			})
+		}
+		return nil
 	case "explain":
 		rest, jsonOutput := stripJSONFlag(args[1:])
 		if len(rest) != 1 {
@@ -166,8 +247,17 @@ func runAgent(ctx context.Context, args []string) error {
 		}
 		return nil
 	default:
-		return errors.New(joinUsage("agent", "explain", "<pane-id>", "[--json]"))
+		return errors.New(agentUsage())
 	}
+}
+
+func agentUsage() string {
+	return joinUsage(
+		"agent",
+		"list|track|seen|explain",
+		"[<pane-id>]",
+		"[--json]",
+	)
 }
 
 func runManifest(args []string) error {
@@ -421,15 +511,20 @@ func printItems(ctx context.Context, mode sessionmgr.SourceMode, jsonOutput bool
 	if err != nil {
 		return err
 	}
-	items, err := sessionmgr.LoadWithOptions(ctx, mode, cfg.LoadOptions())
+	result, err := sessionmgr.LoadWithOptions(ctx, mode, cfg.LoadOptions())
 	if err != nil {
 		return err
 	}
+	if result.Warning != "" {
+		fmt.Fprintf(os.Stderr, "seshagy: warning: %s\n", result.Warning)
+	}
 	if jsonOutput {
-		return encodeSuccess(sessionmgr.ItemsToJSON(mode, items, cfg.IconSet()))
+		return encodeSuccess(
+			sessionmgr.ItemsToJSON(mode, result.Items, cfg.IconSet(), result.Warning),
+		)
 	}
 	icons := cfg.IconSet()
-	for _, item := range items {
+	for _, item := range result.Items {
 		fmt.Println(sessionmgr.FormatLineWithIcons(item, icons))
 	}
 	return nil
@@ -475,8 +570,10 @@ func deleteItem(ctx context.Context, raw string, jsonOutput bool) error {
 	}
 }
 
-func parseReportArgs(args []string) (sessionmgr.AgentReport, error) {
-	var opts sessionmgr.AgentReport
+func forEachFlag(
+	args []string,
+	handle func(arg, key string, nextValue func() (string, error)) error,
+) error {
 	for i := 0; i < len(args); {
 		arg := args[i]
 		key, val, hasInline := splitFlag(arg)
@@ -490,111 +587,110 @@ func parseReportArgs(args []string) (sessionmgr.AgentReport, error) {
 			i++
 			return args[i], nil
 		}
+		if err := handle(arg, key, nextValue); err != nil {
+			return err
+		}
+		i++
+	}
+	return nil
+}
+
+func parseReportArgs(args []string) (sessionmgr.AgentReport, error) {
+	var opts sessionmgr.AgentReport
+	err := forEachFlag(args, func(arg, key string, nextValue func() (string, error)) error {
 		switch key {
 		case "--pane":
 			v, err := nextValue()
 			if err != nil {
-				return opts, err
+				return err
 			}
 			opts.Pane = v
 		case "--agent", "--name":
 			v, err := nextValue()
 			if err != nil {
-				return opts, err
+				return err
 			}
 			opts.Name = v
 		case "--state", "--status":
 			v, err := nextValue()
 			if err != nil {
-				return opts, err
+				return err
 			}
 			opts.State = sessionmgr.NormalizeAgentState(v)
 		case "--message":
 			v, err := nextValue()
 			if err != nil {
-				return opts, err
+				return err
 			}
 			opts.Message = v
 			opts.MessageSeen = true
 		case "--source":
 			v, err := nextValue()
 			if err != nil {
-				return opts, err
+				return err
 			}
 			opts.Source = v
 			opts.SourceSeen = true
 		case "--session-id":
 			v, err := nextValue()
 			if err != nil {
-				return opts, err
+				return err
 			}
 			opts.SessionID = v
 			opts.SessionIDSeen = true
 		case "--seq":
 			v, err := nextValue()
 			if err != nil {
-				return opts, err
+				return err
 			}
 			seq, err := parseSeqFlag(v, key)
 			if err != nil {
-				return opts, err
+				return err
 			}
 			opts.Seq = seq
 			opts.SeqSeen = true
 		default:
-			return opts, fmt.Errorf("unknown --report-agent flag: %s", arg)
+			return fmt.Errorf("unknown --report-agent flag: %s", arg)
 		}
-		i++
-	}
-	return opts, nil
+		return nil
+	})
+	return opts, err
 }
 
 func parseReleaseArgs(args []string) (sessionmgr.AgentRelease, error) {
 	var opts sessionmgr.AgentRelease
-	for i := 0; i < len(args); {
-		arg := args[i]
-		key, val, hasInline := splitFlag(arg)
-		nextValue := func() (string, error) {
-			if hasInline {
-				return val, nil
-			}
-			if i+1 >= len(args) {
-				return "", fmt.Errorf("%s requires a value", arg)
-			}
-			i++
-			return args[i], nil
-		}
+	err := forEachFlag(args, func(arg, key string, nextValue func() (string, error)) error {
 		switch key {
 		case "--pane":
 			v, err := nextValue()
 			if err != nil {
-				return opts, err
+				return err
 			}
 			opts.Pane = v
 		case "--source":
 			v, err := nextValue()
 			if err != nil {
-				return opts, err
+				return err
 			}
 			opts.Source = v
 			opts.SourceSeen = true
 		case "--seq":
 			v, err := nextValue()
 			if err != nil {
-				return opts, err
+				return err
 			}
 			seq, err := parseSeqFlag(v, key)
 			if err != nil {
-				return opts, err
+				return err
 			}
 			opts.Seq = seq
 			opts.SeqSeen = true
 		default:
-			return opts, fmt.Errorf("unknown --release-agent flag: %s", arg)
+			return fmt.Errorf("unknown --release-agent flag: %s", arg)
 		}
-		i++
-	}
-	return opts, nil
+		return nil
+	})
+	return opts, err
 }
 
 func parseSeqFlag(raw, flag string) (int64, error) {
@@ -629,6 +725,11 @@ Usage:
                                   set tmux pane @agent_* metadata
   seshagy --release-agent [flags] [--json]
                                   clear tmux pane @agent_* metadata
+  seshagy agent list [--json]     print detected/tracked agent panes
+  seshagy agent track <pane> [--json]
+                                  refresh one pane's tracked agent state
+  seshagy agent seen <pane> [--json]
+                                  mark a pane as seen (updates @agent_last_seen)
   seshagy agent explain <pane> [--json]
                                   show why a pane has its agent state
   seshagy manifest status [--json] show active manifest sources and update status

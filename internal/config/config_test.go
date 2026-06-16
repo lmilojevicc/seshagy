@@ -266,64 +266,42 @@ func TestIconModes(t *testing.T) {
 	}
 }
 
-func TestNormalizeAgentStateMode(t *testing.T) {
+func TestNormalizeStateDisplayMode(t *testing.T) {
 	tests := map[string]string{
-		"":         AgentStateModeInherit,
-		"inherit":  AgentStateModeInherit,
-		"default":  AgentStateModeInherit,
-		"icon":     AgentStateModeIcons,
-		"icons":    AgentStateModeIcons,
-		"glyphs":   AgentStateModeIcons,
-		"glyph":    AgentStateModeIcons,
-		"text":     AgentStateModeText,
-		"label":    AgentStateModeText,
-		"labels":   AgentStateModeText,
-		"none":     AgentStateModeNone,
-		"off":      AgentStateModeNone,
-		"no-icons": AgentStateModeNone,
-		"unknown":  AgentStateModeInherit,
+		"":         StateDisplayModeInherit,
+		"inherit":  StateDisplayModeInherit,
+		"default":  StateDisplayModeInherit,
+		"icon":     StateDisplayModeIcons,
+		"icons":    StateDisplayModeIcons,
+		"glyphs":   StateDisplayModeIcons,
+		"glyph":    StateDisplayModeIcons,
+		"text":     StateDisplayModeText,
+		"label":    StateDisplayModeText,
+		"labels":   StateDisplayModeText,
+		"none":     StateDisplayModeNone,
+		"off":      StateDisplayModeNone,
+		"no-icons": StateDisplayModeNone,
+		"unknown":  StateDisplayModeInherit,
 	}
 	for in, want := range tests {
-		if got := normalizeAgentStateMode(in); got != want {
-			t.Fatalf("normalizeAgentStateMode(%q) = %q, want %q", in, got, want)
+		if got := normalizeStateDisplayMode(in); got != want {
+			t.Fatalf("normalizeStateDisplayMode(%q) = %q, want %q", in, got, want)
 		}
 	}
-	if got := normalizeAgentStateMode(" GLYPHS "); got != AgentStateModeIcons {
-		t.Fatalf("normalizeAgentStateMode(%q) = %q, want %q", " GLYPHS ", got, AgentStateModeIcons)
-	}
-}
-
-func TestNormalizeTmuxStateMode(t *testing.T) {
-	tests := map[string]string{
-		"":         TmuxStateModeInherit,
-		"inherit":  TmuxStateModeInherit,
-		"default":  TmuxStateModeInherit,
-		"icon":     TmuxStateModeIcons,
-		"icons":    TmuxStateModeIcons,
-		"glyphs":   TmuxStateModeIcons,
-		"glyph":    TmuxStateModeIcons,
-		"text":     TmuxStateModeText,
-		"label":    TmuxStateModeText,
-		"labels":   TmuxStateModeText,
-		"none":     TmuxStateModeNone,
-		"off":      TmuxStateModeNone,
-		"no-icons": TmuxStateModeNone,
-		"unknown":  TmuxStateModeInherit,
-	}
-	for in, want := range tests {
-		if got := normalizeTmuxStateMode(in); got != want {
-			t.Fatalf("normalizeTmuxStateMode(%q) = %q, want %q", in, got, want)
-		}
-	}
-	if got := normalizeTmuxStateMode(" GLYPHS "); got != TmuxStateModeIcons {
-		t.Fatalf("normalizeTmuxStateMode(%q) = %q, want %q", " GLYPHS ", got, TmuxStateModeIcons)
+	if got := normalizeStateDisplayMode(" GLYPHS "); got != StateDisplayModeIcons {
+		t.Fatalf(
+			"normalizeStateDisplayMode(%q) = %q, want %q",
+			" GLYPHS ",
+			got,
+			StateDisplayModeIcons,
+		)
 	}
 }
 
 func TestIconSetAgentStateProjection(t *testing.T) {
 	cfg := Default()
 	icons := cfg.IconSet()
-	if icons.AgentStateMode != AgentStateModeInherit {
+	if icons.AgentStateMode != StateDisplayModeInherit {
 		t.Fatalf("default agent_state_mode = %q, want inherit", icons.AgentStateMode)
 	}
 	if !icons.AgentStateUsesIcons() || icons.AgentStateUsesLabels() {
@@ -344,7 +322,7 @@ func TestIconSetAgentStateProjection(t *testing.T) {
 		)
 	}
 
-	cfg.Icons.AgentStateMode = AgentStateModeIcons
+	cfg.Icons.AgentStateMode = StateDisplayModeIcons
 	icons = cfg.IconSet()
 	if !icons.AgentStateUsesIcons() || icons.AgentStateUsesLabels() {
 		t.Fatalf(
@@ -355,7 +333,7 @@ func TestIconSetAgentStateProjection(t *testing.T) {
 	}
 
 	cfg.Icons.Mode = IconModeIcons
-	cfg.Icons.AgentStateMode = AgentStateModeText
+	cfg.Icons.AgentStateMode = StateDisplayModeText
 	icons = cfg.IconSet()
 	if icons.AgentStateUsesIcons() || !icons.AgentStateUsesLabels() {
 		t.Fatalf(
@@ -365,7 +343,7 @@ func TestIconSetAgentStateProjection(t *testing.T) {
 		)
 	}
 
-	cfg.Icons.AgentStateMode = AgentStateModeNone
+	cfg.Icons.AgentStateMode = StateDisplayModeNone
 	icons = cfg.IconSet()
 	if icons.AgentStateUsesIcons() || icons.AgentStateUsesLabels() || !icons.AgentStateHidden() {
 		t.Fatalf(
@@ -380,7 +358,7 @@ func TestIconSetAgentStateProjection(t *testing.T) {
 func TestIconSetTmuxStateProjection(t *testing.T) {
 	cfg := Default()
 	icons := cfg.IconSet()
-	if icons.TmuxStateMode != TmuxStateModeInherit {
+	if icons.TmuxStateMode != StateDisplayModeInherit {
 		t.Fatalf("default tmux_state_mode = %q, want inherit", icons.TmuxStateMode)
 	}
 	if !icons.TmuxStateUsesIcons() || icons.TmuxStateUsesLabels() {
@@ -401,7 +379,7 @@ func TestIconSetTmuxStateProjection(t *testing.T) {
 		)
 	}
 
-	cfg.Icons.TmuxStateMode = TmuxStateModeIcons
+	cfg.Icons.TmuxStateMode = StateDisplayModeIcons
 	icons = cfg.IconSet()
 	if !icons.TmuxStateUsesIcons() || icons.TmuxStateUsesLabels() {
 		t.Fatalf(
@@ -412,7 +390,7 @@ func TestIconSetTmuxStateProjection(t *testing.T) {
 	}
 
 	cfg.Icons.Mode = IconModeIcons
-	cfg.Icons.TmuxStateMode = TmuxStateModeText
+	cfg.Icons.TmuxStateMode = StateDisplayModeText
 	icons = cfg.IconSet()
 	if icons.TmuxStateUsesIcons() || !icons.TmuxStateUsesLabels() {
 		t.Fatalf(
@@ -422,7 +400,7 @@ func TestIconSetTmuxStateProjection(t *testing.T) {
 		)
 	}
 
-	cfg.Icons.TmuxStateMode = TmuxStateModeNone
+	cfg.Icons.TmuxStateMode = StateDisplayModeNone
 	icons = cfg.IconSet()
 	if icons.TmuxStateUsesIcons() || icons.TmuxStateUsesLabels() || !icons.TmuxStateHidden() {
 		t.Fatalf(
@@ -464,7 +442,7 @@ tmux_state_mode = "text"
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
-	if loaded.Icons.TmuxStateMode != TmuxStateModeText {
+	if loaded.Icons.TmuxStateMode != StateDisplayModeText {
 		t.Fatalf("loaded tmux_state_mode = %q, want text", loaded.Icons.TmuxStateMode)
 	}
 }
@@ -544,7 +522,7 @@ agent_state_mode = "text"
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
-	if loaded.Icons.AgentStateMode != AgentStateModeText {
+	if loaded.Icons.AgentStateMode != StateDisplayModeText {
 		t.Fatalf("loaded agent_state_mode = %q, want text", loaded.Icons.AgentStateMode)
 	}
 }
@@ -605,6 +583,30 @@ func TestNormalizeAgentStatePartialOverride(t *testing.T) {
 	}
 }
 
+func TestLoadMigratesEnabledFalseToNoneMode(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	path := Path()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	data := []byte(`
+[icons]
+enabled = false
+mode = "icons"
+`)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	loaded, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if loaded.Icons.Mode != IconModeNone {
+		t.Fatalf("loaded icon mode = %q, want %q", loaded.Icons.Mode, IconModeNone)
+	}
+}
+
 func TestLoadMigratesLegacyASCIIConfig(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
@@ -642,5 +644,155 @@ color = "#a6e3a1"
 	if strings.Contains(string(saved), "ascii") ||
 		strings.Contains(string(saved), "[icons]\n  enabled") {
 		t.Fatalf("migrated config should omit legacy ascii/enabled keys: %s", saved)
+	}
+}
+
+func TestNormalizeThemeColorsPartial(t *testing.T) {
+	cfg := Default()
+	cfg.Theme.Colors.Title = "#b4befe"
+	cfg.Theme.Colors.Accent = ""
+	cfg.Theme.Colors.Danger = "   "
+	cfg.Normalize()
+
+	defaults := Default().Theme.Colors
+	if cfg.Theme.Colors.Title != "#b4befe" {
+		t.Fatalf("title = %q, want preserved override", cfg.Theme.Colors.Title)
+	}
+	if cfg.Theme.Colors.Accent != defaults.Accent {
+		t.Fatalf("accent = %q, want default %q", cfg.Theme.Colors.Accent, defaults.Accent)
+	}
+	if cfg.Theme.Colors.Danger != defaults.Danger {
+		t.Fatalf("danger = %q, want default %q", cfg.Theme.Colors.Danger, defaults.Danger)
+	}
+}
+
+func TestNormalizeThemeColorsFillsAllEmptyFields(t *testing.T) {
+	cfg := Default()
+	cfg.Theme.Colors = ThemeColorsConfig{}
+	cfg.Normalize()
+
+	defaults := Default().Theme.Colors
+	for _, tc := range []struct {
+		name string
+		got  string
+		want string
+	}{
+		{"FocusedBorder", cfg.Theme.Colors.FocusedBorder, defaults.FocusedBorder},
+		{"ActiveTab", cfg.Theme.Colors.ActiveTab, defaults.ActiveTab},
+		{"Border", cfg.Theme.Colors.Border, defaults.Border},
+		{"InactiveTab", cfg.Theme.Colors.InactiveTab, defaults.InactiveTab},
+		{"Title", cfg.Theme.Colors.Title, defaults.Title},
+		{"Accent", cfg.Theme.Colors.Accent, defaults.Accent},
+		{"Key", cfg.Theme.Colors.Key, defaults.Key},
+		{"Muted", cfg.Theme.Colors.Muted, defaults.Muted},
+		{"Success", cfg.Theme.Colors.Success, defaults.Success},
+		{"Info", cfg.Theme.Colors.Info, defaults.Info},
+		{"Warning", cfg.Theme.Colors.Warning, defaults.Warning},
+		{"Danger", cfg.Theme.Colors.Danger, defaults.Danger},
+	} {
+		if tc.got != tc.want {
+			t.Fatalf("%s = %q, want default %q", tc.name, tc.got, tc.want)
+		}
+	}
+}
+
+func TestLoadRejectsInvalidTOML(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	path := Path()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	if err := os.WriteFile(path, []byte("not = [valid\n"), 0o600); err != nil {
+		t.Fatalf("write invalid config: %v", err)
+	}
+	if _, err := Load(); err == nil {
+		t.Fatal("Load() expected error for invalid TOML")
+	} else if !strings.Contains(err.Error(), path) {
+		t.Fatalf("Load() error = %v, want path %q in message", err, path)
+	}
+}
+
+func TestLoadFailsWhenConfigUnreadable(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	path := Path()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("[sources]\n"), 0o000); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(); err == nil {
+		t.Fatal("Load() expected error for unreadable config")
+	}
+}
+
+func TestManifestFallbackRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	cfg := Default()
+	cfg.Agents.ManifestFallback = true
+	if err := Save(cfg); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	loaded, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if !loaded.Agents.ManifestFallback {
+		t.Fatalf("loaded manifest_fallback = %v, want true", loaded.Agents.ManifestFallback)
+	}
+	if !loaded.LoadOptions().ManifestFallback {
+		t.Fatalf(
+			"loaded load options manifest_fallback = %v, want true",
+			loaded.LoadOptions().ManifestFallback,
+		)
+	}
+}
+
+func TestPrefixKeyDefaultFallback(t *testing.T) {
+	cfg := Default()
+	cfg.TypeFirst.Prefix = "  "
+	if got := cfg.PrefixKey(); got != DefaultPrefix {
+		t.Fatalf("PrefixKey() = %q, want %q", got, DefaultPrefix)
+	}
+	cfg.TypeFirst.Prefix = "ctrl+a"
+	if got := cfg.PrefixKey(); got != "ctrl+a" {
+		t.Fatalf("PrefixKey() = %q, want ctrl+a", got)
+	}
+}
+
+func TestDefaultSourceInvalidFallsBackToAll(t *testing.T) {
+	cfg := Default()
+	cfg.Sources.Default = "not-a-source"
+	if got := cfg.DefaultSource(); got != sessionmgr.ModeAll {
+		t.Fatalf("DefaultSource() = %v, want all", got)
+	}
+}
+
+func TestSaveFailsWhenConfigDirIsFile(t *testing.T) {
+	dir := t.TempDir()
+	blocker := filepath.Join(dir, "blocked")
+	if err := os.WriteFile(blocker, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_CONFIG_HOME", blocker)
+	if err := Save(Default()); err == nil {
+		t.Fatal("Save() expected error when config parent path is a file")
+	}
+}
+
+func TestExists(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	if Exists() {
+		t.Fatal("Exists() = true, want false before save")
+	}
+	if err := Save(Default()); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	if !Exists() {
+		t.Fatal("Exists() = false, want true after save")
 	}
 }

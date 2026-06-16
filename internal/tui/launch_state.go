@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/lmilojevicc/seshagy/internal/integrations"
+	"github.com/lmilojevicc/seshagy/internal/xdg"
 )
 
 const (
@@ -74,34 +75,9 @@ func parseIntegrationPromptVersion(data []byte) int {
 }
 
 func integrationPromptVersionPath() string {
-	return filepath.Join(stateHome(), "seshagy", integrationPromptVersionFile)
+	return filepath.Join(xdg.StateHome(), "seshagy", integrationPromptVersionFile)
 }
 
 func integrationPromptSeenPath() string {
-	return filepath.Join(stateHome(), "seshagy", integrationPromptSeenFile)
-}
-
-func stateHome() string {
-	if value := strings.TrimSpace(os.Getenv("XDG_STATE_HOME")); value != "" {
-		return expandStateHome(value)
-	}
-	if home, err := os.UserHomeDir(); err == nil && home != "" {
-		return filepath.Join(home, ".local", "state")
-	}
-	return "."
-}
-
-func expandStateHome(path string) string {
-	if path == "~" {
-		if home, err := os.UserHomeDir(); err == nil && home != "" {
-			return home
-		}
-		return "."
-	}
-	if strings.HasPrefix(path, "~/") {
-		if home, err := os.UserHomeDir(); err == nil && home != "" {
-			return filepath.Join(home, strings.TrimPrefix(path, "~/"))
-		}
-	}
-	return path
+	return filepath.Join(xdg.StateHome(), "seshagy", integrationPromptSeenFile)
 }

@@ -130,7 +130,7 @@ func installCopilot(binaryPath string) ([]string, error) {
 	}
 	removeDirectCommands(hooks, shellHookName)
 	for _, event := range copilotStaleLifecycleHooks {
-		removeDirectCommandsForEvent(hooks, event, shellHookName)
+		removeDirectCommandsForEvent(hooks, event)
 	}
 	if err := ensureDirectLifecycleHooks(
 		hooks,
@@ -185,7 +185,7 @@ func installCursor(binaryPath string) ([]string, error) {
 	}
 	removeSimpleCommands(hooks, shellHookName)
 	for _, hook := range cursorStaleLifecycleHooks {
-		removeSimpleCommandsForAction(hooks, hook.event, shellHookName, hook.action)
+		removeSimpleCommandsForAction(hooks, hook.event, hook.action)
 	}
 	if _, ok := root["version"]; !ok {
 		root["version"] = float64(1)

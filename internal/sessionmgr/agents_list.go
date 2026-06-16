@@ -11,7 +11,7 @@ import (
 )
 
 func ListAgents(ctx context.Context, sessionFilter string, opts LoadOptions) ([]Item, error) {
-	out, err := tmuxCommand(ctx, "list-panes", "-a", "-F", agentFormat).Output()
+	out, err := tmuxOutput(ctx, "list-panes", "-a", "-F", agentFormat)
 	if err != nil {
 		var ee *exec.ExitError
 		if errors.As(err, &ee) && ee.ExitCode() == 1 {
@@ -32,6 +32,12 @@ func ListAgents(ctx context.Context, sessionFilter string, opts LoadOptions) ([]
 		// Hold the per-pane lock so a concurrent hook report/release cannot
 		// interleave with the tracking-option writes below.
 		err := withAgentPaneLock(pane, func() error {
+			name, _ := showPaneOption(ctx, pane, "@agent_name")
+			stateRaw, _ := showPaneOption(ctx, pane, "@agent_state")
+			if strings.TrimSpace(name) == "" && strings.TrimSpace(stateRaw) == "" {
+				state = detected
+				return nil
+			}
 			s, trackErr := UpdateAgentStatusTracking(
 				ctx,
 				pane,
@@ -47,6 +53,47 @@ func ListAgents(ctx context.Context, sessionFilter string, opts LoadOptions) ([]
 		}
 	}
 	return items, nil
+}
+
+func TrackAgentPane(ctx context.Context, pane string, opts LoadOptions) (AgentState, error) {
+	resolved, err := ResolvePane(ctx, pane)
+	if err != nil {
+		return "", err
+	}
+	line, err := displayPane(ctx, resolved, agentFormat)
+	if err != nil {
+		return "", fmt.Errorf("pane metadata: %w", err)
+	}
+	items := ParseAgents([]byte(line), "", opts)
+	if len(items) == 0 {
+		return AgentUnknown, fmt.Errorf("pane %s is not a listed agent pane", resolved)
+	}
+	item := items[0]
+	detected := item.AgentState
+	if opts.ManifestFallback {
+		applyManifestFallback(ctx, items)
+		detected = items[0].AgentState
+	}
+	lifecycle := HasLifecycleAuthority(item.AgentName, item.AgentSource)
+	var state AgentState
+	err = withAgentPaneLock(resolved, func() error {
+		name, _ := showPaneOption(ctx, resolved, "@agent_name")
+		stateRaw, _ := showPaneOption(ctx, resolved, "@agent_state")
+		if strings.TrimSpace(name) == "" && strings.TrimSpace(stateRaw) == "" {
+			state = detected
+			return nil
+		}
+		s, trackErr := UpdateAgentStatusTracking(
+			ctx,
+			resolved,
+			detected,
+			item.Visible,
+			lifecycle,
+		)
+		state = s
+		return trackErr
+	})
+	return state, err
 }
 
 func applyManifestFallback(ctx context.Context, items []Item) {
@@ -159,8 +206,8 @@ func ParseAgents(raw []byte, sessionFilter string, opts LoadOptions) []Item {
 }
 
 func KillAgentPane(ctx context.Context, pane string) error {
-	if out, err := tmuxCommand(ctx, "kill-pane", "-t", pane).CombinedOutput(); err != nil {
-		return fmt.Errorf("tmux kill-pane: %w (%s)", err, strings.TrimSpace(string(out)))
+	if err := tmuxRun(ctx, "kill-pane", "-t", pane); err != nil {
+		return fmt.Errorf("tmux kill-pane: %w", err)
 	}
 	return nil
 }

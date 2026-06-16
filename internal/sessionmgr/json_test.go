@@ -75,7 +75,7 @@ func TestItemToJSONIncludesStructuredAgentFields(t *testing.T) {
 
 func TestItemsToJSONUsesModeToken(t *testing.T) {
 	items := []Item{{Kind: KindSession, Name: "work", Target: "work"}}
-	payload := ItemsToJSON(ModeAgents, items, IconSet{})
+	payload := ItemsToJSON(ModeAgents, items, IconSet{}, "")
 	if payload.SchemaVersion != 1 {
 		t.Fatalf("schema_version = %d, want 1", payload.SchemaVersion)
 	}
@@ -101,6 +101,91 @@ func TestItemsToJSONUsesModeToken(t *testing.T) {
 		t.Fatalf("attached must be emitted for session items: %#v", raw)
 	} else if attached {
 		t.Fatal("attached should be false")
+	}
+}
+
+func TestManifestSummaryAndRemoteStatusJSON(t *testing.T) {
+	cached := "2026.06.10.3"
+	lastErr := "fetch failed"
+	summary := AgentManifestSummary{
+		AgentID: "codex",
+		ActiveSource: ManifestSource{
+			Kind:    ManifestSourceRemote,
+			Path:    "codex.toml",
+			Version: cached,
+		},
+		ActiveVersion:                cached,
+		CachedRemoteVersion:          cached,
+		LocalOverrideShadowingRemote: true,
+		Warning:                      "remote stale",
+	}
+
+	gotSummary := AgentManifestSummaryToJSON(summary)
+	if gotSummary.AgentID != "codex" || gotSummary.ActiveSource.Kind != "remote" {
+		t.Fatalf("summary json = %#v", gotSummary)
+	}
+	if gotSummary.ActiveSource.Path != "codex.toml" || gotSummary.Warning != "remote stale" {
+		t.Fatalf("summary fields = %#v", gotSummary)
+	}
+
+	summaries := AgentManifestSummariesToJSON([]AgentManifestSummary{summary})
+	if len(summaries) != 1 || summaries[0].AgentID != "codex" {
+		t.Fatalf("summaries json = %#v", summaries)
+	}
+
+	status := ManifestUpdateStatusToJSON(ManifestUpdateStatus{
+		LastResult: strPtr("updated"),
+		Agents: map[string]AgentRemoteStatus{
+			"codex": {
+				CachedVersion: &cached,
+				LastError:     &lastErr,
+				LastResult:    "failed",
+			},
+		},
+	})
+	if status.Agents["codex"].CachedVersion == nil ||
+		*status.Agents["codex"].CachedVersion != cached {
+		t.Fatalf("remote status json = %#v", status.Agents["codex"])
+	}
+	if status.Agents["codex"].LastError == nil || *status.Agents["codex"].LastError != lastErr {
+		t.Fatalf("remote status last_error = %#v", status.Agents["codex"].LastError)
+	}
+}
+
+func TestManifestSourceLabels(t *testing.T) {
+	cases := []struct {
+		source ManifestSource
+		label  string
+		kind   string
+	}{
+		{
+			source: ManifestSource{Kind: ManifestSourceBundled},
+			label:  "bundled",
+			kind:   "bundled",
+		},
+		{
+			source: ManifestSource{Kind: ManifestSourceRemote, Path: "codex.toml"},
+			label:  "remote:codex.toml",
+			kind:   "remote",
+		},
+		{
+			source: ManifestSource{Kind: ManifestSourceRemote},
+			label:  "remote",
+			kind:   "remote",
+		},
+		{
+			source: ManifestSource{Kind: ManifestSourceOverride, Path: "/tmp/override.toml"},
+			label:  "/tmp/override.toml",
+			kind:   "local override",
+		},
+	}
+	for _, tc := range cases {
+		if got := tc.source.Label(); got != tc.label {
+			t.Fatalf("Label(%#v) = %q, want %q", tc.source, got, tc.label)
+		}
+		if got := tc.source.KindLabel(); got != tc.kind {
+			t.Fatalf("KindLabel(%#v) = %q, want %q", tc.source, got, tc.kind)
+		}
 	}
 }
 

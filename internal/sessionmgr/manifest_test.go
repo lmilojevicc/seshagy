@@ -2,9 +2,17 @@ package sessionmgr
 
 import (
 	"context"
+	"os"
 	"strings"
 	"testing"
 )
+
+func TestMain(m *testing.M) {
+	restoreManifestGlobals()
+	code := m.Run()
+	restoreManifestGlobals()
+	os.Exit(code)
+}
 
 func TestDetectManifestClaudeBashPermissionPrompt(t *testing.T) {
 	screen := "do you want to proceed?\n" +
@@ -294,6 +302,163 @@ func TestCaptureAgentPaneCachedReusesPaneCapture(t *testing.T) {
 	}
 	if calls != 1 {
 		t.Fatalf("capture-pane calls = %d, want 1", calls)
+	}
+}
+
+func codexPromptRegionScreen() string {
+	return "tool output\n" +
+		"• Ran something\n" +
+		"› \n" +
+		"prompt text\n" +
+		"────────────\n" +
+		"box body line\n" +
+		"────────────\n"
+}
+
+func TestManifestRegionPromptBoxRegions(t *testing.T) {
+	screen := codexPromptRegionScreen()
+	tests := []struct {
+		spec string
+		want string
+	}{
+		{spec: "above_prompt_box", want: "tool output\n• Ran something\n› \nprompt text\n"},
+		{spec: "prompt_box_body", want: "box body line\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.spec, func(t *testing.T) {
+			got := manifestRegion(manifestDetectionInput{screen: screen}, tt.spec)
+			if got != tt.want {
+				t.Fatalf("region = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestManifestRegionCurrentPromptBlock(t *testing.T) {
+	screen := codexPromptRegionScreen()
+	tests := []struct {
+		spec string
+		want string
+	}{
+		{spec: "current_prompt_block_marker", want: "• Ran something"},
+		{
+			spec: "after_current_prompt_block_marker",
+			want: "• Ran something\n› \nprompt text\n────────────\nbox body line\n────────────\n",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.spec, func(t *testing.T) {
+			got := manifestRegion(manifestDetectionInput{screen: screen}, tt.spec)
+			if got != tt.want {
+				t.Fatalf("region = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestManifestRegionBeforeAndWithoutCurrentPrompt(t *testing.T) {
+	screen := codexPromptRegionScreen()
+	tests := []struct {
+		name   string
+		screen string
+		spec   string
+		want   string
+	}{
+		{
+			name:   "before_current_prompt_marker",
+			screen: screen,
+			spec:   "before_current_prompt_marker",
+			want:   "tool output\n• Ran something\n",
+		},
+		{
+			name:   "whole_recent_without_current_prompt_marker",
+			screen: screen,
+			spec:   "whole_recent_without_current_prompt_marker",
+			want:   "",
+		},
+		{
+			name:   "whole_recent_without_when_no_prompt",
+			screen: "plain shell output\n",
+			spec:   "whole_recent_without_current_prompt_marker",
+			want:   "plain shell output\n",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := manifestRegion(manifestDetectionInput{screen: tt.screen}, tt.spec)
+			if got != tt.want {
+				t.Fatalf("region = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCurrentCodexPromptIndex(t *testing.T) {
+	lines := manifestLines(codexPromptRegionScreen())
+	index, ok := currentCodexPromptIndex(lines)
+	if !ok {
+		t.Fatal("expected current codex prompt")
+	}
+	if lines[index] != "› " {
+		t.Fatalf("prompt line = %q, want › ", lines[index])
+	}
+
+	noPrompt, ok := currentCodexPromptIndex(manifestLines("plain shell\n"))
+	if ok {
+		t.Fatalf("expected no prompt index, got %d", noPrompt)
+	}
+
+	withLaterBlock := manifestLines("› \n• later block\n")
+	if _, ok := currentCodexPromptIndex(withLaterBlock); ok {
+		t.Fatal("expected false when block marker follows prompt")
+	}
+}
+
+func TestManifestRegionOSCBranches(t *testing.T) {
+	input := manifestDetectionInput{
+		oscTitle:    "⠂ working",
+		oscProgress: "42%",
+	}
+	if got := manifestRegion(input, "osc_title"); got != "⠂ working" {
+		t.Fatalf("osc_title = %q, want ⠂ working", got)
+	}
+	if got := manifestRegion(input, "osc_progress"); got != "42%" {
+		t.Fatalf("osc_progress = %q, want 42%%", got)
+	}
+}
+
+func TestManifestRegionUnknownSpecReturnsEmpty(t *testing.T) {
+	got := manifestRegion(manifestDetectionInput{screen: "hello\n"}, "not_a_real_region")
+	if got != "" {
+		t.Fatalf("unknown spec = %q, want empty", got)
+	}
+}
+
+func TestManifestBottomLinesAndLastNonEmptyLine(t *testing.T) {
+	screen := "alpha\n\nbeta\ngamma\n"
+	if got := manifestBottomLines(screen, 2); got != "beta\ngamma\n" {
+		t.Fatalf("manifestBottomLines() = %q", got)
+	}
+	if got := lastNonEmptyLine("one\n\n two \n"); got != " two " {
+		t.Fatalf("lastNonEmptyLine() = %q", got)
+	}
+}
+
+func TestActiveManifestSummariesAfterReload(t *testing.T) {
+	ReloadManifests()
+	summaries := ActiveManifestSummaries()
+	if len(summaries) == 0 {
+		t.Fatal("ActiveManifestSummaries() returned no entries after reload")
+	}
+	found := false
+	for _, summary := range summaries {
+		if summary.AgentID == "claude" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("missing claude summary: %#v", summaries)
 	}
 }
 

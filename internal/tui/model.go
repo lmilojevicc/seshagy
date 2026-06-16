@@ -76,10 +76,11 @@ type setupPrompt struct {
 }
 
 type refreshMsg struct {
-	source sessionmgr.SourceMode
-	gen    uint64
-	items  []sessionmgr.Item
-	err    error
+	source  sessionmgr.SourceMode
+	gen     uint64
+	items   []sessionmgr.Item
+	warning string
+	err     error
 }
 
 type previewMsg struct {
@@ -316,10 +317,6 @@ func (m Model) previewForSelection() tea.Cmd {
 		return nil
 	}
 	return previewCmd(item)
-}
-
-func modeName(mode sessionmgr.SourceMode) string {
-	return mode.Names().List
 }
 
 func sortedCounts(items []sessionmgr.Item) map[sessionmgr.Kind]int {

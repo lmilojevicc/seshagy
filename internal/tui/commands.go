@@ -17,8 +17,14 @@ func refreshCmd(source sessionmgr.SourceMode, gen uint64, opts sessionmgr.LoadOp
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 		defer cancel()
-		items, err := sessionmgr.LoadWithOptions(ctx, source, opts)
-		return refreshMsg{source: source, gen: gen, items: items, err: err}
+		result, err := sessionmgr.LoadWithOptions(ctx, source, opts)
+		return refreshMsg{
+			source:  source,
+			gen:     gen,
+			items:   result.Items,
+			warning: result.Warning,
+			err:     err,
+		}
 	}
 }
 
@@ -91,16 +97,16 @@ func previewCmd(item sessionmgr.Item) tea.Cmd {
 	}
 }
 
+func attachExecCallback(err error) tea.Msg {
+	return attachDoneMsg{err: err}
+}
+
 func attachCmd(name string) tea.Cmd {
-	return tea.ExecProcess(sessionmgr.AttachOrSwitchCommand(name), func(err error) tea.Msg {
-		return attachDoneMsg{err: err}
-	})
+	return tea.ExecProcess(sessionmgr.AttachOrSwitchCommand(name), attachExecCallback)
 }
 
 func focusAgentCmd(pane string) tea.Cmd {
-	return tea.ExecProcess(sessionmgr.FocusAgentCommand(pane), func(err error) tea.Msg {
-		return attachDoneMsg{err: err}
-	})
+	return tea.ExecProcess(sessionmgr.FocusAgentCommand(pane), attachExecCallback)
 }
 
 func createSessionCmd(dir string) tea.Cmd {

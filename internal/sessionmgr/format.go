@@ -236,7 +236,7 @@ func FormatLineWithIcons(i Item, icons IconSet) string {
 		}
 		prefix := joinNonEmpty(
 			colorIcon(KindAgent, icons),
-			"["+agentStateLabel(i.AgentState)+"]",
+			"["+AgentStateLabel(i.AgentState)+"]",
 		)
 		// Embed the real tmux pane id (%N) so --delete-item can target the pane
 		// unambiguously instead of reparsing the session:window.pane location.

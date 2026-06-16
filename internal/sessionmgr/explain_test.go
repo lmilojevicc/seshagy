@@ -8,77 +8,12 @@ import (
 	"time"
 )
 
-func agentExplainFields(paneID string, overrides map[int]string) []string {
-	fields := []string{
-		paneID,
-		"work",
-		"1",
-		"0",
-		"/Users/milo/Projects/seshagy",
-		"1",
-		"1",
-		"1",
-		"0",
-		"claude",
-		"",
-		"claude",
-		"working",
-		"needs ok",
-		"123",
-		"seshagy:claude",
-		"session-123",
-		"42",
-		"12345",
-	}
-	for idx, value := range overrides {
-		fields[idx] = value
-	}
-	return fields
-}
-
-func installExplainFakeTmux(t *testing.T, pane string, fields []string) *fakeTmux {
-	return installExplainFakeTmuxWithCapture(t, pane, fields, "")
-}
-
-func installExplainFakeTmuxWithCapture(
-	t *testing.T,
-	pane string,
-	fields []string,
-	captureScreen string,
-) *fakeTmux {
-	t.Helper()
-	f := newFakeTmux()
-	displayLine := strings.Join(fields, paneSep)
-	origOut, origRun := tmuxOutput, tmuxRun
-	tmuxOutput = func(ctx context.Context, args ...string) ([]byte, error) {
-		if len(args) >= 5 && args[0] == "display-message" && args[1] == "-p" && args[2] == "-t" &&
-			args[3] == pane {
-			switch args[4] {
-			case "#{pane_id}":
-				return []byte(pane), nil
-			case agentFormat:
-				return []byte(displayLine), nil
-			}
-		}
-		if captureScreen != "" && len(args) >= 4 && args[0] == "capture-pane" && args[3] == pane {
-			return []byte(captureScreen), nil
-		}
-		return f.output(ctx, args...)
-	}
-	tmuxRun = f.run
-	t.Cleanup(func() {
-		tmuxOutput = origOut
-		tmuxRun = origRun
-	})
-	return f
-}
-
 func TestExplainAgentHookReportedPane(t *testing.T) {
 	const pane = "%3"
-	f := installExplainFakeTmux(t, pane, agentExplainFields(pane, nil))
-	f.set(pane, "@agent_last_state", "working")
-	f.set(pane, "@agent_last_status", "idle")
-	f.set(pane, "@agent_last_seen", "1718380800")
+	f := InstallExplainFakeTmux(t, pane, agentExplainFields(pane, nil), "")
+	f.Set(pane, "@agent_last_state", "working")
+	f.Set(pane, "@agent_last_status", "idle")
+	f.Set(pane, "@agent_last_seen", "1718380800")
 
 	out, err := ExplainAgent(context.Background(), pane, LoadOptions{})
 	if err != nil {
@@ -119,9 +54,9 @@ func TestExplainAgentProcessDetectedPane(t *testing.T) {
 		16: "",
 		17: "",
 	})
-	f := installExplainFakeTmux(t, pane, fields)
-	f.set(pane, "@agent_last_state", "unknown")
-	f.set(pane, "@agent_last_status", "unknown")
+	f := InstallExplainFakeTmux(t, pane, fields, "")
+	f.Set(pane, "@agent_last_state", "unknown")
+	f.Set(pane, "@agent_last_status", "unknown")
 
 	out, err := ExplainAgent(context.Background(), pane, LoadOptions{})
 	if err != nil {
@@ -155,7 +90,7 @@ func TestExplainAgentHookCapableWithoutHookReport(t *testing.T) {
 		16: "",
 		17: "",
 	})
-	installExplainFakeTmux(t, pane, fields)
+	InstallExplainFakeTmux(t, pane, fields, "")
 
 	out, err := ExplainAgent(context.Background(), pane, LoadOptions{})
 	if err != nil {
@@ -182,7 +117,7 @@ func TestExplainAgentStaleHookState(t *testing.T) {
 		12: "working",
 		14: staleUpdated,
 	})
-	installExplainFakeTmux(t, pane, fields)
+	InstallExplainFakeTmux(t, pane, fields, "")
 
 	origNow := agentResolveNow
 	agentResolveNow = func() time.Time { return now }
@@ -215,7 +150,7 @@ func TestExplainAgentTitleInferenceStateSource(t *testing.T) {
 		16: "",
 		17: "",
 	})
-	installExplainFakeTmux(t, pane, fields)
+	InstallExplainFakeTmux(t, pane, fields, "")
 
 	out, err := ExplainAgent(context.Background(), pane, LoadOptions{})
 	if err != nil {
@@ -226,6 +161,20 @@ func TestExplainAgentTitleInferenceStateSource(t *testing.T) {
 	}
 }
 
+func TestExplainAgentManifestFallbackFalseSkipsCapturePane(t *testing.T) {
+	const pane = "%16"
+	fields := agentExplainFields(pane, map[int]string{12: ""})
+	InstallExplainFakeTmux(t, pane, fields, "")
+
+	out, err := ExplainAgent(context.Background(), pane, LoadOptions{ManifestFallback: false})
+	if err != nil {
+		t.Fatalf("ExplainAgent() error = %v", err)
+	}
+	if strings.Contains(out, "manifest fallback:") {
+		t.Fatalf("expected no manifest fallback line in:\n%s", out)
+	}
+}
+
 func TestExplainAgentManifestFallbackForLifecycleAgentWithSilentHooks(t *testing.T) {
 	const pane = "%7"
 	screen := "Some output above\nRun a dynamic workflow? (esc to cancel)\n"
@@ -233,7 +182,7 @@ func TestExplainAgentManifestFallbackForLifecycleAgentWithSilentHooks(t *testing
 		0:  pane,
 		12: "",
 	})
-	installExplainFakeTmuxWithCapture(t, pane, fields, screen)
+	InstallExplainFakeTmux(t, pane, fields, screen)
 
 	out, err := ExplainAgent(context.Background(), pane, LoadOptions{ManifestFallback: true})
 	if err != nil {
@@ -258,7 +207,7 @@ func TestExplainAgentManifestFallbackGeminiIdleFallback(t *testing.T) {
 		16: "",
 		17: "",
 	})
-	installExplainFakeTmuxWithCapture(t, pane, fields, "plain shell prompt\n")
+	InstallExplainFakeTmux(t, pane, fields, "plain shell prompt\n")
 
 	out, err := ExplainAgent(context.Background(), pane, LoadOptions{ManifestFallback: true})
 	if err != nil {
@@ -266,6 +215,65 @@ func TestExplainAgentManifestFallbackGeminiIdleFallback(t *testing.T) {
 	}
 	if !strings.Contains(out, "manifest fallback: manifest skipped") {
 		t.Fatalf("expected manifest skipped when no rule matches in:\n%s", out)
+	}
+}
+
+func TestExplainAgentReportStructuredPayload(t *testing.T) {
+	const pane = "%11"
+	fields := agentExplainFields(pane, map[int]string{
+		11: "claude",
+		12: "working",
+		15: "seshagy:claude",
+	})
+	f := InstallExplainFakeTmux(t, pane, fields, "")
+	f.Set(pane, "@agent_last_state", "working")
+	f.Set(pane, "@agent_last_status", "idle")
+	f.Set(pane, "@agent_last_seen", "1718380800")
+
+	report, err := ExplainAgentReport(context.Background(), pane, LoadOptions{})
+	if err != nil {
+		t.Fatalf("ExplainAgentReport() error = %v", err)
+	}
+	if !report.Ok || report.SchemaVersion != JSONSchemaVersion || report.PaneID != pane {
+		t.Fatalf("envelope = %#v", report)
+	}
+	if report.AgentName != "claude" || report.EffectiveStatus != AgentIdle ||
+		report.DetectedStatus != AgentWorking || !report.TrackingOverride {
+		t.Fatalf("status fields = %#v", report)
+	}
+	if report.Integration == nil || report.Integration.Target != "claude" {
+		t.Fatalf("integration = %#v", report.Integration)
+	}
+	if report.LastSeenRFC3339 == "" {
+		t.Fatalf("last_seen_rfc3339 missing: %#v", report)
+	}
+}
+
+func TestExplainAgentIncludesManifestMeta(t *testing.T) {
+	const pane = "%16"
+	fields := agentExplainFields(pane, nil)
+	InstallExplainFakeTmux(t, pane, fields, "")
+
+	out, err := ExplainAgent(context.Background(), pane, LoadOptions{})
+	if err != nil {
+		t.Fatalf("ExplainAgent() error = %v", err)
+	}
+	if !strings.Contains(out, "manifest source:") {
+		t.Fatalf("expected manifest metadata in:\n%s", out)
+	}
+}
+
+func TestExplainAgentDeadPaneSkipped(t *testing.T) {
+	const pane = "%15"
+	fields := agentExplainFields(pane, map[int]string{8: "1"})
+	InstallExplainFakeTmux(t, pane, fields, "")
+
+	out, err := ExplainAgent(context.Background(), pane, LoadOptions{})
+	if err != nil {
+		t.Fatalf("ExplainAgent() error = %v", err)
+	}
+	if !strings.Contains(out, "listed: false (pane is dead)") {
+		t.Fatalf("expected dead pane skip in:\n%s", out)
 	}
 }
 
@@ -281,7 +289,7 @@ func TestExplainAgentManifestFallbackSkipsTitleInference(t *testing.T) {
 		16: "",
 		17: "",
 	})
-	installExplainFakeTmux(t, pane, fields)
+	InstallExplainFakeTmux(t, pane, fields, "plain shell prompt\n")
 
 	out, err := ExplainAgent(context.Background(), pane, LoadOptions{ManifestFallback: true})
 	if err != nil {

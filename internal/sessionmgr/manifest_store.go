@@ -211,6 +211,11 @@ func remoteManifestPath(agentID string) string {
 	return filepath.Join(manifestDetectionStateRoot(), "remote", agentID+".toml")
 }
 
+// RemoteManifestPath returns the on-disk path for a cached remote manifest.
+func RemoteManifestPath(agentID string) string {
+	return remoteManifestPath(agentID)
+}
+
 func manifestStatusPath() string {
 	return filepath.Join(manifestDetectionStateRoot(), "status.toml")
 }

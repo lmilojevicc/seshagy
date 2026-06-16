@@ -389,7 +389,7 @@ func (m Model) switchSource(source sessionmgr.SourceMode) (tea.Model, tea.Cmd) {
 	} else {
 		m.items = nil
 		m.loading = true
-		m.status = "loading " + modeName(source)
+		m.status = "loading " + source.Names().List
 	}
 	var refresh tea.Cmd
 	m, refresh = m.beginRefresh(source, false)
