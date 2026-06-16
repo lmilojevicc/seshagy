@@ -185,7 +185,13 @@ func releaseAgentLocked(ctx context.Context, resolved string, opts AgentRelease)
 	return nil
 }
 
+// agentPaneLockHook is overridden in tests to simulate lock acquisition failures.
+var agentPaneLockHook func(pane string, fn func() error) error
+
 func withAgentPaneLock(pane string, fn func() error) error {
+	if agentPaneLockHook != nil {
+		return agentPaneLockHook(pane, fn)
+	}
 	path := agentLockPath(pane)
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {

@@ -11,7 +11,7 @@ import (
 )
 
 func ListAgents(ctx context.Context, sessionFilter string, opts LoadOptions) ([]Item, error) {
-	out, err := tmuxCommand(ctx, "list-panes", "-a", "-F", agentFormat).Output()
+	out, err := tmuxOutput(ctx, "list-panes", "-a", "-F", agentFormat)
 	if err != nil {
 		var ee *exec.ExitError
 		if errors.As(err, &ee) && ee.ExitCode() == 1 {
@@ -159,8 +159,8 @@ func ParseAgents(raw []byte, sessionFilter string, opts LoadOptions) []Item {
 }
 
 func KillAgentPane(ctx context.Context, pane string) error {
-	if out, err := tmuxCommand(ctx, "kill-pane", "-t", pane).CombinedOutput(); err != nil {
-		return fmt.Errorf("tmux kill-pane: %w (%s)", err, strings.TrimSpace(string(out)))
+	if err := tmuxRun(ctx, "kill-pane", "-t", pane); err != nil {
+		return fmt.Errorf("tmux kill-pane: %w", err)
 	}
 	return nil
 }

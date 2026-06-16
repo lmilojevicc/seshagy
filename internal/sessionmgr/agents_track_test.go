@@ -2,7 +2,6 @@ package sessionmgr
 
 import (
 	"context"
-	"fmt"
 	"testing"
 	"time"
 )
@@ -76,10 +75,6 @@ func seedPendingIdleConfirmed(f *fakeTmux, pane string, now time.Time) {
 func seedStartupGraceExpired(f *fakeTmux, pane string, now time.Time) {
 	f.set(pane, "@agent_name", "claude")
 	f.set(pane, "@agent_startup_grace", formatUnix(now.Add(-agentStartupGraceWindow)))
-}
-
-func formatUnix(ts time.Time) string {
-	return fmt.Sprintf("%d", ts.Unix())
 }
 
 func TestUpdateAgentStatusTracking(t *testing.T) {

@@ -18,7 +18,7 @@ func exactSession(name string) string { return "=" + name }
 func exactPane(name string) string    { return "=" + name + ":" }
 
 func ListSessions(ctx context.Context) ([]Item, error) {
-	out, err := tmuxCommand(ctx, "list-sessions", "-F", sessionFormat).Output()
+	out, err := tmuxOutput(ctx, "list-sessions", "-F", sessionFormat)
 	if err != nil {
 		var ee *exec.ExitError
 		if errors.As(err, &ee) && ee.ExitCode() == 1 {
@@ -56,7 +56,7 @@ func ParseSessions(raw []byte) []Item {
 }
 
 func HasSession(ctx context.Context, name string) (bool, error) {
-	err := tmuxCommand(ctx, "has-session", "-t", exactSession(name)).Run()
+	err := tmuxRun(ctx, "has-session", "-t", exactSession(name))
 	if err == nil {
 		return true, nil
 	}
@@ -100,13 +100,8 @@ func CreateSessionFromDir(ctx context.Context, dir string) (string, bool, error)
 	}
 	name = uniqueSessionName(sessions, name)
 
-	cmd := tmuxCommand(ctx, "new-session", "-d", "-s", name, "-c", dir)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return name, false, fmt.Errorf(
-			"tmux new-session: %w (%s)",
-			err,
-			strings.TrimSpace(string(out)),
-		)
+	if err := tmuxRun(ctx, "new-session", "-d", "-s", name, "-c", dir); err != nil {
+		return name, false, fmt.Errorf("tmux new-session: %w", err)
 	}
 	return name, true, nil
 }
@@ -168,27 +163,16 @@ func normalizePath(p string) string {
 }
 
 func KillSession(ctx context.Context, name string) error {
-	if out, err := tmuxCommand(
-		ctx,
-		"kill-session",
-		"-t",
-		exactSession(name),
-	).CombinedOutput(); err != nil {
-		return fmt.Errorf("tmux kill-session: %w (%s)", err, strings.TrimSpace(string(out)))
+	if err := tmuxRun(ctx, "kill-session", "-t", exactSession(name)); err != nil {
+		return fmt.Errorf("tmux kill-session: %w", err)
 	}
 	return nil
 }
 
 func RenameSession(ctx context.Context, oldName, newName string) error {
 	newName = sanitizeSessionName(newName)
-	if out, err := tmuxCommand(
-		ctx,
-		"rename-session",
-		"-t",
-		exactSession(oldName),
-		newName,
-	).CombinedOutput(); err != nil {
-		return fmt.Errorf("tmux rename-session: %w (%s)", err, strings.TrimSpace(string(out)))
+	if err := tmuxRun(ctx, "rename-session", "-t", exactSession(oldName), newName); err != nil {
+		return fmt.Errorf("tmux rename-session: %w", err)
 	}
 	return nil
 }
@@ -198,7 +182,7 @@ func CaptureSession(ctx context.Context, name string, lines int) (string, error)
 	if lines > 0 {
 		args = append(args, "-S", fmt.Sprintf("-%d", lines))
 	}
-	out, err := tmuxCommand(ctx, args...).Output()
+	out, err := tmuxOutput(ctx, args...)
 	if err != nil {
 		return "", fmt.Errorf("tmux capture-pane: %w", err)
 	}
