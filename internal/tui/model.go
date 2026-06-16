@@ -36,11 +36,13 @@ type Model struct {
 	agentStateFilter sessionmgr.AgentState
 	prefixArmed      bool
 
-	query       string
-	searchInput textinput.Model
-	renameInput textinput.Model
-	renameFrom  string
-	inputMode   inputMode
+	query          string
+	searchInput    textinput.Model
+	renameInput    textinput.Model
+	renameFrom     string
+	renamePaneID   string
+	renameForAgent string
+	inputMode      inputMode
 
 	preview     string
 	previewKey  string
@@ -135,7 +137,7 @@ func New() Model {
 	search.Prompt = "/ "
 	search.CharLimit = 256
 	rename := textinput.New()
-	rename.Placeholder = "new session name"
+	rename.Placeholder = "new name"
 	rename.Prompt = "rename > "
 	rename.CharLimit = 128
 	m := Model{
@@ -240,6 +242,7 @@ func (m Model) visibleItems() []sessionmgr.Item {
 						item.Name,
 						item.Path,
 						item.AgentName,
+						item.AgentDisplayName,
 						string(item.AgentState),
 						item.Location,
 						item.AgentMessage,

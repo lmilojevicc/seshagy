@@ -104,22 +104,93 @@ func TestDeleteSelectedSessionAndAgent(t *testing.T) {
 	}
 }
 
-func TestStartRenameNonSessionRejected(t *testing.T) {
+func TestStartRenameAgentEntersRenameMode(t *testing.T) {
 	m := newTestModel(t)
 	m.items = []sessionmgr.Item{
-		{Kind: sessionmgr.KindAgent, PaneID: "%1", AgentName: "pi"},
+		{Kind: sessionmgr.KindAgent, PaneID: "%1", AgentName: "pi", AgentDisplayName: "my bot"},
 	}
 	model, cmd := m.startRename()
 	got := model.(Model)
-	if got.status != "rename only applies to sessions" || cmd != nil {
-		t.Fatalf("agent rename = status:%q cmd:%v", got.status, cmd)
+	if got.inputMode != modeRename || got.renamePaneID != "%1" || got.renameForAgent != "pi" ||
+		got.renameInput.Value() != "my bot" || cmd == nil {
+		t.Fatalf(
+			"agent rename = mode:%v pane:%q agent:%q value:%q cmd:%v",
+			got.inputMode,
+			got.renamePaneID,
+			got.renameForAgent,
+			got.renameInput.Value(),
+			cmd,
+		)
+	}
+
+	m.items = []sessionmgr.Item{{Kind: sessionmgr.KindZoxide, Path: "/tmp/demo"}}
+	model, cmd = m.startRename()
+	got = model.(Model)
+	if got.status != "rename only applies to sessions and agents" || cmd != nil {
+		t.Fatalf("zoxide rename = status:%q cmd:%v", got.status, cmd)
 	}
 
 	m.items = nil
 	model, cmd = m.startRename()
 	got = model.(Model)
-	if got.status != "rename only applies to sessions" || cmd != nil {
+	if got.status != "nothing selected" || cmd != nil {
 		t.Fatalf("empty rename = status:%q cmd:%v", got.status, cmd)
+	}
+}
+
+func TestHandleKeyRenameModeAgentSubmit(t *testing.T) {
+	m := newTestModel(t)
+	m.inputMode = modeRename
+	m.renamePaneID = "%1"
+	m.renameForAgent = "pi"
+	m.renameFrom = "pi"
+	m.renameInput.SetValue("my bot")
+	m.renameInput.Focus()
+
+	model, cmd := m.handleKey(enterMsg())
+	got := model.(Model)
+	if got.inputMode != modeNormal || got.renamePaneID != "" || cmd == nil {
+		t.Fatalf(
+			"agent rename submit = mode:%v pane:%q cmd:%v",
+			got.inputMode,
+			got.renamePaneID,
+			cmd,
+		)
+	}
+}
+
+func TestHandleKeyRenameModeAgentClearLabel(t *testing.T) {
+	m := newTestModel(t)
+	m.inputMode = modeRename
+	m.renamePaneID = "%1"
+	m.renameForAgent = "pi"
+	m.renameFrom = "my bot"
+	m.renameInput.SetValue("   ")
+	m.renameInput.Focus()
+
+	model, cmd := m.handleKey(enterMsg())
+	got := model.(Model)
+	if got.inputMode != modeNormal || got.renamePaneID != "" || cmd == nil {
+		t.Fatalf(
+			"agent clear submit = mode:%v pane:%q cmd:%v",
+			got.inputMode,
+			got.renamePaneID,
+			cmd,
+		)
+	}
+}
+
+func TestHandleActionKeyRenameAgent(t *testing.T) {
+	m := newTestModel(t)
+	m.items = []sessionmgr.Item{
+		{Kind: sessionmgr.KindAgent, PaneID: "%2", AgentName: "claude"},
+	}
+
+	model, cmd := m.handleActionKey(keyMsg("R"))
+	got := model.(Model)
+	if got.inputMode != modeRename || got.renamePaneID != "%2" || got.renameForAgent != "claude" ||
+		cmd == nil {
+		t.Fatalf("R on agent = mode:%v pane:%q cmd:%v", got.inputMode, got.renamePaneID, cmd)
 	}
 }
 

@@ -240,18 +240,19 @@ func FormatLineWithIcons(i Item, icons IconSet) string {
 		)
 		// Embed the real tmux pane id (%N) so --delete-item can target the pane
 		// unambiguously instead of reparsing the session:window.pane location.
+		name := i.DisplayName()
 		if i.PaneID != "" {
 			return fmt.Sprintf(
 				"%s\t%s\t%s\t%s\t%s%s",
 				prefix,
-				i.AgentName,
+				name,
 				i.PaneID,
 				i.Location,
 				i.Path,
 				suffix,
 			)
 		}
-		return fmt.Sprintf("%s\t%s\t%s\t%s%s", prefix, i.AgentName, i.Location, i.Path, suffix)
+		return fmt.Sprintf("%s\t%s\t%s\t%s%s", prefix, name, i.Location, i.Path, suffix)
 	case KindZoxide:
 		return joinNonEmpty(colorIcon(KindZoxide, icons), i.Path)
 	case KindFD:

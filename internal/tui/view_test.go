@@ -67,6 +67,25 @@ func TestAgentSessionIDHiddenWhenAbsent(t *testing.T) {
 	}
 }
 
+func TestDetailLinesAgentShowsBothIdentityAndLabel(t *testing.T) {
+	m := newTestModel(t)
+	item := sessionmgr.Item{
+		Kind:             sessionmgr.KindAgent,
+		AgentName:        "pi",
+		AgentDisplayName: "my bot",
+		AgentState:       sessionmgr.AgentWorking,
+		PaneID:           "%1",
+		Location:         "demo:1.1",
+	}
+	detail := sessionmgr.StripANSI(strings.Join(m.detailLines(item, 40), "\n"))
+	if !strings.Contains(detail, "my bot") {
+		t.Fatalf("detail should show custom label\n%s", detail)
+	}
+	if !strings.Contains(detail, "pi") {
+		t.Fatalf("detail should show original agent identity\n%s", detail)
+	}
+}
+
 func TestViewRendersDashboardChromeAndRows(t *testing.T) {
 	m := newTestModel(t)
 	model, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 32})
@@ -1342,7 +1361,7 @@ func TestFooterWarningStatusesUseWarningStyle(t *testing.T) {
 		"yazi closed without a directory",
 		"nothing selected",
 		"delete only applies to sessions and agents",
-		"rename only applies to sessions",
+		"rename only applies to sessions and agents",
 		"state filter only applies to agent panes",
 	}
 	for _, status := range warnings {
