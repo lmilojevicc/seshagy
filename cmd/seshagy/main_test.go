@@ -9,6 +9,26 @@ import (
 	"testing"
 )
 
+func cliTestEnv(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	home := filepath.Join(dir, "home")
+	configDir := filepath.Join(dir, "config")
+	stateDir := filepath.Join(dir, "state")
+	if err := os.MkdirAll(home, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(configDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(stateDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", configDir)
+	t.Setenv("XDG_STATE_HOME", stateDir)
+}
+
 func manifestTestDirs(t *testing.T) {
 	t.Helper()
 	dir := t.TempDir()

@@ -53,23 +53,27 @@ func ResolvePane(ctx context.Context, pane string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-func ReportAgent(ctx context.Context, opts AgentReport) error {
+func ReportAgent(ctx context.Context, opts AgentReport) (bool, error) {
 	pane, err := ResolvePane(ctx, opts.Pane)
 	if err != nil {
-		return err
+		return false, err
 	}
-	return withAgentPaneLock(pane, func() error {
-		return reportAgentLocked(ctx, pane, opts)
+	var applied bool
+	err = withAgentPaneLock(pane, func() error {
+		var lockErr error
+		applied, lockErr = reportAgentLocked(ctx, pane, opts)
+		return lockErr
 	})
+	return applied, err
 }
 
-func reportAgentLocked(ctx context.Context, pane string, opts AgentReport) error {
+func reportAgentLocked(ctx context.Context, pane string, opts AgentReport) (bool, error) {
 	name := opts.Name
 	if name == "" {
 		name, _ = showPaneOption(ctx, pane, "@agent_name")
 	}
 	if name == "" {
-		return fmt.Errorf("--agent/--name is required for hook-based agent reporting")
+		return false, fmt.Errorf("--agent/--name is required for hook-based agent reporting")
 	}
 	state := opts.State
 	if state == "" {
@@ -79,12 +83,12 @@ func reportAgentLocked(ctx context.Context, pane string, opts AgentReport) error
 		state = NormalizeAgentState(string(state))
 	}
 	if !agentSeqStillCurrent(ctx, pane, opts.Seq, opts.SeqSeen) {
-		return nil
+		return false, nil
 	}
 	if !opts.SeqSeen {
 		existingSeq, _ := showPaneOption(ctx, pane, "@agent_seq")
 		if strings.TrimSpace(existingSeq) != "" {
-			return nil
+			return false, nil
 		}
 	}
 	// Write seq FIRST so concurrent reports with higher seq can't have
@@ -99,7 +103,7 @@ func reportAgentLocked(ctx context.Context, pane string, opts AgentReport) error
 			opts.Seq,
 			opts.SeqSeen,
 		) {
-			return nil
+			return false, nil
 		}
 	}
 	visible := paneVisibleNow(ctx, pane)
@@ -130,37 +134,40 @@ func reportAgentLocked(ctx context.Context, pane string, opts AgentReport) error
 			_ = unsetPaneOption(ctx, pane, "@agent_session_id")
 		}
 	}
-	return nil
+	return true, nil
 }
 
-func ReleaseAgent(ctx context.Context, opts AgentRelease) error {
+func ReleaseAgent(ctx context.Context, opts AgentRelease) (bool, error) {
 	resolved, err := ResolvePane(ctx, opts.Pane)
 	if err != nil {
-		return err
+		return false, err
 	}
-	return withAgentPaneLock(resolved, func() error {
-		return releaseAgentLocked(ctx, resolved, opts)
+	var released bool
+	err = withAgentPaneLock(resolved, func() error {
+		released = releaseAgentLocked(ctx, resolved, opts)
+		return nil
 	})
+	return released, err
 }
 
-func releaseAgentLocked(ctx context.Context, resolved string, opts AgentRelease) error {
+func releaseAgentLocked(ctx context.Context, resolved string, opts AgentRelease) bool {
 	if opts.SourceSeen {
 		source := cleanField(opts.Source)
 		existing, _ := showPaneOption(ctx, resolved, "@agent_source")
 		if existing != "" && existing != source {
-			return nil
+			return false
 		}
 		if existing == "" {
 			name, _ := showPaneOption(ctx, resolved, "@agent_name")
 			state, _ := showPaneOption(ctx, resolved, "@agent_state")
 			sessionID, _ := showPaneOption(ctx, resolved, "@agent_session_id")
 			if name != "" || state != "" || sessionID != "" {
-				return nil
+				return false
 			}
 		}
 	}
 	if !agentSeqStillCurrent(ctx, resolved, opts.Seq, opts.SeqSeen) {
-		return nil
+		return false
 	}
 	// Write seq first to claim the epoch with strict > comparison.
 	if opts.SeqSeen {
@@ -172,7 +179,7 @@ func releaseAgentLocked(ctx context.Context, resolved string, opts AgentRelease)
 			opts.Seq,
 			true,
 		) {
-			return nil
+			return false
 		}
 	}
 	// Clear metadata unconditionally — seq ownership was established above.
@@ -182,7 +189,7 @@ func releaseAgentLocked(ctx context.Context, resolved string, opts AgentRelease)
 		}
 		_ = unsetPaneOption(ctx, resolved, opt)
 	}
-	return nil
+	return true
 }
 
 // agentPaneLockHook is overridden in tests to simulate lock acquisition failures.

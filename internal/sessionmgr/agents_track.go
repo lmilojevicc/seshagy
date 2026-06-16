@@ -200,14 +200,38 @@ func UpdateAgentStatusTracking(
 	return status, nil
 }
 
-func MarkAgentSeen(ctx context.Context, pane string) {
+func MarkAgentSeen(ctx context.Context, pane string) (bool, error) {
+	pane, err := ResolvePane(ctx, pane)
+	if err != nil {
+		return false, err
+	}
+	var seen bool
+	err = withAgentPaneLock(pane, func() error {
+		var lockErr error
+		seen, lockErr = markAgentSeenLocked(ctx, pane)
+		return lockErr
+	})
+	return seen, err
+}
+
+func markAgentSeenLocked(ctx context.Context, pane string) (bool, error) {
+	name, _ := showPaneOption(ctx, pane, "@agent_name")
 	stateRaw, _ := showPaneOption(ctx, pane, "@agent_state")
+	if strings.TrimSpace(name) == "" && strings.TrimSpace(stateRaw) == "" {
+		return false, nil
+	}
+	seqRaw, _ := showPaneOption(ctx, pane, "@agent_seq")
+	seqRaw = strings.TrimSpace(seqRaw)
+	if seqRaw != "" {
+		if _, parseErr := strconv.ParseInt(seqRaw, 10, 64); parseErr != nil {
+			return false, nil //nolint:nilerr // corrupt @agent_seq is a no-op, not a caller error
+		}
+	}
 	semantic := semanticAgentState(NormalizeAgentState(stateRaw))
 	if semantic == AgentIdle || semantic == AgentAborted {
 		// Use seq-safe writes to avoid overwriting concurrent hook reports.
-		seqRaw, _ := showPaneOption(ctx, pane, "@agent_seq")
-		seq, err := strconv.ParseInt(strings.TrimSpace(seqRaw), 10, 64)
-		seqSeen := err == nil && seqRaw != ""
+		seq, _ := strconv.ParseInt(seqRaw, 10, 64)
+		seqSeen := seqRaw != ""
 		setAgentPaneOptionIfCurrent(ctx, pane, "@agent_state", string(AgentIdle), seq, seqSeen)
 		setAgentPaneOptionIfCurrent(
 			ctx,
@@ -218,7 +242,15 @@ func MarkAgentSeen(ctx context.Context, pane string) {
 			seqSeen,
 		)
 	}
-	_ = setPaneOption(ctx, pane, "@agent_last_seen", fmt.Sprintf("%d", time.Now().Unix()))
+	if err := setPaneOption(
+		ctx,
+		pane,
+		"@agent_last_seen",
+		fmt.Sprintf("%d", agentTrackNow().Unix()),
+	); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func FocusAgentCommand(pane string) *exec.Cmd {
@@ -229,9 +261,27 @@ session_id=$(tmux display-message -p -t "$pane" '#{session_id}')
 window_id=$(tmux display-message -p -t "$pane" '#{window_id}')
 tmux select-window -t "$window_id"
 tmux select-pane -t "$pane"
-tmux set-option -qpt "$pane" @agent_last_seen "$(date +%s)" 2>/dev/null || true
+name=$(tmux show-option -qvpt "$pane" @agent_name 2>/dev/null || true)
+seq=$(tmux show-option -qvpt "$pane" @agent_seq 2>/dev/null || true)
 state=$(tmux show-option -qvpt "$pane" @agent_state 2>/dev/null || true)
-case "${state}" in done|complete|completed|finished|idle|ready|aborted|cancelled|canceled|stopped|error|failed|timeout) tmux set-option -qpt "$pane" @agent_state idle 2>/dev/null || true; tmux set-option -qpt "$pane" @agent_last_status idle 2>/dev/null || true ;; esac
+seq_ok=1
+if [ -n "${seq}" ]; then
+  case "${seq}" in
+    *[!0-9]*) seq_ok=0 ;;
+  esac
+fi
+if [ "${seq_ok}" -eq 1 ]; then
+  tmux set-option -qpt "$pane" @agent_last_seen "$(date +%s)" 2>/dev/null || true
+fi
+if [ "${seq_ok}" -eq 1 ] && [ -n "${name}" ] && [ -z "${seq}" ]; then
+  case "${state}" in
+    working|busy|running|thinking|processing|blocked|permission|permissions|question|confirm|confirmation|waiting|wait) ;;
+    done|complete|completed|finished|idle|ready|aborted|cancelled|canceled|stopped|error|failed|timeout)
+      tmux set-option -qpt "$pane" @agent_state idle 2>/dev/null || true
+      tmux set-option -qpt "$pane" @agent_last_status idle 2>/dev/null || true
+    ;;
+  esac
+fi
 if [ -n "${TMUX:-}" ]; then
   tmux switch-client -t "$session_id"
 else

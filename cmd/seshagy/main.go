@@ -89,16 +89,30 @@ func run(args []string) error {
 		if err != nil {
 			return err
 		}
-		if err := sessionmgr.ReportAgent(ctx, report); err != nil {
+		resolved, err := sessionmgr.ResolvePane(ctx, report.Pane)
+		if err != nil {
+			return err
+		}
+		applied, err := sessionmgr.ReportAgent(ctx, report)
+		if err != nil {
 			return err
 		}
 		if jsonOutput {
-			return encodeSuccess(map[string]any{
-				"applied":    true,
-				"pane":       report.Pane,
+			payload := map[string]any{
+				"applied":    applied,
+				"pane":       resolved,
 				"agent_name": report.Name,
-				"state":      report.State,
-			})
+			}
+			if applied {
+				payload["state"] = report.State
+			} else if report.State != "" {
+				payload["requested_state"] = report.State
+				if actual, readErr := sessionmgr.PaneAgentState(ctx, resolved); readErr == nil &&
+					actual != "" {
+					payload["state"] = string(actual)
+				}
+			}
+			return encodeSuccess(payload)
 		}
 		return nil
 	case "--release-agent":
@@ -107,13 +121,18 @@ func run(args []string) error {
 		if err != nil {
 			return err
 		}
-		if err := sessionmgr.ReleaseAgent(ctx, release); err != nil {
+		resolved, err := sessionmgr.ResolvePane(ctx, release.Pane)
+		if err != nil {
+			return err
+		}
+		released, err := sessionmgr.ReleaseAgent(ctx, release)
+		if err != nil {
 			return err
 		}
 		if jsonOutput {
 			return encodeSuccess(map[string]any{
-				"released": true,
-				"pane":     release.Pane,
+				"released": released,
+				"pane":     resolved,
 			})
 		}
 		return nil
@@ -137,9 +156,60 @@ func runGetItems(
 
 func runAgent(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return errors.New(joinUsage("agent", "explain", "<pane-id>", "[--json]"))
+		return errors.New(agentUsage())
 	}
 	switch args[0] {
+	case "list":
+		rest, jsonOutput := stripJSONFlag(args[1:])
+		if len(rest) != 0 {
+			return errors.New(joinUsage("agent", "list", "[--json]"))
+		}
+		return printItems(ctx, sessionmgr.ModeAgents, jsonOutput)
+	case "track":
+		rest, jsonOutput := stripJSONFlag(args[1:])
+		if len(rest) != 1 {
+			return errors.New(joinUsage("agent", "track", "<pane-id>", "[--json]"))
+		}
+		cfg, err := appconfig.Load()
+		if err != nil {
+			return err
+		}
+		pane, err := sessionmgr.ResolvePane(ctx, rest[0])
+		if err != nil {
+			return err
+		}
+		state, err := sessionmgr.TrackAgentPane(ctx, pane, cfg.LoadOptions())
+		if err != nil {
+			return err
+		}
+		if jsonOutput {
+			return encodeSuccess(map[string]any{
+				"pane":  pane,
+				"state": string(state),
+			})
+		}
+		fmt.Printf("%s: %s\n", pane, state)
+		return nil
+	case "seen":
+		rest, jsonOutput := stripJSONFlag(args[1:])
+		if len(rest) != 1 {
+			return errors.New(joinUsage("agent", "seen", "<pane-id>", "[--json]"))
+		}
+		pane, err := sessionmgr.ResolvePane(ctx, rest[0])
+		if err != nil {
+			return err
+		}
+		seen, err := sessionmgr.MarkAgentSeen(ctx, pane)
+		if err != nil {
+			return err
+		}
+		if jsonOutput {
+			return encodeSuccess(map[string]any{
+				"pane": pane,
+				"seen": seen,
+			})
+		}
+		return nil
 	case "explain":
 		rest, jsonOutput := stripJSONFlag(args[1:])
 		if len(rest) != 1 {
@@ -166,8 +236,17 @@ func runAgent(ctx context.Context, args []string) error {
 		}
 		return nil
 	default:
-		return errors.New(joinUsage("agent", "explain", "<pane-id>", "[--json]"))
+		return errors.New(agentUsage())
 	}
+}
+
+func agentUsage() string {
+	return joinUsage(
+		"agent",
+		"list|track|seen|explain",
+		"[<pane-id>]",
+		"[--json]",
+	)
 }
 
 func runManifest(args []string) error {
@@ -434,7 +513,6 @@ func printItems(ctx context.Context, mode sessionmgr.SourceMode, jsonOutput bool
 	}
 	return nil
 }
-
 func deleteItem(ctx context.Context, raw string, jsonOutput bool) error {
 	cfg, err := appconfig.Load()
 	if err != nil {
@@ -629,6 +707,11 @@ Usage:
                                   set tmux pane @agent_* metadata
   seshagy --release-agent [flags] [--json]
                                   clear tmux pane @agent_* metadata
+  seshagy agent list [--json]     print detected/tracked agent panes
+  seshagy agent track <pane> [--json]
+                                  refresh one pane's tracked agent state
+  seshagy agent seen <pane> [--json]
+                                  mark a pane as seen (updates @agent_last_seen)
   seshagy agent explain <pane> [--json]
                                   show why a pane has its agent state
   seshagy manifest status [--json] show active manifest sources and update status
