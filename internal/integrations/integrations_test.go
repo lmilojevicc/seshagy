@@ -1092,6 +1092,82 @@ func TestShellHookSessionActionReportsUnknownWithSessionIDAndSeq(t *testing.T) {
 	}
 }
 
+func TestShellHookInvokesReportAgent(t *testing.T) {
+	home := t.TempDir()
+	logPath := filepath.Join(home, "argv.log")
+	binPath := filepath.Join(home, "seshagy")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" >> " + logPath + "\n"
+	if err := os.WriteFile(binPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	hookPath := filepath.Join(home, "hook.sh")
+	if err := os.WriteFile(
+		hookPath,
+		[]byte(shellHookAsset(TargetCursor, binPath)),
+		0o755,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := exec.Command("sh", hookPath, "cursor", "session")
+	cmd.Env = append(os.Environ(), "TMUX_PANE=%1")
+	cmd.Stdin = strings.NewReader(`{"session_id":"sess-42"}`)
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("hook run error = %v", err)
+	}
+
+	argv := strings.Join(strings.Fields(readFile(t, logPath)), " ")
+	for _, want := range []string{
+		"--report-agent",
+		"--agent",
+		"cursor",
+		"--state",
+		"unknown",
+		"--source",
+		"seshagy:cursor",
+		"--session-id",
+		"sess-42",
+		"--seq",
+	} {
+		if !strings.Contains(argv, want) {
+			t.Fatalf("report argv missing %q:\n%s", want, argv)
+		}
+	}
+}
+
+func TestShellHookNextSeqFallbackToZero(t *testing.T) {
+	home := t.TempDir()
+	logPath := filepath.Join(home, "argv.log")
+	binPath := filepath.Join(home, "seshagy")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" >> " + logPath + "\n"
+	if err := os.WriteFile(binPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	hookPath := filepath.Join(home, "hook.sh")
+	if err := os.WriteFile(
+		hookPath,
+		[]byte(shellHookAsset(TargetCursor, binPath)),
+		0o755,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := exec.Command("sh", hookPath, "cursor", "working")
+	cmd.Env = []string{
+		"TMUX_PANE=%1",
+		"PATH=",
+		"HOME=" + home,
+	}
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("hook run error = %v", err)
+	}
+
+	argv := strings.Join(strings.Fields(readFile(t, logPath)), " ")
+	if !strings.Contains(argv, "--seq 0") {
+		t.Fatalf("hook argv missing --seq 0 fallback:\n%s", argv)
+	}
+}
+
 func TestShellHookRejectsUnsafeMessageAndSessionID(t *testing.T) {
 	home := t.TempDir()
 	binPath := filepath.Join(home, "seshagy")

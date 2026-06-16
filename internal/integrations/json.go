@@ -247,7 +247,7 @@ func removeSimpleCommands(hooks map[string]any, commandPrefix string) bool {
 	return updated
 }
 
-func removeDirectCommandsForEvent(hooks map[string]any, event, commandPrefix string) bool {
+func removeDirectCommandsForEvent(hooks map[string]any, event string) bool {
 	raw, ok := hooks[event]
 	if !ok {
 		return false
@@ -268,7 +268,7 @@ func removeDirectCommandsForEvent(hooks map[string]any, event, commandPrefix str
 		if command == "" {
 			command, _ = entryObject["command"].(string)
 		}
-		if strings.Contains(command, commandPrefix) {
+		if strings.Contains(command, shellHookName) {
 			updated = true
 			continue
 		}
@@ -287,7 +287,7 @@ func removeDirectCommandsForEvent(hooks map[string]any, event, commandPrefix str
 
 func removeSimpleCommandsForAction(
 	hooks map[string]any,
-	event, commandPrefix, action string,
+	event, action string,
 ) bool {
 	raw, ok := hooks[event]
 	if !ok {
@@ -306,7 +306,7 @@ func removeSimpleCommandsForAction(
 			continue
 		}
 		command, _ := entryObject["command"].(string)
-		if strings.Contains(command, commandPrefix) &&
+		if strings.Contains(command, shellHookName) &&
 			strings.Contains(command, " "+action) {
 			updated = true
 			continue
