@@ -52,6 +52,7 @@ func ListAgents(ctx context.Context, sessionFilter string, opts LoadOptions) ([]
 			items[i].AgentState = state
 		}
 	}
+	ApplyAgentLabels(items, sessionFilter)
 	return items, nil
 }
 

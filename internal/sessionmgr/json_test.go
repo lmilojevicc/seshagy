@@ -73,6 +73,42 @@ func TestItemToJSONIncludesStructuredAgentFields(t *testing.T) {
 	}
 }
 
+func TestItemToJSONIncludesDisplayName(t *testing.T) {
+	item := Item{
+		Kind:             KindAgent,
+		Name:             "pi",
+		AgentName:        "pi",
+		AgentDisplayName: "my bot",
+		PaneID:           "%1",
+		AgentState:       AgentIdle,
+	}
+	got := ItemToJSON(item, IconSet{Enabled: false})
+	if got.AgentName != "pi" {
+		t.Fatalf("agent_name = %q, want pi", got.AgentName)
+	}
+	if got.DisplayName != "my bot" {
+		t.Fatalf("display_name = %q, want my bot", got.DisplayName)
+	}
+	if !strings.Contains(got.LinePlain, "my bot") {
+		t.Fatalf("line_plain = %q, want display name in formatted line", got.LinePlain)
+	}
+
+	data, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatal(err)
+	}
+	if raw["agent_name"] != "pi" {
+		t.Fatalf("agent_name json = %#v", raw["agent_name"])
+	}
+	if raw["display_name"] != "my bot" {
+		t.Fatalf("display_name json = %#v", raw["display_name"])
+	}
+}
+
 func TestItemsToJSONUsesModeToken(t *testing.T) {
 	items := []Item{{Kind: KindSession, Name: "work", Target: "work"}}
 	payload := ItemsToJSON(ModeAgents, items, IconSet{}, "")

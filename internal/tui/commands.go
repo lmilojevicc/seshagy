@@ -145,6 +145,21 @@ func renameCmd(oldName, newName string) tea.Cmd {
 	}
 }
 
+func renameAgentCmd(paneID, label, forAgent string) tea.Cmd {
+	return func() tea.Msg {
+		var err error
+		var status string
+		if label == "" {
+			err = sessionmgr.ClearAgentDisplayName(paneID)
+			status = "cleared agent label for " + paneID
+		} else {
+			err = sessionmgr.SetAgentDisplayName(paneID, label, forAgent)
+			status = fmt.Sprintf("renamed agent %s to %s", forAgent, label)
+		}
+		return actionDoneMsg{status: status, err: err}
+	}
+}
+
 func tickCmd() tea.Cmd {
 	return tea.Tick(5*time.Second, func(t time.Time) tea.Msg { return tickMsg(t) })
 }

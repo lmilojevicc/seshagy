@@ -47,15 +47,16 @@ type Item struct {
 	Pane     string
 	Location string
 
-	AgentName      string
-	AgentState     AgentState
-	AgentMessage   string
-	AgentSource    string
-	AgentUpdated   string
-	AgentSessionID string
-	AgentSeq       string
-	PaneTitle      string
-	Visible        bool
+	AgentName        string
+	AgentDisplayName string
+	AgentState       AgentState
+	AgentMessage     string
+	AgentSource      string
+	AgentUpdated     string
+	AgentSessionID   string
+	AgentSeq         string
+	PaneTitle        string
+	Visible          bool
 }
 
 func (i Item) Key() string {
@@ -72,6 +73,9 @@ func (i Item) Key() string {
 func (i Item) DisplayName() string {
 	switch i.Kind {
 	case KindAgent:
+		if i.AgentDisplayName != "" {
+			return i.AgentDisplayName
+		}
 		if i.AgentName != "" {
 			return i.AgentName
 		}

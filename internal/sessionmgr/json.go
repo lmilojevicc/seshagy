@@ -29,6 +29,7 @@ type ItemJSON struct {
 	Visible   bool   `json:"visible"`
 
 	AgentName        string     `json:"agent_name,omitempty"`
+	DisplayName      string     `json:"display_name,omitempty"`
 	State            AgentState `json:"state,omitempty"`
 	Message          string     `json:"message,omitempty"`
 	Source           string     `json:"source,omitempty"`
@@ -77,6 +78,9 @@ func ItemToJSON(item Item, icons IconSet) ItemJSON {
 	}
 	if item.Kind == KindAgent {
 		out.AgentName = item.AgentName
+		if item.AgentDisplayName != "" {
+			out.DisplayName = item.AgentDisplayName
+		}
 		out.State = item.AgentState
 		out.Message = item.AgentMessage
 		out.Source = item.AgentSource

@@ -318,7 +318,11 @@ func (m Model) rowParts(item sessionmgr.Item) (string, string) {
 		if message != "" {
 			secondary += " · " + message
 		}
-		return rowText(m.iconFor(item.Kind), state, s.tabActive.Render(item.AgentName)), secondary
+		return rowText(
+			m.iconFor(item.Kind),
+			state,
+			s.tabActive.Render(item.DisplayName()),
+		), secondary
 	case sessionmgr.KindZoxide:
 		return rowText(m.iconFor(item.Kind), item.Path), "zoxide"
 	case sessionmgr.KindFD:
@@ -412,9 +416,14 @@ func (m Model) detailLines(item sessionmgr.Item, width int) []string {
 	case sessionmgr.KindAgent:
 		icons := m.config.IconSet()
 		stateValue := renderAgentStateDetail(s, item.AgentState, icons)
+		title := item.DisplayName()
+		subtitle := "agent pane"
+		if item.AgentDisplayName != "" {
+			subtitle = item.AgentName
+		}
 		lines := []string{
-			s.title.Render(item.AgentName),
-			s.muted.Render("agent pane"),
+			s.title.Render(title),
+			s.muted.Render(subtitle),
 			"",
 			kv(s, "state", stateValue),
 			kv(s, "pane", item.PaneID),
@@ -581,7 +590,7 @@ func isWarningStatus(status string) bool {
 		"yazi closed without a directory",
 		"nothing selected",
 		"delete only applies to sessions and agents",
-		"rename only applies to sessions",
+		"rename only applies to sessions and agents",
 		"state filter only applies to agent panes":
 		return true
 	default:

@@ -160,6 +160,45 @@ func TestRenameCmdReturnsTmuxError(t *testing.T) {
 	}
 }
 
+func TestRenameAgentCmdSetsLabel(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	msg := renameAgentCmd("%1", "my bot", "pi")().(actionDoneMsg)
+	if msg.err != nil {
+		t.Fatalf("renameAgentCmd() err = %v", msg.err)
+	}
+	if msg.status != "renamed agent pi to my bot" {
+		t.Fatalf("renameAgentCmd() status = %q", msg.status)
+	}
+	store, err := sessionmgr.LoadAgentLabels()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := store.Get("%1", "pi"); got != "my bot" {
+		t.Fatalf("stored label = %q, want my bot", got)
+	}
+}
+
+func TestRenameAgentCmdClearsLabel(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	if err := sessionmgr.SetAgentDisplayName("%1", "old label", "pi"); err != nil {
+		t.Fatal(err)
+	}
+	msg := renameAgentCmd("%1", "", "pi")().(actionDoneMsg)
+	if msg.err != nil {
+		t.Fatalf("renameAgentCmd() err = %v", msg.err)
+	}
+	if msg.status != "cleared agent label for %1" {
+		t.Fatalf("renameAgentCmd() status = %q", msg.status)
+	}
+	store, err := sessionmgr.LoadAgentLabels()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := store.Get("%1", "pi"); got != "" {
+		t.Fatalf("stored label = %q, want empty", got)
+	}
+}
+
 func TestPreviewCmdAgentAndDirectory(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "readme.txt"), []byte("hello"), 0o644); err != nil {

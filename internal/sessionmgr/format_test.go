@@ -236,6 +236,10 @@ func TestItemDisplayName(t *testing.T) {
 		want string
 	}{
 		{Item{Kind: KindAgent, AgentName: "claude", PaneID: "%1"}, "claude"},
+		{
+			Item{Kind: KindAgent, AgentName: "pi", AgentDisplayName: "my bot", PaneID: "%1"},
+			"my bot",
+		},
 		{Item{Kind: KindAgent, PaneID: "%2"}, "%2"},
 		{Item{Kind: KindZoxide, Path: "~/Projects"}, "~/Projects"},
 		{Item{Kind: KindSession, Name: "work"}, "work"},

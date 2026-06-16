@@ -53,6 +53,24 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "enter":
 			newName := strings.TrimSpace(m.renameInput.Value())
+			if m.renamePaneID != "" {
+				paneID := m.renamePaneID
+				forAgent := m.renameForAgent
+				oldLabel := m.renameFrom
+				m.inputMode = modeNormal
+				m.renameInput.Blur()
+				m.renameFrom = ""
+				m.renamePaneID = ""
+				m.renameForAgent = ""
+				if newName == "" {
+					return m, renameAgentCmd(paneID, "", forAgent)
+				}
+				if newName == oldLabel {
+					m.status = "rename cancelled"
+					return m, nil
+				}
+				return m, renameAgentCmd(paneID, newName, forAgent)
+			}
 			oldName := m.renameFrom
 			m.inputMode = modeNormal
 			m.renameInput.Blur()
@@ -462,16 +480,35 @@ func (m Model) deleteSelected() (tea.Model, tea.Cmd) {
 
 func (m Model) startRename() (tea.Model, tea.Cmd) {
 	item, ok := m.selectedItem()
-	if !ok || item.Kind != sessionmgr.KindSession {
-		m.status = "rename only applies to sessions"
+	if !ok {
+		m.status = "nothing selected"
 		return m, nil
 	}
-	m.inputMode = modeRename
-	m.renameFrom = item.Name
-	m.renameInput.SetValue(item.Name)
-	m.renameInput.Focus()
-	m.status = "renaming " + item.Name
-	return m, textinput.Blink
+	switch item.Kind {
+	case sessionmgr.KindSession:
+		m.inputMode = modeRename
+		m.renameFrom = item.Name
+		m.renamePaneID = ""
+		m.renameForAgent = ""
+		m.renameInput.Placeholder = "new session name"
+		m.renameInput.SetValue(item.Name)
+		m.renameInput.Focus()
+		m.status = "renaming " + item.Name
+		return m, textinput.Blink
+	case sessionmgr.KindAgent:
+		m.inputMode = modeRename
+		m.renameFrom = item.DisplayName()
+		m.renamePaneID = item.PaneID
+		m.renameForAgent = item.AgentName
+		m.renameInput.Placeholder = "agent display label"
+		m.renameInput.SetValue(item.DisplayName())
+		m.renameInput.Focus()
+		m.status = "renaming " + item.DisplayName()
+		return m, textinput.Blink
+	default:
+		m.status = "rename only applies to sessions and agents"
+		return m, nil
+	}
 }
 
 func (m Model) startYazi() (tea.Model, tea.Cmd) {
