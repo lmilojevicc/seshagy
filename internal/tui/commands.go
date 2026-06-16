@@ -17,8 +17,14 @@ func refreshCmd(source sessionmgr.SourceMode, gen uint64, opts sessionmgr.LoadOp
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 		defer cancel()
-		items, err := sessionmgr.LoadWithOptions(ctx, source, opts)
-		return refreshMsg{source: source, gen: gen, items: items, err: err}
+		result, err := sessionmgr.LoadWithOptions(ctx, source, opts)
+		return refreshMsg{
+			source:  source,
+			gen:     gen,
+			items:   result.Items,
+			warning: result.Warning,
+			err:     err,
+		}
 	}
 }
 

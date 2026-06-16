@@ -500,15 +500,20 @@ func printItems(ctx context.Context, mode sessionmgr.SourceMode, jsonOutput bool
 	if err != nil {
 		return err
 	}
-	items, err := sessionmgr.LoadWithOptions(ctx, mode, cfg.LoadOptions())
+	result, err := sessionmgr.LoadWithOptions(ctx, mode, cfg.LoadOptions())
 	if err != nil {
 		return err
 	}
+	if result.Warning != "" {
+		fmt.Fprintf(os.Stderr, "seshagy: warning: %s\n", result.Warning)
+	}
 	if jsonOutput {
-		return encodeSuccess(sessionmgr.ItemsToJSON(mode, items, cfg.IconSet()))
+		return encodeSuccess(
+			sessionmgr.ItemsToJSON(mode, result.Items, cfg.IconSet(), result.Warning),
+		)
 	}
 	icons := cfg.IconSet()
-	for _, item := range items {
+	for _, item := range result.Items {
 		fmt.Println(sessionmgr.FormatLineWithIcons(item, icons))
 	}
 	return nil

@@ -76,10 +76,11 @@ type setupPrompt struct {
 }
 
 type refreshMsg struct {
-	source sessionmgr.SourceMode
-	gen    uint64
-	items  []sessionmgr.Item
-	err    error
+	source  sessionmgr.SourceMode
+	gen     uint64
+	items   []sessionmgr.Item
+	warning string
+	err     error
 }
 
 type previewMsg struct {

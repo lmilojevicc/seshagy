@@ -13,6 +13,7 @@ type modeCache struct {
 	items     []sessionmgr.Item
 	fetchedAt time.Time
 	err       error
+	warning   string
 }
 
 func cacheTTL(mode sessionmgr.SourceMode) time.Duration {
@@ -49,6 +50,8 @@ func (m Model) applyCacheEntry(mode sessionmgr.SourceMode) Model {
 	m.err = entry.err
 	if entry.err != nil {
 		m.status = entry.err.Error()
+	} else if entry.warning != "" {
+		m.status = entry.warning
 	} else {
 		m.status = fmt.Sprintf("loaded %d item%s", len(entry.items), plural(len(entry.items)))
 	}
@@ -70,7 +73,12 @@ func (m Model) invalidateAllCaches() Model {
 	return m
 }
 
-func (m Model) storeCache(mode sessionmgr.SourceMode, items []sessionmgr.Item, err error) Model {
+func (m Model) storeCache(
+	mode sessionmgr.SourceMode,
+	items []sessionmgr.Item,
+	warning string,
+	err error,
+) Model {
 	if m.cache == nil {
 		m.cache = make(map[sessionmgr.SourceMode]modeCache)
 	}
@@ -78,6 +86,7 @@ func (m Model) storeCache(mode sessionmgr.SourceMode, items []sessionmgr.Item, e
 		items:     items,
 		fetchedAt: time.Now(),
 		err:       err,
+		warning:   warning,
 	}
 	return m
 }
@@ -125,7 +134,7 @@ func (m Model) handleRefreshMsg(msg refreshMsg) (Model, tea.Cmd) {
 		return m, nil
 	}
 	m = m.finishRefresh(msg.source, msg.gen)
-	m = m.storeCache(msg.source, msg.items, msg.err)
+	m = m.storeCache(msg.source, msg.items, msg.warning, msg.err)
 
 	if msg.source != m.source {
 		return m, nil
@@ -140,6 +149,10 @@ func (m Model) handleRefreshMsg(msg refreshMsg) (Model, tea.Cmd) {
 	m.err = nil
 	m.items = msg.items
 	m.clampCursor()
-	m.status = fmt.Sprintf("loaded %d item%s", len(msg.items), plural(len(msg.items)))
+	if msg.warning != "" {
+		m.status = msg.warning
+	} else {
+		m.status = fmt.Sprintf("loaded %d item%s", len(msg.items), plural(len(msg.items)))
+	}
 	return m, m.previewForSelection()
 }

@@ -43,11 +43,8 @@ type ItemsJSON struct {
 	SchemaVersion int        `json:"schema_version"`
 	Ok            bool       `json:"ok"`
 	Mode          string     `json:"mode"`
+	Warning       string     `json:"warning,omitempty"`
 	Items         []ItemJSON `json:"items"`
-}
-
-func SourceModeToken(mode SourceMode) string {
-	return mode.Names().ConfigToken
 }
 
 func ItemToJSON(item Item, icons IconSet) ItemJSON {
@@ -93,7 +90,7 @@ func ItemToJSON(item Item, icons IconSet) ItemJSON {
 	return out
 }
 
-func ItemsToJSON(mode SourceMode, items []Item, icons IconSet) ItemsJSON {
+func ItemsToJSON(mode SourceMode, items []Item, icons IconSet, warning string) ItemsJSON {
 	out := make([]ItemJSON, 0, len(items))
 	for _, item := range items {
 		out = append(out, ItemToJSON(item, icons))
@@ -101,7 +98,8 @@ func ItemsToJSON(mode SourceMode, items []Item, icons IconSet) ItemsJSON {
 	return ItemsJSON{
 		SchemaVersion: 1,
 		Ok:            true,
-		Mode:          SourceModeToken(mode),
+		Mode:          mode.Names().ConfigToken,
+		Warning:       warning,
 		Items:         out,
 	}
 }

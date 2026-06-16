@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 func captureStdout(t *testing.T, fn func() error) (string, error) {
@@ -18,15 +19,99 @@ func captureStdout(t *testing.T, fn func() error) (string, error) {
 		t.Fatal(err)
 	}
 	os.Stdout = w
+
+	var buf bytes.Buffer
+	copyDone := make(chan struct{})
+	go func() {
+		_, _ = io.Copy(&buf, r)
+		close(copyDone)
+	}()
+
 	t.Cleanup(func() {
 		os.Stdout = old
+		_ = w.Close()
+		select {
+		case <-copyDone:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("captureStdout: timed out waiting for stdout copy during cleanup")
+		}
+		_ = r.Close()
 	})
-	err = fn()
-	_ = w.Close()
+
+	var fnErr error
+	func() {
+		defer w.Close()
+		fnErr = fn()
+	}()
+
+	select {
+	case <-copyDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("captureStdout: timed out waiting for stdout copy")
+	}
+	return buf.String(), fnErr
+}
+
+func captureStderr(t *testing.T, fn func() error) (string, error) {
+	t.Helper()
+	old := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stderr = w
+
 	var buf bytes.Buffer
-	_, _ = io.Copy(&buf, r)
-	_ = r.Close()
-	return buf.String(), err
+	copyDone := make(chan struct{})
+	go func() {
+		_, _ = io.Copy(&buf, r)
+		close(copyDone)
+	}()
+
+	t.Cleanup(func() {
+		os.Stderr = old
+		_ = w.Close()
+		select {
+		case <-copyDone:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("captureStderr: timed out waiting for stderr copy during cleanup")
+		}
+		_ = r.Close()
+	})
+
+	var fnErr error
+	func() {
+		defer w.Close()
+		fnErr = fn()
+	}()
+
+	select {
+	case <-copyDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("captureStderr: timed out waiting for stderr copy")
+	}
+	return buf.String(), fnErr
+}
+
+func TestCaptureStdoutLargeOutput(t *testing.T) {
+	const lines = 512
+	line := strings.Repeat("x", 1024) + "\n"
+
+	out, err := captureStdout(t, func() error {
+		for range lines {
+			if _, writeErr := os.Stdout.Write([]byte(line)); writeErr != nil {
+				return writeErr
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("fn error = %v", err)
+	}
+	wantMin := lines * len(line)
+	if len(out) < wantMin {
+		t.Fatalf("output = %d bytes, want at least %d", len(out), wantMin)
+	}
 }
 
 func TestHasJSONFlag(t *testing.T) {
@@ -41,6 +126,21 @@ func TestHasJSONFlag(t *testing.T) {
 	}
 	if !hasJSONFlag([]string{"--delete-item", "line with --json", "--json"}) {
 		t.Fatal("expected json flag in delete-item args")
+	}
+}
+
+func TestEncodeJSONRejectsUnsupportedValues(t *testing.T) {
+	if err := encodeJSON(make(chan int)); err == nil {
+		t.Fatal("expected marshal error for unsupported value")
+	}
+}
+
+func TestEncodeSuccessRejectsUnsupportedPayload(t *testing.T) {
+	err := encodeSuccess(struct {
+		Ch chan int `json:"ch"`
+	}{Ch: make(chan int)})
+	if err == nil {
+		t.Fatal("expected encodeSuccess error for unsupported payload")
 	}
 }
 
@@ -123,6 +223,7 @@ func TestStripJSONFlag(t *testing.T) {
 }
 
 func TestVersionJSONOutput(t *testing.T) {
+	cliTestEnv(t)
 	out, err := captureStdout(t, func() error {
 		return run([]string{"--version", "--json"})
 	})
@@ -146,6 +247,7 @@ func TestVersionJSONOutput(t *testing.T) {
 }
 
 func TestIntegrationStatusJSONOutput(t *testing.T) {
+	cliTestEnv(t)
 	out, err := captureStdout(t, func() error {
 		return run([]string{"integration", "status", "--json"})
 	})
@@ -212,6 +314,7 @@ func TestManifestStatusJSONShape(t *testing.T) {
 }
 
 func TestGetAgentsJSONRejectsExtraArgs(t *testing.T) {
+	cliTestEnv(t)
 	if err := run([]string{"--get-agents", "--json", "extra"}); err == nil {
 		t.Fatal("expected usage error for extra args")
 	}
