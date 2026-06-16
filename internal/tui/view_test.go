@@ -405,25 +405,184 @@ func TestDefaultIconsRenderWithConfiguredDisplaySpacing(t *testing.T) {
 	}
 }
 
-func TestTextModeAgentDetailRendersStateLabel(t *testing.T) {
-	m := newTestModel(t)
-	cfg := appconfig.Default()
-	cfg.Icons.Mode = appconfig.IconModeText
-	cfg.Icons.Agent.Label = "A"
-	m.config = cfg
+func TestDetailStateRenderingByMode(t *testing.T) {
+	tests := []struct {
+		name       string
+		mode       string
+		kind       sessionmgr.Kind
+		item       sessionmgr.Item
+		wantList   string
+		wantDetail []string
+		wantAbsent []string
+	}{
+		{
+			name: "text mode agent detail",
+			mode: appconfig.IconModeText,
+			kind: sessionmgr.KindAgent,
+			item: sessionmgr.Item{
+				Kind:       sessionmgr.KindAgent,
+				AgentName:  "pi",
+				AgentState: sessionmgr.AgentWorking,
+				PaneID:     "%1",
+			},
+			wantDetail: []string{"state     working"},
+			wantAbsent: []string{"[working]", "state     ▶ working"},
+		},
+		{
+			name: "icons mode agent detail",
+			mode: appconfig.IconModeIcons,
+			kind: sessionmgr.KindAgent,
+			item: sessionmgr.Item{
+				Kind:       sessionmgr.KindAgent,
+				AgentName:  "pi",
+				AgentState: sessionmgr.AgentWorking,
+			},
+			wantDetail: []string{"state     ▶ working"},
+		},
+		{
+			name: "text mode session detail",
+			mode: appconfig.IconModeText,
+			kind: sessionmgr.KindSession,
+			item: sessionmgr.Item{
+				Kind:     sessionmgr.KindSession,
+				Name:     "demo",
+				Attached: true,
+			},
+			wantDetail: []string{"attached  " + "attached"},
+			wantAbsent: []string{"[attached]", "attached  ● attached"},
+		},
+		{
+			name: "icons mode session detail",
+			mode: appconfig.IconModeIcons,
+			kind: sessionmgr.KindSession,
+			item: sessionmgr.Item{
+				Kind:     sessionmgr.KindSession,
+				Name:     "demo",
+				Attached: true,
+			},
+			wantDetail: []string{"attached  ● attached"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := newTestModel(t)
+			cfg := appconfig.Default()
+			cfg.Icons.Mode = tt.mode
+			if tt.kind == sessionmgr.KindAgent && tt.mode == appconfig.IconModeText {
+				cfg.Icons.Agent.Label = "A"
+			}
+			m.config = cfg
 
-	item := sessionmgr.Item{
-		Kind:       sessionmgr.KindAgent,
-		AgentName:  "pi",
-		AgentState: sessionmgr.AgentWorking,
-		PaneID:     "%1",
+			detail := sessionmgr.StripANSI(strings.Join(m.detailLines(tt.item, 40), "\n"))
+			for _, want := range tt.wantDetail {
+				if !strings.Contains(detail, want) {
+					t.Fatalf("detail missing %q\n%s", want, detail)
+				}
+			}
+			for _, absent := range tt.wantAbsent {
+				if strings.Contains(detail, absent) {
+					t.Fatalf("detail should not contain %q\n%s", absent, detail)
+				}
+			}
+		})
 	}
-	detail := sessionmgr.StripANSI(strings.Join(m.detailLines(item, 40), "\n"))
-	if !strings.Contains(detail, "state     working") {
-		t.Fatalf("text-mode agent detail should render raw state\n%s", detail)
+}
+
+func TestStateDisplayOverrideListAndDetail(t *testing.T) {
+	tests := []struct {
+		name       string
+		iconMode   string
+		configure  func(*appconfig.Config)
+		item       sessionmgr.Item
+		wantList   string
+		wantDetail []string
+		wantAbsent []string
+	}{
+		{
+			name:     "text icons + agent_state icons",
+			iconMode: appconfig.IconModeText,
+			configure: func(cfg *appconfig.Config) {
+				cfg.Icons.AgentStateMode = appconfig.StateDisplayModeIcons
+			},
+			item: sessionmgr.Item{
+				Kind:       sessionmgr.KindAgent,
+				AgentName:  "pi",
+				AgentState: sessionmgr.AgentWorking,
+			},
+			wantList:   "A ▶ pi",
+			wantDetail: []string{"state     ▶ working"},
+			wantAbsent: []string{"[working]"},
+		},
+		{
+			name:     "icons mode + agent_state text",
+			iconMode: appconfig.IconModeIcons,
+			configure: func(cfg *appconfig.Config) {
+				cfg.Icons.AgentStateMode = appconfig.StateDisplayModeText
+			},
+			item: sessionmgr.Item{
+				Kind:       sessionmgr.KindAgent,
+				AgentName:  "pi",
+				AgentState: sessionmgr.AgentWorking,
+			},
+			wantList:   sessionmgr.IconAgent + "  [working] pi",
+			wantDetail: []string{"state     working"},
+			wantAbsent: []string{"state     ▶ working", "[working]"},
+		},
+		{
+			name:     "text icons + tmux_state icons",
+			iconMode: appconfig.IconModeText,
+			configure: func(cfg *appconfig.Config) {
+				cfg.Icons.TmuxStateMode = appconfig.StateDisplayModeIcons
+			},
+			item: sessionmgr.Item{
+				Kind:     sessionmgr.KindSession,
+				Name:     "demo",
+				Attached: true,
+			},
+			wantList:   "S ● demo",
+			wantDetail: []string{"attached  ● attached"},
+			wantAbsent: []string{"[attached]"},
+		},
+		{
+			name:     "icons mode + tmux_state text",
+			iconMode: appconfig.IconModeIcons,
+			configure: func(cfg *appconfig.Config) {
+				cfg.Icons.TmuxStateMode = appconfig.StateDisplayModeText
+			},
+			item: sessionmgr.Item{
+				Kind:     sessionmgr.KindSession,
+				Name:     "demo",
+				Attached: true,
+			},
+			wantList:   sessionmgr.IconSession + " [attached] demo",
+			wantDetail: []string{"attached  " + "attached"},
+			wantAbsent: []string{"attached  ● attached", "[attached]"},
+		},
 	}
-	if strings.Contains(detail, "[working]") || strings.Contains(detail, "state     ▶ working") {
-		t.Fatalf("text-mode agent detail should not render brackets or glyph\n%s", detail)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := newTestModel(t)
+			cfg := appconfig.Default()
+			cfg.Icons.Mode = tt.iconMode
+			tt.configure(&cfg)
+			m.config = cfg
+
+			primary, _ := m.rowParts(tt.item)
+			if got := sessionmgr.StripANSI(primary); got != tt.wantList {
+				t.Fatalf("list row = %q, want %q", got, tt.wantList)
+			}
+			detail := sessionmgr.StripANSI(strings.Join(m.detailLines(tt.item, 40), "\n"))
+			for _, want := range tt.wantDetail {
+				if !strings.Contains(detail, want) {
+					t.Fatalf("detail missing %q\n%s", want, detail)
+				}
+			}
+			for _, absent := range tt.wantAbsent {
+				if strings.Contains(detail, absent) {
+					t.Fatalf("detail should not contain %q\n%s", absent, detail)
+				}
+			}
+		})
 	}
 }
 
@@ -461,79 +620,11 @@ func TestNoIconsAgentRowsRenderStateLabel(t *testing.T) {
 	}
 }
 
-func TestAgentStateOverrideIconsModeTextUsesIconsInListAndDetail(t *testing.T) {
-	m := newTestModel(t)
-	cfg := appconfig.Default()
-	cfg.Icons.Mode = appconfig.IconModeText
-	cfg.Icons.AgentStateMode = appconfig.AgentStateModeIcons
-	m.config = cfg
-
-	item := sessionmgr.Item{
-		Kind:       sessionmgr.KindAgent,
-		AgentName:  "pi",
-		AgentState: sessionmgr.AgentWorking,
-	}
-	primary, _ := m.rowParts(item)
-	if got := sessionmgr.StripANSI(primary); got != "A ▶ pi" {
-		t.Fatalf("agent_state=icons list row = %q, want icon state", got)
-	}
-
-	detail := sessionmgr.StripANSI(strings.Join(m.detailLines(item, 40), "\n"))
-	if !strings.Contains(detail, "state     ▶ working") {
-		t.Fatalf("agent_state=icons detail should show icon + raw state\n%s", detail)
-	}
-	if strings.Contains(detail, "[working]") {
-		t.Fatalf("agent_state=icons detail should not show bracket label\n%s", detail)
-	}
-}
-
-func TestAgentStateTextOverridesIconsModeInListAndDetail(t *testing.T) {
-	m := newTestModel(t)
-	cfg := appconfig.Default()
-	cfg.Icons.Mode = appconfig.IconModeIcons
-	cfg.Icons.AgentStateMode = appconfig.AgentStateModeText
-	m.config = cfg
-
-	item := sessionmgr.Item{
-		Kind:       sessionmgr.KindAgent,
-		AgentName:  "pi",
-		AgentState: sessionmgr.AgentWorking,
-	}
-	primary, _ := m.rowParts(item)
-	if got := sessionmgr.StripANSI(primary); got != sessionmgr.IconAgent+"  [working] pi" {
-		t.Fatalf("icons mode + agent_state=text list row = %q, want text state label", got)
-	}
-
-	detail := sessionmgr.StripANSI(strings.Join(m.detailLines(item, 40), "\n"))
-	if !strings.Contains(detail, "state     working") {
-		t.Fatalf("icons mode + agent_state=text detail should show raw state\n%s", detail)
-	}
-	if strings.Contains(detail, "state     ▶ working") || strings.Contains(detail, "[working]") {
-		t.Fatalf(
-			"icons mode + agent_state=text detail should not show glyph or bracket label\n%s",
-			detail,
-		)
-	}
-}
-
-func TestIconsModeAgentDetailRendersGlyphAndRawState(t *testing.T) {
-	m := newTestModel(t)
-	item := sessionmgr.Item{
-		Kind:       sessionmgr.KindAgent,
-		AgentName:  "pi",
-		AgentState: sessionmgr.AgentWorking,
-	}
-	detail := sessionmgr.StripANSI(strings.Join(m.detailLines(item, 40), "\n"))
-	if !strings.Contains(detail, "state     ▶ working") {
-		t.Fatalf("icons-mode agent detail should render glyph + raw state\n%s", detail)
-	}
-}
-
 func TestCustomAgentStateIconInList(t *testing.T) {
 	m := newTestModel(t)
 	cfg := appconfig.Default()
 	cfg.Icons.Mode = appconfig.IconModeIcons
-	cfg.Icons.AgentStateMode = appconfig.AgentStateModeIcons
+	cfg.Icons.AgentStateMode = appconfig.StateDisplayModeIcons
 	cfg.Icons.AgentState.Working.Icon = "★"
 	m.config = cfg
 
@@ -552,7 +643,7 @@ func TestCustomAgentStateLabelInTextMode(t *testing.T) {
 	m := newTestModel(t)
 	cfg := appconfig.Default()
 	cfg.Icons.Mode = appconfig.IconModeIcons
-	cfg.Icons.AgentStateMode = appconfig.AgentStateModeText
+	cfg.Icons.AgentStateMode = appconfig.StateDisplayModeText
 	cfg.Icons.AgentState.Working.Label = "busy"
 	m.config = cfg
 
@@ -585,99 +676,11 @@ func TestPartialAgentStateOverrideKeepsDefaultGlyph(t *testing.T) {
 	}
 }
 
-func TestTextModeSessionDetailRendersAttachmentLabel(t *testing.T) {
-	m := newTestModel(t)
-	cfg := appconfig.Default()
-	cfg.Icons.Mode = appconfig.IconModeText
-	m.config = cfg
-
-	item := sessionmgr.Item{
-		Kind:     sessionmgr.KindSession,
-		Name:     "demo",
-		Attached: true,
-	}
-	detail := sessionmgr.StripANSI(strings.Join(m.detailLines(item, 40), "\n"))
-	if !strings.Contains(detail, "attached  "+"attached") {
-		t.Fatalf("text-mode session detail should render raw attachment label\n%s", detail)
-	}
-	if strings.Contains(detail, "[attached]") || strings.Contains(detail, "attached  ● attached") {
-		t.Fatalf("text-mode session detail should not render brackets or glyph\n%s", detail)
-	}
-}
-
-func TestTmuxStateOverrideIconsModeTextUsesIconsInListAndDetail(t *testing.T) {
-	m := newTestModel(t)
-	cfg := appconfig.Default()
-	cfg.Icons.Mode = appconfig.IconModeText
-	cfg.Icons.TmuxStateMode = appconfig.TmuxStateModeIcons
-	m.config = cfg
-
-	item := sessionmgr.Item{
-		Kind:     sessionmgr.KindSession,
-		Name:     "demo",
-		Attached: true,
-	}
-	primary, _ := m.rowParts(item)
-	if got := sessionmgr.StripANSI(primary); got != "S ● demo" {
-		t.Fatalf("tmux_state=icons list row = %q, want icon state", got)
-	}
-
-	detail := sessionmgr.StripANSI(strings.Join(m.detailLines(item, 40), "\n"))
-	if !strings.Contains(detail, "attached  ● attached") {
-		t.Fatalf("tmux_state=icons detail should show icon + raw label\n%s", detail)
-	}
-	if strings.Contains(detail, "[attached]") {
-		t.Fatalf("tmux_state=icons detail should not show bracket label\n%s", detail)
-	}
-}
-
-func TestTmuxStateTextOverridesIconsModeInListAndDetail(t *testing.T) {
-	m := newTestModel(t)
-	cfg := appconfig.Default()
-	cfg.Icons.Mode = appconfig.IconModeIcons
-	cfg.Icons.TmuxStateMode = appconfig.TmuxStateModeText
-	m.config = cfg
-
-	item := sessionmgr.Item{
-		Kind:     sessionmgr.KindSession,
-		Name:     "demo",
-		Attached: true,
-	}
-	primary, _ := m.rowParts(item)
-	if got := sessionmgr.StripANSI(primary); got != sessionmgr.IconSession+" [attached] demo" {
-		t.Fatalf("icons mode + tmux_state=text list row = %q, want text state label", got)
-	}
-
-	detail := sessionmgr.StripANSI(strings.Join(m.detailLines(item, 40), "\n"))
-	if !strings.Contains(detail, "attached  "+"attached") {
-		t.Fatalf("icons mode + tmux_state=text detail should show raw label\n%s", detail)
-	}
-	if strings.Contains(detail, "attached  ● attached") || strings.Contains(detail, "[attached]") {
-		t.Fatalf(
-			"icons mode + tmux_state=text detail should not show glyph or bracket label\n%s",
-			detail,
-		)
-	}
-}
-
-func TestIconsModeSessionDetailRendersGlyphAndRawLabel(t *testing.T) {
-	m := newTestModel(t)
-	item := sessionmgr.Item{
-		Kind:     sessionmgr.KindSession,
-		Name:     "demo",
-		Attached: true,
-	}
-	detail := sessionmgr.StripANSI(strings.Join(m.detailLines(item, 40), "\n"))
-	if !strings.Contains(detail, "attached  ● attached") {
-		t.Fatalf("icons-mode session detail should render glyph + raw label\n%s", detail)
-	}
-}
-
 func TestCustomTmuxStateIconInList(t *testing.T) {
 	m := newTestModel(t)
 	cfg := appconfig.Default()
 	cfg.Icons.Mode = appconfig.IconModeIcons
-	cfg.Icons.TmuxStateMode = appconfig.TmuxStateModeIcons
+	cfg.Icons.TmuxStateMode = appconfig.StateDisplayModeIcons
 	cfg.Icons.TmuxState.Attached.Icon = "★"
 	m.config = cfg
 
@@ -695,7 +698,7 @@ func TestCustomTmuxStateIconInList(t *testing.T) {
 func TestTmuxStateModeNoneHidesListPrefix(t *testing.T) {
 	m := newTestModel(t)
 	cfg := appconfig.Default()
-	cfg.Icons.TmuxStateMode = appconfig.TmuxStateModeNone
+	cfg.Icons.TmuxStateMode = appconfig.StateDisplayModeNone
 	m.config = cfg
 
 	item := sessionmgr.Item{Kind: sessionmgr.KindSession, Name: "demo", Attached: true}
@@ -716,7 +719,7 @@ func TestTmuxStateModeNoneHidesListPrefix(t *testing.T) {
 func TestAgentStateModeNoneHidesListPrefix(t *testing.T) {
 	m := newTestModel(t)
 	cfg := appconfig.Default()
-	cfg.Icons.AgentStateMode = appconfig.AgentStateModeNone
+	cfg.Icons.AgentStateMode = appconfig.StateDisplayModeNone
 	m.config = cfg
 
 	item := sessionmgr.Item{
@@ -742,7 +745,7 @@ func TestCustomTmuxStateLabelInTextMode(t *testing.T) {
 	m := newTestModel(t)
 	cfg := appconfig.Default()
 	cfg.Icons.Mode = appconfig.IconModeIcons
-	cfg.Icons.TmuxStateMode = appconfig.TmuxStateModeText
+	cfg.Icons.TmuxStateMode = appconfig.StateDisplayModeText
 	cfg.Icons.TmuxState.Attached.Label = "live"
 	m.config = cfg
 

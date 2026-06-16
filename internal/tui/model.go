@@ -318,10 +318,6 @@ func (m Model) previewForSelection() tea.Cmd {
 	return previewCmd(item)
 }
 
-func modeName(mode sessionmgr.SourceMode) string {
-	return mode.Names().List
-}
-
 func sortedCounts(items []sessionmgr.Item) map[sessionmgr.Kind]int {
 	counts := map[sessionmgr.Kind]int{}
 	for _, item := range items {

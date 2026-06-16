@@ -91,16 +91,16 @@ func previewCmd(item sessionmgr.Item) tea.Cmd {
 	}
 }
 
+func attachExecCallback(err error) tea.Msg {
+	return attachDoneMsg{err: err}
+}
+
 func attachCmd(name string) tea.Cmd {
-	return tea.ExecProcess(sessionmgr.AttachOrSwitchCommand(name), func(err error) tea.Msg {
-		return attachDoneMsg{err: err}
-	})
+	return tea.ExecProcess(sessionmgr.AttachOrSwitchCommand(name), attachExecCallback)
 }
 
 func focusAgentCmd(pane string) tea.Cmd {
-	return tea.ExecProcess(sessionmgr.FocusAgentCommand(pane), func(err error) tea.Msg {
-		return attachDoneMsg{err: err}
-	})
+	return tea.ExecProcess(sessionmgr.FocusAgentCommand(pane), attachExecCallback)
 }
 
 func createSessionCmd(dir string) tea.Cmd {

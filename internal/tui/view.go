@@ -111,15 +111,11 @@ func (m Model) sourceTabs() []sourceTab {
 	for i, mode := range order {
 		tabs = append(tabs, sourceTab{
 			key:  fmt.Sprintf("%d", i+1),
-			name: tabNameForMode(mode),
+			name: mode.Names().Tab,
 			mode: mode,
 		})
 	}
 	return tabs
-}
-
-func tabNameForMode(mode sessionmgr.SourceMode) string {
-	return mode.Names().Tab
 }
 
 func (m Model) renderIntegrationPrompt(height int) string {
@@ -224,7 +220,7 @@ func (m Model) renderListPane(width, height int) string {
 	// Count the visible (filtered) items so the All-tab breakdown stays
 	// consistent with the leading total when a filter is active.
 	counts := sortedCounts(items)
-	titleName := titleForMode(m.source)
+	titleName := m.source.Names().Title
 	if m.agentStateFilteringActive() {
 		titleName += " · " + agentStateFilterLabel(m.agentStateFilter)
 	}
@@ -497,7 +493,7 @@ func (m Model) renderFooter() string {
 	} else {
 		statusLeft = append(statusLeft, s.warning.Render("outside tmux"))
 	}
-	statusLeft = append(statusLeft, s.info.Render(modeName(m.source)))
+	statusLeft = append(statusLeft, s.info.Render(m.source.Names().List))
 	if m.config.TypeFirst.Enabled {
 		statusLeft = append(statusLeft, s.emphasis.Render("type-first"))
 		if m.prefixArmed {
@@ -593,10 +589,6 @@ func isWarningStatus(status string) bool {
 	}
 }
 
-func titleForMode(mode sessionmgr.SourceMode) string {
-	return mode.Names().Title
-}
-
 func renderAgentState(s styles, icons sessionmgr.IconSet, state sessionmgr.AgentState) string {
 	style := icons.ForState(state)
 	return renderAgentStateStyled(s, state, style.Icon, style.Color)
@@ -606,7 +598,7 @@ func renderAgentStateLabel(s styles, icons sessionmgr.IconSet, state sessionmgr.
 	style := icons.ForState(state)
 	label := style.ASCII
 	if label == "" {
-		label = agentStateText(state)
+		label = sessionmgr.AgentStateLabel(state)
 	}
 	return renderAgentStateStyled(s, state, "["+label+"]", style.Color)
 }
@@ -615,7 +607,7 @@ func renderAgentStateRaw(s styles, icons sessionmgr.IconSet, state sessionmgr.Ag
 	style := icons.ForState(state)
 	label := style.ASCII
 	if label == "" {
-		label = agentStateText(state)
+		label = sessionmgr.AgentStateLabel(state)
 	}
 	return renderAgentStateStyled(s, state, label, style.Color)
 }
@@ -644,19 +636,12 @@ func renderAgentStateDetail(
 	icons sessionmgr.IconSet,
 ) string {
 	if icons.AgentStateHidden() {
-		return agentStateText(state)
+		return sessionmgr.AgentStateLabel(state)
 	}
 	if icons.AgentStateUsesIcons() {
 		return rowText(renderAgentState(s, icons, state), string(state))
 	}
 	return renderAgentStateRaw(s, icons, state)
-}
-
-func agentStateText(state sessionmgr.AgentState) string {
-	if state == "" {
-		return string(sessionmgr.AgentUnknown)
-	}
-	return string(state)
 }
 
 func renderTmuxState(s styles, icons sessionmgr.IconSet, attached bool) string {

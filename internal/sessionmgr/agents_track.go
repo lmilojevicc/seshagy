@@ -51,7 +51,7 @@ func semanticAgentState(state AgentState) AgentState {
 	return state
 }
 
-func agentStateLabel(state AgentState) string {
+func AgentStateLabel(state AgentState) string {
 	if state == "" {
 		return string(AgentUnknown)
 	}

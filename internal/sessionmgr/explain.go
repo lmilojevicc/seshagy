@@ -181,7 +181,7 @@ func buildAgentExplain(
 		case hookStateRaw != "":
 			info.StateSource = fmt.Sprintf(
 				"hook (@agent_state): %s",
-				agentStateLabel(detected),
+				AgentStateLabel(detected),
 			)
 		default:
 			if skipTitleInference {
@@ -196,7 +196,7 @@ func buildAgentExplain(
 			) {
 				if inferred := InferStateFromTitle(name, title); inferred != AgentUnknown {
 					detected = inferred
-					info.StateSource = fmt.Sprintf("title inference: %s", agentStateLabel(inferred))
+					info.StateSource = fmt.Sprintf("title inference: %s", AgentStateLabel(inferred))
 				} else {
 					info.StateSource = "default (unknown)"
 				}
@@ -324,7 +324,7 @@ func formatAgentExplain(info agentExplain) string {
 			fmt.Fprintf(&b, "hook freshness: stale (TTL exceeded)\n")
 		}
 	}
-	fmt.Fprintf(&b, "effective status: %s", agentStateLabel(info.EffectiveStatus))
+	fmt.Fprintf(&b, "effective status: %s", AgentStateLabel(info.EffectiveStatus))
 	if info.TrackingOverride {
 		b.WriteString(" (tracking override)")
 	}
