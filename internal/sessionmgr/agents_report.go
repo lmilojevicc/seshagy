@@ -267,7 +267,7 @@ func shouldApplyAgentSeq(existing string, incoming int64, incomingSeen bool) boo
 	}
 	existingSeq, err := strconv.ParseInt(existing, 10, 64)
 	if err != nil {
-		return true
+		return false
 	}
 	return incoming > existingSeq
 }

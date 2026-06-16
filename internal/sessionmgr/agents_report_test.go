@@ -738,3 +738,59 @@ func TestReleaseAgentWithoutSourceClearsForeignMetadata(t *testing.T) {
 		t.Fatalf("@agent_seq = %q, want tombstone 61", got)
 	}
 }
+
+func TestReportAgentRejectsWhenSeqCorrupted(t *testing.T) {
+	const pane = "%14"
+	ctx := context.Background()
+	SetFixedTrackTime(t, time.Unix(1_700_000_000, 0))
+	f := InstallReportFakeTmux(t, pane)
+
+	f.Set(pane, "@agent_seq", "bad")
+
+	applied, err := ReportAgent(ctx, AgentReport{
+		Pane:       pane,
+		Name:       "pi",
+		State:      AgentWorking,
+		Source:     "hook",
+		SourceSeen: true,
+		Seq:        10,
+		SeqSeen:    true,
+	})
+	if err != nil {
+		t.Fatalf("report seq 10: %v", err)
+	}
+	if applied {
+		t.Fatal("report should not apply when existing @agent_seq is malformed")
+	}
+	if got := f.Get(pane, "@agent_name"); got != "" {
+		t.Fatalf("@agent_name = %q, want unchanged", got)
+	}
+}
+
+func TestReleaseAgentRejectsWhenSeqCorrupted(t *testing.T) {
+	const pane = "%15"
+	ctx := context.Background()
+	f := InstallReportFakeTmux(t, pane)
+
+	f.Set(pane, "@agent_name", "pi")
+	f.Set(pane, "@agent_state", string(AgentWorking))
+	f.Set(pane, "@agent_source", "hook")
+	f.Set(pane, "@agent_seq", "bad")
+
+	released, err := ReleaseAgent(ctx, AgentRelease{
+		Pane:       pane,
+		Source:     "hook",
+		SourceSeen: true,
+		Seq:        11,
+		SeqSeen:    true,
+	})
+	if err != nil {
+		t.Fatalf("release seq 11: %v", err)
+	}
+	if released {
+		t.Fatal("release should not apply when existing @agent_seq is malformed")
+	}
+	if got := f.Get(pane, "@agent_name"); got != "pi" {
+		t.Fatalf("@agent_name = %q, want unchanged", got)
+	}
+}
