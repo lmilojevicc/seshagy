@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -296,8 +297,151 @@ func TestIntegrationPromptWrapsAtEdges(t *testing.T) {
 	}
 }
 
+func assertTabsFitAtWidth(t *testing.T, width int, source sessionmgr.SourceMode) {
+	t.Helper()
+
+	m := newTestModel(t)
+	model, _ := m.Update(tea.WindowSizeMsg{Width: width, Height: 28})
+	m = model.(Model)
+	m.source = source
+	m.showPreview = true
+
+	maxW := safeWidth(width)
+	header := m.renderTabs()
+	if lipgloss.Width(header) > maxW && lipgloss.Height(header) <= 1 {
+		t.Fatalf(
+			"renderTabs width %d > safe %d:\n%s",
+			lipgloss.Width(header),
+			maxW,
+			sessionmgr.StripANSI(header),
+		)
+	}
+
+	var activeKey string
+	for _, tab := range m.sourceTabs() {
+		if tab.mode == source {
+			activeKey = "[" + tab.key + "]"
+			break
+		}
+	}
+	clean := sessionmgr.StripANSI(header)
+	if !strings.Contains(clean, activeKey) {
+		t.Fatalf("active tab %s not visible at width %d:\n%s", activeKey, width, clean)
+	}
+
+	view := m.View()
+	viewLines := strings.Split(view, "\n")
+	if len(viewLines) == 0 {
+		t.Fatalf("empty view at width %d", width)
+	}
+	top := sessionmgr.StripANSI(strings.Join(viewLines[:min(2, len(viewLines))], "\n"))
+	for i := 1; i <= 6; i++ {
+		key := fmt.Sprintf("[%d]", i)
+		if !strings.Contains(top, key) {
+			t.Fatalf("tab %s missing from top of view at width %d:\n%s", key, width, top)
+		}
+	}
+	if lipgloss.Width(viewLines[0]) > maxW {
+		t.Fatalf(
+			"View line 0 width %d > safe width %d (auto-wrap risk)",
+			lipgloss.Width(viewLines[0]),
+			maxW,
+		)
+	}
+}
+
+func TestRenderTabsFitsTerminalWidth(t *testing.T) {
+	for width := 20; width <= 120; width++ {
+		t.Run(fmt.Sprintf("%d", width), func(t *testing.T) {
+			assertTabsFitAtWidth(t, width, sessionmgr.ModeAgents)
+		})
+	}
+}
+
+func TestTabBarSurvivesRefreshAtWidth51(t *testing.T) {
+	const width = 51
+	maxW := safeWidth(width)
+
+	m := New()
+	model, _ := m.Update(tea.WindowSizeMsg{Width: width, Height: 24})
+	m = model.(Model)
+	m.loading = false
+	m.showHelp = true
+	m.status = "loaded 1212 items"
+	m.items = make([]sessionmgr.Item, 1212)
+	for i := range m.items {
+		m.items[i] = sessionmgr.Item{Kind: sessionmgr.KindZoxide, Path: "/tmp/x"}
+	}
+
+	check := func(label string) {
+		t.Helper()
+		view := m.View()
+		lines := strings.Split(view, "\n")
+		if len(lines) < 2 {
+			t.Fatalf("%s: view too short:\n%s", label, sessionmgr.StripANSI(view))
+		}
+		line0 := sessionmgr.StripANSI(lines[0])
+		line1 := sessionmgr.StripANSI(lines[1])
+		if !strings.Contains(line0, "[1]") || !strings.Contains(line0, "seshagy") {
+			t.Fatalf("%s: tab bar not on first line:\nline0=%q\nline1=%q", label, line0, line1)
+		}
+		if strings.HasPrefix(line1, "All (") {
+			t.Fatalf(
+				"%s: list title jumped above tab bar:\nline0=%q\nline1=%q",
+				label,
+				line0,
+				line1,
+			)
+		}
+		for i, line := range lines {
+			if lipgloss.Width(line) > maxW {
+				t.Fatalf(
+					"%s: line %d too wide (%d > %d): %q",
+					label,
+					i,
+					lipgloss.Width(line),
+					maxW,
+					sessionmgr.StripANSI(line),
+				)
+			}
+		}
+	}
+
+	check("after load")
+	before := lipgloss.Width(strings.Split(m.View(), "\n")[0])
+
+	model, _ = m.Update(refreshMsg{
+		source: m.source,
+		gen:    m.inflightRefresh[m.source],
+		items: []sessionmgr.Item{
+			{
+				Kind:     sessionmgr.KindSession,
+				Name:     strings.Repeat("wide-session-", 20),
+				Attached: true,
+			},
+			{Kind: sessionmgr.KindZoxide, Path: "/very/long/path/" + strings.Repeat("x", 80)},
+		},
+	})
+	m = model.(Model)
+	check("after refresh")
+	after := lipgloss.Width(strings.Split(m.View(), "\n")[0])
+	if after > before+2 {
+		t.Fatalf("tab bar widened from %d to %d after refresh", before, after)
+	}
+
+	model, _ = m.Update(setupMsg{})
+	m = model.(Model)
+	check("after setup")
+
+	model, _ = m.Update(integrationsMsg{})
+	m = model.(Model)
+	check("after integrations")
+}
+
 func TestTabsUseCurrentAgentsFourthAndNoTrailingCWD(t *testing.T) {
 	m := newTestModel(t)
+	model, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 28})
+	m = model.(Model)
 	out := sessionmgr.StripANSI(m.renderTabs())
 	for _, want := range []string{"[1] All", "[2] Sessions", "[3] Agents", "[4] Current agents", "[5] Zoxide", "[6] fd"} {
 		if !strings.Contains(out, want) {
@@ -1311,12 +1455,12 @@ func TestFooterKeepsStatusOnOneLine(t *testing.T) {
 		t.Fatalf("status wrapped or disappeared from first line:\n%s", clean)
 	}
 	for i, line := range lines {
-		if width := lipgloss.Width(line); width >= m.width {
+		if width := lipgloss.Width(line); width > safeWidth(m.width) {
 			t.Fatalf(
-				"footer line %d width = %d, want less than terminal width %d",
+				"footer line %d width = %d, want at most safe width %d",
 				i,
 				width,
-				m.width,
+				safeWidth(m.width),
 			)
 		}
 	}

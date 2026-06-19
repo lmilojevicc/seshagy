@@ -11,28 +11,39 @@ import (
 	"github.com/lmilojevicc/seshagy/internal/sessionmgr"
 )
 
+// previewMinWidth gates list+preview split and full tab labels in renderTabs.
+const previewMinWidth = 110
+
+// tabWidthUnset skips tab width limits when terminal width is unknown.
+const tabWidthUnset = 9999
+
+// safeWidth is one column shy of the terminal to avoid auto-wrap at the right edge.
+func safeWidth(w int) int {
+	if w <= 0 {
+		return tabWidthUnset
+	}
+	return max(1, w-1)
+}
+
 func (m Model) View() string {
-	if m.width == 0 {
+	if m.width == 0 || m.height == 0 {
 		return "loading…"
 	}
 	s := m.styles
-	availableH := max(8, m.height)
 	if m.setup.active {
-		return s.app.Width(m.width).Height(availableH).Render(m.renderSetupPrompt(availableH))
+		return s.app.Width(m.width).Height(m.height).Render(m.renderSetupPrompt(m.height))
 	}
 	if m.integration.active {
-		return s.app.Width(m.width).Height(availableH).Render(m.renderIntegrationPrompt(availableH))
+		return s.app.Width(m.width).Height(m.height).Render(m.renderIntegrationPrompt(m.height))
 	}
 	header := m.renderTabs()
 	footer := m.renderFooter()
-	bodyH := availableH - lipgloss.Height(header) - lipgloss.Height(footer)
-	if bodyH < 6 {
-		bodyH = 6
+	bodyH := m.height - lipgloss.Height(header) - lipgloss.Height(footer)
+	if bodyH < 1 {
+		bodyH = 1
 	}
 	body := m.renderBody(bodyH)
-	return s.app.Width(m.width).
-		Height(availableH).
-		Render(lipgloss.JoinVertical(lipgloss.Left, header, body, footer))
+	return joinFrame(header, body, footer, m.width, m.height)
 }
 
 func (m Model) renderSetupPrompt(height int) string {
@@ -87,16 +98,89 @@ func (m Model) renderSetupPrompt(height int) string {
 
 func (m Model) renderTabs() string {
 	s := m.styles
-	parts := []string{s.emphasis.Render("seshagy")}
-	for _, tab := range m.sourceTabs() {
-		label := fmt.Sprintf("[%s] %s", tab.key, tab.name)
-		if tab.mode == m.source {
-			parts = append(parts, s.tabActive.Render(label))
-		} else {
-			parts = append(parts, s.tabInactive.Render(label))
+	tabs := m.sourceTabs()
+	all := make([]int, len(tabs))
+	for i := range tabs {
+		all[i] = i
+	}
+	maxW := safeWidth(m.width)
+	tabPad := lipgloss.NewStyle().Padding(0, 1)
+	render := func(full bool, sep string, brand bool, visible []int) string {
+		parts := make([]string, 0, len(visible)+1)
+		if brand {
+			parts = append(parts, s.emphasis.Render("seshagy"))
+		}
+		for _, i := range visible {
+			tab := tabs[i]
+			label := fmt.Sprintf("[%s] %s", tab.key, tab.name)
+			if !full {
+				label = fmt.Sprintf("[%s]", tab.key)
+			}
+			if tab.mode == m.source {
+				parts = append(parts, s.tabActive.Render(label))
+			} else {
+				parts = append(parts, s.tabInactive.Render(label))
+			}
+		}
+		line := strings.Join(parts, sep)
+		if brand || sep != "" || full {
+			line = tabPad.Render(line)
+		}
+		return line
+	}
+	fitsOneLine := func(content string) bool {
+		return lipgloss.Width(content) <= maxW && lipgloss.Height(content) <= 1
+	}
+	fitsTwoLine := func(content string) bool {
+		return lipgloss.Width(content) <= maxW && lipgloss.Height(content) <= 2
+	}
+	tryFull := m.width <= 0 || !m.showPreview || m.width >= previewMinWidth
+	if tryFull {
+		line := render(true, "  ", true, all)
+		if fitsOneLine(line) {
+			return line
 		}
 	}
-	return lipgloss.NewStyle().Padding(0, 1).Render(strings.Join(parts, "  "))
+	layouts := []struct {
+		sep   string
+		brand bool
+	}{
+		{"  ", true},
+		{" ", true},
+		{" ", false},
+		{"", false},
+	}
+	for _, layout := range layouts {
+		line := render(false, layout.sep, layout.brand, all)
+		if fitsOneLine(line) {
+			return line
+		}
+	}
+	brandLine := tabPad.Render(s.emphasis.Render("seshagy"))
+	tabRow := tabPad.Render(render(false, "", false, all))
+	twoLine := brandLine + "\n" + tabRow
+	if fitsTwoLine(twoLine) {
+		return twoLine
+	}
+	visible := append([]int(nil), all...)
+	for len(visible) > 1 {
+		line := render(false, "", false, visible)
+		if fitsOneLine(line) {
+			return line
+		}
+		removed := false
+		for i := len(visible) - 1; i >= 0; i-- {
+			if tabs[visible[i]].mode != m.source {
+				visible = append(visible[:i], visible[i+1:]...)
+				removed = true
+				break
+			}
+		}
+		if !removed {
+			break
+		}
+	}
+	return render(false, "", false, visible)
 }
 
 type sourceTab struct {
@@ -191,18 +275,19 @@ func (m Model) renderIntegrationRow(
 }
 
 func (m Model) renderBody(height int) string {
+	usableW := safeWidth(m.width)
 	gap := 2
-	if m.width < 80 || !m.showPreview {
+	if m.width < previewMinWidth || !m.showPreview {
 		gap = 0
 	}
-	leftW := m.width
+	leftW := usableW
 	rightW := 0
-	if m.showPreview && m.width >= 80 {
-		leftW = max(34, (m.width-gap)/2)
+	if m.showPreview && m.width >= previewMinWidth {
+		leftW = max(34, (usableW-gap)/2)
 		if leftW > 72 {
 			leftW = 72
 		}
-		rightW = m.width - leftW - gap
+		rightW = usableW - leftW - gap
 	}
 	left := m.renderListPane(leftW, height)
 	if rightW <= 0 {
@@ -241,7 +326,7 @@ func (m Model) renderListPane(width, height int) string {
 			counts[sessionmgr.KindZoxide]+counts[sessionmgr.KindFD],
 		)
 	}
-	lines := []string{s.title.Render(title)}
+	lines := []string{s.title.Render(clampText(title, innerW))}
 	if m.loading {
 		lines = append(lines, s.muted.Render("refreshing…"))
 	}
@@ -560,7 +645,7 @@ func (m Model) renderFooter() string {
 	// The status style has one column of horizontal padding on each side. Keep
 	// the composed text inside that content area, and render one column shy of
 	// the terminal width to avoid terminal auto-wrap at the right edge.
-	footerW := max(1, m.width-1)
+	footerW := safeWidth(m.width)
 	contentW := max(1, footerW-2)
 	line1 := composeLine(left, input, contentW, inputStyle)
 	line2 := clampText(help, contentW)
@@ -737,6 +822,34 @@ func pad(line string, width int) string {
 		return line
 	}
 	return line + strings.Repeat(" ", width-lipgloss.Width(line))
+}
+
+// joinFrame stacks UI blocks without lipgloss.JoinVertical, which pads every
+// line to the widest line in the frame and can push the tab bar past the pane.
+func joinFrame(header, body, footer string, width, height int) string {
+	safeW := safeWidth(width)
+	lines := make([]string, 0, height)
+	appendBlock := func(block string) {
+		for _, line := range strings.Split(block, "\n") {
+			if len(lines) >= height {
+				return
+			}
+			if lipgloss.Width(line) > safeW {
+				line = clampText(line, safeW)
+			}
+			lines = append(lines, line)
+		}
+	}
+	appendBlock(header)
+	appendBlock(body)
+	appendBlock(footer)
+	for len(lines) < height {
+		lines = append(lines, "")
+	}
+	if len(lines) > height {
+		lines = lines[:height]
+	}
+	return strings.Join(lines, "\n")
 }
 
 func trimHeight(s string, height int) string {
