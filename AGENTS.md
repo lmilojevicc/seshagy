@@ -32,7 +32,3 @@ Pull requests should include a short problem/solution summary, `mise run verify`
 ## CI/CD and Release Workflow
 
 GitHub Actions runs formatting, linting, vet, tests, vulnerability checks, and build through pinned `mise` tools. Releases are tag-driven: after `mise run verify`, `mise run vuln`, and `mise run release:check` pass on a clean tree, push a `v*` tag to run GoReleaser.
-
-## Agent-Specific Instructions
-
-Do not scrape terminal pane contents when adding agent features; this project relies on explicit tmux `@agent_*` metadata reported by hooks/plugins. The opt-in `manifest_fallback` setting is an exception: it captures the last 30 pane lines for Herdr screen-rule matching when hooks are silent. Preserve sequence handling for agent report/release flows so stale updates cannot resurrect cleared state.
