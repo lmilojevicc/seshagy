@@ -256,59 +256,6 @@ func TestParseSessionsSkipsMalformedLines(t *testing.T) {
 	}
 }
 
-func TestResolvePane(t *testing.T) {
-	t.Run("uses env and display-message", func(t *testing.T) {
-		const pane = "%12"
-		t.Setenv("TMUX_PANE", pane)
-		SetTmuxHooksForTest(t, func(_ context.Context, args ...string) ([]byte, error) {
-			if len(args) >= 5 && args[0] == "display-message" && args[3] == pane &&
-				args[4] == "#{pane_id}" {
-				return []byte(pane), nil
-			}
-			return nil, nil
-		}, nil)
-
-		got, err := ResolvePane(context.Background(), "")
-		if err != nil || got != pane {
-			t.Fatalf("ResolvePane() = (%q, %v)", got, err)
-		}
-
-		got, err = ResolvePane(context.Background(), pane)
-		if err != nil || got != pane {
-			t.Fatalf("ResolvePane(%q) = (%q, %v)", pane, got, err)
-		}
-	})
-
-	t.Run("requires pane outside tmux", func(t *testing.T) {
-		t.Setenv("TMUX", "")
-		t.Setenv("TMUX_PANE", "")
-		SetTmuxHooksForTest(t, func(_ context.Context, args ...string) ([]byte, error) {
-			return nil, fmt.Errorf("tmux should not be called")
-		}, nil)
-
-		if _, err := ResolvePane(context.Background(), ""); err == nil {
-			t.Fatal("ResolvePane() expected error without pane")
-		} else if !strings.Contains(err.Error(), "--pane is required") {
-			t.Fatalf("ResolvePane() error = %v", err)
-		}
-	})
-
-	t.Run("pane not found", func(t *testing.T) {
-		SetTmuxHooksForTest(t, func(_ context.Context, args ...string) ([]byte, error) {
-			if len(args) >= 3 && args[0] == "display-message" {
-				return nil, fmt.Errorf("pane missing")
-			}
-			return nil, nil
-		}, nil)
-
-		if _, err := ResolvePane(context.Background(), "%404"); err == nil {
-			t.Fatal("ResolvePane() expected error")
-		} else if !strings.Contains(err.Error(), "pane not found") {
-			t.Fatalf("ResolvePane() error = %v", err)
-		}
-	})
-}
-
 func TestCaptureSession(t *testing.T) {
 	var startFlag, lineCount, target string
 	SetTmuxHooksForTest(t, func(_ context.Context, args ...string) ([]byte, error) {

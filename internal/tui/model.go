@@ -10,7 +10,6 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	appconfig "github.com/lmilojevicc/seshagy/internal/config"
-	"github.com/lmilojevicc/seshagy/internal/integrations"
 	"github.com/lmilojevicc/seshagy/internal/sessionmgr"
 )
 
@@ -33,16 +32,13 @@ type Model struct {
 	items  []sessionmgr.Item
 	cursor int
 
-	agentStateFilter sessionmgr.AgentState
-	prefixArmed      bool
+	prefixArmed bool
 
-	query          string
-	searchInput    textinput.Model
-	renameInput    textinput.Model
-	renameFrom     string
-	renamePaneID   string
-	renameForAgent string
-	inputMode      inputMode
+	query       string
+	searchInput textinput.Model
+	renameInput textinput.Model
+	renameFrom  string
+	inputMode   inputMode
 
 	preview     string
 	previewKey  string
@@ -56,18 +52,7 @@ type Model struct {
 	refreshGen      map[sessionmgr.SourceMode]uint64
 	inflightRefresh map[sessionmgr.SourceMode]uint64
 
-	integration integrationPrompt
-	setup       setupPrompt
-}
-
-// integrationPrompt holds the state of the hook-integration selection prompt.
-type integrationPrompt struct {
-	active        bool
-	startupPrompt bool
-	rows          []integrations.Recommendation
-	selected      map[integrations.Target]bool
-	cursor        int
-	messages      []string
+	setup setupPrompt
 }
 
 // setupPrompt holds the state of the first-launch / manual input-mode prompt.
@@ -112,17 +97,6 @@ type (
 
 type tickMsg time.Time
 
-type integrationsMsg struct {
-	recs    []integrations.Recommendation
-	startup bool
-	err     error
-}
-
-type integrationsInstalledMsg struct {
-	messages []string
-	err      error
-}
-
 type setupMsg struct {
 	prompt bool
 	err    error
@@ -133,7 +107,7 @@ var checkTmuxPopup = sessionmgr.InTmuxPopup
 func New() Model {
 	cfg, cfgErr := appconfig.Load()
 	search := textinput.New()
-	search.Placeholder = "filter sessions, agents, directories"
+	search.Placeholder = "filter sessions, directories"
 	search.Prompt = "/ "
 	search.CharLimit = 256
 	rename := textinput.New()
@@ -151,7 +125,6 @@ func New() Model {
 		cache:           make(map[sessionmgr.SourceMode]modeCache),
 		refreshGen:      make(map[sessionmgr.SourceMode]uint64),
 		inflightRefresh: make(map[sessionmgr.SourceMode]uint64),
-		integration:     integrationPrompt{selected: map[integrations.Target]bool{}},
 		setup:           setupPrompt{cursor: 1},
 		loading:         true,
 	}
@@ -166,10 +139,6 @@ func New() Model {
 
 func Run() error {
 	m := New()
-	sessionmgr.StartManifestAutoUpdate(
-		m.config.Agents.ManifestCatalogURL,
-		m.config.Agents.ManifestAutoUpdate,
-	)
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	_, err := p.Run()
 	return err
@@ -224,16 +193,12 @@ func wrapCursorDown(cursor, count int) int {
 }
 
 func (m Model) visibleItems() []sessionmgr.Item {
-	if m.query == "" && !m.agentStateFilteringActive() {
+	if m.query == "" {
 		return m.items
 	}
 	query := strings.ToLower(m.query)
 	out := make([]sessionmgr.Item, 0, len(m.items))
 	for _, item := range m.items {
-		if m.agentStateFilteringActive() &&
-			(item.Kind != sessionmgr.KindAgent || item.AgentState != m.agentStateFilter) {
-			continue
-		}
 		if query != "" {
 			haystack := strings.ToLower(
 				strings.Join(
@@ -241,13 +206,7 @@ func (m Model) visibleItems() []sessionmgr.Item {
 						string(item.Kind),
 						item.Name,
 						item.Path,
-						item.AgentName,
-						item.AgentDisplayName,
-						string(item.AgentState),
 						item.Location,
-						item.AgentMessage,
-						item.AgentSource,
-						item.AgentSessionID,
 					},
 					" ",
 				),
@@ -259,40 +218,6 @@ func (m Model) visibleItems() []sessionmgr.Item {
 		out = append(out, item)
 	}
 	return out
-}
-
-func (m Model) agentStateFilteringActive() bool {
-	return isAgentSource(m.source) && m.agentStateFilter != ""
-}
-
-func isAgentSource(mode sessionmgr.SourceMode) bool {
-	return mode == sessionmgr.ModeAgents || mode == sessionmgr.ModeCurrentAgents
-}
-
-func nextAgentStateFilter(current sessionmgr.AgentState) sessionmgr.AgentState {
-	switch current {
-	case "":
-		return sessionmgr.AgentWorking
-	case sessionmgr.AgentWorking:
-		return sessionmgr.AgentBlocked
-	case sessionmgr.AgentBlocked:
-		return sessionmgr.AgentAborted
-	case sessionmgr.AgentAborted:
-		return sessionmgr.AgentDone
-	case sessionmgr.AgentDone:
-		return sessionmgr.AgentIdle
-	case sessionmgr.AgentIdle:
-		return sessionmgr.AgentUnknown
-	default:
-		return ""
-	}
-}
-
-func agentStateFilterLabel(state sessionmgr.AgentState) string {
-	if state == "" {
-		return "all"
-	}
-	return string(state)
 }
 
 func (m Model) selectedItem() (sessionmgr.Item, bool) {
@@ -369,12 +294,10 @@ func modeRank(k sessionmgr.Kind) int {
 	switch k {
 	case sessionmgr.KindSession:
 		return 0
-	case sessionmgr.KindAgent:
-		return 1
 	case sessionmgr.KindZoxide:
-		return 2
+		return 1
 	case sessionmgr.KindFD:
-		return 3
+		return 2
 	default:
 		return 9
 	}

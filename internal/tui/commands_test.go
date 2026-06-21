@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	appconfig "github.com/lmilojevicc/seshagy/internal/config"
-	"github.com/lmilojevicc/seshagy/internal/integrations"
 	"github.com/lmilojevicc/seshagy/internal/sessionmgr"
 )
 
@@ -23,18 +22,15 @@ func TestAttachExecCallbackMapsErrors(t *testing.T) {
 	}
 }
 
-func TestAttachAndFocusAgentCmdReturnExecProcess(t *testing.T) {
+func TestAttachCmdReturnsExecProcess(t *testing.T) {
 	if attachCmd("demo") == nil {
 		t.Fatal("attachCmd() returned nil")
-	}
-	if focusAgentCmd("%1") == nil {
-		t.Fatal("focusAgentCmd() returned nil")
 	}
 }
 
 func TestCreateDeleteRenameCommandsUseTmuxHooks(t *testing.T) {
 	dir := t.TempDir()
-	var killedSession, renamedOld, renamedNew, killedPane string
+	var killedSession, renamedOld, renamedNew string
 	var newSessionArgs []string
 	sessionmgr.SetTmuxHooksForTest(t, func(_ context.Context, args ...string) ([]byte, error) {
 		if len(args) >= 1 && args[0] == "list-sessions" {
@@ -48,8 +44,6 @@ func TestCreateDeleteRenameCommandsUseTmuxHooks(t *testing.T) {
 		case len(args) >= 4 && args[0] == "rename-session":
 			renamedOld = strings.TrimPrefix(args[2], "=")
 			renamedNew = args[3]
-		case len(args) >= 3 && args[0] == "kill-pane":
-			killedPane = args[2]
 		case sessionmgr.MatchNewSession(args):
 			newSessionArgs = append([]string(nil), args...)
 		}
@@ -74,11 +68,6 @@ func TestCreateDeleteRenameCommandsUseTmuxHooks(t *testing.T) {
 	}
 	if killedSession != "demo" {
 		t.Fatalf("kill-session target = %q, want demo", killedSession)
-	}
-
-	agentMsg := deleteAgentCmd("%4")().(actionDoneMsg)
-	if agentMsg.err != nil || killedPane != "%4" {
-		t.Fatalf("deleteAgentCmd() = %#v pane=%q", agentMsg, killedPane)
 	}
 
 	renameMsg := renameCmd("old", "new")().(actionDoneMsg)
@@ -160,63 +149,10 @@ func TestRenameCmdReturnsTmuxError(t *testing.T) {
 	}
 }
 
-func TestRenameAgentCmdSetsLabel(t *testing.T) {
-	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	msg := renameAgentCmd("%1", "my bot", "pi")().(actionDoneMsg)
-	if msg.err != nil {
-		t.Fatalf("renameAgentCmd() err = %v", msg.err)
-	}
-	if msg.status != "renamed agent pi to my bot" {
-		t.Fatalf("renameAgentCmd() status = %q", msg.status)
-	}
-	store, err := sessionmgr.LoadAgentLabels()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := store.Get("%1", "pi"); got != "my bot" {
-		t.Fatalf("stored label = %q, want my bot", got)
-	}
-}
-
-func TestRenameAgentCmdClearsLabel(t *testing.T) {
-	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	if err := sessionmgr.SetAgentDisplayName("%1", "old label", "pi"); err != nil {
-		t.Fatal(err)
-	}
-	msg := renameAgentCmd("%1", "", "pi")().(actionDoneMsg)
-	if msg.err != nil {
-		t.Fatalf("renameAgentCmd() err = %v", msg.err)
-	}
-	if msg.status != "cleared agent label for %1" {
-		t.Fatalf("renameAgentCmd() status = %q", msg.status)
-	}
-	store, err := sessionmgr.LoadAgentLabels()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := store.Get("%1", "pi"); got != "" {
-		t.Fatalf("stored label = %q, want empty", got)
-	}
-}
-
-func TestPreviewCmdAgentAndDirectory(t *testing.T) {
+func TestPreviewCmdDirectory(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "readme.txt"), []byte("hello"), 0o644); err != nil {
 		t.Fatal(err)
-	}
-	sessionmgr.SetTmuxHooksForTest(t, func(_ context.Context, args ...string) ([]byte, error) {
-		if len(args) >= 3 && args[0] == "capture-pane" && args[3] == "%5" {
-			return []byte("agent output\n"), nil
-		}
-		return nil, nil
-	}, nil)
-
-	agentPreview := previewCmd(sessionmgr.Item{
-		Kind:   sessionmgr.KindAgent,
-		PaneID: "%5",
-	})().(previewMsg)
-	if agentPreview.err != nil || !strings.Contains(agentPreview.preview, "agent output") {
-		t.Fatalf("agent preview = %#v", agentPreview)
 	}
 
 	dirPreview := previewCmd(sessionmgr.Item{
@@ -225,72 +161,6 @@ func TestPreviewCmdAgentAndDirectory(t *testing.T) {
 	})().(previewMsg)
 	if dirPreview.err != nil || !strings.Contains(dirPreview.preview, "readme.txt") {
 		t.Fatalf("directory preview = %#v", dirPreview)
-	}
-}
-
-func TestIntegrationCommands(t *testing.T) {
-	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	home := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(home, ".pi", "agent"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("HOME", home)
-
-	scanMsg := integrationsCmd()().(integrationsMsg)
-	if scanMsg.err != nil {
-		t.Fatalf("integrationsCmd() error = %v", scanMsg.err)
-	}
-
-	installMsg := installIntegrationsCmd([]integrations.Target{integrations.TargetPi})().(integrationsInstalledMsg)
-	if installMsg.err != nil || len(installMsg.messages) == 0 {
-		t.Fatalf("installIntegrationsCmd() = %#v", installMsg)
-	}
-}
-
-func TestInstallIntegrationsCmdPartialFailureKeepsPriorInstalls(t *testing.T) {
-	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	home := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(home, ".pi", "agent"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("HOME", home)
-
-	msg := installIntegrationsCmd([]integrations.Target{
-		integrations.TargetPi,
-		integrations.TargetCodex,
-	})().(integrationsInstalledMsg)
-	if msg.err == nil {
-		t.Fatal("installIntegrationsCmd() expected error for missing codex config")
-	}
-	if !strings.Contains(msg.err.Error(), "codex config directory not found") {
-		t.Fatalf("installIntegrationsCmd() error = %v", msg.err)
-	}
-	if len(msg.messages) == 0 {
-		t.Fatal("expected pi install messages before codex failure")
-	}
-	extPath := filepath.Join(home, ".pi", "agent", "extensions", "seshagy-agent-state.ts")
-	if _, err := os.Stat(extPath); err != nil {
-		t.Fatalf("pi extension should remain after partial failure at %s: %v", extPath, err)
-	}
-}
-
-func TestStartupIntegrationsCmdReturnsCheckError(t *testing.T) {
-	stateDir := t.TempDir()
-	t.Setenv("XDG_STATE_HOME", stateDir)
-	versionPath := filepath.Join(stateDir, "seshagy", integrationPromptVersionFile)
-	if err := os.MkdirAll(filepath.Dir(versionPath), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Mkdir(versionPath, 0o700); err != nil {
-		t.Fatal(err)
-	}
-
-	msg := startupIntegrationsCmd()().(integrationsMsg)
-	if msg.err == nil {
-		t.Fatal("expected startup integration check error")
-	}
-	if !strings.Contains(msg.err.Error(), "check startup hook prompt") {
-		t.Fatalf("integrationsMsg.err = %v", msg.err)
 	}
 }
 

@@ -8,8 +8,7 @@ import (
 type SourceMode int
 
 type LoadOptions struct {
-	FDCommand        string
-	ManifestFallback bool
+	FDCommand string
 }
 
 // LoadResult is the outcome of a source load. Warning carries non-fatal source
@@ -23,8 +22,6 @@ type LoadResult struct {
 const (
 	ModeAll SourceMode = iota
 	ModeSessions
-	ModeAgents
-	ModeCurrentAgents
 	ModeZoxide
 	ModeFD
 )
@@ -33,16 +30,6 @@ func LoadWithOptions(ctx context.Context, mode SourceMode, opts LoadOptions) (Lo
 	switch mode {
 	case ModeSessions:
 		items, err := ListSessions(ctx)
-		return LoadResult{Items: items}, err
-	case ModeAgents:
-		items, err := ListAgents(ctx, "", opts)
-		return LoadResult{Items: items}, err
-	case ModeCurrentAgents:
-		session, err := CurrentTmuxSession(ctx)
-		if err != nil {
-			return LoadResult{}, err
-		}
-		items, err := ListAgents(ctx, session, opts)
 		return LoadResult{Items: items}, err
 	case ModeZoxide:
 		items, err := ListZoxideDirs(ctx)
@@ -59,10 +46,6 @@ func LoadWithOptions(ctx context.Context, mode SourceMode, opts LoadOptions) (Lo
 		if err != nil {
 			return LoadResult{}, err
 		}
-		agents, err := ListAgents(ctx, "", opts)
-		if err != nil {
-			return LoadResult{}, err
-		}
 		zoxide, err := ListZoxideDirs(ctx)
 		if err != nil {
 			warnings = append(warnings, err.Error())
@@ -72,7 +55,6 @@ func LoadWithOptions(ctx context.Context, mode SourceMode, opts LoadOptions) (Lo
 			warnings = append(warnings, err.Error())
 		}
 		out = append(out, sessions...)
-		out = append(out, agents...)
 		out = append(out, zoxide...)
 		out = append(out, fd...)
 		return LoadResult{Items: out, Warning: strings.Join(warnings, "; ")}, nil

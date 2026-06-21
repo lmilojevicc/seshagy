@@ -6,27 +6,14 @@ const (
 	IconSession = ""
 	IconZoxide  = "󰉖"
 	IconFD      = "󰥩"
-	IconAgent   = ""
 )
 
 type Kind string
 
 const (
 	KindSession Kind = "session"
-	KindAgent   Kind = "agent"
 	KindZoxide  Kind = "zoxide"
 	KindFD      Kind = "fd"
-)
-
-type AgentState string
-
-const (
-	AgentWorking AgentState = "working"
-	AgentBlocked AgentState = "blocked"
-	AgentAborted AgentState = "aborted"
-	AgentDone    AgentState = "done"
-	AgentIdle    AgentState = "idle"
-	AgentUnknown AgentState = "unknown"
 )
 
 type Item struct {
@@ -46,25 +33,12 @@ type Item struct {
 	Window   string
 	Pane     string
 	Location string
-
-	AgentName        string
-	AgentDisplayName string
-	AgentState       AgentState
-	AgentMessage     string
-	AgentSource      string
-	AgentUpdated     string
-	AgentSessionID   string
-	AgentSeq         string
-	PaneTitle        string
-	Visible          bool
 }
 
 func (i Item) Key() string {
 	switch i.Kind {
 	case KindSession:
 		return string(i.Kind) + ":" + i.Name
-	case KindAgent:
-		return string(i.Kind) + ":" + i.PaneID
 	default:
 		return string(i.Kind) + ":" + i.Path
 	}
@@ -72,14 +46,6 @@ func (i Item) Key() string {
 
 func (i Item) DisplayName() string {
 	switch i.Kind {
-	case KindAgent:
-		if i.AgentDisplayName != "" {
-			return i.AgentDisplayName
-		}
-		if i.AgentName != "" {
-			return i.AgentName
-		}
-		return i.PaneID
 	case KindZoxide, KindFD:
 		return i.Path
 	default:

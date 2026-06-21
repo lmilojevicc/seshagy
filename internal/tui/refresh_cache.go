@@ -18,7 +18,7 @@ type modeCache struct {
 
 func cacheTTL(mode sessionmgr.SourceMode) time.Duration {
 	switch mode {
-	case sessionmgr.ModeAgents, sessionmgr.ModeCurrentAgents, sessionmgr.ModeAll:
+	case sessionmgr.ModeAll:
 		return 2 * time.Second
 	default:
 		return 15 * time.Second

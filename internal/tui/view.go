@@ -7,7 +7,6 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/lmilojevicc/seshagy/internal/integrations"
 	"github.com/lmilojevicc/seshagy/internal/sessionmgr"
 )
 
@@ -32,9 +31,6 @@ func (m Model) View() string {
 	s := m.styles
 	if m.setup.active {
 		return s.app.Width(m.width).Height(m.height).Render(m.renderSetupPrompt(m.height))
-	}
-	if m.integration.active {
-		return s.app.Width(m.width).Height(m.height).Render(m.renderIntegrationPrompt(m.height))
 	}
 	header := m.renderTabs()
 	footer := m.renderFooter()
@@ -202,78 +198,6 @@ func (m Model) sourceTabs() []sourceTab {
 	return tabs
 }
 
-func (m Model) renderIntegrationPrompt(height int) string {
-	s := m.styles
-	width := max(40, m.width-4)
-	innerW := max(36, width-4)
-	innerH := max(8, height-6)
-	lines := []string{
-		s.title.Render("Install agent state hooks?"),
-		s.muted.Render(
-			"seshagy now uses hook/plugin reports for agent state instead of pane text or process inspection.",
-		),
-		s.muted.Render("Toggle the detected integrations you want to install, then press enter."),
-		"",
-	}
-	if len(m.integration.rows) == 0 {
-		lines = append(
-			lines,
-			s.muted.Render("No missing hook integrations found for installed agents."),
-		)
-	} else {
-		for i, rec := range m.integration.rows {
-			lines = append(lines, m.renderIntegrationRow(rec, i == m.integration.cursor, innerW))
-		}
-	}
-	if len(m.integration.messages) > 0 {
-		lines = append(lines, "")
-		for _, message := range m.integration.messages {
-			lines = append(lines, s.muted.Render(clampText(message, innerW)))
-		}
-	}
-	lines = append(lines, "", clampText(strings.Join([]string{
-		s.key.Render("space") + " toggle",
-		s.key.Render("enter") + " install selected",
-		s.key.Render("s/esc") + " skip until next launch",
-		s.key.Render("r") + " rescan",
-		s.key.Render("q") + " dismiss for this version",
-	}, s.muted.Render(" · ")), innerW))
-	content := trimHeight(strings.Join(lines, "\n"), innerH)
-	box := s.paneFocus.Width(width - 2).Height(innerH).Render(content)
-	return lipgloss.Place(m.width, height, lipgloss.Center, lipgloss.Center, box)
-}
-
-func (m Model) renderIntegrationRow(
-	rec integrations.Recommendation,
-	selected bool,
-	width int,
-) string {
-	s := m.styles
-	prefix := "  "
-	if selected {
-		prefix = s.bar.Render("▌") + " "
-	}
-	box := "[ ]"
-	if m.integration.selected[rec.Target] {
-		box = s.success.Render("[x]")
-	}
-	if !rec.AgentAvailable || !rec.Installable || rec.State == integrations.StatusCurrent {
-		box = s.muted.Render("[-]")
-	}
-	state := string(rec.State)
-	if rec.State == integrations.StatusCurrent {
-		state = "current"
-	} else if rec.Reason != "" {
-		state = rec.Reason
-	}
-	left := fmt.Sprintf("%s %-18s", box, rec.Label)
-	line := prefix + composeLine(left, state, max(1, width-2), s.muted)
-	if selected {
-		line = s.selectedBG.Render(pad(line, width))
-	}
-	return line
-}
-
 func (m Model) renderBody(height int) string {
 	usableW := safeWidth(m.width)
 	gap := 2
@@ -306,9 +230,6 @@ func (m Model) renderListPane(width, height int) string {
 	// consistent with the leading total when a filter is active.
 	counts := sortedCounts(items)
 	titleName := m.source.Names().Title
-	if m.agentStateFilteringActive() {
-		titleName += " · " + agentStateFilterLabel(m.agentStateFilter)
-	}
 	title := fmt.Sprintf("%s (%d", titleName, len(items))
 	if m.query != "" {
 		title += fmt.Sprintf("/%d match", len(m.items))
@@ -319,10 +240,9 @@ func (m Model) renderListPane(width, height int) string {
 	title += ")"
 	if m.source == sessionmgr.ModeAll {
 		title = fmt.Sprintf(
-			"All (%d · %d sessions · %d agents · %d dirs)",
+			"All (%d · %d sessions · %d dirs)",
 			len(items),
 			counts[sessionmgr.KindSession],
-			counts[sessionmgr.KindAgent],
 			counts[sessionmgr.KindZoxide]+counts[sessionmgr.KindFD],
 		)
 	}
@@ -334,8 +254,6 @@ func (m Model) renderListPane(width, height int) string {
 		empty := "no items"
 		if m.query != "" {
 			empty = "no matches for " + m.query
-		} else if m.agentStateFilteringActive() {
-			empty = "no agent panes with state " + agentStateFilterLabel(m.agentStateFilter)
 		}
 		lines = append(lines, "", s.muted.Render(empty))
 	} else {
@@ -383,31 +301,6 @@ func (m Model) rowParts(item sessionmgr.Item) (string, string) {
 		}
 		name := s.tabActive.Render(item.Name)
 		return rowText(m.iconFor(item.Kind), state, name), ago(item.Activity)
-	case sessionmgr.KindAgent:
-		icons := m.config.IconSet()
-		var state string
-		if !icons.AgentStateHidden() {
-			state = renderAgentState(s, icons, item.AgentState)
-			if icons.AgentStateUsesLabels() {
-				state = renderAgentStateLabel(s, icons, item.AgentState)
-			}
-		}
-		message := item.AgentMessage
-		if message == "" {
-			message = item.AgentSource
-		}
-		secondary := item.Location
-		if item.Path != "" {
-			secondary += " · " + item.Path
-		}
-		if message != "" {
-			secondary += " · " + message
-		}
-		return rowText(
-			m.iconFor(item.Kind),
-			state,
-			s.tabActive.Render(item.DisplayName()),
-		), secondary
 	case sessionmgr.KindZoxide:
 		return rowText(m.iconFor(item.Kind), item.Path), "zoxide"
 	case sessionmgr.KindFD:
@@ -469,20 +362,19 @@ func (m Model) renderRightPane(width, height int) string {
 
 func (m Model) renderDetailPane(width, height int) string {
 	s := m.styles
-	innerW := max(10, width-4)
 	innerH := max(4, height-2)
 	item, ok := m.selectedItem()
 	var lines []string
 	if !ok {
 		lines = []string{s.title.Render("Details"), "", s.muted.Render("select an item")}
 	} else {
-		lines = m.detailLines(item, innerW)
+		lines = m.detailLines(item)
 	}
 	content := trimHeight(strings.Join(lines, "\n"), innerH)
 	return s.pane.Width(width - 2).Height(height - 2).Render(content)
 }
 
-func (m Model) detailLines(item sessionmgr.Item, width int) []string {
+func (m Model) detailLines(item sessionmgr.Item) []string {
 	s := m.styles
 	switch item.Kind {
 	case sessionmgr.KindSession:
@@ -498,27 +390,6 @@ func (m Model) detailLines(item sessionmgr.Item, width int) []string {
 			kv(s, "activity", ago(item.Activity)),
 			kv(s, "created", ago(item.Created)),
 		}
-	case sessionmgr.KindAgent:
-		icons := m.config.IconSet()
-		stateValue := renderAgentStateDetail(s, item.AgentState, icons)
-		title := item.DisplayName()
-		subtitle := "agent pane"
-		if item.AgentDisplayName != "" {
-			subtitle = item.AgentName
-		}
-		lines := []string{
-			s.title.Render(title),
-			s.muted.Render(subtitle),
-			"",
-			kv(s, "state", stateValue),
-			kv(s, "pane", item.PaneID),
-			kv(s, "where", item.Location),
-			kv(s, "path", item.Path),
-		}
-		if item.AgentSessionID != "" {
-			lines = append(lines, kv(s, "session", clampText(item.AgentSessionID, width-8)))
-		}
-		return lines
 	case sessionmgr.KindZoxide, sessionmgr.KindFD:
 		return []string{
 			s.title.Render(sessionmgr.SessionNameFromDir(item.Path)),
@@ -594,12 +465,6 @@ func (m Model) renderFooter() string {
 			statusLeft = append(statusLeft, s.warning.Render("prefix"))
 		}
 	}
-	if m.agentStateFilteringActive() {
-		statusLeft = append(
-			statusLeft,
-			s.emphasis.Render("state:"+agentStateFilterLabel(m.agentStateFilter)),
-		)
-	}
 	if m.query != "" {
 		statusLeft = append(statusLeft, s.emphasis.Render("/"+m.query))
 	}
@@ -620,21 +485,12 @@ func (m Model) renderFooter() string {
 				s.key.Render("enter") + " attach/create/focus",
 				s.key.Render("/") + " filter",
 			}
-			if isAgentSource(m.source) {
-				helpParts = append(helpParts,
-					s.key.Render("s")+" state",
-					s.key.Render("S")+" all",
-				)
-			}
 			helpParts = append(helpParts,
-				s.key.Render("g")+" agents",
-				s.key.Render("o")+" current agents",
 				s.key.Render("m")+" mode",
 				s.key.Render("r")+" refresh",
 				s.key.Render("R")+" rename",
 				s.key.Render("x")+" kill",
 				s.key.Render("y")+" yazi",
-				s.key.Render("i")+" hooks",
 				s.key.Render("p")+" preview",
 			)
 			help = strings.Join(helpParts, s.muted.Render(" · "))
@@ -674,68 +530,12 @@ func isWarningStatus(status string) bool {
 		"rename cancelled",
 		"yazi closed without a directory",
 		"nothing selected",
-		"delete only applies to sessions and agents",
-		"rename only applies to sessions and agents",
-		"state filter only applies to agent panes":
+		"delete only applies to sessions",
+		"rename only applies to sessions":
 		return true
 	default:
 		return false
 	}
-}
-
-func renderAgentState(s styles, icons sessionmgr.IconSet, state sessionmgr.AgentState) string {
-	style := icons.ForState(state)
-	return renderAgentStateStyled(s, state, style.Icon, style.Color)
-}
-
-func renderAgentStateLabel(s styles, icons sessionmgr.IconSet, state sessionmgr.AgentState) string {
-	style := icons.ForState(state)
-	label := style.ASCII
-	if label == "" {
-		label = sessionmgr.AgentStateLabel(state)
-	}
-	return renderAgentStateStyled(s, state, "["+label+"]", style.Color)
-}
-
-func renderAgentStateRaw(s styles, icons sessionmgr.IconSet, state sessionmgr.AgentState) string {
-	style := icons.ForState(state)
-	label := style.ASCII
-	if label == "" {
-		label = sessionmgr.AgentStateLabel(state)
-	}
-	return renderAgentStateStyled(s, state, label, style.Color)
-}
-
-func renderAgentStateStyled(s styles, state sessionmgr.AgentState, text, color string) string {
-	if strings.TrimSpace(color) != "" {
-		return lipgloss.NewStyle().Foreground(lipgloss.Color(color)).Render(text)
-	}
-	switch state {
-	case sessionmgr.AgentWorking, sessionmgr.AgentDone:
-		return s.success.Render(text)
-	case sessionmgr.AgentBlocked:
-		return s.warning.Render(text)
-	case sessionmgr.AgentAborted:
-		return s.danger.Render(text)
-	case sessionmgr.AgentIdle:
-		return s.info.Render(text)
-	default:
-		return s.muted.Render(text)
-	}
-}
-
-func renderAgentStateDetail(
-	s styles,
-	state sessionmgr.AgentState,
-	icons sessionmgr.IconSet,
-) string {
-	if icons.AgentStateHidden() {
-		return sessionmgr.AgentStateLabel(state)
-	}
-	if icons.AgentStateUsesIcons() {
-		return rowText(renderAgentState(s, icons, state), string(state))
-	}
-	return renderAgentStateRaw(s, icons, state)
 }
 
 func renderTmuxState(s styles, icons sessionmgr.IconSet, attached bool) string {

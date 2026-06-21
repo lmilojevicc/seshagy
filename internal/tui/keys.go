@@ -11,7 +11,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	appconfig "github.com/lmilojevicc/seshagy/internal/config"
-	"github.com/lmilojevicc/seshagy/internal/integrations"
 	"github.com/lmilojevicc/seshagy/internal/sessionmgr"
 )
 
@@ -53,24 +52,6 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "enter":
 			newName := strings.TrimSpace(m.renameInput.Value())
-			if m.renamePaneID != "" {
-				paneID := m.renamePaneID
-				forAgent := m.renameForAgent
-				oldLabel := m.renameFrom
-				m.inputMode = modeNormal
-				m.renameInput.Blur()
-				m.renameFrom = ""
-				m.renamePaneID = ""
-				m.renameForAgent = ""
-				if newName == "" {
-					return m, renameAgentCmd(paneID, "", forAgent)
-				}
-				if newName == oldLabel {
-					m.status = "rename cancelled"
-					return m, nil
-				}
-				return m, renameAgentCmd(paneID, newName, forAgent)
-			}
 			oldName := m.renameFrom
 			m.inputMode = modeNormal
 			m.renameInput.Blur()
@@ -148,14 +129,6 @@ func (m Model) handleActionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "p", "alt+p":
 		m.showPreview = !m.showPreview
 		return m, m.previewForSelection()
-	case "s":
-		return m.cycleAgentStateFilter()
-	case "S":
-		return m.clearAgentStateFilter()
-	case "i":
-		m.integration.active = true
-		m.status = "scanning hook integrations"
-		return m, integrationsCmd()
 	case "m":
 		m.openInputModePrompt(true)
 		m.status = "change input mode"
@@ -167,10 +140,6 @@ func (m Model) handleActionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.switchSource(sessionmgr.ModeAll)
 	case "t", "ctrl+t":
 		return m.switchSource(sessionmgr.ModeSessions)
-	case "g", "ctrl+g":
-		return m.switchSource(sessionmgr.ModeAgents)
-	case "o", "ctrl+o":
-		return m.switchSource(sessionmgr.ModeCurrentAgents)
 	case "z", "ctrl+z":
 		return m.switchSource(sessionmgr.ModeZoxide)
 	case "f", "ctrl+f":
@@ -278,55 +247,6 @@ func (m Model) clearFilterText() (tea.Model, tea.Cmd) {
 	return m, m.previewForSelection()
 }
 
-func (m Model) handleIntegrationKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "ctrl+c", "q":
-		if m.integration.startupPrompt {
-			if err := recordIntegrationPromptDismissed(); err != nil {
-				m.status = err.Error()
-				return m, nil
-			}
-			m.integration.startupPrompt = false
-		}
-		return m, tea.Quit
-	case "esc", "s":
-		if m.integration.startupPrompt {
-			m.integration.startupPrompt = false
-		}
-		m.integration.active = false
-		m.status = "hook installation skipped"
-		return m, nil
-	case "up", "k":
-		m.integration.cursor = wrapCursorUp(m.integration.cursor, len(m.integration.rows))
-		return m, nil
-	case "down", "j":
-		m.integration.cursor = wrapCursorDown(m.integration.cursor, len(m.integration.rows))
-		return m, nil
-	case " ":
-		if len(m.integration.rows) == 0 {
-			return m, nil
-		}
-		rec := m.integration.rows[m.integration.cursor]
-		if rec.AgentAvailable && rec.Installable && rec.State != integrations.StatusCurrent {
-			m.integration.selected[rec.Target] = !m.integration.selected[rec.Target]
-		}
-		return m, nil
-	case "enter":
-		var targets []integrations.Target
-		for _, rec := range m.integration.rows {
-			if m.integration.selected[rec.Target] {
-				targets = append(targets, rec.Target)
-			}
-		}
-		m.status = "installing selected hook integrations"
-		return m, installIntegrationsCmd(targets)
-	case "r":
-		m.status = "rescanning hook integrations"
-		return m, integrationsCmd()
-	}
-	return m, nil
-}
-
 func (m *Model) openInputModePrompt(manual bool) {
 	m.setup.active = true
 	m.setup.manual = manual
@@ -371,7 +291,6 @@ func (m Model) cancelInputModePrompt() (tea.Model, tea.Cmd) {
 }
 
 func (m Model) applyTypeFirstSetup(enabled bool) (tea.Model, tea.Cmd) {
-	manual := m.setup.manual
 	cfg := m.config
 	cfg.TypeFirst.Enabled = enabled
 	if strings.TrimSpace(cfg.TypeFirst.Prefix) == "" {
@@ -392,10 +311,7 @@ func (m Model) applyTypeFirstSetup(enabled bool) (tea.Model, tea.Cmd) {
 	} else {
 		m.status = "classic input mode selected"
 	}
-	if manual {
-		return m, nil
-	}
-	return m, startupIntegrationsCmd()
+	return m, nil
 }
 
 func (m Model) switchSource(source sessionmgr.SourceMode) (tea.Model, tea.Cmd) {
@@ -414,30 +330,6 @@ func (m Model) switchSource(source sessionmgr.SourceMode) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(refresh, m.previewForSelection())
 }
 
-func (m Model) cycleAgentStateFilter() (tea.Model, tea.Cmd) {
-	if !isAgentSource(m.source) {
-		m.status = "state filter only applies to agent panes"
-		return m, nil
-	}
-	m.agentStateFilter = nextAgentStateFilter(m.agentStateFilter)
-	m.cursor = 0
-	m.clampCursor()
-	m.status = "agent state filter: " + agentStateFilterLabel(m.agentStateFilter)
-	return m, m.previewForSelection()
-}
-
-func (m Model) clearAgentStateFilter() (tea.Model, tea.Cmd) {
-	if !isAgentSource(m.source) {
-		m.status = "state filter only applies to agent panes"
-		return m, nil
-	}
-	m.agentStateFilter = ""
-	m.cursor = 0
-	m.clampCursor()
-	m.status = "agent state filter: all"
-	return m, m.previewForSelection()
-}
-
 func (m Model) activateSelected() (tea.Model, tea.Cmd) {
 	item, ok := m.selectedItem()
 	if !ok {
@@ -448,9 +340,6 @@ func (m Model) activateSelected() (tea.Model, tea.Cmd) {
 	case sessionmgr.KindSession:
 		m.status = "attaching " + item.Name
 		return m, attachCmd(item.Name)
-	case sessionmgr.KindAgent:
-		m.status = "focusing " + item.Location
-		return m, focusAgentCmd(item.PaneID)
 	case sessionmgr.KindZoxide, sessionmgr.KindFD:
 		m.status = "creating session from " + item.Path
 		return m, createSessionCmd(item.Path)
@@ -469,11 +358,8 @@ func (m Model) deleteSelected() (tea.Model, tea.Cmd) {
 	case sessionmgr.KindSession:
 		m.status = "killing session " + item.Name
 		return m, deleteSessionCmd(item.Name)
-	case sessionmgr.KindAgent:
-		m.status = "killing pane " + item.PaneID
-		return m, deleteAgentCmd(item.PaneID)
 	default:
-		m.status = "delete only applies to sessions and agents"
+		m.status = "delete only applies to sessions"
 		return m, nil
 	}
 }
@@ -488,25 +374,11 @@ func (m Model) startRename() (tea.Model, tea.Cmd) {
 	case sessionmgr.KindSession:
 		m.inputMode = modeRename
 		m.renameFrom = item.Name
-		m.renamePaneID = ""
-		m.renameForAgent = ""
-		m.renameInput.Placeholder = "new session name"
-		m.renameInput.SetValue(item.Name)
 		m.renameInput.Focus()
 		m.status = "renaming " + item.Name
 		return m, textinput.Blink
-	case sessionmgr.KindAgent:
-		m.inputMode = modeRename
-		m.renameFrom = item.DisplayName()
-		m.renamePaneID = item.PaneID
-		m.renameForAgent = item.AgentName
-		m.renameInput.Placeholder = "agent display label"
-		m.renameInput.SetValue(item.DisplayName())
-		m.renameInput.Focus()
-		m.status = "renaming " + item.DisplayName()
-		return m, textinput.Blink
 	default:
-		m.status = "rename only applies to sessions and agents"
+		m.status = "rename only applies to sessions"
 		return m, nil
 	}
 }
