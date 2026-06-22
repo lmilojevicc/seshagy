@@ -14,6 +14,14 @@ var modeNames = map[SourceMode]ModeNames{
 	ModeSessions: {ConfigToken: "sessions", Tab: "Sessions", Title: "Sessions", List: "sessions"},
 	ModeZoxide:   {ConfigToken: "zoxide", Tab: "Zoxide", Title: "Zoxide", List: "zoxide"},
 	ModeFD:       {ConfigToken: "fd", Tab: "fd", Title: "fd", List: "fd"},
+	ModeAgents: {
+		ConfigToken: "agents", Tab: "Agents",
+		Title: "Agents", List: "agents",
+	},
+	ModeCurrentAgents: {
+		ConfigToken: "current-agents", Tab: "Current",
+		Title: "Current Agents", List: "current agents",
+	},
 }
 
 // Names returns the label set for mode, falling back to the ModeAll labels for

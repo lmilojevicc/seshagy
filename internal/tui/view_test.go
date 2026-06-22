@@ -844,7 +844,7 @@ func TestFooterWarningStatusesUseWarningStyle(t *testing.T) {
 		"yazi closed without a directory",
 		"nothing selected",
 		"delete only applies to sessions",
-		"rename only applies to sessions",
+		"rename only applies to sessions and agents",
 	}
 	for _, status := range warnings {
 		style := footerStatusStyle(s, status, false)

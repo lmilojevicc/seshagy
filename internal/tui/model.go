@@ -34,11 +34,13 @@ type Model struct {
 
 	prefixArmed bool
 
-	query       string
-	searchInput textinput.Model
-	renameInput textinput.Model
-	renameFrom  string
-	inputMode   inputMode
+	query         string
+	searchInput   textinput.Model
+	renameInput   textinput.Model
+	renameFrom    string
+	renameKind    sessionmgr.Kind
+	renameSession string
+	inputMode     inputMode
 
 	preview     string
 	previewKey  string
@@ -207,6 +209,9 @@ func (m Model) visibleItems() []sessionmgr.Item {
 						item.Name,
 						item.Path,
 						item.Location,
+						item.AgentName,
+						item.AgentDisplayName,
+						string(item.AgentState),
 					},
 					" ",
 				),
@@ -294,10 +299,12 @@ func modeRank(k sessionmgr.Kind) int {
 	switch k {
 	case sessionmgr.KindSession:
 		return 0
-	case sessionmgr.KindZoxide:
+	case sessionmgr.KindAgent:
 		return 1
-	case sessionmgr.KindFD:
+	case sessionmgr.KindZoxide:
 		return 2
+	case sessionmgr.KindFD:
+		return 3
 	default:
 		return 9
 	}

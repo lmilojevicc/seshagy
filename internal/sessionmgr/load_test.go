@@ -14,6 +14,7 @@ func installModeAllStrictFakeTmux(t *testing.T, sessionLine string) {
 	NewStrictFakeTmux(t, f).
 		AllowPaneOptions().
 		AllowOutput(MatchListSessions).
+		AllowOutput(MatchListPanes).
 		AllowOutput(func(args []string) bool {
 			return len(args) >= 3 && args[0] == "display-message" && args[1] == "-p" &&
 				args[2] == "#S"

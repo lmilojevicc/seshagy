@@ -93,6 +93,17 @@ func renameCmd(oldName, newName string) tea.Cmd {
 	}
 }
 
+func renameAgentLabelCmd(agentType, session, displayName string) tea.Cmd {
+	return func() tea.Msg {
+		err := sessionmgr.SaveAgentLabel(agentType, session, displayName)
+		verb := "renamed agent"
+		if displayName == "" {
+			verb = "cleared agent alias"
+		}
+		return actionDoneMsg{status: fmt.Sprintf("%s %s", verb, agentType), err: err}
+	}
+}
+
 func tickCmd() tea.Cmd {
 	return tea.Tick(5*time.Second, func(t time.Time) tea.Msg { return tickMsg(t) })
 }

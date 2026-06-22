@@ -66,6 +66,7 @@ func TestHandleKeyRenameModeCancelAndSubmit(t *testing.T) {
 
 	m.inputMode = modeRename
 	m.renameFrom = "demo"
+	m.renameKind = sessionmgr.KindSession
 	m.renameInput.SetValue("renamed")
 	model, cmd = m.handleKey(enterMsg())
 	got = model.(Model)
@@ -306,6 +307,43 @@ func TestDeleteSelectedUnsupportedKind(t *testing.T) {
 	got := model.(Model)
 	if got.status != "delete only applies to sessions" || cmd != nil {
 		t.Fatalf("zoxide delete = status:%q cmd:%v", got.status, cmd)
+	}
+}
+
+func TestRenameAgentEmptyInputClearsLabel(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+
+	// Pre-populate an alias so the clear path has something to remove.
+	if err := sessionmgr.SaveAgentLabel("pi", "seshagy", "frontend-bot"); err != nil {
+		t.Fatalf("seed label: %v", err)
+	}
+
+	m := newTestModel(t)
+	m.inputMode = modeRename
+	m.renameKind = sessionmgr.KindAgent
+	m.renameFrom = "pi"
+	m.renameSession = "seshagy"
+	m.renameInput.SetValue("")
+	m.renameInput.Focus()
+
+	model, cmd := m.handleKey(enterMsg())
+	got := model.(Model)
+	if got.inputMode != modeNormal || got.renameKind != "" || cmd == nil {
+		t.Fatalf("enter = mode:%v renameKind:%q cmd:%v", got.inputMode, got.renameKind, cmd)
+	}
+
+	msg := cmd()
+	done, ok := msg.(actionDoneMsg)
+	if !ok {
+		t.Fatalf("cmd msg = %T, want actionDoneMsg", msg)
+	}
+	if done.err != nil || !strings.Contains(done.status, "cleared agent alias") {
+		t.Fatalf("action = status:%q err:%v", done.status, done.err)
+	}
+
+	store := sessionmgr.LoadAgentLabels()
+	if _, ok := store.Labels["pi:seshagy"]; ok {
+		t.Fatalf("label not cleared; store=%+v", store.Labels)
 	}
 }
 

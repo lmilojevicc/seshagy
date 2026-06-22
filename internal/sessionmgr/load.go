@@ -24,6 +24,8 @@ const (
 	ModeSessions
 	ModeZoxide
 	ModeFD
+	ModeAgents
+	ModeCurrentAgents
 )
 
 func LoadWithOptions(ctx context.Context, mode SourceMode, opts LoadOptions) (LoadResult, error) {
@@ -36,6 +38,16 @@ func LoadWithOptions(ctx context.Context, mode SourceMode, opts LoadOptions) (Lo
 		return LoadResult{Items: items}, err
 	case ModeFD:
 		items, err := ListFDirsWithCommand(ctx, opts.FDCommand)
+		return LoadResult{Items: items}, err
+	case ModeAgents:
+		items, err := ListAgents(ctx, "")
+		return LoadResult{Items: items}, err
+	case ModeCurrentAgents:
+		session, err := CurrentTmuxSession(ctx)
+		if err != nil {
+			return LoadResult{}, err
+		}
+		items, err := ListAgents(ctx, session)
 		return LoadResult{Items: items}, err
 	case ModeAll:
 		fallthrough
@@ -57,6 +69,11 @@ func LoadWithOptions(ctx context.Context, mode SourceMode, opts LoadOptions) (Lo
 		out = append(out, sessions...)
 		out = append(out, zoxide...)
 		out = append(out, fd...)
+		agents, err := ListAgents(ctx, "")
+		if err != nil {
+			warnings = append(warnings, err.Error())
+		}
+		out = append(out, agents...)
 		return LoadResult{Items: out, Warning: strings.Join(warnings, "; ")}, nil
 	}
 }

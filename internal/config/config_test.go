@@ -40,7 +40,7 @@ func TestLoadDefaultWhenMissing(t *testing.T) {
 	if got := cfg.Sources.Order; strings.Join(
 		got,
 		",",
-	) != "all,sessions,zoxide,fd" {
+	) != "all,sessions,zoxide,fd,agents,current-agents" {
 		t.Fatalf("default source order = %#v", got)
 	}
 	if cfg.Icons.Mode != IconModeIcons {
@@ -121,8 +121,9 @@ func TestSaveAndLoadConfig(t *testing.T) {
 	if loaded.DefaultSource() != sessionmgr.ModeZoxide {
 		t.Fatalf("loaded default source = %v, want zoxide", loaded.DefaultSource())
 	}
-	if order := loaded.SourceOrder(); len(order) != 4 || order[0] != sessionmgr.ModeSessions ||
-		order[3] != sessionmgr.ModeAll {
+	if order := loaded.SourceOrder(); len(order) != 6 || order[0] != sessionmgr.ModeSessions ||
+		order[3] != sessionmgr.ModeAll || order[4] != sessionmgr.ModeAgents ||
+		order[5] != sessionmgr.ModeCurrentAgents {
 		t.Fatalf("loaded source order = %#v", order)
 	}
 	if loaded.LoadOptions().FDCommand != `printf '%s\n' /tmp/project` {
@@ -165,7 +166,7 @@ func TestNormalizeSourceOrder(t *testing.T) {
 	if cfg.Sources.Default != "zoxide" {
 		t.Fatalf("normalized default source = %q", cfg.Sources.Default)
 	}
-	want := []string{"fd", "sessions", "all", "zoxide"}
+	want := []string{"fd", "sessions", "all", "zoxide", "agents", "current-agents"}
 	if strings.Join(cfg.Sources.Order, ",") != strings.Join(want, ",") {
 		t.Fatalf("normalized source order = %#v, want %#v", cfg.Sources.Order, want)
 	}

@@ -13,18 +13,27 @@ var ansiRE = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 func StripANSI(s string) string { return ansiRE.ReplaceAllString(s, "") }
 
 type IconSet struct {
-	Enabled       bool
-	ASCII         bool
-	TmuxStateMode string
-	TmuxStates    TmuxStateStyles
-	Session       IconStyle
-	Zoxide        IconStyle
-	FD            IconStyle
+	Enabled        bool
+	ASCII          bool
+	TmuxStateMode  string
+	TmuxStates     TmuxStateStyles
+	AgentStateMode string
+	AgentStates    AgentStateStyles
+	Session        IconStyle
+	Zoxide         IconStyle
+	FD             IconStyle
 }
 
 type TmuxStateStyles struct {
 	Attached IconStyle
 	Detached IconStyle
+}
+
+type AgentStateStyles struct {
+	Idle    IconStyle
+	Working IconStyle
+	Blocked IconStyle
+	Done    IconStyle
 }
 
 type IconStyle struct {
@@ -67,6 +76,66 @@ func (set IconSet) TmuxStateUsesLabels() bool {
 		return false
 	}
 	return !set.TmuxStateUsesIcons()
+}
+
+func (set IconSet) AgentStateHidden() bool {
+	return set.AgentStateMode == "none"
+}
+
+func (set IconSet) AgentStateUsesIcons() bool {
+	if set.AgentStateHidden() {
+		return false
+	}
+	switch set.AgentStateMode {
+	case "icons":
+		return true
+	case "text":
+		return false
+	default: // inherit
+		return set.Enabled && !set.ASCII
+	}
+}
+
+func (set IconSet) ForAgentState(state AgentState) IconStyle {
+	style := set.rawAgentState(state)
+	defaults := defaultAgentStateStyle(state)
+	if style.Icon == "" {
+		style.Icon = defaults.Icon
+	}
+	if style.ASCII == "" {
+		style.ASCII = defaults.ASCII
+	}
+	return style
+}
+
+func (set IconSet) rawAgentState(state AgentState) IconStyle {
+	switch state {
+	case AgentWorking:
+		return set.AgentStates.Working
+	case AgentBlocked:
+		return set.AgentStates.Blocked
+	case AgentDone:
+		return set.AgentStates.Done
+	case AgentIdle:
+		return set.AgentStates.Idle
+	default:
+		return set.AgentStates.Idle
+	}
+}
+
+func defaultAgentStateStyle(state AgentState) IconStyle {
+	switch state {
+	case AgentWorking:
+		return IconStyle{Icon: "●", ASCII: "working", Color: "10"}
+	case AgentBlocked:
+		return IconStyle{Icon: "◐", ASCII: "blocked", Color: "11"}
+	case AgentDone:
+		return IconStyle{Icon: "◉", ASCII: "done", Color: "14"}
+	case AgentIdle:
+		return IconStyle{Icon: "○", ASCII: "idle", Color: "8"}
+	default:
+		return IconStyle{Icon: "○", ASCII: "idle", Color: "8"}
+	}
 }
 
 func (set IconSet) ForTmuxState(attached bool) IconStyle {
@@ -124,6 +193,8 @@ func (set IconSet) raw(kind Kind) IconStyle {
 		return set.Zoxide
 	case KindFD:
 		return set.FD
+	case KindAgent:
+		return IconStyle{}
 	default:
 		return IconStyle{}
 	}
@@ -149,6 +220,11 @@ func FormatLineWithIcons(i Item, icons IconSet) string {
 		return joinNonEmpty(colorIcon(KindZoxide, icons), i.Path)
 	case KindFD:
 		return joinNonEmpty(colorIcon(KindFD, icons), i.Path)
+	case KindAgent:
+		if icons.AgentStateHidden() {
+			return i.DisplayName()
+		}
+		return joinNonEmpty(agentStateGlyph(i.AgentState, icons), i.DisplayName())
 	default:
 		return i.DisplayName()
 	}
@@ -160,6 +236,17 @@ func colorIcon(kind Kind, icons IconSet) string {
 		return style.Text
 	}
 	return fmt.Sprintf("\x1b[%sm%s\x1b[0m", ansiColorSequence(style.Color), style.Text)
+}
+
+func agentStateGlyph(state AgentState, icons IconSet) string {
+	style := icons.ForAgentState(state)
+	if style.Icon == "" {
+		return ""
+	}
+	if style.Color == "" {
+		return style.Icon
+	}
+	return fmt.Sprintf("\x1b[%sm%s\x1b[0m", ansiColorSequence(style.Color), style.Icon)
 }
 
 func joinNonEmpty(parts ...string) string {

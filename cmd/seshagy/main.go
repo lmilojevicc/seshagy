@@ -57,6 +57,15 @@ func run(args []string) error {
 		return runGetItems(ctx, args[1:], sessionmgr.ModeZoxide, "--get-zoxide")
 	case "--get-fd":
 		return runGetItems(ctx, args[1:], sessionmgr.ModeFD, "--get-fd")
+	case "--get-agents":
+		return runGetItems(ctx, args[1:], sessionmgr.ModeAgents, "--get-agents")
+	case "--get-current-session-agents":
+		return runGetItems(
+			ctx,
+			args[1:],
+			sessionmgr.ModeCurrentAgents,
+			"--get-current-session-agents",
+		)
 	case "--get-all":
 		return runGetItems(ctx, args[1:], sessionmgr.ModeAll, "--get-all")
 	case "--delete-item":
@@ -221,6 +230,9 @@ Usage:
   seshagy --get-sessions [--json] print tmux sessions
   seshagy --get-zoxide [--json]   print zoxide directories
   seshagy --get-fd [--json]       print fd directories
+  seshagy --get-agents [--json]   print agent panes (all sessions)
+  seshagy --get-current-session-agents [--json]
+                                  print agent panes (current session)
   seshagy --delete-item <line> [--json]
                                   kill a rendered session line
   seshagy config path [--json]    print config file path
@@ -236,7 +248,7 @@ Scripting:
 TUI keys:
   enter attach/create/focus   q quit   / filter   r refresh   R rename
   x kill session/pane         y yazi   m mode     1-6 modes
-  p preview                   ? help
+  o agents                    p preview   ? help
 
 Config:
   Config lives at $XDG_CONFIG_HOME/seshagy/config.toml, or

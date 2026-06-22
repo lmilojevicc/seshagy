@@ -66,19 +66,28 @@ type ThemeColorsConfig struct {
 }
 
 type IconsConfig struct {
-	Mode          string           `toml:"mode"                      json:"mode"`
-	TmuxStateMode string           `toml:"tmux_state_mode,omitempty" json:"tmux_state_mode,omitempty"`
-	Enabled       *bool            `toml:"enabled,omitempty"         json:"enabled,omitempty"`
-	ASCII         bool             `toml:"ascii,omitempty"           json:"ascii,omitempty"`
-	Session       IconConfig       `toml:"session"                   json:"session"`
-	Zoxide        IconConfig       `toml:"zoxide"                    json:"zoxide"`
-	FD            IconConfig       `toml:"fd"                        json:"fd"`
-	TmuxState     TmuxStatesConfig `toml:"tmux_state"                json:"tmux_state"`
+	Mode           string            `toml:"mode"                       json:"mode"`
+	TmuxStateMode  string            `toml:"tmux_state_mode,omitempty"  json:"tmux_state_mode,omitempty"`
+	AgentStateMode string            `toml:"agent_state_mode,omitempty" json:"agent_state_mode,omitempty"`
+	Enabled        *bool             `toml:"enabled,omitempty"          json:"enabled,omitempty"`
+	ASCII          bool              `toml:"ascii,omitempty"            json:"ascii,omitempty"`
+	Session        IconConfig        `toml:"session"                    json:"session"`
+	Zoxide         IconConfig        `toml:"zoxide"                     json:"zoxide"`
+	FD             IconConfig        `toml:"fd"                         json:"fd"`
+	TmuxState      TmuxStatesConfig  `toml:"tmux_state"                 json:"tmux_state"`
+	AgentState     AgentStatesConfig `toml:"agent_state"                json:"agent_state"`
 }
 
 type TmuxStatesConfig struct {
 	Attached IconConfig `toml:"attached" json:"attached"`
 	Detached IconConfig `toml:"detached" json:"detached"`
+}
+
+type AgentStatesConfig struct {
+	Idle    IconConfig `toml:"idle"    json:"idle"`
+	Working IconConfig `toml:"working" json:"working"`
+	Blocked IconConfig `toml:"blocked" json:"blocked"`
+	Done    IconConfig `toml:"done"    json:"done"`
 }
 
 type IconConfig struct {
@@ -116,11 +125,12 @@ func Default() Config {
 			Danger:        "9",
 		}},
 		Icons: IconsConfig{
-			Mode:      IconModeIcons,
-			TmuxState: defaultTmuxStatesConfig(),
-			Session:   IconConfig{Icon: sessionmgr.IconSession + " ", Label: "S", Color: "10"},
-			Zoxide:    IconConfig{Icon: sessionmgr.IconZoxide + " ", Label: "Z", Color: "14"},
-			FD:        IconConfig{Icon: sessionmgr.IconFD + " ", Label: "F", Color: "11"},
+			Mode:       IconModeIcons,
+			TmuxState:  defaultTmuxStatesConfig(),
+			AgentState: defaultAgentStatesConfig(),
+			Session:    IconConfig{Icon: sessionmgr.IconSession + " ", Label: "S", Color: "10"},
+			Zoxide:     IconConfig{Icon: sessionmgr.IconZoxide + " ", Label: "Z", Color: "14"},
+			FD:         IconConfig{Icon: sessionmgr.IconFD + " ", Label: "F", Color: "11"},
 		},
 		TypeFirst: TypeFirstConfig{Enabled: false, Prefix: DefaultPrefix},
 	}
@@ -188,6 +198,7 @@ func (c *Config) Normalize() {
 	normalizeThemeColors(&c.Theme.Colors, defaults.Theme.Colors)
 	c.Icons.Mode = normalizeIconMode(c.Icons.Mode)
 	c.Icons.TmuxStateMode = normalizeStateDisplayMode(c.Icons.TmuxStateMode)
+	c.Icons.AgentStateMode = normalizeStateDisplayMode(c.Icons.AgentStateMode)
 	if c.Icons.Enabled != nil && !*c.Icons.Enabled {
 		c.Icons.Mode = IconModeNone
 	} else if c.Icons.ASCII {
@@ -199,6 +210,7 @@ func (c *Config) Normalize() {
 	normalizeKindIcon(&c.Icons.Zoxide, defaults.Icons.Zoxide, sessionmgr.IconZoxide)
 	normalizeKindIcon(&c.Icons.FD, defaults.Icons.FD, sessionmgr.IconFD)
 	normalizeTmuxStatesConfig(&c.Icons.TmuxState, defaults.Icons.TmuxState)
+	normalizeAgentStatesConfig(&c.Icons.AgentState, defaults.Icons.AgentState)
 	if strings.TrimSpace(c.TypeFirst.Prefix) == "" {
 		c.TypeFirst.Prefix = DefaultPrefix
 	}
@@ -247,10 +259,12 @@ func (c Config) IconSet() sessionmgr.IconSet {
 	c.Normalize()
 	enabled := c.Icons.Mode != IconModeNone
 	return sessionmgr.IconSet{
-		Enabled:       enabled,
-		ASCII:         c.Icons.Mode == IconModeText,
-		TmuxStateMode: c.Icons.TmuxStateMode,
-		TmuxStates:    projectTmuxStateStyles(c.Icons.TmuxState),
+		Enabled:        enabled,
+		ASCII:          c.Icons.Mode == IconModeText,
+		TmuxStateMode:  c.Icons.TmuxStateMode,
+		AgentStateMode: c.Icons.AgentStateMode,
+		TmuxStates:     projectTmuxStateStyles(c.Icons.TmuxState),
+		AgentStates:    projectAgentStateStyles(c.Icons.AgentState),
 		Session: sessionmgr.IconStyle{
 			Icon:  c.Icons.Session.Icon,
 			ASCII: c.Icons.Session.Label,
@@ -336,6 +350,8 @@ func defaultSourceOrder() []sessionmgr.SourceMode {
 		sessionmgr.ModeSessions,
 		sessionmgr.ModeZoxide,
 		sessionmgr.ModeFD,
+		sessionmgr.ModeAgents,
+		sessionmgr.ModeCurrentAgents,
 	}
 }
 
@@ -361,6 +377,10 @@ func sourceModeFromName(name string) (sessionmgr.SourceMode, bool) {
 		return sessionmgr.ModeZoxide, true
 	case "fd", "f":
 		return sessionmgr.ModeFD, true
+	case "agents", "agent":
+		return sessionmgr.ModeAgents, true
+	case "current-agents", "current-agent":
+		return sessionmgr.ModeCurrentAgents, true
 	default:
 		return sessionmgr.ModeAll, false
 	}
@@ -460,6 +480,56 @@ func projectTmuxStateStyles(states TmuxStatesConfig) sessionmgr.TmuxStateStyles 
 			Icon:  states.Detached.Icon,
 			ASCII: states.Detached.Label,
 			Color: states.Detached.Color,
+		},
+	}
+}
+
+func defaultAgentStatesConfig() AgentStatesConfig {
+	return AgentStatesConfig{
+		Working: IconConfig{Icon: "●", Label: "working", Color: "10"},
+		Blocked: IconConfig{Icon: "◐", Label: "blocked", Color: "11"},
+		Done:    IconConfig{Icon: "◉", Label: "done", Color: "14"},
+		Idle:    IconConfig{Icon: "○", Label: "idle", Color: "8"},
+	}
+}
+
+func normalizeAgentStatesConfig(states *AgentStatesConfig, defaults AgentStatesConfig) {
+	normalizeAgentStateIcon(&states.Idle, defaults.Idle)
+	normalizeAgentStateIcon(&states.Working, defaults.Working)
+	normalizeAgentStateIcon(&states.Blocked, defaults.Blocked)
+	normalizeAgentStateIcon(&states.Done, defaults.Done)
+}
+
+func normalizeAgentStateIcon(state *IconConfig, defaults IconConfig) {
+	if strings.TrimSpace(state.Icon) == "" {
+		state.Icon = defaults.Icon
+	}
+	if strings.TrimSpace(state.Label) == "" {
+		state.Label = defaults.Label
+	}
+}
+
+func projectAgentStateStyles(states AgentStatesConfig) sessionmgr.AgentStateStyles {
+	return sessionmgr.AgentStateStyles{
+		Idle: sessionmgr.IconStyle{
+			Icon:  states.Idle.Icon,
+			ASCII: states.Idle.Label,
+			Color: states.Idle.Color,
+		},
+		Working: sessionmgr.IconStyle{
+			Icon:  states.Working.Icon,
+			ASCII: states.Working.Label,
+			Color: states.Working.Color,
+		},
+		Blocked: sessionmgr.IconStyle{
+			Icon:  states.Blocked.Icon,
+			ASCII: states.Blocked.Label,
+			Color: states.Blocked.Color,
+		},
+		Done: sessionmgr.IconStyle{
+			Icon:  states.Done.Icon,
+			ASCII: states.Done.Label,
+			Color: states.Done.Color,
 		},
 	}
 }

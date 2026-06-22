@@ -173,6 +173,7 @@ func TestGetAllJSONIncludesZoxideWarning(t *testing.T) {
 	sessionmgr.NewStrictFakeTmux(t, sessionmgr.NewFakeTmux()).
 		AllowPaneOptions().
 		AllowOutput(sessionmgr.MatchListSessions).
+		AllowOutput(sessionmgr.MatchListPanes).
 		HandleOutput(sessionmgr.MatchListSessions, func(_ context.Context, _ ...string) ([]byte, error) {
 			return []byte(sessionLine), nil
 		}).

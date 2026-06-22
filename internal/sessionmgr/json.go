@@ -24,6 +24,10 @@ type ItemJSON struct {
 	Window   string `json:"window,omitempty"`
 	Pane     string `json:"pane,omitempty"`
 	Location string `json:"location,omitempty"`
+
+	AgentName        string `json:"agent_name,omitempty"`
+	AgentDisplayName string `json:"agent_display_name,omitempty"`
+	AgentState       string `json:"agent_state,omitempty"`
 }
 
 // ItemsJSON wraps a mode query result.
@@ -38,20 +42,23 @@ type ItemsJSON struct {
 func ItemToJSON(item Item, icons IconSet) ItemJSON {
 	formattedLine := FormatLineWithIcons(item, icons)
 	out := ItemJSON{
-		Kind:      string(item.Kind),
-		Key:       item.Key(),
-		Name:      item.Name,
-		Target:    item.Target,
-		Path:      item.Path,
-		Line:      formattedLine,
-		LinePlain: StripANSI(formattedLine),
-		Attached:  item.Attached,
-		Windows:   item.Windows,
-		PaneID:    item.PaneID,
-		Session:   item.Session,
-		Window:    item.Window,
-		Pane:      item.Pane,
-		Location:  item.Location,
+		Kind:             string(item.Kind),
+		Key:              item.Key(),
+		Name:             item.Name,
+		Target:           item.Target,
+		Path:             item.Path,
+		Line:             formattedLine,
+		LinePlain:        StripANSI(formattedLine),
+		Attached:         item.Attached,
+		Windows:          item.Windows,
+		PaneID:           item.PaneID,
+		Session:          item.Session,
+		Window:           item.Window,
+		Pane:             item.Pane,
+		Location:         item.Location,
+		AgentName:        item.AgentName,
+		AgentDisplayName: item.AgentDisplayName,
+		AgentState:       string(item.AgentState),
 	}
 	if !item.Created.IsZero() {
 		created := item.Created.UTC()

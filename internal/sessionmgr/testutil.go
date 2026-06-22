@@ -232,6 +232,11 @@ func MatchListSessions(args []string) bool {
 	return len(args) >= 1 && args[0] == "list-sessions"
 }
 
+// MatchListPanes matches list-panes calls.
+func MatchListPanes(args []string) bool {
+	return len(args) >= 1 && args[0] == "list-panes"
+}
+
 // MatchNewSession matches detached new-session creation.
 func MatchNewSession(args []string) bool {
 	return len(args) >= 2 && args[0] == "new-session" && args[1] == "-d"

@@ -1,11 +1,14 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/lmilojevicc/seshagy/internal/sessionmgr"
 )
 
 func cliTestEnv(t *testing.T) {
@@ -97,5 +100,75 @@ func TestUnknownCommandErrorIncludesHint(t *testing.T) {
 	err := unknownCommandError([]string{"frobnicate", "--json"})
 	if err == nil || !strings.Contains(err.Error(), "frobnicate") {
 		t.Fatalf("unknownCommandError() = %v", err)
+	}
+}
+
+func TestRunGetAgentsRoutes(t *testing.T) {
+	cliTestEnv(t)
+	sessionmgr.SetTmuxHooksForTest(t, func(_ context.Context, args ...string) ([]byte, error) {
+		if len(args) >= 1 && args[0] == "list-panes" {
+			return nil, nil
+		}
+		return nil, nil
+	}, nil)
+	if err := run([]string{"--get-agents"}); err != nil {
+		t.Fatalf("run(--get-agents) unexpected error: %v", err)
+	}
+}
+
+func TestRunGetCurrentSessionAgentsRoutes(t *testing.T) {
+	cliTestEnv(t)
+	sessionmgr.SetTmuxHooksForTest(t, func(_ context.Context, args ...string) ([]byte, error) {
+		if len(args) >= 1 && args[0] == "display-message" {
+			return []byte("mysession\n"), nil
+		}
+		return nil, nil
+	}, nil)
+	if err := run([]string{"--get-current-session-agents"}); err != nil {
+		t.Fatalf("run(--get-current-session-agents) unexpected error: %v", err)
+	}
+}
+
+func TestRunGetAgentsJSONIncludesAgentFields(t *testing.T) {
+	cliTestEnv(t)
+	line := strings.Join([]string{
+		"%1", "seshagy", "1", "2", "/home/user/proj", "pi", "12345", "0",
+	}, "\x1f")
+	sessionmgr.SetTmuxHooksForTest(t, func(_ context.Context, args ...string) ([]byte, error) {
+		if len(args) >= 1 && args[0] == "list-panes" {
+			return []byte(line), nil
+		}
+		return nil, nil
+	}, nil)
+	out, err := captureStdout(t, func() error {
+		return run([]string{"--get-agents", "--json"})
+	})
+	if err != nil {
+		t.Fatalf("run(--get-agents --json) error = %v", err)
+	}
+	var payload struct {
+		Ok    bool `json:"ok"`
+		Items []struct {
+			Kind      string `json:"kind"`
+			AgentName string `json:"agent_name"`
+			State     string `json:"agent_state"`
+			Location  string `json:"location"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(out)), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v, out=%q", err, out)
+	}
+	if !payload.Ok || len(payload.Items) != 1 {
+		t.Fatalf("payload = %+v", payload)
+	}
+	item := payload.Items[0]
+	if item.Kind != "agent" || item.AgentName != "pi" {
+		t.Fatalf("item = %+v", item)
+	}
+	if item.State != "idle" {
+		t.Fatalf("agent_state = %q, want idle", item.State)
+	}
+	if item.Location != "seshagy:1.2" {
+		t.Fatalf("location = %q, want seshagy:1.2", item.Location)
 	}
 }

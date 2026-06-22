@@ -240,9 +240,10 @@ func (m Model) renderListPane(width, height int) string {
 	title += ")"
 	if m.source == sessionmgr.ModeAll {
 		title = fmt.Sprintf(
-			"All (%d · %d sessions · %d dirs)",
+			"All (%d · %d sessions · %d agents · %d dirs)",
 			len(items),
 			counts[sessionmgr.KindSession],
+			counts[sessionmgr.KindAgent],
 			counts[sessionmgr.KindZoxide]+counts[sessionmgr.KindFD],
 		)
 	}
@@ -305,6 +306,17 @@ func (m Model) rowParts(item sessionmgr.Item) (string, string) {
 		return rowText(m.iconFor(item.Kind), item.Path), "zoxide"
 	case sessionmgr.KindFD:
 		return rowText(m.iconFor(item.Kind), item.Path), "fd"
+	case sessionmgr.KindAgent:
+		icons := m.config.IconSet()
+		var glyph string
+		if !icons.AgentStateHidden() {
+			glyph = renderAgentState(s, icons, item.AgentState)
+			if !icons.AgentStateUsesIcons() {
+				glyph = renderAgentStateLabel(s, icons, item.AgentState)
+			}
+		}
+		name := s.tabActive.Render(item.DisplayName())
+		return rowText(glyph, name), item.Location
 	default:
 		return item.DisplayName(), ""
 	}
@@ -397,6 +409,24 @@ func (m Model) detailLines(item sessionmgr.Item) []string {
 			"",
 			kv(s, "path", item.Path),
 			kv(s, "enter", "create/switch tmux session"),
+		}
+	case sessionmgr.KindAgent:
+		icons := m.config.IconSet()
+		stateLabel := agentStateText(item.AgentState)
+		if !icons.AgentStateHidden() {
+			stateLabel = rowText(
+				renderAgentState(s, icons, item.AgentState),
+				agentStateText(item.AgentState),
+			)
+		}
+		return []string{
+			s.title.Render(item.DisplayName()),
+			s.muted.Render("agent · " + item.AgentName),
+			"",
+			kv(s, "state", stateLabel),
+			kv(s, "location", item.Location),
+			kv(s, "session", item.Session),
+			kv(s, "path", sessionmgr.ContractHome(item.Path)),
 		}
 	default:
 		return []string{s.title.Render(item.DisplayName())}
@@ -531,7 +561,7 @@ func isWarningStatus(status string) bool {
 		"yazi closed without a directory",
 		"nothing selected",
 		"delete only applies to sessions",
-		"rename only applies to sessions":
+		"rename only applies to sessions and agents":
 		return true
 	default:
 		return false
@@ -598,6 +628,44 @@ func tmuxStateText(attached bool) string {
 		return "attached"
 	}
 	return "detached"
+}
+
+func renderAgentState(s styles, icons sessionmgr.IconSet, state sessionmgr.AgentState) string {
+	style := icons.ForAgentState(state)
+	return renderAgentStateStyled(s, state, style.Icon, style.Color)
+}
+
+func renderAgentStateLabel(s styles, icons sessionmgr.IconSet, state sessionmgr.AgentState) string {
+	style := icons.ForAgentState(state)
+	label := style.ASCII
+	if label == "" {
+		label = agentStateText(state)
+	}
+	return renderAgentStateStyled(s, state, "["+label+"]", style.Color)
+}
+
+func renderAgentStateStyled(s styles, state sessionmgr.AgentState, text, color string) string {
+	if strings.TrimSpace(color) != "" {
+		return lipgloss.NewStyle().Foreground(lipgloss.Color(color)).Render(text)
+	}
+	return agentStateFallback(s, state, text)
+}
+
+func agentStateText(state sessionmgr.AgentState) string {
+	return string(state)
+}
+
+func agentStateFallback(s styles, state sessionmgr.AgentState, text string) string {
+	switch state {
+	case sessionmgr.AgentWorking:
+		return s.success.Render(text)
+	case sessionmgr.AgentBlocked:
+		return s.warning.Render(text)
+	case sessionmgr.AgentDone:
+		return s.info.Render(text)
+	default:
+		return s.muted.Render(text)
+	}
 }
 
 func kv(s styles, key, value string) string {

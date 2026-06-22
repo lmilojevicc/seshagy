@@ -53,14 +53,29 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "enter":
 			newName := strings.TrimSpace(m.renameInput.Value())
 			oldName := m.renameFrom
+			kind := m.renameKind
+			session := m.renameSession
 			m.inputMode = modeNormal
 			m.renameInput.Blur()
 			m.renameFrom = ""
+			m.renameSession = ""
+			m.renameKind = ""
+			if newName == "" && kind == sessionmgr.KindAgent {
+				return m, renameAgentLabelCmd(oldName, session, "")
+			}
 			if newName == "" || oldName == "" || newName == oldName {
 				m.status = "rename cancelled"
 				return m, nil
 			}
-			return m, renameCmd(oldName, newName)
+			switch kind {
+			case sessionmgr.KindSession:
+				return m, renameCmd(oldName, newName)
+			case sessionmgr.KindAgent:
+				return m, renameAgentLabelCmd(oldName, session, newName)
+			default:
+				m.status = "rename only applies to sessions and agents"
+				return m, nil
+			}
 		case "ctrl+c":
 			return m, tea.Quit
 		}
@@ -114,6 +129,11 @@ func (m Model) handleActionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.deleteSelected()
 	case "R":
 		return m.startRename()
+	case "o":
+		if m.source == sessionmgr.ModeAgents {
+			return m.switchSource(sessionmgr.ModeCurrentAgents)
+		}
+		return m.switchSource(sessionmgr.ModeAgents)
 	case "/":
 		m.inputMode = modeSearch
 		m.searchInput.SetValue(m.query)
@@ -373,12 +393,22 @@ func (m Model) startRename() (tea.Model, tea.Cmd) {
 	switch item.Kind {
 	case sessionmgr.KindSession:
 		m.inputMode = modeRename
+		m.renameKind = item.Kind
 		m.renameFrom = item.Name
 		m.renameInput.Focus()
 		m.status = "renaming " + item.Name
 		return m, textinput.Blink
+	case sessionmgr.KindAgent:
+		m.inputMode = modeRename
+		m.renameKind = item.Kind
+		m.renameFrom = item.AgentName
+		m.renameSession = item.Session
+		m.renameInput.SetValue(item.DisplayName())
+		m.renameInput.Focus()
+		m.status = "renaming agent " + item.AgentName
+		return m, textinput.Blink
 	default:
-		m.status = "rename only applies to sessions"
+		m.status = "rename only applies to sessions and agents"
 		return m, nil
 	}
 }
