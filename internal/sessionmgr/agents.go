@@ -32,13 +32,11 @@ var agentProcessNames = map[string]string{
 	"copilot":      "copilot",
 }
 
-// detectAgentName maps a pane_current_command value to the canonical agent
-// name, returning "" when the process is not a known agent. It handles
-// architecture-suffixed binary names (e.g. codex-aarch64-a) via prefix matching.
-//
-// Phase 1 matches only the foreground process name. Node-based agents that
-// report as "node" are not discovered until process-tree walking arrives in a
-// later phase.
+// detectAgentName maps a process name to the canonical agent name, returning
+// "" when the process is not a known agent. It handles architecture-suffixed
+// binary names (e.g. codex-aarch64-a) via prefix matching, and basenames the
+// input via filepath.Base so full-path comm values (e.g.
+// /Users/x/.local/bin/cursor-agent) match correctly.
 func detectAgentName(command string) string {
 	name := strings.ToLower(filepath.Base(strings.TrimSpace(command)))
 	if agent := agentProcessNames[name]; agent != "" {
@@ -71,6 +69,8 @@ func ListAgents(ctx context.Context, sessionFilter string) ([]Item, error) {
 
 // ParseAgents parses raw list-panes output into agent items. Dead panes and
 // non-agent processes are skipped; sessionFilter limits results to a session.
+// A per-call snapshotCache ensures the process table is read at most once for
+// the descendant-walk fallback across all panes.
 func ParseAgents(raw []byte, sessionFilter string) []Item {
 	text := strings.TrimSpace(string(raw))
 	if text == "" {
@@ -78,6 +78,7 @@ func ParseAgents(raw []byte, sessionFilter string) []Item {
 	}
 	lines := strings.Split(text, "\n")
 	items := make([]Item, 0, len(lines))
+	cache := &snapshotCache{}
 	for _, line := range lines {
 		parts := strings.Split(line, "\x1f")
 		if len(parts) < 8 {
@@ -89,7 +90,7 @@ func ParseAgents(raw []byte, sessionFilter string) []Item {
 		if sessionFilter != "" && parts[1] != sessionFilter {
 			continue
 		}
-		agentName := detectAgentName(parts[5])
+		agentName := detectAgent(parts[5], parts[6], cache)
 		if agentName == "" {
 			continue
 		}
