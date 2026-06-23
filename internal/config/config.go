@@ -302,7 +302,17 @@ func (c Config) SourceOrder() []sessionmgr.SourceMode {
 	if len(modes) == 0 {
 		return defaultSourceOrder()
 	}
-	return modes
+	// ModeCurrentAgents is CLI-only (--get-current-session-agents passes the
+	// mode directly and bypasses SourceOrder). It must never render as a tab,
+	// even when a stale config persists it in [sources].order.
+	filtered := modes[:0]
+	for _, mode := range modes {
+		if mode == sessionmgr.ModeCurrentAgents {
+			continue
+		}
+		filtered = append(filtered, mode)
+	}
+	return filtered
 }
 
 func (c Config) DefaultSource() sessionmgr.SourceMode {
@@ -332,7 +342,12 @@ func normalizeSourceOrder(names []string) []string {
 		if !ok || seen[mode] {
 			continue
 		}
+		// ModeCurrentAgents is never a tab; mark it seen so it is dropped from
+		// the persisted order on Save() without being re-added by defaults.
 		seen[mode] = true
+		if mode == sessionmgr.ModeCurrentAgents {
+			continue
+		}
 		order = append(order, SourceModeName(mode))
 	}
 	for _, mode := range defaultSourceOrder() {
@@ -351,7 +366,6 @@ func defaultSourceOrder() []sessionmgr.SourceMode {
 		sessionmgr.ModeZoxide,
 		sessionmgr.ModeFD,
 		sessionmgr.ModeAgents,
-		sessionmgr.ModeCurrentAgents,
 	}
 }
 

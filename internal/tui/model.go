@@ -50,6 +50,9 @@ type Model struct {
 	status      string
 	err         error
 
+	agentsCurrentOnly bool
+	currentSession    string
+
 	cache           map[sessionmgr.SourceMode]modeCache
 	refreshGen      map[sessionmgr.SourceMode]uint64
 	inflightRefresh map[sessionmgr.SourceMode]uint64
@@ -65,11 +68,12 @@ type setupPrompt struct {
 }
 
 type refreshMsg struct {
-	source  sessionmgr.SourceMode
-	gen     uint64
-	items   []sessionmgr.Item
-	warning string
-	err     error
+	source         sessionmgr.SourceMode
+	gen            uint64
+	items          []sessionmgr.Item
+	currentSession string
+	warning        string
+	err            error
 }
 
 type previewMsg struct {
@@ -195,12 +199,21 @@ func wrapCursorDown(cursor, count int) int {
 }
 
 func (m Model) visibleItems() []sessionmgr.Item {
-	if m.query == "" {
+	// The current-session scope filter ('o' in the Agents tab) applies
+	// client-side here and composes with the search query. ModeAgents loads
+	// every agent pane; this just hides those outside the current tmux
+	// session.
+	scope := m.source == sessionmgr.ModeAgents && m.agentsCurrentOnly &&
+		m.currentSession != ""
+	if m.query == "" && !scope {
 		return m.items
 	}
 	query := strings.ToLower(m.query)
 	out := make([]sessionmgr.Item, 0, len(m.items))
 	for _, item := range m.items {
+		if scope && item.Session != m.currentSession {
+			continue
+		}
 		if query != "" {
 			haystack := strings.ToLower(
 				strings.Join(

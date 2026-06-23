@@ -148,6 +148,7 @@ func (m Model) handleRefreshMsg(msg refreshMsg) (Model, tea.Cmd) {
 	}
 	m.err = nil
 	m.items = msg.items
+	m.currentSession = msg.currentSession
 	m.clampCursor()
 	if msg.warning != "" {
 		m.status = msg.warning

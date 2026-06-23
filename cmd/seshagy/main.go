@@ -247,8 +247,8 @@ Scripting:
 
 TUI keys:
   enter attach/create/focus   q quit   / filter   r refresh   R rename
-  x kill session/pane         y yazi   m mode     1-6 modes
-  o agents                    p preview   ? help
+  x kill session/pane         y yazi   m mode     1-5 modes
+  o agent scope               p preview   ? help
 
 Config:
   Config lives at $XDG_CONFIG_HOME/seshagy/config.toml, or

@@ -130,10 +130,20 @@ func (m Model) handleActionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "R":
 		return m.startRename()
 	case "o":
-		if m.source == sessionmgr.ModeAgents {
-			return m.switchSource(sessionmgr.ModeCurrentAgents)
+		if m.source != sessionmgr.ModeAgents {
+			return m, nil
 		}
-		return m.switchSource(sessionmgr.ModeAgents)
+		m.agentsCurrentOnly = !m.agentsCurrentOnly
+		switch {
+		case m.agentsCurrentOnly && m.currentSession == "":
+			m.status = "agents: not in a tmux session"
+		case m.agentsCurrentOnly:
+			m.status = "agents: " + m.currentSession
+		default:
+			m.status = "agents: all sessions"
+		}
+		m.clampCursor()
+		return m, m.previewForSelection()
 	case "/":
 		m.inputMode = modeSearch
 		m.searchInput.SetValue(m.query)

@@ -247,6 +247,17 @@ func (m Model) renderListPane(width, height int) string {
 			counts[sessionmgr.KindZoxide]+counts[sessionmgr.KindFD],
 		)
 	}
+	if m.source == sessionmgr.ModeAgents {
+		scope := "all"
+		if m.agentsCurrentOnly {
+			if m.currentSession == "" {
+				scope = "current session"
+			} else {
+				scope = m.currentSession
+			}
+		}
+		title = fmt.Sprintf("Agents (%d · %s)", len(items), scope)
+	}
 	lines := []string{s.title.Render(clampText(title, innerW))}
 	if m.loading {
 		lines = append(lines, s.muted.Render("refreshing…"))

@@ -17,13 +17,23 @@ func refreshCmd(source sessionmgr.SourceMode, gen uint64, opts sessionmgr.LoadOp
 		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 		defer cancel()
 		result, err := sessionmgr.LoadWithOptions(ctx, source, opts)
-		return refreshMsg{
+		msg := refreshMsg{
 			source:  source,
 			gen:     gen,
 			items:   result.Items,
 			warning: result.Warning,
 			err:     err,
 		}
+		// Resolve the current tmux session once per agent refresh so the
+		// current-session scope filter (toggled with 'o') can match without a
+		// per-render tmux call. Runs in this background goroutine; a missing
+		// session (not in tmux) leaves currentSession empty.
+		if source == sessionmgr.ModeAgents {
+			if session, err := sessionmgr.CurrentTmuxSession(ctx); err == nil {
+				msg.currentSession = session
+			}
+		}
+		return msg
 	}
 }
 

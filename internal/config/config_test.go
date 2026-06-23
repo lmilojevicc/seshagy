@@ -40,7 +40,7 @@ func TestLoadDefaultWhenMissing(t *testing.T) {
 	if got := cfg.Sources.Order; strings.Join(
 		got,
 		",",
-	) != "all,sessions,zoxide,fd,agents,current-agents" {
+	) != "all,sessions,zoxide,fd,agents" {
 		t.Fatalf("default source order = %#v", got)
 	}
 	if cfg.Icons.Mode != IconModeIcons {
@@ -121,9 +121,8 @@ func TestSaveAndLoadConfig(t *testing.T) {
 	if loaded.DefaultSource() != sessionmgr.ModeZoxide {
 		t.Fatalf("loaded default source = %v, want zoxide", loaded.DefaultSource())
 	}
-	if order := loaded.SourceOrder(); len(order) != 6 || order[0] != sessionmgr.ModeSessions ||
-		order[3] != sessionmgr.ModeAll || order[4] != sessionmgr.ModeAgents ||
-		order[5] != sessionmgr.ModeCurrentAgents {
+	if order := loaded.SourceOrder(); len(order) != 5 || order[0] != sessionmgr.ModeSessions ||
+		order[3] != sessionmgr.ModeAll || order[4] != sessionmgr.ModeAgents {
 		t.Fatalf("loaded source order = %#v", order)
 	}
 	if loaded.LoadOptions().FDCommand != `printf '%s\n' /tmp/project` {
@@ -166,9 +165,33 @@ func TestNormalizeSourceOrder(t *testing.T) {
 	if cfg.Sources.Default != "zoxide" {
 		t.Fatalf("normalized default source = %q", cfg.Sources.Default)
 	}
-	want := []string{"fd", "sessions", "all", "zoxide", "agents", "current-agents"}
+	want := []string{"fd", "sessions", "all", "zoxide", "agents"}
 	if strings.Join(cfg.Sources.Order, ",") != strings.Join(want, ",") {
 		t.Fatalf("normalized source order = %#v, want %#v", cfg.Sources.Order, want)
+	}
+}
+
+// TestSourceOrderDropsStaleCurrentAgentsTab proves that a config persisted on
+// a prior version (where current-agents was a tab) is migrated clean: the
+// current-agents entry is dropped from both the persisted order and the
+// rendered tab list.
+func TestSourceOrderDropsStaleCurrentAgentsTab(t *testing.T) {
+	cfg := Default()
+	cfg.Sources.Order = []string{"all", "sessions", "current-agents", "agents"}
+	cfg.Normalize()
+
+	// normalizeSourceOrder must have dropped current-agents from the persisted order.
+	for _, name := range cfg.Sources.Order {
+		if name == "current-agents" {
+			t.Fatalf("current-agents still in normalized order: %#v", cfg.Sources.Order)
+		}
+	}
+
+	// SourceOrder must not include ModeCurrentAgents as a tab.
+	for _, mode := range cfg.SourceOrder() {
+		if mode == sessionmgr.ModeCurrentAgents {
+			t.Fatalf("ModeCurrentAgents in SourceOrder: %#v", cfg.SourceOrder())
+		}
 	}
 }
 
