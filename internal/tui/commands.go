@@ -114,6 +114,17 @@ func renameAgentLabelCmd(agentType, session, displayName string) tea.Cmd {
 	}
 }
 
+const tickInterval = 5 * time.Second
+
 func tickCmd() tea.Cmd {
-	return tea.Tick(5*time.Second, func(t time.Time) tea.Msg { return tickMsg(t) })
+	return tea.Tick(tickInterval, func(t time.Time) tea.Msg { return tickMsg(t) })
+}
+
+// tickIntervalFor returns the tick interval for a source. Agents mode uses 1s
+// for near-instant state-detection; all other modes use the default 5s.
+func tickIntervalFor(source sessionmgr.SourceMode) time.Duration {
+	if source == sessionmgr.ModeAgents {
+		return 1 * time.Second
+	}
+	return tickInterval
 }

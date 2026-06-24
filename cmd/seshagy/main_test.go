@@ -67,7 +67,7 @@ func TestRunRoutingErrors(t *testing.T) {
 		{"integration", "frobnicate", "x"},
 		{"--delete-item"},
 		{"--report-agent", "--bogus"},
-		{"--release-agent", "--seq", "-1"},
+		{"--report-agent", "--state", "working"},
 	}
 	for _, args := range cases {
 		if err := run(args); err == nil {

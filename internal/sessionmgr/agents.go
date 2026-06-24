@@ -7,12 +7,14 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // agentPaneFormat is the tmux list-panes format used for agent discovery. Fields
 // are separated by the unit separator (\x1f), mirroring sessionFormat.
 const agentPaneFormat = "#{pane_id}\x1f#{session_name}\x1f#{window_index}\x1f#{pane_index}" +
-	"\x1f#{pane_current_path}\x1f#{pane_current_command}\x1f#{pane_pid}\x1f#{pane_dead}"
+	"\x1f#{pane_current_path}\x1f#{pane_current_command}\x1f#{pane_pid}\x1f#{pane_dead}" +
+	"\x1f#{@agent_state}\x1f#{@agent_updated}\x1f#{@agent_seq}"
 
 // agentProcessNames maps a pane_current_command basename to the canonical agent
 // name. The canonical names (pi, opencode, codex, claude, cursor, antigravity,
@@ -30,6 +32,49 @@ var agentProcessNames = map[string]string{
 	"factory":      "droid",
 	"grok":         "grok",
 	"copilot":      "copilot",
+}
+
+const agentFreshnessWindow = 60 * time.Second
+
+// NormalizeAgentState maps hook-reported state synonyms to the 4-state enum.
+// Unknown/aborted/error states all fall back to idle — the strict rule is:
+// never guess working or blocked from an unrecognised value. An agent that
+// crashed is gone (pane dies); an ESC interrupt returns to idle.
+func NormalizeAgentState(state string) AgentState {
+	s := strings.ToLower(strings.TrimSpace(state))
+	switch s {
+	case "working", "busy", "running", "thinking", "processing":
+		return AgentWorking
+	case "blocked",
+		"permission",
+		"permissions",
+		"question",
+		"confirm",
+		"confirmation",
+		"waiting",
+		"wait":
+		return AgentBlocked
+	case "done", "complete", "completed", "finished":
+		return AgentDone
+	case "idle", "ready":
+		return AgentIdle
+	default:
+		return AgentIdle
+	}
+}
+
+// isStateFresh returns true when the @agent_updated timestamp is within the
+// freshness window. Stale reports (older than 60s) fall back to idle so a
+// crashed agent doesn't show a stale working state.
+func isStateFresh(updated, seqStr string) bool {
+	if updated == "" || seqStr == "" {
+		return false
+	}
+	t, err := time.Parse(time.RFC3339Nano, updated)
+	if err != nil {
+		return false
+	}
+	return time.Since(t) < agentFreshnessWindow
 }
 
 // detectAgentName maps a process name to the canonical agent name, returning
@@ -94,11 +139,24 @@ func ParseAgents(raw []byte, sessionFilter string) []Item {
 		if agentName == "" {
 			continue
 		}
+
+		// Resolve state from @agent_* metadata. Falls back to idle when
+		// hooks are absent or the report is stale.
+		agentState := AgentIdle
+		if len(parts) > 10 {
+			rawState := parts[8] // @agent_state
+			updated := parts[9]  // @agent_updated
+			seqStr := parts[10]  // @agent_seq
+			if rawState != "" && isStateFresh(updated, seqStr) {
+				agentState = NormalizeAgentState(rawState)
+			}
+		}
+
 		items = append(items, Item{
 			Kind:       KindAgent,
 			Name:       agentName,
 			AgentName:  agentName,
-			AgentState: AgentIdle, // Phase 1: always idle
+			AgentState: agentState,
 			PaneID:     parts[0],
 			Session:    parts[1],
 			Window:     parts[2],

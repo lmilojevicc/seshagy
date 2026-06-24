@@ -48,6 +48,9 @@ type Item struct {
 	AgentName        string
 	AgentDisplayName string
 	AgentState       AgentState
+	AgentUpdated     time.Time
+	AgentSeq         int64
+	AgentSource      string
 }
 
 func (i Item) Key() string {

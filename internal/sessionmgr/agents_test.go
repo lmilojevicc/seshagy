@@ -6,10 +6,14 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+	"time"
 )
 
 func agentPaneLine(pane, session, win, paneIdx, path, cmd, pid, dead string) string {
-	return strings.Join([]string{pane, session, win, paneIdx, path, cmd, pid, dead}, "\x1f")
+	return strings.Join(
+		[]string{pane, session, win, paneIdx, path, cmd, pid, dead, "", "", ""},
+		"\x1f",
+	)
 }
 
 func TestDetectAgentNameMatchesKnownAgents(t *testing.T) {
@@ -161,5 +165,85 @@ func TestListAgentsPropagatesError(t *testing.T) {
 		t.Fatal("ListAgents() expected error")
 	} else if !strings.Contains(err.Error(), "tmux list-panes") {
 		t.Fatalf("ListAgents() error = %v", err)
+	}
+}
+
+func agentPaneLineWithState(
+	pane, session, win, paneIdx, path, cmd, pid, dead, state, updated, seq string,
+) string {
+	return strings.Join(
+		[]string{pane, session, win, paneIdx, path, cmd, pid, dead, state, updated, seq},
+		"\x1f",
+	)
+}
+
+func TestParseAgentsReadsHookState(t *testing.T) {
+	now := time.Now().Format(time.RFC3339Nano)
+	raw := agentPaneLineWithState(
+		"%1",
+		"work",
+		"0",
+		"0",
+		"/home/work",
+		"pi",
+		"111",
+		"0",
+		"working",
+		now,
+		"123",
+	)
+	items := ParseAgents([]byte(raw), "")
+	if len(items) != 1 {
+		t.Fatalf("ParseAgents() = %d items, want 1", len(items))
+	}
+	if items[0].AgentState != AgentWorking {
+		t.Errorf("AgentState = %q, want working", items[0].AgentState)
+	}
+}
+
+func TestParseAgentsFallsBackToIdleWhenNoHook(t *testing.T) {
+	raw := agentPaneLineWithState(
+		"%1",
+		"work",
+		"0",
+		"0",
+		"/home/work",
+		"pi",
+		"111",
+		"0",
+		"",
+		"",
+		"",
+	)
+	items := ParseAgents([]byte(raw), "")
+	if len(items) != 1 {
+		t.Fatalf("ParseAgents() = %d items, want 1", len(items))
+	}
+	if items[0].AgentState != AgentIdle {
+		t.Errorf("AgentState = %q, want idle", items[0].AgentState)
+	}
+}
+
+func TestParseAgentsStaleStateFallsBackToIdle(t *testing.T) {
+	old := time.Now().Add(-2 * time.Minute).Format(time.RFC3339Nano)
+	raw := agentPaneLineWithState(
+		"%1",
+		"work",
+		"0",
+		"0",
+		"/home/work",
+		"pi",
+		"111",
+		"0",
+		"working",
+		old,
+		"123",
+	)
+	items := ParseAgents([]byte(raw), "")
+	if len(items) != 1 {
+		t.Fatalf("ParseAgents() = %d items, want 1", len(items))
+	}
+	if items[0].AgentState != AgentIdle {
+		t.Errorf("AgentState = %q, want idle (stale report)", items[0].AgentState)
 	}
 }

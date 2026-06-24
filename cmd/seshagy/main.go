@@ -3,11 +3,13 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"os"
 	"time"
 
 	appconfig "github.com/lmilojevicc/seshagy/internal/config"
+	"github.com/lmilojevicc/seshagy/internal/integrations"
 	"github.com/lmilojevicc/seshagy/internal/sessionmgr"
 	"github.com/lmilojevicc/seshagy/internal/tui"
 )
@@ -68,6 +70,12 @@ func run(args []string) error {
 		)
 	case "--get-all":
 		return runGetItems(ctx, args[1:], sessionmgr.ModeAll, "--get-all")
+	case "--report-agent":
+		return runReportAgent(ctx, args[1:])
+	case "--release-agent":
+		return runReleaseAgent(ctx, args[1:])
+	case "integration":
+		return runIntegration(ctx, args[1:])
 	case "--delete-item":
 		line, jsonOutput := parseDeleteItemArgs(args[1:])
 		if line == "" {
@@ -101,6 +109,104 @@ func runGetItems(
 		return errors.New(modeUsage(flag))
 	}
 	return printItems(ctx, mode, jsonOutput)
+}
+
+func runReportAgent(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("--report-agent", flag.ContinueOnError)
+	pane := fs.String("pane", "", "target pane id (e.g. %5)")
+	agent := fs.String("agent", "", "agent name")
+	state := fs.String("state", "", "agent state")
+	source := fs.String("source", "", "report source")
+	seq := fs.Int64("seq", 0, "monotonic sequence number")
+	message := fs.String("message", "", "optional status message")
+	sessionID := fs.String("session-id", "", "optional agent session id")
+	jsonOutput := fs.Bool("json", false, "JSON output")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *pane == "" || *state == "" || *source == "" {
+		return errors.New("--report-agent requires --pane, --state, --source")
+	}
+	resolved, err := sessionmgr.ResolvePane(ctx, *pane)
+	if err != nil {
+		return err
+	}
+	applied, err := sessionmgr.ReportAgent(ctx, sessionmgr.AgentReport{
+		Pane:      resolved,
+		Name:      *agent,
+		State:     sessionmgr.NormalizeAgentState(*state),
+		Source:    *source,
+		Seq:       *seq,
+		Message:   *message,
+		SessionID: *sessionID,
+	})
+	if err != nil {
+		return err
+	}
+	if *jsonOutput {
+		return encodeSuccess(map[string]any{"applied": applied})
+	}
+	if applied {
+		fmt.Printf("reported %s %s on %s\n", *agent, *state, resolved)
+	} else {
+		fmt.Printf("stale report ignored (seq %d)\n", *seq)
+	}
+	return nil
+}
+
+func runReleaseAgent(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("--release-agent", flag.ContinueOnError)
+	pane := fs.String("pane", "", "target pane id (e.g. %5)")
+	source := fs.String("source", "", "report source")
+	seq := fs.Int64("seq", 0, "monotonic sequence number")
+	jsonOutput := fs.Bool("json", false, "JSON output")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *pane == "" || *source == "" {
+		return errors.New("--release-agent requires --pane, --source")
+	}
+	resolved, err := sessionmgr.ResolvePane(ctx, *pane)
+	if err != nil {
+		return err
+	}
+	applied, err := sessionmgr.ReleaseAgent(ctx, sessionmgr.AgentRelease{
+		Pane:   resolved,
+		Source: *source,
+		Seq:    *seq,
+	})
+	if err != nil {
+		return err
+	}
+	if *jsonOutput {
+		return encodeSuccess(map[string]any{"applied": applied})
+	}
+	if applied {
+		fmt.Printf("released agent state on %s\n", resolved)
+	} else {
+		fmt.Printf("stale release ignored (seq %d)\n", *seq)
+	}
+	return nil
+}
+
+func runIntegration(_ context.Context, args []string) error {
+	if len(args) == 0 {
+		return errors.New(joinUsage("integration", "install <name>"))
+	}
+	switch args[0] {
+	case "install":
+		if len(args) < 2 {
+			return errors.New(joinUsage("integration", "install", "<name>"))
+		}
+		path, err := integrations.Install(args[1])
+		if err != nil {
+			return err
+		}
+		fmt.Printf("installed %s integration to %s\n", args[1], path)
+		return nil
+	default:
+		return fmt.Errorf("unknown integration command: %q", args[0])
+	}
 }
 
 func runConfig(args []string) error {
@@ -244,6 +350,12 @@ Scripting:
   Append --json to any command above for machine-readable JSON on stdout.
   Responses include schema_version and ok; errors also print JSON on stdout.
   Human text output is unchanged when --json is omitted.
+  seshagy --report-agent --pane %N --state <state> --source <src> --seq <n>
+                                  report agent state to a tmux pane
+  seshagy --release-agent --pane %N --source <src> --seq <n>
+                                  clear agent state from a tmux pane
+  seshagy integration install <name>
+                                  install an agent hook/extension
 
 TUI keys:
   enter attach/create/focus   q quit   / filter   r refresh   R rename

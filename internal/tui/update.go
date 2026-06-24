@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -15,15 +16,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.renameInput.Width = max(20, msg.Width/3)
 		return m, m.previewForSelection()
 	case tickMsg:
+		interval := tickIntervalFor(m.source)
 		if m.setup.active {
-			return m, tickCmd()
+			return m, tea.Tick(interval, func(t time.Time) tea.Msg { return tickMsg(t) })
 		}
 		if m.cacheFresh(m.source) {
-			return m, tickCmd()
+			return m, tea.Tick(interval, func(t time.Time) tea.Msg { return tickMsg(t) })
 		}
 		var cmd tea.Cmd
 		m, cmd = m.beginRefresh(m.source, false)
-		return m, tea.Batch(cmd, tickCmd())
+		return m, tea.Batch(
+			cmd,
+			tea.Tick(interval, func(t time.Time) tea.Msg { return tickMsg(t) }),
+		)
 	case setupMsg:
 		if msg.err != nil {
 			m.err = msg.err

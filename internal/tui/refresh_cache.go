@@ -20,6 +20,8 @@ func cacheTTL(mode sessionmgr.SourceMode) time.Duration {
 	switch mode {
 	case sessionmgr.ModeAll:
 		return 2 * time.Second
+	case sessionmgr.ModeAgents:
+		return 2 * time.Second // fast poll for state changes
 	default:
 		return 15 * time.Second
 	}
