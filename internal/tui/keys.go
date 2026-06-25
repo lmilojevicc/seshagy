@@ -375,6 +375,12 @@ func (m Model) activateSelected() (tea.Model, tea.Cmd) {
 			m.status = "cannot focus agent (missing pane info)"
 			return m, nil
 		}
+		// Flip done→idle before focusing: the user is visiting the pane. Run
+		// synchronously because focusAgentCmd suspends the TUI (tea.ExecProcess),
+		// so the flip must persist first. Errors are non-fatal.
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_, _ = sessionmgr.MarkAgentVisited(ctx, item.PaneID)
 		m.status = fmt.Sprintf(
 			"focusing %s on %s:%s.%s",
 			item.DisplayName(),

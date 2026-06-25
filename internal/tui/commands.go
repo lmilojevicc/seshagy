@@ -17,6 +17,12 @@ func refreshCmd(source sessionmgr.SourceMode, gen uint64, opts sessionmgr.LoadOp
 		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 		defer cancel()
 		result, err := sessionmgr.LoadWithOptions(ctx, source, opts)
+		// Backstop: flip done→idle for agent panes the user has navigated to
+		// directly in tmux (bypassing seshagy's Enter-focus path). Runs only in
+		// agents mode and only issues a tmux call when a done agent exists.
+		if source == sessionmgr.ModeAgents && err == nil {
+			sessionmgr.MarkActiveDoneAgentsIdle(ctx, result.Items)
+		}
 		msg := refreshMsg{
 			source:  source,
 			gen:     gen,

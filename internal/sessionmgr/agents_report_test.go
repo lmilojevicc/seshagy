@@ -242,3 +242,137 @@ func TestReleaseAgentTombstoneBlocksStaleResurrection(t *testing.T) {
 		t.Errorf("@seshagy_agent_state = %q after stale report, want empty (no resurrection)", got)
 	}
 }
+
+func TestMarkAgentVisitedFlipsDoneToIdle(t *testing.T) {
+	ft := NewFakeTmux()
+	ft.Set("%5", "@seshagy_agent_state", "done")
+	ft.Set("%5", "@seshagy_agent_seq", "5")
+	SetTmuxHooksForTest(t, ft.output, ft.run)
+	ctx := context.Background()
+
+	flipped, err := MarkAgentVisited(ctx, "%5")
+	if err != nil {
+		t.Fatalf("MarkAgentVisited() error = %v", err)
+	}
+	if !flipped {
+		t.Fatal("MarkAgentVisited() flipped = false, want true for done pane")
+	}
+	if got := ft.Get("%5", "@seshagy_agent_state"); got != "idle" {
+		t.Errorf("@seshagy_agent_state = %q, want idle", got)
+	}
+	if got := ft.Get("%5", "@seshagy_agent_updated"); got == "" {
+		t.Error("@seshagy_agent_updated is empty, want a timestamp")
+	}
+	if got := ft.Get("%5", "@seshagy_agent_last_seen"); got == "" {
+		t.Error("@seshagy_agent_last_seen is empty, want a timestamp")
+	}
+	// Seq must be unchanged — the visit flip does not advance the epoch.
+	if got := ft.Get("%5", "@seshagy_agent_seq"); got != "5" {
+		t.Errorf("@seshagy_agent_seq = %q, want 5 (unchanged)", got)
+	}
+}
+
+func TestMarkAgentVisitedSeqSafeNoClobber(t *testing.T) {
+	base := NewFakeTmux()
+	base.Set("%5", "@seshagy_agent_state", "done")
+	base.Set("%5", "@seshagy_agent_seq", "5")
+	s := NewStrictFakeTmux(t, base).AllowPaneOptions()
+	// Simulate a higher-seq ReportAgent landing between the two seq reads:
+	// the first read returns "5", the defensive re-read returns "9".
+	var seqReads int
+	s.HandleOutput(func(args []string) bool {
+		return len(args) >= 4 && args[0] == "show-option" && args[3] == "@seshagy_agent_seq"
+	}, func(_ context.Context, _ ...string) ([]byte, error) {
+		seqReads++
+		if seqReads >= 2 {
+			return []byte("9"), nil
+		}
+		return []byte("5"), nil
+	})
+	s.Install(t)
+	ctx := context.Background()
+
+	flipped, err := MarkAgentVisited(ctx, "%5")
+	if err != nil {
+		t.Fatalf("MarkAgentVisited() error = %v", err)
+	}
+	if flipped {
+		t.Fatal("MarkAgentVisited() flipped = true, want false (seq changed mid-write)")
+	}
+	if got := base.Get("%5", "@seshagy_agent_state"); got != "done" {
+		t.Errorf("@seshagy_agent_state = %q, want done (not clobbered)", got)
+	}
+}
+
+func TestMarkAgentVisitedSkipsNonDone(t *testing.T) {
+	ctx := context.Background()
+	for _, state := range []string{"working", "blocked", "idle", ""} {
+		t.Run(state, func(t *testing.T) {
+			ft := NewFakeTmux()
+			ft.Set("%5", "@seshagy_agent_state", state)
+			ft.Set("%5", "@seshagy_agent_seq", "5")
+			SetTmuxHooksForTest(t, ft.output, ft.run)
+
+			flipped, err := MarkAgentVisited(ctx, "%5")
+			if err != nil {
+				t.Fatalf("MarkAgentVisited() error = %v", err)
+			}
+			if flipped {
+				t.Fatalf("MarkAgentVisited(state=%q) flipped = true, want false", state)
+			}
+			want := state
+			if got := ft.Get("%5", "@seshagy_agent_state"); got != want {
+				t.Errorf("@seshagy_agent_state = %q, want %q (untouched)", got, want)
+			}
+		})
+	}
+}
+
+func TestMarkActiveDoneAgentsIdleFlipsActiveDonePane(t *testing.T) {
+	base := NewFakeTmux()
+	base.Set("%1", "@seshagy_agent_state", "done")
+	base.Set("%1", "@seshagy_agent_seq", "1")
+	base.Set("%2", "@seshagy_agent_state", "done")
+	base.Set("%2", "@seshagy_agent_seq", "2")
+	s := NewStrictFakeTmux(t, base).AllowPaneOptions()
+	s.HandleOutput(func(args []string) bool {
+		// list-panes -a -f #{pane_active} -F #{pane_id} → only %1 is active.
+		return len(args) >= 1 && args[0] == "list-panes"
+	}, func(_ context.Context, _ ...string) ([]byte, error) {
+		return []byte("%1"), nil
+	})
+	s.Install(t)
+	ctx := context.Background()
+
+	items := []Item{
+		{Kind: KindAgent, AgentState: AgentDone, PaneID: "%1"},
+		{Kind: KindAgent, AgentState: AgentDone, PaneID: "%2"},
+		{Kind: KindAgent, AgentState: AgentWorking, PaneID: "%3"},
+	}
+	MarkActiveDoneAgentsIdle(ctx, items)
+
+	if got := base.Get("%1", "@seshagy_agent_state"); got != "idle" {
+		t.Errorf("active done pane %%1 state = %q, want idle", got)
+	}
+	if got := base.Get("%2", "@seshagy_agent_state"); got != "done" {
+		t.Errorf("inactive done pane %%2 state = %q, want done (untouched)", got)
+	}
+}
+
+func TestMarkActiveDoneAgentsIdleNoopWithoutDone(t *testing.T) {
+	called := false
+	SetTmuxHooksForTest(t, func(_ context.Context, args ...string) ([]byte, error) {
+		if len(args) >= 1 && args[0] == "list-panes" {
+			called = true
+		}
+		return nil, nil
+	}, nil)
+	ctx := context.Background()
+
+	MarkActiveDoneAgentsIdle(ctx, []Item{
+		{Kind: KindAgent, AgentState: AgentWorking, PaneID: "%1"},
+	})
+	if called {
+		t.Fatal("list-panes called when no done agents exist; want no tmux call")
+	}
+}

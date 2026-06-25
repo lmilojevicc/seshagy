@@ -248,6 +248,38 @@ func TestAttachOrSwitchCommandUsesTmuxContext(t *testing.T) {
 	}
 }
 
+func TestFocusAgentCommandSwitchesClientInTmux(t *testing.T) {
+	t.Setenv("TMUX", "/tmp/tmux-123/default,1,0")
+	cmd := FocusAgentCommand("work", "1", "%5")
+	if len(cmd.Args) < 3 || cmd.Args[0] != "sh" || cmd.Args[1] != "-c" {
+		t.Fatalf("command = %#v, want sh -c", cmd.Args)
+	}
+	script := cmd.Args[2]
+	for _, want := range []string{
+		"select-window -t 'work:1'",
+		"select-pane -t '%5'",
+		"switch-client -t 'work'",
+	} {
+		if !strings.Contains(script, want) {
+			t.Errorf("script missing %q\nscript: %s", want, script)
+		}
+	}
+}
+
+func TestFocusAgentCommandNoSwitchClientOutsideTmux(t *testing.T) {
+	t.Setenv("TMUX", "")
+	cmd := FocusAgentCommand("work", "1", "%5")
+	script := cmd.Args[2]
+	if strings.Contains(script, "switch-client") {
+		t.Errorf("script should not switch-client outside tmux\nscript: %s", script)
+	}
+	for _, want := range []string{"select-window", "select-pane"} {
+		if !strings.Contains(script, want) {
+			t.Errorf("script missing %q\nscript: %s", want, script)
+		}
+	}
+}
+
 func TestParseSessionsSkipsMalformedLines(t *testing.T) {
 	raw := []byte("only-three\x1fparts\x1fhere\n" + sessionListLine("ok", "/tmp/demo"))
 	items := ParseSessions(raw)

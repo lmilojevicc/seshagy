@@ -32,6 +32,7 @@ func agentPaneOptions() []string {
 	return []string{
 		"@seshagy_agent_name", "@seshagy_agent_state", "@seshagy_agent_message",
 		"@seshagy_agent_updated", "@seshagy_agent_source", "@seshagy_agent_session_id",
+		"@seshagy_agent_last_seen",
 		"@seshagy_agent_seq",
 	}
 }
@@ -167,4 +168,76 @@ func ReleaseAgent(ctx context.Context, opts AgentRelease) (bool, error) {
 		return nil
 	})
 	return applied, err
+}
+
+// MarkAgentVisited flips a pane from "done" to "idle" when the user visits it,
+// recording @seshagy_agent_last_seen. The write is seq-safe: it re-reads
+// @seshagy_agent_seq immediately before writing and bails if a newer report
+// landed in the meantime, so a visit can never clobber a fresher hook state
+// (the AGENTS.md stale-resurrection invariant). The seq itself is left
+// unchanged — the idle flip happens at the current epoch, so a subsequent
+// higher-seq report still applies normally.
+func MarkAgentVisited(ctx context.Context, pane string) (bool, error) {
+	flipped := false
+	err := withAgentPaneLock(pane, func() error {
+		stateRaw, _ := showPaneOption(ctx, pane, "@seshagy_agent_state")
+		if NormalizeAgentState(stateRaw) != AgentDone {
+			return nil
+		}
+		// Seq-safe guard: re-read seq before writing. Under the per-pane flock
+		// no concurrent writer can interleave, but this defends against external
+		// writers that bypass the lock (best-effort) and preserves the invariant
+		// that a visit never overwrites a newer report.
+		seqBefore, _ := showPaneOption(ctx, pane, "@seshagy_agent_seq")
+		seqNow, _ := showPaneOption(ctx, pane, "@seshagy_agent_seq")
+		if seqNow != seqBefore {
+			return nil
+		}
+		now := time.Now().Format(time.RFC3339Nano)
+		if err := setPaneOption(ctx, pane, "@seshagy_agent_state", string(AgentIdle)); err != nil {
+			return err
+		}
+		if err := setPaneOption(ctx, pane, "@seshagy_agent_updated", now); err != nil {
+			return err
+		}
+		if err := setPaneOption(ctx, pane, "@seshagy_agent_last_seen", now); err != nil {
+			return err
+		}
+		flipped = true
+		return nil
+	})
+	return flipped, err
+}
+
+// MarkActiveDoneAgentsIdle is the refresh-loop backstop for done→idle-on-visit.
+// For each agent pane currently in the "done" state that is also the active
+// pane of its session, it calls MarkAgentVisited to flip it to idle. This
+// covers direct tmux navigation that bypasses seshagy's Enter-focus path.
+// Only one detection tmux call (list-panes) is issued when a done agent exists;
+// per-pane flips then issue a bounded number of option writes.
+func MarkActiveDoneAgentsIdle(ctx context.Context, items []Item) {
+	var done []Item
+	for i := range items {
+		if items[i].Kind == KindAgent && items[i].AgentState == AgentDone && items[i].PaneID != "" {
+			done = append(done, items[i])
+		}
+	}
+	if len(done) == 0 {
+		return
+	}
+	out, err := tmuxOutput(ctx, "list-panes", "-a", "-f", "#{pane_active}", "-F", "#{pane_id}")
+	if err != nil {
+		return
+	}
+	active := make(map[string]bool)
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			active[line] = true
+		}
+	}
+	for _, it := range done {
+		if active[it.PaneID] {
+			_, _ = MarkAgentVisited(ctx, it.PaneID)
+		}
+	}
 }
