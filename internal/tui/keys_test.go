@@ -125,6 +125,53 @@ func TestHandleActionKeyPgUpDownHomeEnd(t *testing.T) {
 	}
 }
 
+func TestActivateSelectedAgentFocusesPane(t *testing.T) {
+	m := newTestModel(t)
+	m.source = sessionmgr.ModeAgents
+	m.items = []sessionmgr.Item{{
+		Kind:      sessionmgr.KindAgent,
+		Name:      "pi",
+		AgentName: "pi",
+		Session:   "seshagy",
+		Window:    "1",
+		Pane:      "2",
+		PaneID:    "%5",
+		Location:  "seshagy:1.2",
+	}}
+	m.cursor = 0
+
+	model, cmd := m.activateSelected()
+	got := model.(Model)
+	if cmd == nil {
+		t.Fatal("activateSelected on agent returned nil cmd")
+	}
+	if !strings.Contains(got.status, "focusing pi on seshagy:1.2") {
+		t.Fatalf("status = %q, want 'focusing pi on seshagy:1.2'", got.status)
+	}
+}
+
+func TestActivateSelectedAgentMissingPaneInfoNoOps(t *testing.T) {
+	m := newTestModel(t)
+	m.source = sessionmgr.ModeAgents
+	m.items = []sessionmgr.Item{{
+		Kind:    sessionmgr.KindAgent,
+		Name:    "pi",
+		PaneID:  "%5",
+		Session: "seshagy",
+		// Window + PaneID pane empty: Window missing
+	}}
+	m.cursor = 0
+
+	model, cmd := m.activateSelected()
+	got := model.(Model)
+	if cmd != nil {
+		t.Fatal("activateSelected on malformed agent should return nil cmd")
+	}
+	if !strings.Contains(got.status, "cannot focus") {
+		t.Fatalf("status = %q, want 'cannot focus'", got.status)
+	}
+}
+
 func TestHandleActionKeyDeleteAndRename(t *testing.T) {
 	m := newTestModel(t)
 	m.items = []sessionmgr.Item{

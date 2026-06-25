@@ -370,6 +370,19 @@ func (m Model) activateSelected() (tea.Model, tea.Cmd) {
 	case sessionmgr.KindSession:
 		m.status = "attaching " + item.Name
 		return m, attachCmd(item.Name)
+	case sessionmgr.KindAgent:
+		if item.Session == "" || item.Window == "" || item.PaneID == "" {
+			m.status = "cannot focus agent (missing pane info)"
+			return m, nil
+		}
+		m.status = fmt.Sprintf(
+			"focusing %s on %s:%s.%s",
+			item.DisplayName(),
+			item.Session,
+			item.Window,
+			item.Pane,
+		)
+		return m, focusAgentCmd(item.Session, item.Window, item.PaneID)
 	case sessionmgr.KindZoxide, sessionmgr.KindFD:
 		m.status = "creating session from " + item.Path
 		return m, createSessionCmd(item.Path)

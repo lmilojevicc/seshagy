@@ -76,6 +76,16 @@ func attachCmd(name string) tea.Cmd {
 	return tea.ExecProcess(sessionmgr.AttachOrSwitchCommand(name), attachExecCallback)
 }
 
+// focusAgentCmd focuses an agent pane in the user's already-attached session.
+// It runs switch-window + select-pane via tea.ExecProcess, mirroring attachCmd
+// (the TUI exits so the user lands on the focused pane).
+func focusAgentCmd(session, window, paneID string) tea.Cmd {
+	return tea.ExecProcess(
+		sessionmgr.FocusAgentCommand(session, window, paneID),
+		attachExecCallback,
+	)
+}
+
 func createSessionCmd(dir string) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
