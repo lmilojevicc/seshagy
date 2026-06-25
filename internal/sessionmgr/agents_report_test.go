@@ -54,20 +54,20 @@ func TestReportAgentWritesOptionsAndSeq(t *testing.T) {
 	if !applied {
 		t.Fatal("ReportAgent() applied = false, want true")
 	}
-	if got := ft.Get("%5", "@agent_state"); got != "working" {
-		t.Errorf("@agent_state = %q, want working", got)
+	if got := ft.Get("%5", "@seshagy_agent_state"); got != "working" {
+		t.Errorf("@seshagy_agent_state = %q, want working", got)
 	}
-	if got := ft.Get("%5", "@agent_seq"); got != "5" {
-		t.Errorf("@agent_seq = %q, want 5", got)
+	if got := ft.Get("%5", "@seshagy_agent_seq"); got != "5" {
+		t.Errorf("@seshagy_agent_seq = %q, want 5", got)
 	}
-	if got := ft.Get("%5", "@agent_updated"); got == "" {
-		t.Error("@agent_updated is empty, want a timestamp")
+	if got := ft.Get("%5", "@seshagy_agent_updated"); got == "" {
+		t.Error("@seshagy_agent_updated is empty, want a timestamp")
 	}
 }
 
 func TestReportAgentStaleSeqIgnored(t *testing.T) {
 	ft := NewFakeTmux()
-	ft.Set("%5", "@agent_seq", "5")
+	ft.Set("%5", "@seshagy_agent_seq", "5")
 	SetTmuxHooksForTest(t, ft.output, ft.run)
 	ctx := context.Background()
 
@@ -83,14 +83,14 @@ func TestReportAgentStaleSeqIgnored(t *testing.T) {
 	if applied {
 		t.Fatal("ReportAgent(seq=3, existing=5) applied = true, want false")
 	}
-	if got := ft.Get("%5", "@agent_state"); got != "" {
-		t.Errorf("@agent_state = %q, want empty (stale ignored)", got)
+	if got := ft.Get("%5", "@seshagy_agent_state"); got != "" {
+		t.Errorf("@seshagy_agent_state = %q, want empty (stale ignored)", got)
 	}
 }
 
 func TestReportAgentEqualSeqIgnored(t *testing.T) {
 	ft := NewFakeTmux()
-	ft.Set("%5", "@agent_seq", "5")
+	ft.Set("%5", "@seshagy_agent_seq", "5")
 	SetTmuxHooksForTest(t, ft.output, ft.run)
 	ctx := context.Background()
 
@@ -110,8 +110,8 @@ func TestReportAgentEqualSeqIgnored(t *testing.T) {
 
 func TestReportAgentHigherSeqOverwrites(t *testing.T) {
 	ft := NewFakeTmux()
-	ft.Set("%5", "@agent_seq", "3")
-	ft.Set("%5", "@agent_state", "idle")
+	ft.Set("%5", "@seshagy_agent_seq", "3")
+	ft.Set("%5", "@seshagy_agent_state", "idle")
 	SetTmuxHooksForTest(t, ft.output, ft.run)
 	ctx := context.Background()
 
@@ -127,20 +127,20 @@ func TestReportAgentHigherSeqOverwrites(t *testing.T) {
 	if !applied {
 		t.Fatal("ReportAgent(seq=5, existing=3) applied = false, want true")
 	}
-	if got := ft.Get("%5", "@agent_state"); got != "working" {
-		t.Errorf("@agent_state = %q, want working", got)
+	if got := ft.Get("%5", "@seshagy_agent_state"); got != "working" {
+		t.Errorf("@seshagy_agent_state = %q, want working", got)
 	}
-	if got := ft.Get("%5", "@agent_seq"); got != "5" {
-		t.Errorf("@agent_seq = %q, want 5", got)
+	if got := ft.Get("%5", "@seshagy_agent_seq"); got != "5" {
+		t.Errorf("@seshagy_agent_seq = %q, want 5", got)
 	}
 }
 
 func TestReleaseAgentClearsAllStateOptions(t *testing.T) {
 	ft := NewFakeTmux()
-	ft.Set("%5", "@agent_seq", "5")
-	ft.Set("%5", "@agent_state", "working")
-	ft.Set("%5", "@agent_name", "pi")
-	ft.Set("%5", "@agent_source", "seshagy:pi")
+	ft.Set("%5", "@seshagy_agent_seq", "5")
+	ft.Set("%5", "@seshagy_agent_state", "working")
+	ft.Set("%5", "@seshagy_agent_name", "pi")
+	ft.Set("%5", "@seshagy_agent_source", "seshagy:pi")
 	SetTmuxHooksForTest(t, ft.output, ft.run)
 	ctx := context.Background()
 
@@ -156,21 +156,21 @@ func TestReleaseAgentClearsAllStateOptions(t *testing.T) {
 		t.Fatal("ReleaseAgent() applied = false, want true")
 	}
 	// State-bearing options must be cleared.
-	for _, opt := range []string{"@agent_state", "@agent_name", "@agent_message", "@agent_updated", "@agent_source", "@agent_session_id"} {
+	for _, opt := range []string{"@seshagy_agent_state", "@seshagy_agent_name", "@seshagy_agent_message", "@seshagy_agent_updated", "@seshagy_agent_source", "@seshagy_agent_session_id"} {
 		if got := ft.Get("%5", opt); got != "" {
 			t.Errorf("%s = %q after release, want empty", opt, got)
 		}
 	}
-	// @agent_seq is retained as the tombstone high-water mark.
-	if got := ft.Get("%5", "@agent_seq"); got != "5" {
-		t.Errorf("@agent_seq = %q after release, want 5 (tombstone high-water)", got)
+	// @seshagy_agent_seq is retained as the tombstone high-water mark.
+	if got := ft.Get("%5", "@seshagy_agent_seq"); got != "5" {
+		t.Errorf("@seshagy_agent_seq = %q after release, want 5 (tombstone high-water)", got)
 	}
 }
 
 func TestReleaseAgentStaleSeqIgnored(t *testing.T) {
 	ft := NewFakeTmux()
-	ft.Set("%5", "@agent_seq", "5")
-	ft.Set("%5", "@agent_state", "working")
+	ft.Set("%5", "@seshagy_agent_seq", "5")
+	ft.Set("%5", "@seshagy_agent_state", "working")
 	SetTmuxHooksForTest(t, ft.output, ft.run)
 	ctx := context.Background()
 
@@ -185,8 +185,8 @@ func TestReleaseAgentStaleSeqIgnored(t *testing.T) {
 	if applied {
 		t.Fatal("ReleaseAgent(seq=3, existing=5) applied = true, want false")
 	}
-	if got := ft.Get("%5", "@agent_state"); got != "working" {
-		t.Errorf("@agent_state = %q, want working (stale release ignored)", got)
+	if got := ft.Get("%5", "@seshagy_agent_state"); got != "working" {
+		t.Errorf("@seshagy_agent_state = %q, want working (stale release ignored)", got)
 	}
 }
 
@@ -216,11 +216,11 @@ func TestReleaseAgentTombstoneBlocksStaleResurrection(t *testing.T) {
 	if err != nil || !applied {
 		t.Fatalf("ReleaseAgent(seq=10) failed: applied=%v err=%v", applied, err)
 	}
-	if got := ft.Get("%5", "@agent_state"); got != "" {
-		t.Errorf("@agent_state = %q after release, want empty", got)
+	if got := ft.Get("%5", "@seshagy_agent_state"); got != "" {
+		t.Errorf("@seshagy_agent_state = %q after release, want empty", got)
 	}
-	if got := ft.Get("%5", "@agent_seq"); got != "10" {
-		t.Errorf("@agent_seq = %q after release, want 10 (tombstone)", got)
+	if got := ft.Get("%5", "@seshagy_agent_seq"); got != "10" {
+		t.Errorf("@seshagy_agent_seq = %q after release, want 10 (tombstone)", got)
 	}
 
 	// Late stale report at seq=7 (< 10 tombstone) — must NOT resurrect.
@@ -238,7 +238,7 @@ func TestReleaseAgentTombstoneBlocksStaleResurrection(t *testing.T) {
 			"ReportAgent(seq=7, tombstone=10) applied = true, want false (stale resurrection blocked)",
 		)
 	}
-	if got := ft.Get("%5", "@agent_state"); got != "" {
-		t.Errorf("@agent_state = %q after stale report, want empty (no resurrection)", got)
+	if got := ft.Get("%5", "@seshagy_agent_state"); got != "" {
+		t.Errorf("@seshagy_agent_state = %q after stale report, want empty (no resurrection)", got)
 	}
 }

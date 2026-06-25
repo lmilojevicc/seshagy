@@ -14,7 +14,7 @@ import (
 // are separated by the unit separator (\x1f), mirroring sessionFormat.
 const agentPaneFormat = "#{pane_id}\x1f#{session_name}\x1f#{window_index}\x1f#{pane_index}" +
 	"\x1f#{pane_current_path}\x1f#{pane_current_command}\x1f#{pane_pid}\x1f#{pane_dead}" +
-	"\x1f#{@agent_state}\x1f#{@agent_updated}\x1f#{@agent_seq}"
+	"\x1f#{@seshagy_agent_state}\x1f#{@seshagy_agent_updated}\x1f#{@seshagy_agent_seq}"
 
 // agentProcessNames maps a pane_current_command basename to the canonical agent
 // name. The canonical names (pi, opencode, codex, claude, cursor, antigravity,
@@ -63,7 +63,7 @@ func NormalizeAgentState(state string) AgentState {
 	}
 }
 
-// isStateFresh returns true when the @agent_updated timestamp is within the
+// isStateFresh returns true when the @seshagy_agent_updated timestamp is within the
 // freshness window. Stale reports (older than 60s) fall back to idle so a
 // crashed agent doesn't show a stale working state.
 func isStateFresh(updated, seqStr string) bool {
@@ -140,13 +140,13 @@ func ParseAgents(raw []byte, sessionFilter string) []Item {
 			continue
 		}
 
-		// Resolve state from @agent_* metadata. Falls back to idle when
+		// Resolve state from @seshagy_agent_* metadata. Falls back to idle when
 		// hooks are absent or the report is stale.
 		agentState := AgentIdle
 		if len(parts) > 10 {
-			rawState := parts[8] // @agent_state
-			updated := parts[9]  // @agent_updated
-			seqStr := parts[10]  // @agent_seq
+			rawState := parts[8] // @seshagy_agent_state
+			updated := parts[9]  // @seshagy_agent_updated
+			seqStr := parts[10]  // @seshagy_agent_seq
 			if rawState != "" && isStateFresh(updated, seqStr) {
 				agentState = NormalizeAgentState(rawState)
 			}
