@@ -1,9 +1,9 @@
 // installed by seshagy
 // managed by seshagy; reinstalling or updating the integration overwrites this file.
 // SESHAGY_INTEGRATION_ID=pi
-// @ts-nocheck
 
 import { spawn } from "node:child_process";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 const BIN = "seshagy";
 const SOURCE = "seshagy:pi";
@@ -41,22 +41,22 @@ function release() {
 	]);
 }
 
-export default function (pi) {
+export default function seshagyAgentState(pi: ExtensionAPI): void {
 	if (!process.env.TMUX_PANE) return;
 
-	pi.on?.("session_start", () => report("idle"));
+	pi.on("session_start", () => report("idle"));
 
-	pi.on?.("before_agent_start", () => report("working"));
+	pi.on("before_agent_start", () => report("working"));
 
-	pi.on?.("agent_start", () => report("working"));
+	pi.on("agent_start", () => report("working"));
 
-	pi.on?.("turn_start", () => report("working"));
+	pi.on("turn_start", () => report("working"));
 
-	pi.on?.("tool_call", () => report("working"));
+	pi.on("tool_call", () => report("working"));
 
-	pi.on?.("turn_end", () => report("working"));
+	pi.on("turn_end", () => report("working"));
 
-	pi.on?.("agent_end", () => report("done"));
+	pi.on("agent_end", () => report("done"));
 
-	pi.on?.("session_shutdown", () => release());
+	pi.on("session_shutdown", () => release());
 }
