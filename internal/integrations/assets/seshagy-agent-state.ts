@@ -5,7 +5,9 @@
 import { spawn } from "node:child_process";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
-const BIN = "seshagy";
+// Override the seshagy binary path via $SESHAGY_BIN; otherwise fall back to the
+// one on PATH. Set SESHAGY_BIN to your worktree build during development.
+const BIN = process.env.SESHAGY_BIN || "seshagy";
 const SOURCE = "seshagy:pi";
 
 function seq(): string {
