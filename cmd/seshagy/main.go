@@ -204,6 +204,16 @@ func runIntegration(_ context.Context, args []string) error {
 		}
 		fmt.Printf("installed %s integration to %s\n", args[1], path)
 		return nil
+	case "uninstall":
+		if len(args) < 2 {
+			return errors.New(joinUsage("integration", "uninstall", "<name>"))
+		}
+		path, err := integrations.Uninstall(args[1])
+		if err != nil {
+			return err
+		}
+		fmt.Printf("uninstalled %s integration from %s\n", args[1], path)
+		return nil
 	default:
 		return fmt.Errorf("unknown integration command: %q", args[0])
 	}
@@ -356,6 +366,8 @@ Scripting:
                                   clear agent state from a tmux pane
   seshagy integration install <name>
                                   install an agent hook/extension
+  seshagy integration uninstall <name>
+                                  remove an agent hook/extension
 
 TUI keys:
   enter attach/create/focus   q quit   / filter   r refresh   R rename
