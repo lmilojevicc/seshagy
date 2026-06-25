@@ -3,7 +3,10 @@
 # managed by seshagy; reinstalling or updating the integration overwrites this file.
 # SESHAGY_INTEGRATION_ID=shell-hook
 
-set -eu
+# A state-reporting hook must NEVER fail the host agent. No set -e/-u: every
+# command is explicitly guarded with || true or checked. The script always
+# exits 0 (except when invoked via the codex PermissionRequest command string
+# which appends '; exit 1' OUTSIDE this script).
 agent="${1:-}"
 state="${2:-idle}"
 message="${3:-}"
@@ -105,11 +108,14 @@ case "$state" in
   *) exit 0 ;;
 esac
 
+# Sanitize message/session_id: if they contain shell-injection characters,
+# drop the unsafe field rather than failing the hook. State reporting is
+# best-effort and must never break the host agent.
 if [ -n "$message" ] && ! reject_unsafe_value "$message"; then
-  exit 1
+  message=""
 fi
 if [ -n "$session_id" ] && ! reject_unsafe_value "$session_id"; then
-  exit 1
+  session_id=""
 fi
 
 if [ -n "$message" ] && [ -n "$session_id" ]; then
@@ -121,3 +127,5 @@ elif [ -n "$session_id" ]; then
 else
   "$bin" --report-agent --pane "$TMUX_PANE" --agent "$agent" --state "$state" --source "$source" --seq "$seq" >/dev/null 2>&1 || true
 fi
+
+exit 0

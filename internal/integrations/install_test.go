@@ -351,6 +351,13 @@ func TestSharedHookScriptContent(t *testing.T) {
 			t.Errorf("shared script missing %q", want)
 		}
 	}
+	// A state-reporting hook must NEVER fail the host agent.
+	if strings.Contains(s, "set -eu") || strings.Contains(s, "set -e\n") {
+		t.Errorf("shared script must not use set -e/-eu (would fail host on any error)")
+	}
+	if !strings.HasSuffix(strings.TrimSpace(s), "exit 0") {
+		t.Errorf("shared script must end with exit 0")
+	}
 	if strings.Contains(s, "/Users/milo") {
 		t.Errorf("shared script contains hardcoded /Users/milo path")
 	}
