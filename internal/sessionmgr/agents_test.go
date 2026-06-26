@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/lmilojevicc/seshagy/internal/integrations"
 )
 
 func agentPaneLine(pane, session, win, paneIdx, path, cmd, pid, dead string) string {
@@ -323,6 +325,64 @@ func TestParseAgentsPreservesStaleLifecycleBlocked(t *testing.T) {
 		t.Errorf(
 			"AgentState = %q, want blocked (lifecycle stale state preserved)",
 			items[0].AgentState,
+		)
+	}
+}
+
+// TestEveryDiscoveredAgentHasIntegrationOrManifestOrIsAllowlisted documents
+// the coverage gap: every agent in agentProcessNames must have either a
+// bundled integration, a bundled manifest, or be explicitly listed here as
+// hot-update-only (discovered, gets manifests from herdr's catalog on launch,
+// but has no bundled offline fallback). If a new agent is added to discovery
+// without satisfying one of these, this test fails — forcing a conscious
+// decision.
+func TestEveryDiscoveredAgentHasIntegrationOrManifestOrIsAllowlisted(t *testing.T) {
+	// Agents that are discovered but rely on herdr hot-update for manifests.
+	// They have no bundled offline fallback and no hook integration.
+	hotUpdateOnly := map[string]bool{
+		"amp":      true,
+		"cline":    true,
+		"devin":    true,
+		"gemini":   true,
+		"hermes":   true,
+		"kilo":     true,
+		"kimi":     true,
+		"kiro":     true,
+		"qodercli": true,
+		"copilot":  true,
+	}
+
+	// Collect canonical names from agentProcessNames.
+	canonical := make(map[string]bool)
+	for _, name := range agentProcessNames {
+		canonical[name] = true
+	}
+
+	for agentName := range canonical {
+		// Check bundled manifest.
+		if _, ok := manifestForAgent(agentName); ok {
+			continue
+		}
+		// Check integration (registered in the integrations package).
+		registered := false
+		for _, name := range integrations.Available() {
+			if name == agentName {
+				registered = true
+				break
+			}
+		}
+		if registered {
+			continue
+		}
+		// Check explicit allowlist.
+		if hotUpdateOnly[agentName] {
+			continue
+		}
+		t.Errorf(
+			"agent %q is discovered (agentProcessNames) but has no integration, "+
+				"no bundled manifest, and is not in the hotUpdateOnly allowlist. "+
+				"Add one of the three, or document it as hot-update-only.",
+			agentName,
 		)
 	}
 }

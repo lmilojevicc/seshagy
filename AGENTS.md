@@ -51,6 +51,8 @@ Add focused table-driven tests near the package being changed. Use names like `T
 - **Stale-can't-resurrect:** every state write goes through `@seshagy_agent_seq` strict-`>` + flock + tombstone release. `MarkAgentVisited` does NOT advance the seq.
 - **No pane scraping except the capture-pane manifest backstop** (the `manifest_fallback` sanctioned exception, default-on, hot-updated from herdr).
 - **Authority model:** lifecycle agents (pi/opencode) suppress manifest when hooks are fresh; partial-hook agents (codex/claude/droid) and hook-less agents always run the manifest classifier. Manifest overwrites state only on a positive rule match; no-match preserves the existing state.
+- **Done is hook-only:** capture-only agents (cursor/agy/grok + hot-update-only agents like amp/cline/devin/gemini/hermes/kilo/kimi/kiro/qodercli) can show working/blocked/idle but NOT done — `done` requires a hook/plugin report because the screen cannot distinguish "turn finished" from "idle and waiting". This is inherent to screen-based detection.
+- **Release suppression:** after `ReleaseAgent` clears state, capture-pane manifest is suppressed for 10s (`@seshagy_agent_released_at`) to prevent visual resurrection of a just-released pane.
 - **Zero new go.mod deps if avoidable.** cgo-free. `BurntSushi/toml` is the only non-stdlib dep for manifests.
 
 ## Commit & Pull Request Guidelines

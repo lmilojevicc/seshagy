@@ -493,3 +493,82 @@ func TestMarkActiveDoneAgentsIdleNoopWithoutDone(t *testing.T) {
 		t.Fatal("list-panes called when no done agents exist; want no tmux call")
 	}
 }
+
+func TestReleaseAgentRejectsCrossSource(t *testing.T) {
+	ft := NewFakeTmux()
+	ft.Set("%5", "@seshagy_agent_seq", "5")
+	ft.Set("%5", "@seshagy_agent_state", "working")
+	ft.Set("%5", "@seshagy_agent_source", "seshagy:opencode")
+	SetTmuxHooksForTest(t, ft.output, ft.run)
+	ctx := context.Background()
+
+	// Release from a DIFFERENT source (seshagy:pi) at a higher seq — must NOT clear.
+	applied, err := ReleaseAgent(ctx, AgentRelease{
+		Pane:   "%5",
+		Source: "seshagy:pi",
+		Seq:    10,
+	})
+	if err != nil {
+		t.Fatalf("ReleaseAgent() error = %v", err)
+	}
+	if applied {
+		t.Fatal("cross-source release applied = true, want false (refused)")
+	}
+	if got := ft.Get("%5", "@seshagy_agent_state"); got != "working" {
+		t.Errorf(
+			"@seshagy_agent_state = %q, want working (not cleared by cross-source release)",
+			got,
+		)
+	}
+	if got := ft.Get("%5", "@seshagy_agent_source"); got != "seshagy:opencode" {
+		t.Errorf("@seshagy_agent_source = %q, want seshagy:opencode", got)
+	}
+}
+
+func TestReleaseAgentSameSourceSucceeds(t *testing.T) {
+	ft := NewFakeTmux()
+	ft.Set("%5", "@seshagy_agent_seq", "5")
+	ft.Set("%5", "@seshagy_agent_state", "working")
+	ft.Set("%5", "@seshagy_agent_source", "seshagy:opencode")
+	SetTmuxHooksForTest(t, ft.output, ft.run)
+	ctx := context.Background()
+
+	// Release from the SAME source at equal seq — must clear.
+	applied, err := ReleaseAgent(ctx, AgentRelease{
+		Pane:   "%5",
+		Source: "seshagy:opencode",
+		Seq:    5,
+	})
+	if err != nil {
+		t.Fatalf("ReleaseAgent() error = %v", err)
+	}
+	if !applied {
+		t.Fatal("same-source release applied = false, want true")
+	}
+	if got := ft.Get("%5", "@seshagy_agent_state"); got != "" {
+		t.Errorf("@seshagy_agent_state = %q, want empty", got)
+	}
+	if got := ft.Get("%5", "@seshagy_agent_released_at"); got == "" {
+		t.Error("@seshagy_agent_released_at is empty after release, want timestamp")
+	}
+}
+
+func TestReleaseAgentEmptyExistingSourceSucceeds(t *testing.T) {
+	ft := NewFakeTmux()
+	ft.Set("%5", "@seshagy_agent_seq", "5")
+	SetTmuxHooksForTest(t, ft.output, ft.run)
+	ctx := context.Background()
+
+	// No existing source set → release from any source should proceed.
+	applied, err := ReleaseAgent(ctx, AgentRelease{
+		Pane:   "%5",
+		Source: "seshagy:codex",
+		Seq:    10,
+	})
+	if err != nil {
+		t.Fatalf("ReleaseAgent() error = %v", err)
+	}
+	if !applied {
+		t.Fatal("release with empty existing source applied = false, want true")
+	}
+}

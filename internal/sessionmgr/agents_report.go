@@ -33,10 +33,17 @@ func agentPaneOptions() []string {
 	return []string{
 		"@seshagy_agent_name", "@seshagy_agent_state", "@seshagy_agent_message",
 		"@seshagy_agent_updated", "@seshagy_agent_source", "@seshagy_agent_session_id",
-		"@seshagy_agent_last_seen",
+		"@seshagy_agent_last_seen", "@seshagy_agent_released_at",
 		"@seshagy_agent_seq",
 	}
 }
+
+// manifestReleaseSuppressWindow is how long after a release the manifest
+// classifier is suppressed for that pane. This prevents capture-pane from
+// visually resurrecting a just-released pane (whose screen may still match a
+// working/blocked rule). After the window the process has likely changed
+// screens and manifest can run normally.
+const manifestReleaseSuppressWindow = 10 * time.Second
 
 // ResolvePane resolves a pane target to a canonical pane id (%NN).
 func ResolvePane(ctx context.Context, pane string) (string, error) {
@@ -200,6 +207,17 @@ func ReleaseAgent(ctx context.Context, opts AgentRelease) (bool, error) {
 		if parseErr == nil && opts.Seq < existingSeq {
 			return nil // stale — strict < guard (equal seq is valid for release)
 		}
+		// Cross-source guard: reject if the releasing source differs from the
+		// pane's recorded source. Prevents a delayed release from agent A
+		// (e.g. opencode) from clearing agent B's current state in a reused
+		// pane. When the existing source is empty (never set) or matches the
+		// releaser, proceed as normal.
+		if opts.Source != "" {
+			existingSource, _ := showPaneOption(ctx, opts.Pane, "@seshagy_agent_source")
+			if existingSource != "" && existingSource != opts.Source {
+				return nil // cross-source release — refuse to clear
+			}
+		}
 		// Tombstone: unset all state-bearing options except @seshagy_agent_seq.
 		for _, opt := range agentPaneOptions() {
 			if opt == "@seshagy_agent_seq" {
@@ -208,6 +226,16 @@ func ReleaseAgent(ctx context.Context, opts AgentRelease) (bool, error) {
 			if err := unsetPaneOption(ctx, opts.Pane, opt); err != nil {
 				return err
 			}
+		}
+		// Write @seshagy_agent_released_at as a release timestamp so the
+		// manifest classifier can suppress immediate resurrection.
+		if err := setPaneOption(
+			ctx,
+			opts.Pane,
+			"@seshagy_agent_released_at",
+			time.Now().Format(time.RFC3339Nano),
+		); err != nil {
+			return err
 		}
 		// Write @seshagy_agent_seq LAST as the tombstone high-water mark so a crash
 		// mid-release leaves the highest seq recorded, and any subsequent

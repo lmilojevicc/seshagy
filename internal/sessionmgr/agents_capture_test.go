@@ -33,7 +33,7 @@ func TestApplyManifestFallbackSkipsLifecycleFreshHook(t *testing.T) {
 	ctx := context.Background()
 
 	var captureCalls int
-	fake := NewStrictFakeTmux(t, nil)
+	fake := NewStrictFakeTmux(t, nil).AllowPaneOptions()
 	fake.AllowOutput(func(args []string) bool {
 		if len(args) >= 1 && args[0] == "capture-pane" {
 			captureCalls++
@@ -70,7 +70,7 @@ func TestApplyManifestFallbackRunsForPartialHookAgentEvenWhenFresh(t *testing.T)
 	freshPane := "%5"
 
 	var captured bool
-	fake := NewStrictFakeTmux(t, nil)
+	fake := NewStrictFakeTmux(t, nil).AllowPaneOptions()
 	fake.HandleOutput(func(args []string) bool {
 		return len(args) >= 1 && args[0] == "capture-pane"
 	}, func(_ context.Context, args ...string) ([]byte, error) {
@@ -113,7 +113,7 @@ func TestApplyManifestFallbackRunsForPartialHookAgentEvenWhenFresh(t *testing.T)
 // state is preserved (not clobbered to idle).
 func TestApplyManifestFallbackNoMatchPreservesFreshHookState(t *testing.T) {
 	ctx := context.Background()
-	fake := NewStrictFakeTmux(t, nil)
+	fake := NewStrictFakeTmux(t, nil).AllowPaneOptions()
 	fake.HandleOutput(func(args []string) bool {
 		return len(args) >= 1 && args[0] == "capture-pane"
 	}, func(_ context.Context, args ...string) ([]byte, error) {
@@ -142,7 +142,7 @@ func TestApplyManifestFallbackNoMatchPreservesFreshHookState(t *testing.T) {
 func TestApplyManifestFallbackRunsForLifecycleAgentWhenStale(t *testing.T) {
 	ctx := context.Background()
 	var captured bool
-	fake := NewStrictFakeTmux(t, nil)
+	fake := NewStrictFakeTmux(t, nil).AllowPaneOptions()
 	fake.HandleOutput(func(args []string) bool {
 		return len(args) >= 1 && args[0] == "capture-pane"
 	}, func(_ context.Context, args ...string) ([]byte, error) {
@@ -225,7 +225,7 @@ func TestParseOSCSequences(t *testing.T) {
 // OSC regions are now populated (previously always empty → dead rule).
 func TestApplyManifestFallbackCodexOSCTitleWorking(t *testing.T) {
 	ctx := context.Background()
-	fake := NewStrictFakeTmux(t, nil)
+	fake := NewStrictFakeTmux(t, nil).AllowPaneOptions()
 	fake.HandleOutput(func(args []string) bool {
 		return len(args) >= 1 && args[0] == "capture-pane"
 	}, func(_ context.Context, args ...string) ([]byte, error) {
@@ -254,7 +254,7 @@ func TestApplyManifestFallbackCodexOSCTitleWorking(t *testing.T) {
 // (NOT be overwritten to idle by the demoted live_prompt_box rule).
 func TestApplyManifestFallbackClaudeBlockedSurvivesIdleRule(t *testing.T) {
 	ctx := context.Background()
-	fake := NewStrictFakeTmux(t, nil)
+	fake := NewStrictFakeTmux(t, nil).AllowPaneOptions()
 	fake.HandleOutput(func(args []string) bool {
 		return len(args) >= 1 && args[0] == "capture-pane"
 	}, func(_ context.Context, args ...string) ([]byte, error) {
@@ -281,5 +281,64 @@ func TestApplyManifestFallbackClaudeBlockedSurvivesIdleRule(t *testing.T) {
 	ApplyManifestFallback(ctx, items)
 	if items[0].AgentState != AgentBlocked {
 		t.Fatalf("claude blocked clobbered to %s by idle rule", items[0].AgentState)
+	}
+}
+
+func TestApplyManifestFallbackSuppressesRecentlyReleased(t *testing.T) {
+	captureCalled := false
+	base := NewFakeTmux()
+	// Released 1 second ago — within the 10s suppression window.
+	base.Set(
+		"%5",
+		"@seshagy_agent_released_at",
+		time.Now().Add(-1*time.Second).Format(time.RFC3339Nano),
+	)
+	s := NewStrictFakeTmux(t, base).AllowPaneOptions()
+	s.HandleOutput(func(args []string) bool {
+		return len(args) > 0 && args[0] == "capture-pane"
+	}, func(_ context.Context, _ ...string) ([]byte, error) {
+		captureCalled = true
+		return []byte("  ctrl+c to stop\n"), nil
+	})
+	s.Install(t)
+	ctx := context.Background()
+
+	items := []Item{
+		{Kind: KindAgent, AgentName: "cursor", PaneID: "%5", AgentState: AgentIdle},
+	}
+	// Non-lifecycle agent (cursor) -> shouldRunManifest=true, but
+	// isRecentlyReleased must suppress and NOT call capture-pane.
+	ApplyManifestFallback(ctx, items)
+	if captureCalled {
+		t.Fatal("capture-pane was called despite recent release; manifest should be suppressed")
+	}
+	if items[0].AgentState != AgentIdle {
+		t.Errorf("state = %q, want idle (release suppression)", items[0].AgentState)
+	}
+}
+
+func TestApplyManifestFallbackRunsAfterReleaseWindow(t *testing.T) {
+	base := NewFakeTmux()
+	// Released 30 seconds ago — past the 10s suppression window.
+	base.Set(
+		"%5",
+		"@seshagy_agent_released_at",
+		time.Now().Add(-30*time.Second).Format(time.RFC3339Nano),
+	)
+	s := NewStrictFakeTmux(t, base).AllowPaneOptions()
+	s.HandleOutput(func(args []string) bool {
+		return len(args) > 0 && args[0] == "capture-pane"
+	}, func(_ context.Context, _ ...string) ([]byte, error) {
+		return []byte("  ctrl+c to stop\n"), nil
+	})
+	s.Install(t)
+	ctx := context.Background()
+
+	items := []Item{
+		{Kind: KindAgent, AgentName: "cursor", PaneID: "%5", AgentState: AgentIdle},
+	}
+	ApplyManifestFallback(ctx, items)
+	if items[0].AgentState != AgentWorking {
+		t.Errorf("state = %q, want working (suppression window expired)", items[0].AgentState)
 	}
 }

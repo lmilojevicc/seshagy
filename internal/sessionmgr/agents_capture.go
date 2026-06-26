@@ -145,6 +145,12 @@ func ApplyManifestFallback(ctx context.Context, items []Item) {
 		if _, ok := manifestForAgent(item.AgentName); !ok {
 			continue
 		}
+		// Suppress manifest for a short window after a release to prevent
+		// capture-pane from visually resurrecting a just-released pane whose
+		// screen may still match a working/blocked rule.
+		if isRecentlyReleased(ctx, item.PaneID) {
+			continue
+		}
 		screen, err := captureAgentPaneCached(ctx, cache, item.PaneID, manifestCaptureLines)
 		if err != nil {
 			continue
@@ -162,4 +168,20 @@ func ApplyManifestFallback(ctx context.Context, items []Item) {
 			items[i].AgentState = result.State
 		}
 	}
+}
+
+// isRecentlyReleased returns true when the pane has a @seshagy_agent_released_at
+// timestamp within the manifestReleaseSuppressWindow. This prevents capture-pane
+// from visually resurrecting a just-released pane. On error/absence returns false
+// (no suppression — current behavior).
+func isRecentlyReleased(ctx context.Context, pane string) bool {
+	raw, _ := showPaneOption(ctx, pane, "@seshagy_agent_released_at")
+	if raw == "" {
+		return false
+	}
+	t, err := time.Parse(time.RFC3339Nano, raw)
+	if err != nil {
+		return false
+	}
+	return time.Since(t) < manifestReleaseSuppressWindow
 }
