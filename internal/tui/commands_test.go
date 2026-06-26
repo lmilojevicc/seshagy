@@ -164,6 +164,44 @@ func TestPreviewCmdDirectory(t *testing.T) {
 	}
 }
 
+func TestPreviewCmdAgentRoutesToCaptureAgentPane(t *testing.T) {
+	var capturedPane string
+	sessionmgr.SetTmuxHooksForTest(t, func(_ context.Context, args ...string) ([]byte, error) {
+		if len(args) >= 4 && args[0] == "capture-pane" && args[1] == "-ep" && args[2] == "-t" {
+			capturedPane = args[3]
+			return []byte("agent pane output\nlatest line"), nil
+		}
+		return nil, nil
+	}, nil)
+
+	msg := previewCmd(sessionmgr.Item{
+		Kind:   sessionmgr.KindAgent,
+		PaneID: "%7",
+	})().(previewMsg)
+	if msg.err != nil {
+		t.Fatalf("agent preview err = %v", msg.err)
+	}
+	if capturedPane != "%7" {
+		t.Fatalf("capture-pane target = %q, want %%7", capturedPane)
+	}
+	if !strings.Contains(msg.preview, "latest line") {
+		t.Fatalf("agent preview = %q, want captured output", msg.preview)
+	}
+}
+
+func TestPreviewCmdAgentEmptyPaneIDFallsBack(t *testing.T) {
+	msg := previewCmd(sessionmgr.Item{
+		Kind:   sessionmgr.KindAgent,
+		PaneID: "",
+	})().(previewMsg)
+	if msg.err != nil {
+		t.Fatalf("agent empty PaneID err = %v", msg.err)
+	}
+	if msg.preview != "no preview available" {
+		t.Fatalf("agent empty PaneID preview = %q, want no preview available", msg.preview)
+	}
+}
+
 func TestStartupSetupCommands(t *testing.T) {
 	cfg := appconfig.Default()
 	cfg.Setup.TypeFirstPromptSeen = false
