@@ -56,6 +56,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			oldName := m.renameFrom
 			kind := m.renameKind
 			session := m.renameSession
+			target := m.renameTarget
 			m.inputMode = modeNormal
 			m.renameInput.Blur()
 			m.renameFrom = ""
@@ -71,7 +72,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			switch kind {
 			case sessionmgr.KindSession:
-				return m, renameCmd(m.mux, m.renameTarget, oldName, newName)
+				return m, renameCmd(m.mux, target, oldName, newName)
 			case sessionmgr.KindAgent:
 				return m, renameAgentCmd(m.mux, oldName, session, newName)
 			default:
@@ -509,6 +510,7 @@ func (m Model) startRename() (tea.Model, tea.Cmd) {
 		m.inputMode = modeRename
 		m.renameKind = item.Kind
 		m.renameFrom = item.Name
+		m.renameTarget = item.ActionTarget()
 		m.renameInput.Focus()
 		m.status = "renaming " + item.Name
 		return m, textinput.Blink

@@ -407,3 +407,47 @@ func TestHandleKeySearchModeTypingAndQuit(t *testing.T) {
 		t.Fatal("expected quit command from search mode")
 	}
 }
+
+func TestRenameSessionFlowSetsAndUsesTarget(t *testing.T) {
+	var renamedTarget, renamedNew string
+	sessionmgr.SetTmuxHooksForTest(t, func(_ context.Context, args ...string) ([]byte, error) {
+		return nil, nil
+	}, func(_ context.Context, args ...string) error {
+		if len(args) >= 4 && args[0] == "rename-session" {
+			renamedTarget = strings.TrimPrefix(args[2], "=")
+			renamedNew = args[3]
+		}
+		return nil
+	})
+
+	m := newTestModel(t)
+	m.items = []sessionmgr.Item{
+		{Kind: sessionmgr.KindSession, Name: "myproj", Target: "myproj"},
+	}
+	m.cursor = 0
+
+	// startRename must populate renameTarget from the selected item's ActionTarget.
+	model, _ := m.startRename()
+	got := model.(Model)
+	if got.renameTarget != "myproj" {
+		t.Fatalf("startRename() renameTarget = %q, want myproj", got.renameTarget)
+	}
+	if got.inputMode != modeRename {
+		t.Fatalf("startRename() inputMode = %v, want modeRename", got.inputMode)
+	}
+
+	// Enter the new name and commit; the target must reach the backend.
+	got.renameInput.SetValue("newname")
+	_, cmd := got.handleKey(enterMsg())
+	if cmd == nil {
+		t.Fatal("expected rename command from enter")
+	}
+	_ = cmd() // drive the tmux rename-session call
+
+	if renamedTarget != "myproj" {
+		t.Fatalf("rename-session target = %q, want myproj", renamedTarget)
+	}
+	if renamedNew != "newname" {
+		t.Fatalf("rename-session newName = %q, want newname", renamedNew)
+	}
+}
