@@ -381,6 +381,9 @@ func TestSeshagyOpenCodePluginContent(t *testing.T) {
 		"permission.ask",
 		"session.idle",
 		"seshagy:opencode",
+		// permissionPending state machine guards (blocker #1 fix).
+		"permissionPending",
+		"permission.replied",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("opencode plugin missing %q", want)

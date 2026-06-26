@@ -59,26 +59,63 @@ function release(cwd: string) {
 	]);
 }
 
+// permissionPending guards against session.idle overwriting a pending blocked
+// state. The opencode SDK fires session.idle while a permission prompt is still
+// displayed (the session is idle because it's waiting on the user's approval,
+// not because the turn finished). Without this guard, the later `done` report
+// (higher seq) would overwrite the `blocked` report from permission.ask.
+let permissionPending = false;
+
 export const SeshagyPlugin: Plugin = async (input) => {
 	const cwd = input.directory;
 	return {
-		// Turn start / tool execution → working.
-		"chat.message": async () => report(cwd, "working"),
-		"tool.execute.before": async () => report(cwd, "working"),
-
-		// Permission prompt → blocked. status "ask" means the TUI is showing an
-		// approval prompt; "allow"/"deny" are the plugin's own decision and do
-		// not indicate a blocked pane.
-		"permission.ask": async (_input, output) => {
-			if (output.status === "ask") report(cwd, "blocked");
+		// Turn start / tool execution → working. Either of these means the turn
+		// resumed, so any prior permission prompt is no longer pending.
+		"chat.message": async () => {
+			permissionPending = false;
+			report(cwd, "working");
+		},
+		"tool.execute.before": async () => {
+			permissionPending = false;
+			report(cwd, "working");
 		},
 
-		// session.idle → done (turn finished, pane not yet visited).
+		// Permission prompt → blocked. status "ask" means the TUI is showing an
+		// approval prompt; "allow"/"deny" are the plugin's own decision and
+		// indicate the turn is resuming (not blocked).
+		"permission.ask": async (_input, output) => {
+			if (output.status === "ask") {
+				permissionPending = true;
+				report(cwd, "blocked");
+			} else {
+				permissionPending = false;
+				report(cwd, "working");
+			}
+		},
+
+		// session.idle → done ONLY when no permission prompt is pending. If a
+		// permission is pending, the idle is because the session is waiting on
+		// the user's approval — leave the state on blocked.
+		//
+		// permission.replied → the user answered; the turn resumes → working.
 		event: async ({ event }) => {
-			if (event.type === "session.idle") report(cwd, "done");
+			if (event.type === "permission.replied") {
+				permissionPending = false;
+				report(cwd, "working");
+				return;
+			}
+			if (event.type === "session.idle") {
+				if (permissionPending) {
+					return;
+				}
+				report(cwd, "done");
+			}
 		},
 
 		// Plugin/server shutdown → release.
-		dispose: async () => release(cwd),
+		dispose: async () => {
+			permissionPending = false;
+			release(cwd);
+		},
 	};
 };

@@ -1,7 +1,7 @@
 id = "claude"
-version = "2026.06.10.3"
+version = "2026.06.26.1"
 min_engine_version = 2
-updated_at = "2026-06-10T00:00:00Z"
+updated_at = "2026-06-26T00:00:00Z"
 aliases = ["claude-code"]
 
 [[rules]]
@@ -51,9 +51,27 @@ visible_blocker = true
 contains = ["run a dynamic workflow?", "esc to cancel"]
 
 [[rules]]
+id = "permission_active_guard"
+state = "unknown"
+priority = 970
+region = "whole_recent"
+skip_state_update = true
+any = [
+  { contains = ["do you want to proceed?"] },
+  { contains = ["would you like to"] },
+  { contains = ["tab to amend"] },
+  { contains = ["ctrl+e to explain"] },
+  { contains = ["waiting for permission"] },
+  { contains = ["do you want to allow this connection?"] },
+  { contains = ["review your answers"] },
+  { contains = ["skip interview"] },
+  { contains = ["run a dynamic workflow?"] },
+]
+
+[[rules]]
 id = "live_prompt_box"
 state = "idle"
-priority = 950
+priority = 200
 region = "prompt_box_body"
 visible_idle = true
 line_regex = ['^\s*❯']
@@ -63,6 +81,13 @@ not = [
   { contains = ["tab/arrow keys"] },
   { contains = ["arrow keys to navigate"] },
   { contains = ["↑/↓ to navigate"] },
+  { contains = ["do you want to proceed?"] },
+  { contains = ["would you like to"] },
+  { contains = ["tab to amend"] },
+  { contains = ["ctrl+e to explain"] },
+  { contains = ["review your answers"] },
+  { contains = ["skip interview"] },
+  { contains = ["do you want to allow this connection?"] },
 ]
 
 [[rules]]

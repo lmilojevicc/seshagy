@@ -165,3 +165,121 @@ func TestApplyManifestFallbackRunsForLifecycleAgentWhenStale(t *testing.T) {
 		t.Fatal("expected capture-pane call for stale lifecycle agent")
 	}
 }
+
+// TestParseOSCSequences verifies extraction of OSC title and progress payloads
+// from a capture-pane stream that preserved escape sequences.
+func TestParseOSCSequences(t *testing.T) {
+	tests := []struct {
+		name      string
+		screen    string
+		wantTitle string
+		wantProg  string
+	}{
+		{
+			name:      "osc0_title_bel",
+			screen:    "line1\n\x1b]0;\x1b[32m⠋\x1b[0m Working\x07\ntail\n",
+			wantTitle: "⠋ Working",
+			wantProg:  "",
+		},
+		{
+			name:      "osc2_title_st",
+			screen:    "\x1b]2;Action Required\x1b\\\n",
+			wantTitle: "Action Required",
+			wantProg:  "",
+		},
+		{
+			name:      "osc4_progress_bel",
+			screen:    "\x1b]4;0\x07\n",
+			wantTitle: "",
+			wantProg:  "4;0",
+		},
+		{
+			name:      "title_then_progress_last_wins",
+			screen:    "\x1b]0;old\x07\n\x1b]0;new\x07\n\x1b]4;0\x07\n",
+			wantTitle: "new",
+			wantProg:  "4;0",
+		},
+		{
+			name:      "none",
+			screen:    "plain text no escapes\n",
+			wantTitle: "",
+			wantProg:  "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotTitle, gotProg := parseOSCSequences(tt.screen)
+			if gotTitle != tt.wantTitle {
+				t.Errorf("title = %q, want %q", gotTitle, tt.wantTitle)
+			}
+			if gotProg != tt.wantProg {
+				t.Errorf("progress = %q, want %q", gotProg, tt.wantProg)
+			}
+		})
+	}
+}
+
+// TestApplyManifestFallbackCodexOSCTitleWorking verifies that a codex pane
+// whose capture contains an OSC title spinner (but NO screen-text working
+// indicator) is classified working via the osc_title_working rule — proving
+// OSC regions are now populated (previously always empty → dead rule).
+func TestApplyManifestFallbackCodexOSCTitleWorking(t *testing.T) {
+	ctx := context.Background()
+	fake := NewStrictFakeTmux(t, nil)
+	fake.HandleOutput(func(args []string) bool {
+		return len(args) >= 1 && args[0] == "capture-pane"
+	}, func(_ context.Context, args ...string) ([]byte, error) {
+		// Screen has an OSC braille spinner title but no working text body.
+		return []byte("some output\n\x1b]0;\x1b[32m⠋\x1b[0m Thinking\x07\n"), nil
+	})
+	fake.Install(t)
+
+	items := []Item{
+		{
+			Kind:       KindAgent,
+			AgentName:  "codex",
+			PaneID:     "%1",
+			AgentState: AgentIdle, // no fresh hook → default idle
+		},
+	}
+	ApplyManifestFallback(ctx, items)
+	if items[0].AgentState != AgentWorking {
+		t.Fatalf("osc_title_working rule should classify working, got %s", items[0].AgentState)
+	}
+}
+
+// TestApplyManifestFallbackClaudeBlockedSurvivesIdleRule is the regression for
+// blocker #2: a claude pane with fresh hook `blocked` and a captured screen
+// containing BOTH a prompt-box ❯ line AND permission text must stay blocked
+// (NOT be overwritten to idle by the demoted live_prompt_box rule).
+func TestApplyManifestFallbackClaudeBlockedSurvivesIdleRule(t *testing.T) {
+	ctx := context.Background()
+	fake := NewStrictFakeTmux(t, nil)
+	fake.HandleOutput(func(args []string) bool {
+		return len(args) >= 1 && args[0] == "capture-pane"
+	}, func(_ context.Context, args ...string) ([]byte, error) {
+		// Screen contains a horizontal-rule prompt box with a ❯ cursor AND
+		// permission wording. The live_prompt_box idle rule must NOT win.
+		return []byte("│ do you want to proceed?              │\n" +
+			"│ esc to cancel                       │\n" +
+			"│ tab to amend                        │\n" +
+			"─\n" +
+			"❯ \n" +
+			"─\n"), nil
+	})
+	fake.Install(t)
+
+	items := []Item{
+		{
+			Kind:         KindAgent,
+			AgentName:    "claude",
+			PaneID:       "%1",
+			AgentState:   AgentBlocked, // fresh hook says blocked
+			AgentUpdated: time.Now(),   // fresh
+		},
+	}
+	ApplyManifestFallback(ctx, items)
+	if items[0].AgentState != AgentBlocked {
+		t.Fatalf("claude blocked clobbered to %s by idle rule", items[0].AgentState)
+	}
+}

@@ -3,10 +3,68 @@ package sessionmgr
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/lmilojevicc/seshagy/internal/integrations"
 )
+
+// parseOSCSequences extracts the most-recent OSC window title and progress
+// payload from a capture-pane output that preserved escape sequences (-e).
+//
+// tmux capture-pane -e keeps SGR and OSC sequences inline. The relevant OSC
+// patterns used by the bundled codex/claude manifests are:
+//
+//   - OSC 0 / OSC 2 (set window title): `\x1b]0;<title>\x07` or `\x1b]2;<title>\x07`
+//     (also ST-terminated `\x1b\\`). The codex/claude osc_title rules match
+//     the title TEXT AFTER StripANSI against patterns like `^[braille] ` or
+//     `Action Required`.
+//   - OSC 4 (progress, herdr uses `OSC 4;0` for idle): `\x1b]4;<payload>\x07`.
+//     The claude osc_progress rule matches `^4;0`, i.e. the payload must
+//     INCLUDE the leading `4;` prefix (the manifest regex starts with `4`).
+//
+// When multiple OSC sequences of the same kind appear, the LAST one wins
+// (most-recent state). Returns empty strings when none are present.
+func parseOSCSequences(screen string) (title, progress string) {
+	// Find all OSC sequences: ESC ] ... (BEL | ST)
+	// BEL = 0x07, ST = ESC backslash (0x1b 0x5c).
+	start := 0
+	for {
+		idx := strings.Index(screen[start:], "\x1b]")
+		if idx < 0 {
+			break
+		}
+		idx += start
+		// payload starts after "ESC ]"
+		payloadStart := idx + 2
+		// find terminator: BEL or ST
+		end := -1
+		termLen := 0
+		if bell := strings.IndexByte(screen[payloadStart:], '\x07'); bell >= 0 {
+			end = payloadStart + bell
+			termLen = 1
+		} else if st := strings.Index(screen[payloadStart:], "\x1b\\"); st >= 0 {
+			end = payloadStart + st
+			termLen = 2
+		}
+		if end < 0 {
+			break
+		}
+		payload := screen[payloadStart:end]
+		// OSC 0 or 2: window title.
+		if strings.HasPrefix(payload, "0;") || strings.HasPrefix(payload, "2;") {
+			// strip the "0;" / "2;" prefix, then strip ANSI SGR sequences.
+			rawTitle := payload[2:]
+			title = StripANSI(rawTitle)
+		} else if strings.HasPrefix(payload, "4;") {
+			// OSC 4; progress — keep the full payload INCLUDING the "4;" prefix
+			// because the claude osc_progress rule matches `^4;0`.
+			progress = StripANSI(payload)
+		}
+		start = end + termLen
+	}
+	return title, progress
+}
 
 // CaptureAgentPane captures the bottom N lines of a tmux pane via
 // capture-pane. ANSI escape sequences are preserved (-e) so manifest regexes
@@ -91,7 +149,12 @@ func ApplyManifestFallback(ctx context.Context, items []Item) {
 		if err != nil {
 			continue
 		}
-		result := detectManifest(item.AgentName, manifestDetectionInput{screen: screen})
+		title, progress := parseOSCSequences(screen)
+		result := detectManifest(item.AgentName, manifestDetectionInput{
+			screen:      screen,
+			oscTitle:    title,
+			oscProgress: progress,
+		})
 		if result.SkipStateUpdate {
 			continue
 		}
