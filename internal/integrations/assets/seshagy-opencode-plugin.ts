@@ -99,22 +99,67 @@ export const SeshagyPlugin: Plugin = async (input) => {
 			}
 		},
 
-		// session.idle → done ONLY when no permission prompt is pending. If a
-		// permission is pending, the idle is because the session is waiting on
-		// the user's approval — leave the state on blocked.
-		//
-		// permission.replied → the user answered; the turn resumes → working.
+		// Event-bus state mapping (mirrors herdr's opencode plugin). The event
+		// hook receives ALL published events, including question/elicitation
+		// events that have no dedicated Hooks key. This is the ONLY path that
+		// detects `question.asked` (user elicitation) and `permission.asked`
+		// (event-bus version distinct from the permission.ask Hook above).
 		event: async ({ event }) => {
-			if (event.type === "permission.replied") {
-				permissionPending = false;
-				report(cwd, "working");
-				return;
-			}
-			if (event.type === "session.idle") {
-				if (permissionPending) {
-					return;
+			const type = event?.type;
+			switch (type) {
+				// Blocked: agent is asking for permission or asking the user a
+				// question (elicitation). Set permissionPending so session.idle
+				// doesn't overwrite blocked while the prompt is displayed.
+				case "permission.asked":
+				case "question.asked":
+				case "session.error":
+					permissionPending = true;
+					report(cwd, "blocked");
+					break;
+
+				// Working: turn resumed after a reply/rejection (or compaction).
+				case "tool.execute.before":
+				case "tool.execute.after":
+				case "permission.replied":
+				case "question.replied":
+				case "question.rejected":
+				case "session.compacted":
+					permissionPending = false;
+					report(cwd, "working");
+					break;
+
+				// Session idle → done (only if no permission/question pending).
+				case "session.idle":
+					if (!permissionPending) {
+						report(cwd, "done");
+					}
+					break;
+
+				// session.status carries a status string for belt-and-suspenders
+				// coverage alongside the named events above.
+				case "session.status": {
+					const status = (event?.properties?.status ?? "").toLowerCase();
+					switch (status) {
+						case "idle":
+							if (!permissionPending) {
+								report(cwd, "idle");
+							}
+							break;
+						case "active":
+						case "busy":
+						case "pending":
+						case "running":
+						case "streaming":
+						case "working":
+							permissionPending = false;
+							report(cwd, "working");
+							break;
+					}
+					break;
 				}
-				report(cwd, "done");
+
+				default:
+					break;
 			}
 		},
 
