@@ -6,7 +6,7 @@ import (
 )
 
 func TestBundledManifestsCompile(t *testing.T) {
-	for _, name := range []string{"opencode", "cursor", "antigravity", "agy", "grok"} {
+	for _, name := range []string{"opencode", "cursor", "antigravity", "agy", "grok", "codex", "claude", "droid"} {
 		m, ok := manifestForAgent(name)
 		if !ok {
 			t.Errorf("manifestForAgent(%q): not found", name)
