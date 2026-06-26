@@ -31,6 +31,23 @@ func plainCommand(ctx context.Context, name string, args ...string) *exec.Cmd {
 	return cmd
 }
 
+func herdrCommand(ctx context.Context, args ...string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, "herdr", args...)
+	cmd.Env = withLocale(os.Environ())
+	return cmd
+}
+
+// herdrOutput and herdrRun are the single seam through which the herdr backend
+// invokes the herdr CLI. Tests override these to simulate a herdr server.
+var (
+	herdrOutput = func(ctx context.Context, args ...string) ([]byte, error) {
+		return herdrCommand(ctx, args...).Output()
+	}
+	herdrRun = func(ctx context.Context, args ...string) error {
+		return herdrCommand(ctx, args...).Run()
+	}
+)
+
 func shellCommand(ctx context.Context, command string) *exec.Cmd {
 	cmd := exec.CommandContext(ctx, "sh", "-c", command)
 	cmd.Env = withLocale(os.Environ())

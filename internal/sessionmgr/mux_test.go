@@ -7,13 +7,26 @@ import (
 )
 
 func TestDetectFromEnvPriority(t *testing.T) {
-	// Until the herdr backend exists (Phase 4), detection routes TMUX→tmux and
-	// neither→noop. The HERDR_ENV=1 special-case lands in Phase 4.
 	tests := []struct {
 		name   string
 		getenv func(string) string
 		want   BackendKind
 	}{
+		{
+			name: "herdr wins over tmux when both set",
+			getenv: func(k string) string {
+				return map[string]string{
+					"HERDR_ENV": "1",
+					"TMUX":      "/tmp/tmux-1000/default,123,0",
+				}[k]
+			},
+			want: BackendHerdr,
+		},
+		{
+			name:   "herdr only",
+			getenv: func(k string) string { return map[string]string{"HERDR_ENV": "1"}[k] },
+			want:   BackendHerdr,
+		},
 		{
 			name:   "tmux only",
 			getenv: func(k string) string { return map[string]string{"TMUX": "/tmp/tmux-1000/default,123,0"}[k] },

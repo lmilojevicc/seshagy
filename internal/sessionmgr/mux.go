@@ -100,13 +100,13 @@ func Detect() Multiplexer { return DetectFromEnv(os.Getenv) }
 
 // DetectFromEnv is the env-driven, testable form of Detect. Detection priority:
 //
-//	HERDR_ENV=1 → herdr backend (Phase 4 wires this up; until then detection
-//	              falls through to tmux/noop so the branch stays green)
+//	HERDR_ENV=1 → herdr backend (herdr owns agent state; seshagy is read-only)
 //	TMUX set    → tmux backend
 //	neither     → noop backend
 func DetectFromEnv(getenv func(string) string) Multiplexer {
-	// herdr backend (Phase 4): HERDR_ENV=1 → NewHerdrBackend(). Until the
-	// herdr backend exists, fall through so detection stays correct for tmux.
+	if getenv("HERDR_ENV") == "1" {
+		return NewHerdrBackend()
+	}
 	if getenv("TMUX") != "" {
 		return NewTmuxBackend()
 	}
@@ -118,3 +118,6 @@ func NewTmuxBackend() Multiplexer { return tmuxBackend{} }
 
 // NewNoopBackend returns a no-op Multiplexer used when no multiplexer is active.
 func NewNoopBackend() Multiplexer { return noopBackend{} }
+
+// NewHerdrBackend returns the herdr-backed Multiplexer.
+func NewHerdrBackend() Multiplexer { return herdrBackend{} }
