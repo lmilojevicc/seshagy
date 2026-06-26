@@ -50,10 +50,11 @@ var agentProcessNames = map[string]string{
 
 const agentFreshnessWindow = 60 * time.Second
 
-// NormalizeAgentState maps hook-reported state synonyms to the 4-state enum.
-// Unknown/aborted/error states all fall back to idle — the strict rule is:
-// never guess working or blocked from an unrecognised value. An agent that
-// crashed is gone (pane dies); an ESC interrupt returns to idle.
+// NormalizeAgentState maps hook-reported state synonyms to the AgentState enum.
+// Only an explicit unknown report maps to AgentUnknown. Other unknown/aborted/error
+// values all fall back to idle — the strict rule is: never guess working or
+// blocked from an unrecognised value. An agent that crashed is gone (pane dies);
+// an ESC interrupt returns to idle.
 func NormalizeAgentState(state string) AgentState {
 	s := strings.ToLower(strings.TrimSpace(state))
 	switch s {
@@ -70,6 +71,8 @@ func NormalizeAgentState(state string) AgentState {
 		return AgentBlocked
 	case "done", "complete", "completed", "finished":
 		return AgentDone
+	case "unknown":
+		return AgentUnknown
 	case "idle", "ready":
 		return AgentIdle
 	default:

@@ -747,6 +747,8 @@ func agentStateFallback(s styles, state sessionmgr.AgentState, text string) stri
 		return s.warning.Render(text)
 	case sessionmgr.AgentDone:
 		return s.info.Render(text)
+	case sessionmgr.AgentUnknown:
+		return s.muted.Render(text)
 	default:
 		return s.muted.Render(text)
 	}

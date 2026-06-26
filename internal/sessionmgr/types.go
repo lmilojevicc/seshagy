@@ -25,6 +25,7 @@ const (
 	AgentWorking AgentState = "working"
 	AgentBlocked AgentState = "blocked"
 	AgentDone    AgentState = "done"
+	AgentUnknown AgentState = "unknown"
 )
 
 type Item struct {

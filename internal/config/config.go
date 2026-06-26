@@ -89,6 +89,7 @@ type AgentStatesConfig struct {
 	Working IconConfig `toml:"working" json:"working"`
 	Blocked IconConfig `toml:"blocked" json:"blocked"`
 	Done    IconConfig `toml:"done"    json:"done"`
+	Unknown IconConfig `toml:"unknown" json:"unknown"`
 }
 
 type IconConfig struct {
@@ -534,6 +535,7 @@ func defaultAgentStatesConfig() AgentStatesConfig {
 		Working: IconConfig{Icon: "●", Label: "working", Color: "10"},
 		Blocked: IconConfig{Icon: "◐", Label: "blocked", Color: "11"},
 		Done:    IconConfig{Icon: "◉", Label: "done", Color: "14"},
+		Unknown: IconConfig{Icon: "?", Label: "unknown", Color: "8"},
 		Idle:    IconConfig{Icon: "○", Label: "idle", Color: "8"},
 	}
 }
@@ -543,6 +545,7 @@ func normalizeAgentStatesConfig(states *AgentStatesConfig, defaults AgentStatesC
 	normalizeAgentStateIcon(&states.Working, defaults.Working)
 	normalizeAgentStateIcon(&states.Blocked, defaults.Blocked)
 	normalizeAgentStateIcon(&states.Done, defaults.Done)
+	normalizeAgentStateIcon(&states.Unknown, defaults.Unknown)
 }
 
 func normalizeAgentStateIcon(state *IconConfig, defaults IconConfig) {
@@ -575,6 +578,11 @@ func projectAgentStateStyles(states AgentStatesConfig) sessionmgr.AgentStateStyl
 			Icon:  states.Done.Icon,
 			ASCII: states.Done.Label,
 			Color: states.Done.Color,
+		},
+		Unknown: sessionmgr.IconStyle{
+			Icon:  states.Unknown.Icon,
+			ASCII: states.Unknown.Label,
+			Color: states.Unknown.Color,
 		},
 	}
 }
