@@ -54,6 +54,22 @@ type Item struct {
 	AgentSource      string
 }
 
+// ActionTarget returns the multiplexer-actionable identifier for an item: the
+// session target (or display name) for sessions, and the pane id for agents.
+// tmux session items set Target == Name; herdr workspace items set Target to
+// the workspace id (stable) and Name to the display label.
+func (i Item) ActionTarget() string {
+	if i.Target != "" {
+		return i.Target
+	}
+	switch i.Kind {
+	case KindAgent:
+		return i.PaneID
+	default:
+		return i.Name
+	}
+}
+
 func (i Item) Key() string {
 	switch i.Kind {
 	case KindSession:
