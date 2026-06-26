@@ -572,3 +572,59 @@ func TestReleaseAgentEmptyExistingSourceSucceeds(t *testing.T) {
 		t.Fatal("release with empty existing source applied = false, want true")
 	}
 }
+
+func TestReleaseAgentRejectsEmptySourceAgainstSetSource(t *testing.T) {
+	ft := NewFakeTmux()
+	ft.Set("%5", "@seshagy_agent_seq", "5")
+	ft.Set("%5", "@seshagy_agent_state", "blocked")
+	ft.Set("%5", "@seshagy_agent_source", "seshagy:opencode")
+	SetTmuxHooksForTest(t, ft.output, ft.run)
+	ctx := context.Background()
+
+	// Unidentified release (Source="") against a source-tagged pane at a
+	// higher seq — must NOT clear. Regression for the cross-source guard.
+	applied, err := ReleaseAgent(ctx, AgentRelease{
+		Pane:   "%5",
+		Source: "",
+		Seq:    10,
+	})
+	if err != nil {
+		t.Fatalf("ReleaseAgent() error = %v", err)
+	}
+	if applied {
+		t.Fatal("unidentified release applied = true, want false (refused)")
+	}
+	if got := ft.Get("%5", "@seshagy_agent_state"); got != "blocked" {
+		t.Errorf("@seshagy_agent_state = %q, want blocked (not cleared)", got)
+	}
+	if got := ft.Get("%5", "@seshagy_agent_source"); got != "seshagy:opencode" {
+		t.Errorf("@seshagy_agent_source = %q, want seshagy:opencode", got)
+	}
+}
+
+func TestReportAgentClearsReleasedAt(t *testing.T) {
+	ft := NewFakeTmux()
+	ft.Set("%5", "@seshagy_agent_seq", "5")
+	ft.Set("%5", "@seshagy_agent_released_at", "2026-06-26T20:00:00Z")
+	SetTmuxHooksForTest(t, ft.output, ft.run)
+	ctx := context.Background()
+
+	// A fresh report that passes the seq guard must clear the release tombstone
+	// so manifest classification is no longer suppressed for this pane.
+	applied, err := ReportAgent(ctx, AgentReport{
+		Pane:   "%5",
+		Name:   "codex",
+		State:  AgentWorking,
+		Source: "seshagy:codex",
+		Seq:    10,
+	})
+	if err != nil {
+		t.Fatalf("ReportAgent() error = %v", err)
+	}
+	if !applied {
+		t.Fatal("ReportAgent() applied = false, want true")
+	}
+	if got := ft.Get("%5", "@seshagy_agent_released_at"); got != "" {
+		t.Errorf("@seshagy_agent_released_at = %q, want empty (cleared by fresh report)", got)
+	}
+}

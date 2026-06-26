@@ -121,6 +121,9 @@ func ReportAgent(ctx context.Context, opts AgentReport) (bool, error) {
 		if parseErr == nil && opts.Seq <= existingSeq {
 			return nil // stale — strict > guard
 		}
+		// Clear any prior release tombstone so a fresh report in a reused pane
+		// is not manifest-suppressed by the previous release's 10s window.
+		_ = unsetPaneOption(ctx, opts.Pane, "@seshagy_agent_released_at")
 		// Write seq FIRST so a crash leaves the highest seq, not a stale lower one.
 		if err := setPaneOption(
 			ctx,
@@ -210,13 +213,12 @@ func ReleaseAgent(ctx context.Context, opts AgentRelease) (bool, error) {
 		// Cross-source guard: reject if the releasing source differs from the
 		// pane's recorded source. Prevents a delayed release from agent A
 		// (e.g. opencode) from clearing agent B's current state in a reused
-		// pane. When the existing source is empty (never set) or matches the
-		// releaser, proceed as normal.
-		if opts.Source != "" {
-			existingSource, _ := showPaneOption(ctx, opts.Pane, "@seshagy_agent_source")
-			if existingSource != "" && existingSource != opts.Source {
-				return nil // cross-source release — refuse to clear
-			}
+		// pane. An unidentified releaser (Source="") is also rejected when
+		// the pane has a recorded source. When the existing source is empty
+		// (never set) or matches the releaser, proceed as normal.
+		existingSource, _ := showPaneOption(ctx, opts.Pane, "@seshagy_agent_source")
+		if existingSource != "" && existingSource != opts.Source {
+			return nil // cross-source / unidentified release — refuse to clear
 		}
 		// Tombstone: unset all state-bearing options except @seshagy_agent_seq.
 		for _, opt := range agentPaneOptions() {
