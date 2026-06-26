@@ -47,7 +47,7 @@ Add focused table-driven tests near the package being changed. Use names like `T
 
 ## Agent-state invariants
 
-- **Namespace:** only `@seshagy_agent_*`. Never `@agent_*` (herdr) — both coexist.
+- **Namespace:** only `@seshagy_agent_*` under tmux. Never `@agent_*` — that namespace belongs to the separate `gentle-agent-state` / `tmux-agent-state` project, NOT to herdr. (herdr exposes agent state via its own CLI/socket API and the `agent_status` field, not tmux user options.) Under herdr (`HERDR_ENV=1`), seshagy writes NO agent state at all — herdr owns detection; the `@seshagy_agent_*` writes, capture-pane manifest backstop, and state-reporting hooks are all tmux-only and suppress under herdr.
 - **Stale-can't-resurrect:** every state write goes through `@seshagy_agent_seq` strict-`>` + flock + tombstone release. `MarkAgentVisited` does NOT advance the seq.
 - **No pane scraping except the capture-pane manifest backstop** (the `manifest_fallback` sanctioned exception, default-on, hot-updated from herdr).
 - **Authority model:** lifecycle agents (pi/opencode) suppress manifest when hooks are fresh; partial-hook agents (codex/claude/droid) and hook-less agents always run the manifest classifier. Manifest overwrites state only on a positive rule match; no-match preserves the existing state.

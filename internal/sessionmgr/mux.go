@@ -65,7 +65,7 @@ func HerdrTerms() Terms {
 
 // NoneTerms is the neutral vocabulary used when no multiplexer is detected.
 func NoneTerms() Terms {
-	return TmuxTerms() // neutral fallback; Phase 5 will differentiate "outside tmux/herdr"
+	return TmuxTerms() // neutral fallback; the "outside tmux/herdr" footer is handled in tui/view.go
 }
 
 // Multiplexer abstracts the terminal multiplexer seshagy drives. Both the tmux

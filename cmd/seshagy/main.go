@@ -40,7 +40,7 @@ func run(args []string) error {
 	defer cancel()
 	switch args[0] {
 	case "--help", "-h", "help":
-		fmt.Print(helpText(sessionmgr.Detect().Terms()))
+		fmt.Print(helpText())
 		return nil
 	case "--version", "version":
 		rest, jsonOutput := stripJSONFlag(args[1:])
@@ -172,6 +172,8 @@ func runReportAgent(ctx context.Context, mux sessionmgr.Multiplexer, args []stri
 	}
 	if applied {
 		fmt.Printf("reported %s %s on %s\n", *agent, *state, resolved)
+	} else if mux.Kind() == sessionmgr.BackendHerdr {
+		fmt.Printf("report ignored (herdr owns agent state)\n")
 	} else {
 		fmt.Printf("stale report ignored (seq %d)\n", *seq)
 	}
@@ -211,6 +213,8 @@ func runReleaseAgent(ctx context.Context, mux sessionmgr.Multiplexer, args []str
 	}
 	if applied {
 		fmt.Printf("released agent state on %s\n", resolved)
+	} else if mux.Kind() == sessionmgr.BackendHerdr {
+		fmt.Printf("release ignored (herdr owns agent state)\n")
 	} else {
 		fmt.Printf("stale release ignored (seq %d)\n", *seq)
 	}
@@ -375,7 +379,7 @@ func deleteItem(
 	}
 }
 
-func helpText(terms sessionmgr.Terms) string {
+func helpText() string {
 	return `seshagy — minimal terminal session manager
 
 Usage:

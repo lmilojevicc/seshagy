@@ -346,6 +346,8 @@ func TestSharedHookScriptContent(t *testing.T) {
 		`--pane "$TMUX_PANE"`,
 		`--report-agent`,
 		`--release-agent`,
+		// herdr owns agent state; hook is a no-op under herdr.
+		`[ "${HERDR_ENV:-}" = "1" ] && exit 0`,
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("shared script missing %q", want)
@@ -393,6 +395,8 @@ func TestSeshagyOpenCodePluginContent(t *testing.T) {
 		// BigInt microseconds seq (fix #7).
 		"BigInt",
 		"1000n",
+		// herdr owns agent state; plugin is a no-op under herdr.
+		`HERDR_ENV === "1"`,
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("opencode plugin missing %q", want)
@@ -400,6 +404,26 @@ func TestSeshagyOpenCodePluginContent(t *testing.T) {
 	}
 	if strings.Contains(s, "/Users/milo") {
 		t.Errorf("opencode plugin contains hardcoded /Users/milo path")
+	}
+}
+
+func TestSeshagyPiExtensionContent(t *testing.T) {
+	s := piExtensionSource
+	for _, want := range []string{
+		"--report-agent",
+		"--release-agent",
+		"seshagy:pi",
+		"session_start",
+		"session_shutdown",
+		// herdr owns agent state; extension is a no-op under herdr.
+		`HERDR_ENV === "1"`,
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("pi extension missing %q", want)
+		}
+	}
+	if strings.Contains(s, "/Users/milo") {
+		t.Errorf("pi extension contains hardcoded /Users/milo path")
 	}
 }
 

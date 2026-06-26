@@ -10,10 +10,16 @@ Run one command to get a keyboard-first view where you can:
 - see coding-agent panes, their current state, and where they are running.
 
 It is intentionally tmux-native. Agent state is reported through the
-`@seshagy_agent_*` pane-option namespace (deliberately separate from herdr's
-`@agent_*` so both tools coexist). Near-instant detection comes from installed
-hook/plugin integrations; a capture-pane screen-rule backstop (hot-updated from
-[herdr](https://herdr.dev/docs/agents)) covers agents without usable hooks.
+`@seshagy_agent_*` pane-option namespace (tmux backend only). Near-instant
+detection comes from installed hook/plugin integrations; a capture-pane
+screen-rule backstop (hot-updated from [herdr](https://herdr.dev/docs/agents))
+covers agents without usable hooks.
+
+seshagy also supports [herdr](https://herdr.dev) as a multiplexer: when run
+inside herdr (`$HERDR_ENV=1`), it auto-detects herdr and speaks herdr's
+vocabulary (workspaces/tabs/panes) instead of tmux's (sessions/windows/panes).
+Under herdr, agent state is read-only from herdr's `agent_status` — seshagy
+writes no state, since herdr owns detection.
 
 ## Quick start
 
@@ -54,7 +60,9 @@ Typical first run:
 
 Required:
 
-- `tmux`
+- `tmux` **or** [herdr](https://herdr.dev) — seshagy auto-detects which
+  multiplexer it is running in (`$HERDR_ENV=1` → herdr; else `$TMUX` → tmux;
+  else no backend). All session/agent operations are available under either.
 
 Optional, but useful:
 
@@ -62,6 +70,27 @@ Optional, but useful:
 - `fd` for filesystem directory discovery
 - `yazi` for choosing a directory interactively
 - `eza` for richer directory previews
+
+## Multiplexer support
+
+seshagy supports two multiplexer backends with a shared vocabulary:
+
+| concept | tmux | herdr |
+|---|---|---|
+| project container | session | workspace |
+| layout group | window | tab |
+| terminal | pane | pane |
+
+Backend is selected automatically from the environment — there is no config
+key to set. The TUI and CLI adapt their terminology to the active backend
+(sessions/windows under tmux; workspaces/tabs under herdr).
+
+**Agent state under herdr is read-only.** herdr owns agent detection and
+exposes it via the `agent_status` field (`idle`/`working`/`blocked`/`done`/
+`unknown`). seshagy reads this directly; it does **not** call
+`herdr pane report-agent`, run the capture-pane manifest backstop, or write
+`@seshagy_agent_*` options under herdr. The state-reporting hooks (shell,
+Pi extension, OpenCode plugin) early-exit when `$HERDR_ENV=1` is set.
 
 Builds from source require Go 1.26, matching `go.mod`. Shell-hook integrations
 may use `bash` and `python3`; the OpenCode plugin runs on Bun/Node.
@@ -427,7 +456,7 @@ colors and icons there. `seshagy config show` prints the resolved config.
 
 ## Limits and expectations
 
-- tmux is required for session and agent operations.
+- a multiplexer is required for session and agent operations: tmux (`$TMUX`) or herdr (`$HERDR_ENV=1`). Without one, seshagy shows directory sources only.
 - Hook/plugin integrations report state through the `@seshagy_agent_*`
   namespace. Agents without integrations are still discovered (process name +
   descendant walk) and classified by the capture-pane screen-rule backstop when
