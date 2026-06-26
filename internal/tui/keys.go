@@ -59,10 +59,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.inputMode = modeNormal
 			m.renameInput.Blur()
 			m.renameFrom = ""
+			m.renameTarget = ""
 			m.renameSession = ""
 			m.renameKind = ""
 			if newName == "" && kind == sessionmgr.KindAgent {
-				return m, renameAgentLabelCmd(oldName, session, "")
+				return m, renameAgentCmd(m.mux, oldName, session, "")
 			}
 			if newName == "" || oldName == "" || newName == oldName {
 				m.status = "rename cancelled"
@@ -70,9 +71,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			switch kind {
 			case sessionmgr.KindSession:
-				return m, renameCmd(oldName, newName)
+				return m, renameCmd(m.mux, m.renameTarget, oldName, newName)
 			case sessionmgr.KindAgent:
-				return m, renameAgentLabelCmd(oldName, session, newName)
+				return m, renameAgentCmd(m.mux, oldName, session, newName)
 			default:
 				m.status = "rename only applies to sessions and agents"
 				return m, nil
@@ -453,7 +454,7 @@ func (m Model) activateSelected() (tea.Model, tea.Cmd) {
 	switch item.Kind {
 	case sessionmgr.KindSession:
 		m.status = "attaching " + item.Name
-		return m, attachCmd(item.Name)
+		return m, attachCmd(m.mux, item)
 	case sessionmgr.KindAgent:
 		if item.Session == "" || item.Window == "" || item.PaneID == "" {
 			m.status = "cannot focus agent (missing pane info)"
@@ -464,7 +465,7 @@ func (m Model) activateSelected() (tea.Model, tea.Cmd) {
 		// so the flip must persist first. Errors are non-fatal.
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		_, _ = sessionmgr.MarkAgentVisited(ctx, item.PaneID)
+		_, _ = m.mux.MarkAgentVisited(ctx, item.PaneID)
 		m.status = fmt.Sprintf(
 			"focusing %s on %s:%s.%s",
 			item.DisplayName(),
@@ -472,10 +473,10 @@ func (m Model) activateSelected() (tea.Model, tea.Cmd) {
 			item.Window,
 			item.Pane,
 		)
-		return m, focusAgentCmd(item.Session, item.Window, item.PaneID)
+		return m, focusAgentCmd(m.mux, item)
 	case sessionmgr.KindZoxide, sessionmgr.KindFD:
 		m.status = "creating session from " + item.Path
-		return m, createSessionCmd(item.Path)
+		return m, createSessionCmd(m.mux, item.Path)
 	default:
 		return m, nil
 	}
@@ -490,7 +491,7 @@ func (m Model) deleteSelected() (tea.Model, tea.Cmd) {
 	switch item.Kind {
 	case sessionmgr.KindSession:
 		m.status = "killing session " + item.Name
-		return m, deleteSessionCmd(item.Name)
+		return m, deleteSessionCmd(m.mux, item)
 	default:
 		m.status = "delete only applies to sessions"
 		return m, nil
@@ -529,7 +530,7 @@ func (m Model) startRename() (tea.Model, tea.Cmd) {
 func (m Model) startYazi() (tea.Model, tea.Cmd) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	inPopup, err := checkTmuxPopup(ctx)
+	inPopup, err := m.checkPopup(ctx)
 	if err != nil {
 		m.status = fmt.Sprintf("checking tmux popup: %v", err)
 		m.err = err

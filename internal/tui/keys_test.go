@@ -320,9 +320,7 @@ func TestHandleActionKeyModePrompt(t *testing.T) {
 
 func TestStartYaziBlockedInsidePopup(t *testing.T) {
 	m := newTestModel(t)
-	old := checkTmuxPopup
-	checkTmuxPopup = func(context.Context) (bool, error) { return true, nil }
-	t.Cleanup(func() { checkTmuxPopup = old })
+	m.checkPopup = func(context.Context) (bool, error) { return true, nil }
 
 	model, cmd := m.startYazi()
 	got := model.(Model)
@@ -336,9 +334,7 @@ func TestStartYaziBlockedInsidePopup(t *testing.T) {
 
 func TestStartYaziOutsidePopup(t *testing.T) {
 	m := newTestModel(t)
-	old := checkTmuxPopup
-	checkTmuxPopup = func(context.Context) (bool, error) { return false, nil }
-	t.Cleanup(func() { checkTmuxPopup = old })
+	m.checkPopup = func(context.Context) (bool, error) { return false, nil }
 
 	model, cmd := m.startYazi()
 	got := model.(Model)

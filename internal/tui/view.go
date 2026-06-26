@@ -566,7 +566,7 @@ func (m Model) renderFooter() string {
 		inputStyle = footerStatusStyle(s, input, m.err != nil)
 	}
 	statusLeft := []string{}
-	if sessionmgr.InTmux() {
+	if m.mux.InMultiplexer() {
 		statusLeft = append(statusLeft, s.success.Render("✓ tmux"))
 	} else {
 		statusLeft = append(statusLeft, s.warning.Render("outside tmux"))

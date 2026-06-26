@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"sort"
 	"strings"
 	"time"
@@ -25,6 +26,9 @@ type Model struct {
 	styles styles
 	config appconfig.Config
 
+	mux   sessionmgr.Multiplexer
+	terms sessionmgr.Terms
+
 	width  int
 	height int
 
@@ -38,6 +42,7 @@ type Model struct {
 	searchInput   textinput.Model
 	renameInput   textinput.Model
 	renameFrom    string
+	renameTarget  string
 	renameKind    sessionmgr.Kind
 	renameSession string
 	inputMode     inputMode
@@ -56,6 +61,8 @@ type Model struct {
 	cache           map[sessionmgr.SourceMode]modeCache
 	refreshGen      map[sessionmgr.SourceMode]uint64
 	inflightRefresh map[sessionmgr.SourceMode]uint64
+
+	checkPopup func(context.Context) (bool, error)
 
 	setup          setupPrompt
 	installMenu    installMenuState
@@ -99,7 +106,7 @@ type actionDoneMsg struct {
 }
 
 type createDoneMsg struct {
-	name    string
+	item    sessionmgr.Item
 	created bool
 	err     error
 }
@@ -119,10 +126,9 @@ type setupMsg struct {
 	err    error
 }
 
-var checkTmuxPopup = sessionmgr.InTmuxPopup
-
 func New() Model {
 	cfg, cfgErr := appconfig.Load()
+	mux := sessionmgr.Detect()
 	search := textinput.New()
 	search.Placeholder = "filter sessions, directories"
 	search.Prompt = "/ "
@@ -134,6 +140,8 @@ func New() Model {
 	m := Model{
 		styles:          stylesFromConfig(cfg),
 		config:          cfg,
+		mux:             mux,
+		terms:           mux.Terms(),
 		source:          cfg.DefaultSource(),
 		showPreview:     true,
 		showHelp:        true,
@@ -142,6 +150,7 @@ func New() Model {
 		cache:           make(map[sessionmgr.SourceMode]modeCache),
 		refreshGen:      make(map[sessionmgr.SourceMode]uint64),
 		inflightRefresh: make(map[sessionmgr.SourceMode]uint64),
+		checkPopup:      mux.InMultiplexerPopup,
 		setup:           setupPrompt{cursor: 1},
 		loading:         true,
 	}
@@ -163,7 +172,7 @@ func Run() error {
 
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(
-		refreshCmd(m.source, m.inflightRefresh[m.source], m.config.LoadOptions()),
+		refreshCmd(m.mux, m.source, m.inflightRefresh[m.source], m.config.LoadOptions()),
 		startupSetupCmd(m.config),
 		startupInstallMenuCmd(m.config),
 		refreshCatalogsCmd(m.config),
@@ -275,7 +284,7 @@ func (m Model) previewForSelection() tea.Cmd {
 	if !ok {
 		return nil
 	}
-	return previewCmd(item)
+	return previewCmd(m.mux, item)
 }
 
 func sortedCounts(items []sessionmgr.Item) map[sessionmgr.Kind]int {

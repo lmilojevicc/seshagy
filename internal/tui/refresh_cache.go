@@ -109,7 +109,7 @@ func (m Model) beginRefresh(source sessionmgr.SourceMode, force bool) (Model, te
 	m.refreshGen[source]++
 	gen := m.refreshGen[source]
 	m.inflightRefresh[source] = gen
-	return m, refreshCmd(source, gen, m.config.LoadOptions())
+	return m, refreshCmd(m.mux, source, gen, m.config.LoadOptions())
 }
 
 func (m Model) finishRefresh(source sessionmgr.SourceMode, gen uint64) Model {

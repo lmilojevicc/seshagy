@@ -17,7 +17,13 @@ import (
 func newTestModel(t *testing.T) Model {
 	t.Helper()
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	return New()
+	m := New()
+	// Tests mock tmux via SetTmuxHooksForTest; force the tmux backend so those
+	// seams are exercised even when tests run outside tmux.
+	m.mux = sessionmgr.NewTmuxBackend()
+	m.terms = m.mux.Terms()
+	m.checkPopup = m.mux.InMultiplexerPopup
+	return m
 }
 
 func TestViewRendersDashboardChromeAndRows(t *testing.T) {
@@ -333,7 +339,7 @@ func TestConfiguredSourceOrderAndDefault(t *testing.T) {
 func TestRefreshUsesConfiguredFDCommand(t *testing.T) {
 	m := newTestModel(t)
 	m.config.Directories.FDCommand = `printf '%s\n' /tmp/seshagy-tui-fd`
-	msg, ok := refreshCmd(sessionmgr.ModeFD, 1, m.config.LoadOptions())().(refreshMsg)
+	msg, ok := refreshCmd(sessionmgr.NewTmuxBackend(), sessionmgr.ModeFD, 1, m.config.LoadOptions())().(refreshMsg)
 	if !ok || msg.err != nil {
 		t.Fatalf("refreshCmd = %#v, ok=%v", msg, ok)
 	}
@@ -518,9 +524,7 @@ func TestTypeFirstAllowsArrowNavigationWithoutPrefix(t *testing.T) {
 
 func TestYaziBlockedInsideTmuxPopup(t *testing.T) {
 	m := newTestModel(t)
-	old := checkTmuxPopup
-	checkTmuxPopup = func(context.Context) (bool, error) { return true, nil }
-	t.Cleanup(func() { checkTmuxPopup = old })
+	m.checkPopup = func(context.Context) (bool, error) { return true, nil }
 
 	model, cmd := m.startYazi()
 	m = model.(Model)
