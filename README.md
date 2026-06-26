@@ -45,8 +45,9 @@ Typical first run:
    to install, or press `esc` to skip.
 3. Press `z` or `f` to browse project directories from `zoxide` or `fd`.
 4. Press `enter` on a directory to create/switch to a tmux session for it.
-5. Press `1`–`5` to switch sources; on the Agents source, `enter` focuses an
-   agent pane (and clears `done` → `idle`).
+5. Press `a`/`t`/`z`/`f` to switch sources (all / tmux sessions / zoxide /
+   fd directories); on the Agents source, `enter` focuses an agent pane (and
+   clears `done` → `idle`).
 6. Press `h` to reopen the install menu at any time.
 
 ## Requirements
