@@ -166,6 +166,7 @@ func (m Model) Init() tea.Cmd {
 		refreshCmd(m.source, m.inflightRefresh[m.source], m.config.LoadOptions()),
 		startupSetupCmd(m.config),
 		startupInstallMenuCmd(m.config),
+		refreshCatalogsCmd(m.config),
 		tickCmd(),
 	)
 }

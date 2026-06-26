@@ -114,7 +114,8 @@ type SetupConfig struct {
 // AGENTS.md describes manifest_fallback as opt-in; that wording predates the
 // default-on decision and will be reconciled in a future docs pass.
 type AgentsConfig struct {
-	ManifestFallback *bool `toml:"manifest_fallback,omitempty" json:"manifest_fallback,omitempty"`
+	ManifestFallback *bool  `toml:"manifest_fallback,omitempty" json:"manifest_fallback,omitempty"`
+	CatalogURL       string `toml:"catalog_url,omitempty"       json:"catalog_url,omitempty"`
 }
 
 // ManifestFallback reports whether the capture-pane manifest backstop is
@@ -124,6 +125,15 @@ func (c Config) ManifestFallback() bool {
 		return true
 	}
 	return *c.Agents.ManifestFallback
+}
+
+// CatalogURL returns the manifest catalog URL. Defaults to the herdr public
+// catalog when empty.
+func (c Config) CatalogURL() string {
+	if u := strings.TrimSpace(c.Agents.CatalogURL); u != "" {
+		return u
+	}
+	return sessionmgr.DefaultManifestCatalogURL()
 }
 
 func Default() Config {

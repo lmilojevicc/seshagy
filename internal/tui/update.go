@@ -5,6 +5,8 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/lmilojevicc/seshagy/internal/sessionmgr"
 )
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -65,6 +67,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.installMenu.statuses[msg.name] = "uninstalled"
 			}
 			m.installMenu.message = msg.name + " " + msg.action + " ok"
+		}
+		return m, nil
+	case catalogRefreshMsg:
+		if msg.err != nil {
+			m.status = "catalog refresh skipped"
+			return m, nil
+		}
+		sessionmgr.ReloadManifests()
+		updated := len(msg.result.Fetched)
+		if updated > 0 {
+			m.status = fmt.Sprintf("agent rules updated (%d)", updated)
+			m = m.invalidateAllCaches()
+			var refresh tea.Cmd
+			m, refresh = m.beginRefresh(m.source, true)
+			return m, tea.Batch(refresh, m.previewForSelection())
 		}
 		return m, nil
 	case refreshMsg:

@@ -63,6 +63,24 @@ type installResultMsg struct {
 	err    error
 }
 
+// catalogRefreshMsg carries the result of the async manifest-catalog refresh.
+type catalogRefreshMsg struct {
+	result sessionmgr.ManifestFetchResult
+	err    error
+}
+
+// refreshCatalogsCmd fetches manifest updates from the herdr catalog in the
+// background. Non-blocking: the TUI renders immediately with bundled/cached
+// manifests; when this completes the in-memory cache is reloaded.
+func refreshCatalogsCmd(cfg appconfig.Config) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		result, err := sessionmgr.FetchManifestUpdates(ctx, cfg.CatalogURL())
+		return catalogRefreshMsg{result: result, err: err}
+	}
+}
+
 func startupInstallMenuCmd(cfg appconfig.Config) tea.Cmd {
 	return func() tea.Msg {
 		return installMenuMsg{show: !cfg.Setup.InstallMenuSeen}

@@ -3,6 +3,8 @@ package sessionmgr
 import (
 	"embed"
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -36,11 +38,12 @@ var (
 )
 
 type agentManifest struct {
-	ID        string         `toml:"id"`
-	Version   string         `toml:"version"`
-	UpdatedAt string         `toml:"updated_at"`
-	Aliases   []string       `toml:"aliases"`
-	Rules     []manifestRule `toml:"rules"`
+	ID               string         `toml:"id"`
+	Version          string         `toml:"version"`
+	MinEngineVersion int            `toml:"min_engine_version"`
+	UpdatedAt        string         `toml:"updated_at"`
+	Aliases          []string       `toml:"aliases"`
+	Rules            []manifestRule `toml:"rules"`
 }
 
 type manifestRule struct {
@@ -129,12 +132,20 @@ func ensureManifestsLoaded() {
 	manifestLoaded = true
 }
 
+// buildManifestCache assembles the manifest cache from three layers with
+// precedence: local override > cached remote > bundled embed. A remote/cache
+// manifest shadows the embed only when its version is >= the embed's version
+// (equal versions = remote wins, since it's the freshest copy). Malformed
+// override/cache files are skipped so they can never poison the cache.
 func buildManifestCache() (map[string]*compiledManifest, error) {
+	cache := make(map[string]*compiledManifest)
+	versions := make(map[string]string) // agent id → version string (winner)
+
+	// Layer 1: bundled embed (offline fallback).
 	entries, err := manifestFS.ReadDir("manifests")
 	if err != nil {
 		return nil, err
 	}
-	cache := make(map[string]*compiledManifest)
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".toml") {
 			continue
@@ -143,17 +154,84 @@ func buildManifestCache() (map[string]*compiledManifest, error) {
 		if err != nil {
 			return nil, fmt.Errorf("read manifest %s: %w", entry.Name(), err)
 		}
-		var parsed agentManifest
-		if _, err := toml.Decode(string(data), &parsed); err != nil {
-			return nil, fmt.Errorf("parse manifest %s: %w", entry.Name(), err)
-		}
-		compiled, err := compileManifest(parsed)
-		if err != nil {
-			return nil, fmt.Errorf("compile manifest %s: %w", entry.Name(), err)
-		}
-		registerManifest(cache, compiled)
+		registerFromTOML(cache, versions, string(data))
 	}
+
+	// Layer 2: cached remote (from herdr catalog refresh).
+	loadManifestLayer(cache, versions, cachedManifestDir)
+	// Layer 3: local override (user edits — always wins).
+	loadManifestLayer(cache, versions, overrideManifestDir)
+
 	return cache, nil
+}
+
+// loadManifestLayer walks a filesystem dir, parsing + compiling each *.toml
+// and applying the version-guarded precedence against the current cache.
+func loadManifestLayer(
+	cache map[string]*compiledManifest,
+	versions map[string]string,
+	dirFn func() (string, error),
+) {
+	dir, err := dirFn()
+	if err != nil || dir == "" {
+		return
+	}
+	files, err := readDirToml(dir)
+	if err != nil {
+		return
+	}
+	for _, f := range files {
+		path := filepath.Join(dir, f)
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		registerFromTOML(cache, versions, string(data))
+	}
+}
+
+// registerFromTOML parses + compiles a single manifest TOML blob and, if valid,
+// registers it in the cache with version-guarded precedence.
+func registerFromTOML(
+	cache map[string]*compiledManifest,
+	versions map[string]string,
+	data string,
+) {
+	var parsed agentManifest
+	if _, err := toml.Decode(data, &parsed); err != nil {
+		return // skip malformed
+	}
+	compiled, err := compileManifest(parsed)
+	if err != nil {
+		return // skip malformed
+	}
+	id := strings.ToLower(strings.TrimSpace(compiled.agent))
+	if existing, ok := cache[id]; ok {
+		// Version guard: don't let an older override/cache downgrade a newer
+		// embed. Equal versions: the new one wins (freshest copy).
+		if compareManifestVersion(parsed.Version, versions[id]) < 0 {
+			return
+		}
+		_ = existing
+	}
+	versions[id] = parsed.Version
+	registerManifest(cache, compiled)
+}
+
+// readDirToml returns *.toml filenames in a dir (best-effort; ignores errors).
+func readDirToml(dir string) ([]string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	var files []string
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".toml") {
+			continue
+		}
+		files = append(files, entry.Name())
+	}
+	return files, nil
 }
 
 func registerManifest(cache map[string]*compiledManifest, compiled *compiledManifest) {
