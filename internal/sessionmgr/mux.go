@@ -27,6 +27,8 @@ type Terms struct {
 	WindowTitle   string
 	PaneNoun      string
 	PanePlural    string
+	KillVerb      string // present-tense destroy verb ("killing" / "closing")
+	KillVerbPast  string // past-tense destroy verb ("killed" / "closed")
 }
 
 func TmuxTerms() Terms {
@@ -40,6 +42,8 @@ func TmuxTerms() Terms {
 		WindowTitle:   "Window",
 		PaneNoun:      "pane",
 		PanePlural:    "panes",
+		KillVerb:      "killing",
+		KillVerbPast:  "killed",
 	}
 }
 
@@ -54,6 +58,8 @@ func HerdrTerms() Terms {
 		WindowTitle:   "Tab",
 		PaneNoun:      "pane",
 		PanePlural:    "panes",
+		KillVerb:      "closing",
+		KillVerbPast:  "closed",
 	}
 }
 

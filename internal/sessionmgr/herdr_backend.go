@@ -216,7 +216,7 @@ func (herdrBackend) ListAgents(
 			Window:           p.TabID,
 			Pane:             p.PaneID,
 			Path:             path,
-			Location:         fmt.Sprintf("%s:%s.%s", p.WorkspaceID, p.TabID, p.PaneID),
+			Location:         p.PaneID,
 		})
 	}
 	// Do NOT apply local aliases under herdr — herdr labels are authoritative.

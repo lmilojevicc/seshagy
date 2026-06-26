@@ -76,7 +76,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			case sessionmgr.KindAgent:
 				return m, renameAgentCmd(m.mux, oldName, session, newName)
 			default:
-				m.status = "rename only applies to sessions and agents"
+				m.status = "rename only applies to " + m.terms.SessionPlural + " and agents"
 				return m, nil
 			}
 		case "ctrl+c":
@@ -139,11 +139,11 @@ func (m Model) handleActionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.agentsCurrentOnly = !m.agentsCurrentOnly
 		switch {
 		case m.agentsCurrentOnly && m.currentSession == "":
-			m.status = "agents: not in a tmux session"
+			m.status = "agents: not in a " + m.terms.BackendName + " " + m.terms.SessionNoun
 		case m.agentsCurrentOnly:
 			m.status = "agents: " + m.currentSession
 		default:
-			m.status = "agents: all sessions"
+			m.status = "agents: all " + m.terms.SessionPlural
 		}
 		m.clampCursor()
 		return m, m.previewForSelection()
@@ -439,7 +439,7 @@ func (m Model) switchSource(source sessionmgr.SourceMode) (tea.Model, tea.Cmd) {
 	} else {
 		m.items = nil
 		m.loading = true
-		m.status = "loading " + source.Names().List
+		m.status = "loading " + source.DisplayNames(m.terms).List
 	}
 	var refresh tea.Cmd
 	m, refresh = m.beginRefresh(source, false)
@@ -476,7 +476,7 @@ func (m Model) activateSelected() (tea.Model, tea.Cmd) {
 		)
 		return m, focusAgentCmd(m.mux, item)
 	case sessionmgr.KindZoxide, sessionmgr.KindFD:
-		m.status = "creating session from " + item.Path
+		m.status = "creating " + m.terms.SessionNoun + " from " + item.Path
 		return m, createSessionCmd(m.mux, item.Path)
 	default:
 		return m, nil
@@ -491,10 +491,10 @@ func (m Model) deleteSelected() (tea.Model, tea.Cmd) {
 	}
 	switch item.Kind {
 	case sessionmgr.KindSession:
-		m.status = "killing session " + item.Name
+		m.status = m.terms.KillVerb + " " + m.terms.SessionNoun + " " + item.Name
 		return m, deleteSessionCmd(m.mux, item)
 	default:
-		m.status = "delete only applies to sessions"
+		m.status = "delete only applies to " + m.terms.SessionPlural
 		return m, nil
 	}
 }
@@ -524,7 +524,7 @@ func (m Model) startRename() (tea.Model, tea.Cmd) {
 		m.status = "renaming agent " + item.AgentName
 		return m, textinput.Blink
 	default:
-		m.status = "rename only applies to sessions and agents"
+		m.status = "rename only applies to " + m.terms.SessionPlural + " and agents"
 		return m, nil
 	}
 }
@@ -534,12 +534,12 @@ func (m Model) startYazi() (tea.Model, tea.Cmd) {
 	defer cancel()
 	inPopup, err := m.checkPopup(ctx)
 	if err != nil {
-		m.status = fmt.Sprintf("checking tmux popup: %v", err)
+		m.status = fmt.Sprintf("checking %s popup: %v", m.terms.BackendName, err)
 		m.err = err
 		return m, nil
 	}
 	if inPopup {
-		err := fmt.Errorf("cannot open yazi inside a tmux popup")
+		err := fmt.Errorf("cannot open yazi inside a %s popup", m.terms.BackendName)
 		m.status = err.Error()
 		m.err = err
 		return m, nil

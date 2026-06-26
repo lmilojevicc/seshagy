@@ -161,7 +161,9 @@ func deleteSessionCmd(mux sessionmgr.Multiplexer, item sessionmgr.Item) tea.Cmd 
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		err := mux.KillSession(ctx, item.ActionTarget())
-		return actionDoneMsg{status: "killed session " + item.Name, err: err}
+		verbPast := mux.Terms().KillVerbPast
+		noun := mux.Terms().SessionNoun
+		return actionDoneMsg{status: verbPast + " " + noun + " " + item.Name, err: err}
 	}
 }
 

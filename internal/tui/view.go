@@ -249,7 +249,7 @@ func (m Model) sourceTabs() []sourceTab {
 	for i, mode := range order {
 		tabs = append(tabs, sourceTab{
 			key:  fmt.Sprintf("%d", i+1),
-			name: mode.Names().Tab,
+			name: mode.DisplayNames(m.terms).Tab,
 			mode: mode,
 		})
 	}
@@ -287,7 +287,7 @@ func (m Model) renderListPane(width, height int) string {
 	// Count the visible (filtered) items so the All-tab breakdown stays
 	// consistent with the leading total when a filter is active.
 	counts := sortedCounts(items)
-	titleName := m.source.Names().Title
+	titleName := m.source.DisplayNames(m.terms).Title
 	title := fmt.Sprintf("%s (%d", titleName, len(items))
 	if m.query != "" {
 		title += fmt.Sprintf("/%d match", len(m.items))
@@ -298,9 +298,10 @@ func (m Model) renderListPane(width, height int) string {
 	title += ")"
 	if m.source == sessionmgr.ModeAll {
 		title = fmt.Sprintf(
-			"All (%d · %d sessions · %d agents · %d dirs)",
+			"All (%d · %d %s · %d agents · %d dirs)",
 			len(items),
 			counts[sessionmgr.KindSession],
+			m.terms.SessionPlural,
 			counts[sessionmgr.KindAgent],
 			counts[sessionmgr.KindZoxide]+counts[sessionmgr.KindFD],
 		)
@@ -309,7 +310,7 @@ func (m Model) renderListPane(width, height int) string {
 		scope := "all"
 		if m.agentsCurrentOnly {
 			if m.currentSession == "" {
-				scope = "current session"
+				scope = "current " + m.terms.SessionNoun
 			} else {
 				scope = m.currentSession
 			}
@@ -463,11 +464,11 @@ func (m Model) detailLines(item sessionmgr.Item) []string {
 		attached := renderTmuxStateDetail(s, item.Attached, icons)
 		return []string{
 			s.title.Render(item.Name),
-			s.muted.Render("tmux session"),
+			s.muted.Render(m.terms.BackendName + " " + m.terms.SessionNoun),
 			"",
 			kv(s, "path", sessionmgr.ContractHome(item.Path)),
 			kv(s, "attached", attached),
-			kv(s, "windows", fmt.Sprint(item.Windows)),
+			kv(s, m.terms.WindowPlural, fmt.Sprint(item.Windows)),
 			kv(s, "activity", ago(item.Activity)),
 			kv(s, "created", ago(item.Created)),
 		}
@@ -477,7 +478,7 @@ func (m Model) detailLines(item sessionmgr.Item) []string {
 			s.muted.Render(string(item.Kind) + " directory"),
 			"",
 			kv(s, "path", item.Path),
-			kv(s, "enter", "create/switch tmux session"),
+			kv(s, "enter", "create/switch "+m.terms.BackendName+" "+m.terms.SessionNoun),
 		}
 	case sessionmgr.KindAgent:
 		icons := m.config.IconSet()
@@ -494,7 +495,7 @@ func (m Model) detailLines(item sessionmgr.Item) []string {
 			"",
 			kv(s, "state", stateLabel),
 			kv(s, "location", item.Location),
-			kv(s, "session", item.Session),
+			kv(s, m.terms.SessionNoun, item.Session),
 			kv(s, "path", sessionmgr.ContractHome(item.Path)),
 		}
 	default:
@@ -521,7 +522,7 @@ func (m Model) renderPreviewPane(width, height int) string {
 	// overflows, show the most recent lines so the preview starts from the
 	// bottom of the tmux pane. Directory listings stay top-down.
 	start := 0
-	if item, ok := m.selectedItem(); ok && isTmuxCaptureKind(item.Kind) &&
+	if item, ok := m.selectedItem(); ok && isTailPreviewKind(item.Kind) &&
 		len(previewLines) > contentH {
 		start = len(previewLines) - contentH
 	}
@@ -536,9 +537,10 @@ func (m Model) renderPreviewPane(width, height int) string {
 		Render(trimHeight(strings.Join(lines, "\n"), innerH))
 }
 
-// isTmuxCaptureKind reports whether a kind's preview is sourced from tmux
-// capture-pane (bottom-anchored) rather than a top-down directory listing.
-func isTmuxCaptureKind(kind sessionmgr.Kind) bool {
+// isTailPreviewKind reports whether a kind's preview is sourced from a
+// multiplexer capture (tmux capture-pane or herdr pane read), both of which
+// are bottom-anchored, rather than a top-down directory listing.
+func isTailPreviewKind(kind sessionmgr.Kind) bool {
 	return kind == sessionmgr.KindSession || kind == sessionmgr.KindAgent
 }
 
@@ -567,11 +569,11 @@ func (m Model) renderFooter() string {
 	}
 	statusLeft := []string{}
 	if m.mux.InMultiplexer() {
-		statusLeft = append(statusLeft, s.success.Render("✓ tmux"))
+		statusLeft = append(statusLeft, s.success.Render("✓ "+m.terms.BackendName))
 	} else {
-		statusLeft = append(statusLeft, s.warning.Render("outside tmux"))
+		statusLeft = append(statusLeft, s.warning.Render("outside tmux/herdr"))
 	}
-	statusLeft = append(statusLeft, s.info.Render(m.source.Names().List))
+	statusLeft = append(statusLeft, s.info.Render(m.source.DisplayNames(m.terms).List))
 	if m.config.TypeFirst.Enabled {
 		statusLeft = append(statusLeft, s.emphasis.Render("type-first"))
 		if m.prefixArmed {
@@ -643,12 +645,13 @@ func isWarningStatus(status string) bool {
 		"input mode change cancelled",
 		"rename cancelled",
 		"yazi closed without a directory",
-		"nothing selected",
-		"delete only applies to sessions",
-		"rename only applies to sessions and agents":
+		"nothing selected":
 		return true
 	default:
-		return false
+		// These statuses are parameterized by backend terminology (session vs
+		// workspace); match on prefix so they classify under any backend.
+		return strings.HasPrefix(status, "delete only applies to ") ||
+			strings.HasPrefix(status, "rename only applies to ")
 	}
 }
 

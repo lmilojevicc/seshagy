@@ -40,7 +40,7 @@ func run(args []string) error {
 	defer cancel()
 	switch args[0] {
 	case "--help", "-h", "help":
-		fmt.Print(helpText())
+		fmt.Print(helpText(sessionmgr.Detect().Terms()))
 		return nil
 	case "--version", "version":
 		rest, jsonOutput := stripJSONFlag(args[1:])
@@ -375,13 +375,13 @@ func deleteItem(
 	}
 }
 
-func helpText() string {
-	return `seshagy — minimal tmux session manager
+func helpText(terms sessionmgr.Terms) string {
+	return `seshagy — minimal terminal session manager
 
 Usage:
   seshagy                         open the Bubble Tea dashboard
   seshagy --get-all [--json]      print sessions, zoxide dirs, fd dirs
-  seshagy --get-sessions [--json] print tmux sessions
+  seshagy --get-sessions [--json] print tmux sessions / herdr workspaces
   seshagy --get-zoxide [--json]   print zoxide directories
   seshagy --get-fd [--json]       print fd directories
   seshagy --get-agents [--json]   print agent panes (all sessions)
@@ -399,7 +399,8 @@ Scripting:
   Responses include schema_version and ok; errors also print JSON on stdout.
   Human text output is unchanged when --json is omitted.
   seshagy --report-agent --pane %N --state <state> --source <src> --seq <n>
-                                  report agent state to a tmux pane
+                                  report agent state to a tmux pane (tmux only;
+                                  no-op under herdr since herdr owns state)
                                   (--cwd <dir> may replace --pane; resolved by
                                   working directory when unique)
   seshagy --release-agent --pane %N --source <src> --seq <n>

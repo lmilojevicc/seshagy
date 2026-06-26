@@ -107,14 +107,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.created {
 			verb = "created"
 		}
-		m.status = fmt.Sprintf("%s session %s", verb, msg.item.Name)
+		m.status = fmt.Sprintf("%s %s %s", verb, m.terms.SessionNoun, msg.item.Name)
 		return m, attachCmd(m.mux, msg.item)
 	case attachDoneMsg:
 		if msg.err != nil {
 			m.status = msg.err.Error()
 			m.err = msg.err
 		} else {
-			m.status = "returned from tmux"
+			m.status = "returned from " + m.terms.BackendName
 		}
 		m = m.invalidateAllCaches()
 		var refresh tea.Cmd

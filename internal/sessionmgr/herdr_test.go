@@ -297,7 +297,7 @@ func TestHerdrBackendListAgents(t *testing.T) {
 		items[0].PaneID != "w1:p1" || items[0].Path != "/proj/src" {
 		t.Fatalf("items[0] fields = %+v", items[0])
 	}
-	if items[0].Location != "w1:w1:t1.w1:p1" {
+	if items[0].Location != "w1:p1" {
 		t.Fatalf("Location = %q", items[0].Location)
 	}
 	// p3: agent=codex, no display_agent → Name falls back to agent

@@ -451,3 +451,47 @@ func TestRenameSessionFlowSetsAndUsesTarget(t *testing.T) {
 		t.Fatalf("rename-session newName = %q, want newname", renamedNew)
 	}
 }
+
+// TestAgentsScopeStatusTmuxByteIdentical is the regression guard for the 'o'
+// toggle agents-scope status under tmux terms.
+func TestAgentsScopeStatusTmuxByteIdentical(t *testing.T) {
+	m := newTestModel(t)
+	m.source = sessionmgr.ModeAgents
+
+	// Not in a session → toggle to current-only → "agents: not in a tmux session"
+	m.agentsCurrentOnly = false
+	m.currentSession = ""
+	model, _ := m.handleActionKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("o")})
+	m = model.(Model)
+	if m.status != "agents: not in a tmux session" {
+		t.Fatalf("status = %q, want \"agents: not in a tmux session\"", m.status)
+	}
+
+	// Toggle to all → "agents: all sessions"
+	model, _ = m.handleActionKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("o")})
+	m = model.(Model)
+	if m.status != "agents: all sessions" {
+		t.Fatalf("status = %q, want \"agents: all sessions\"", m.status)
+	}
+}
+
+// TestAgentsScopeStatusHerdrTerms verifies herdr vocabulary in agents scope.
+func TestAgentsScopeStatusHerdrTerms(t *testing.T) {
+	m := newTestModel(t)
+	m.terms = sessionmgr.HerdrTerms()
+	m.source = sessionmgr.ModeAgents
+
+	m.agentsCurrentOnly = false
+	m.currentSession = ""
+	model, _ := m.handleActionKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("o")})
+	m = model.(Model)
+	if m.status != "agents: not in a herdr workspace" {
+		t.Fatalf("status = %q, want \"agents: not in a herdr workspace\"", m.status)
+	}
+
+	model, _ = m.handleActionKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("o")})
+	m = model.(Model)
+	if m.status != "agents: all workspaces" {
+		t.Fatalf("status = %q, want \"agents: all workspaces\"", m.status)
+	}
+}
