@@ -110,6 +110,10 @@ func previewCmd(item sessionmgr.Item) tea.Cmd {
 		switch item.Kind {
 		case sessionmgr.KindSession:
 			preview, err = sessionmgr.CaptureSession(ctx, item.Name, 160)
+		case sessionmgr.KindAgent:
+			if item.PaneID != "" {
+				preview, err = sessionmgr.CaptureAgentPane(ctx, item.PaneID, 160)
+			}
 		case sessionmgr.KindZoxide, sessionmgr.KindFD:
 			preview, err = sessionmgr.ListDirectoryPreview(ctx, item.Path, 160)
 		}

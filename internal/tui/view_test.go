@@ -872,6 +872,53 @@ func TestFooterWarningStatusesUseWarningStyle(t *testing.T) {
 	}
 }
 
+func TestRenderPreviewPaneBottomAnchoredForTmuxCaptureKinds(t *testing.T) {
+	// Build content with more lines than fit so overflow clipping is exercised.
+	var contentLines []string
+	for i := 0; i < 10; i++ {
+		contentLines = append(contentLines, fmt.Sprintf("line%02d", i))
+	}
+	content := strings.Join(contentLines, "\n")
+
+	for _, tt := range []struct {
+		name      string
+		kind      sessionmgr.Kind
+		wantFirst bool
+		wantLast  bool
+	}{
+		{name: "agent bottom-anchored", kind: sessionmgr.KindAgent, wantFirst: false, wantLast: true},
+		{name: "session bottom-anchored", kind: sessionmgr.KindSession, wantFirst: false, wantLast: true},
+		{name: "fd top-down", kind: sessionmgr.KindFD, wantFirst: true, wantLast: false},
+		{name: "zoxide top-down", kind: sessionmgr.KindZoxide, wantFirst: true, wantLast: false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			m := newTestModel(t)
+			m.items = []sessionmgr.Item{{
+				Kind:     tt.kind,
+				Name:     "demo",
+				PaneID:   "%1",
+				Path:     "/tmp/demo",
+				Activity: time.Now(),
+				Created:  time.Now(),
+			}}
+			m.preview = content
+			out := sessionmgr.StripANSI(m.renderPreviewPane(60, 8))
+			if tt.wantLast && !strings.Contains(out, "line09") {
+				t.Fatalf("%s: preview should contain last line\n%s", tt.name, out)
+			}
+			if tt.wantLast && strings.Contains(out, "line00") {
+				t.Fatalf("%s: preview should NOT contain first (clipped) line\n%s", tt.name, out)
+			}
+			if tt.wantFirst && !strings.Contains(out, "line00") {
+				t.Fatalf("%s: preview should contain first line\n%s", tt.name, out)
+			}
+			if tt.wantFirst && strings.Contains(out, "line09") {
+				t.Fatalf("%s: preview should NOT contain last (clipped) line\n%s", tt.name, out)
+			}
+		})
+	}
+}
+
 func keyMsg(s string) tea.KeyMsg {
 	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}
 }

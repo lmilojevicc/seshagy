@@ -517,7 +517,15 @@ func (m Model) renderPreviewPane(width, height int) string {
 	lines := []string{s.title.Render(clampText(title, innerW)), ""}
 	contentH := max(1, innerH-len(lines))
 	previewLines := strings.Split(content, "\n")
-	for i := 0; i < contentH && i < len(previewLines); i++ {
+	// tmux-captured panes (sessions, agents) are bottom-anchored: when content
+	// overflows, show the most recent lines so the preview starts from the
+	// bottom of the tmux pane. Directory listings stay top-down.
+	start := 0
+	if item, ok := m.selectedItem(); ok && isTmuxCaptureKind(item.Kind) &&
+		len(previewLines) > contentH {
+		start = len(previewLines) - contentH
+	}
+	for i := start; i-start < contentH && i < len(previewLines); i++ {
 		lines = append(lines, clampText(previewLines[i], innerW))
 	}
 	for len(lines) < innerH {
@@ -526,6 +534,12 @@ func (m Model) renderPreviewPane(width, height int) string {
 	return s.pane.Width(width - 2).
 		Height(height - 2).
 		Render(trimHeight(strings.Join(lines, "\n"), innerH))
+}
+
+// isTmuxCaptureKind reports whether a kind's preview is sourced from tmux
+// capture-pane (bottom-anchored) rather than a top-down directory listing.
+func isTmuxCaptureKind(kind sessionmgr.Kind) bool {
+	return kind == sessionmgr.KindSession || kind == sessionmgr.KindAgent
 }
 
 func (m Model) renderFooter() string {
