@@ -8,22 +8,19 @@ import (
 	"testing"
 )
 
-func installModeAllStrictFakeTmux(t *testing.T, sessionLine, agentLine string) {
+func installModeAllStrictFakeTmux(t *testing.T, sessionLine string) {
 	t.Helper()
 	f := NewFakeTmux()
 	NewStrictFakeTmux(t, f).
 		AllowPaneOptions().
 		AllowOutput(MatchListSessions).
-		AllowOutput(MatchListPanesAgents).
+		AllowOutput(MatchListPanes).
 		AllowOutput(func(args []string) bool {
 			return len(args) >= 3 && args[0] == "display-message" && args[1] == "-p" &&
 				args[2] == "#S"
 		}).
 		HandleOutput(MatchListSessions, func(_ context.Context, _ ...string) ([]byte, error) {
 			return []byte(sessionLine), nil
-		}).
-		HandleOutput(MatchListPanesAgents, func(_ context.Context, _ ...string) ([]byte, error) {
-			return []byte(agentLine + "\n"), nil
 		}).
 		HandleOutput(func(args []string) bool {
 			return len(args) >= 3 && args[0] == "display-message" && args[1] == "-p" &&
@@ -52,10 +49,8 @@ func installBrokenZoxideOnPath(t *testing.T) {
 }
 
 func TestLoadWithOptionsModeAllPartialWhenFDFails(t *testing.T) {
-	const pane = "%1"
 	sessionLine := "dev\x1f100\x1f120\x1f/tmp/dev\x1f1\x1f2"
-	agentLine := strings.Join(agentExplainFields(pane, map[int]string{1: "dev"}), paneSep)
-	installModeAllStrictFakeTmux(t, sessionLine, agentLine)
+	installModeAllStrictFakeTmux(t, sessionLine)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -74,16 +69,14 @@ func TestLoadWithOptionsModeAllPartialWhenFDFails(t *testing.T) {
 	for _, item := range result.Items {
 		gotCounts[item.Kind]++
 	}
-	if gotCounts[KindSession] != 1 || gotCounts[KindAgent] != 1 {
-		t.Fatalf("items = %v, want one session and one agent", gotCounts)
+	if gotCounts[KindSession] != 1 {
+		t.Fatalf("items = %v, want one session", gotCounts)
 	}
 }
 
 func TestLoadWithOptionsModeAllPartialWhenZoxideFails(t *testing.T) {
-	const pane = "%2"
 	sessionLine := "dev\x1f100\x1f120\x1f/tmp/dev\x1f1\x1f2"
-	agentLine := strings.Join(agentExplainFields(pane, map[int]string{1: "dev"}), paneSep)
-	installModeAllStrictFakeTmux(t, sessionLine, agentLine)
+	installModeAllStrictFakeTmux(t, sessionLine)
 	installBrokenZoxideOnPath(t)
 	fdDir := t.TempDir()
 
@@ -102,8 +95,8 @@ func TestLoadWithOptionsModeAllPartialWhenZoxideFails(t *testing.T) {
 	for _, item := range result.Items {
 		gotCounts[item.Kind]++
 	}
-	if gotCounts[KindSession] != 1 || gotCounts[KindAgent] != 1 || gotCounts[KindFD] != 1 {
-		t.Fatalf("items = %v, want session, agent, and fd", gotCounts)
+	if gotCounts[KindSession] != 1 || gotCounts[KindFD] != 1 {
+		t.Fatalf("items = %v, want session and fd", gotCounts)
 	}
 }
 
@@ -121,11 +114,9 @@ func TestLoadWithOptionsModeFDFailsWithCanceledContext(t *testing.T) {
 }
 
 func TestLoadWithOptionsModeDispatch(t *testing.T) {
-	const pane = "%1"
 	sessionLine := "dev\x1f100\x1f120\x1f/tmp/dev\x1f1\x1f2"
-	agentLine := strings.Join(agentExplainFields(pane, map[int]string{1: "dev"}), paneSep)
 	fdDir := t.TempDir()
-	installModeAllStrictFakeTmux(t, sessionLine, agentLine)
+	installModeAllStrictFakeTmux(t, sessionLine)
 
 	ctx := context.Background()
 	fdOpts := LoadOptions{FDCommand: "printf '%s\\n' " + fdDir}
@@ -147,28 +138,17 @@ func TestLoadWithOptionsModeDispatch(t *testing.T) {
 			wantCounts: map[Kind]int{KindSession: 1},
 		},
 		{
-			name:       "agents",
-			mode:       ModeAgents,
-			wantCounts: map[Kind]int{KindAgent: 1},
-		},
-		{
-			name:       "current agents",
-			mode:       ModeCurrentAgents,
-			wantCounts: map[Kind]int{KindAgent: 1},
-		},
-		{
 			name:       "fd",
 			mode:       ModeFD,
 			opts:       fdOpts,
 			wantCounts: map[Kind]int{KindFD: 1},
 		},
 		{
-			name: "all merges sessions agents and fd",
+			name: "all merges sessions and fd",
 			mode: ModeAll,
 			opts: fdOpts,
 			wantCounts: map[Kind]int{
 				KindSession: 1,
-				KindAgent:   1,
 				KindFD:      1,
 			},
 		},

@@ -248,65 +248,44 @@ func TestAttachOrSwitchCommandUsesTmuxContext(t *testing.T) {
 	}
 }
 
+func TestFocusAgentCommandSwitchesClientInTmux(t *testing.T) {
+	t.Setenv("TMUX", "/tmp/tmux-123/default,1,0")
+	cmd := FocusAgentCommand("work", "1", "%5")
+	if len(cmd.Args) < 3 || cmd.Args[0] != "sh" || cmd.Args[1] != "-c" {
+		t.Fatalf("command = %#v, want sh -c", cmd.Args)
+	}
+	script := cmd.Args[2]
+	for _, want := range []string{
+		"select-window -t 'work:1'",
+		"select-pane -t '%5'",
+		"switch-client -t 'work'",
+	} {
+		if !strings.Contains(script, want) {
+			t.Errorf("script missing %q\nscript: %s", want, script)
+		}
+	}
+}
+
+func TestFocusAgentCommandNoSwitchClientOutsideTmux(t *testing.T) {
+	t.Setenv("TMUX", "")
+	cmd := FocusAgentCommand("work", "1", "%5")
+	script := cmd.Args[2]
+	if strings.Contains(script, "switch-client") {
+		t.Errorf("script should not switch-client outside tmux\nscript: %s", script)
+	}
+	for _, want := range []string{"select-window", "select-pane"} {
+		if !strings.Contains(script, want) {
+			t.Errorf("script missing %q\nscript: %s", want, script)
+		}
+	}
+}
+
 func TestParseSessionsSkipsMalformedLines(t *testing.T) {
 	raw := []byte("only-three\x1fparts\x1fhere\n" + sessionListLine("ok", "/tmp/demo"))
 	items := ParseSessions(raw)
 	if len(items) != 1 || items[0].Name != "ok" {
 		t.Fatalf("ParseSessions() = %#v, want one valid item", items)
 	}
-}
-
-func TestResolvePane(t *testing.T) {
-	t.Run("uses env and display-message", func(t *testing.T) {
-		const pane = "%12"
-		t.Setenv("TMUX_PANE", pane)
-		SetTmuxHooksForTest(t, func(_ context.Context, args ...string) ([]byte, error) {
-			if len(args) >= 5 && args[0] == "display-message" && args[3] == pane &&
-				args[4] == "#{pane_id}" {
-				return []byte(pane), nil
-			}
-			return nil, nil
-		}, nil)
-
-		got, err := ResolvePane(context.Background(), "")
-		if err != nil || got != pane {
-			t.Fatalf("ResolvePane() = (%q, %v)", got, err)
-		}
-
-		got, err = ResolvePane(context.Background(), pane)
-		if err != nil || got != pane {
-			t.Fatalf("ResolvePane(%q) = (%q, %v)", pane, got, err)
-		}
-	})
-
-	t.Run("requires pane outside tmux", func(t *testing.T) {
-		t.Setenv("TMUX", "")
-		t.Setenv("TMUX_PANE", "")
-		SetTmuxHooksForTest(t, func(_ context.Context, args ...string) ([]byte, error) {
-			return nil, fmt.Errorf("tmux should not be called")
-		}, nil)
-
-		if _, err := ResolvePane(context.Background(), ""); err == nil {
-			t.Fatal("ResolvePane() expected error without pane")
-		} else if !strings.Contains(err.Error(), "--pane is required") {
-			t.Fatalf("ResolvePane() error = %v", err)
-		}
-	})
-
-	t.Run("pane not found", func(t *testing.T) {
-		SetTmuxHooksForTest(t, func(_ context.Context, args ...string) ([]byte, error) {
-			if len(args) >= 3 && args[0] == "display-message" {
-				return nil, fmt.Errorf("pane missing")
-			}
-			return nil, nil
-		}, nil)
-
-		if _, err := ResolvePane(context.Background(), "%404"); err == nil {
-			t.Fatal("ResolvePane() expected error")
-		} else if !strings.Contains(err.Error(), "pane not found") {
-			t.Fatalf("ResolvePane() error = %v", err)
-		}
-	})
 }
 
 func TestCaptureSession(t *testing.T) {

@@ -53,33 +53,30 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "enter":
 			newName := strings.TrimSpace(m.renameInput.Value())
-			if m.renamePaneID != "" {
-				paneID := m.renamePaneID
-				forAgent := m.renameForAgent
-				oldLabel := m.renameFrom
-				m.inputMode = modeNormal
-				m.renameInput.Blur()
-				m.renameFrom = ""
-				m.renamePaneID = ""
-				m.renameForAgent = ""
-				if newName == "" {
-					return m, renameAgentCmd(paneID, "", forAgent)
-				}
-				if newName == oldLabel {
-					m.status = "rename cancelled"
-					return m, nil
-				}
-				return m, renameAgentCmd(paneID, newName, forAgent)
-			}
 			oldName := m.renameFrom
+			kind := m.renameKind
+			session := m.renameSession
 			m.inputMode = modeNormal
 			m.renameInput.Blur()
 			m.renameFrom = ""
+			m.renameSession = ""
+			m.renameKind = ""
+			if newName == "" && kind == sessionmgr.KindAgent {
+				return m, renameAgentLabelCmd(oldName, session, "")
+			}
 			if newName == "" || oldName == "" || newName == oldName {
 				m.status = "rename cancelled"
 				return m, nil
 			}
-			return m, renameCmd(oldName, newName)
+			switch kind {
+			case sessionmgr.KindSession:
+				return m, renameCmd(oldName, newName)
+			case sessionmgr.KindAgent:
+				return m, renameAgentLabelCmd(oldName, session, newName)
+			default:
+				m.status = "rename only applies to sessions and agents"
+				return m, nil
+			}
 		case "ctrl+c":
 			return m, tea.Quit
 		}
@@ -133,6 +130,21 @@ func (m Model) handleActionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.deleteSelected()
 	case "R":
 		return m.startRename()
+	case "o":
+		if m.source != sessionmgr.ModeAgents {
+			return m, nil
+		}
+		m.agentsCurrentOnly = !m.agentsCurrentOnly
+		switch {
+		case m.agentsCurrentOnly && m.currentSession == "":
+			m.status = "agents: not in a tmux session"
+		case m.agentsCurrentOnly:
+			m.status = "agents: " + m.currentSession
+		default:
+			m.status = "agents: all sessions"
+		}
+		m.clampCursor()
+		return m, m.previewForSelection()
 	case "/":
 		m.inputMode = modeSearch
 		m.searchInput.SetValue(m.query)
@@ -148,29 +160,21 @@ func (m Model) handleActionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "p", "alt+p":
 		m.showPreview = !m.showPreview
 		return m, m.previewForSelection()
-	case "s":
-		return m.cycleAgentStateFilter()
-	case "S":
-		return m.clearAgentStateFilter()
-	case "i":
-		m.integration.active = true
-		m.status = "scanning hook integrations"
-		return m, integrationsCmd()
 	case "m":
 		m.openInputModePrompt(true)
 		m.status = "change input mode"
 		return m, nil
-	case "?", "h", "alt+h":
+	case "?":
 		m.showHelp = !m.showHelp
+		return m, nil
+	case "h":
+		m.openInstallMenu(false)
+		m.status = "install menu"
 		return m, nil
 	case "a", "ctrl+a":
 		return m.switchSource(sessionmgr.ModeAll)
 	case "t", "ctrl+t":
 		return m.switchSource(sessionmgr.ModeSessions)
-	case "g", "ctrl+g":
-		return m.switchSource(sessionmgr.ModeAgents)
-	case "o", "ctrl+o":
-		return m.switchSource(sessionmgr.ModeCurrentAgents)
 	case "z", "ctrl+z":
 		return m.switchSource(sessionmgr.ModeZoxide)
 	case "f", "ctrl+f":
@@ -278,55 +282,6 @@ func (m Model) clearFilterText() (tea.Model, tea.Cmd) {
 	return m, m.previewForSelection()
 }
 
-func (m Model) handleIntegrationKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "ctrl+c", "q":
-		if m.integration.startupPrompt {
-			if err := recordIntegrationPromptDismissed(); err != nil {
-				m.status = err.Error()
-				return m, nil
-			}
-			m.integration.startupPrompt = false
-		}
-		return m, tea.Quit
-	case "esc", "s":
-		if m.integration.startupPrompt {
-			m.integration.startupPrompt = false
-		}
-		m.integration.active = false
-		m.status = "hook installation skipped"
-		return m, nil
-	case "up", "k":
-		m.integration.cursor = wrapCursorUp(m.integration.cursor, len(m.integration.rows))
-		return m, nil
-	case "down", "j":
-		m.integration.cursor = wrapCursorDown(m.integration.cursor, len(m.integration.rows))
-		return m, nil
-	case " ":
-		if len(m.integration.rows) == 0 {
-			return m, nil
-		}
-		rec := m.integration.rows[m.integration.cursor]
-		if rec.AgentAvailable && rec.Installable && rec.State != integrations.StatusCurrent {
-			m.integration.selected[rec.Target] = !m.integration.selected[rec.Target]
-		}
-		return m, nil
-	case "enter":
-		var targets []integrations.Target
-		for _, rec := range m.integration.rows {
-			if m.integration.selected[rec.Target] {
-				targets = append(targets, rec.Target)
-			}
-		}
-		m.status = "installing selected hook integrations"
-		return m, installIntegrationsCmd(targets)
-	case "r":
-		m.status = "rescanning hook integrations"
-		return m, integrationsCmd()
-	}
-	return m, nil
-}
-
 func (m *Model) openInputModePrompt(manual bool) {
 	m.setup.active = true
 	m.setup.manual = manual
@@ -334,6 +289,25 @@ func (m *Model) openInputModePrompt(manual bool) {
 		m.setup.cursor = 0
 	} else {
 		m.setup.cursor = 1
+	}
+}
+
+func (m *Model) openInstallMenu(firstRun bool) {
+	m.installMenu.active = true
+	m.installMenu.cursor = 0
+	names := integrations.Available()
+	if m.installMenu.statuses == nil {
+		m.installMenu.statuses = make(map[string]string, len(names))
+	}
+	for _, n := range names {
+		if m.installMenu.statuses[n] == "" {
+			m.installMenu.statuses[n] = "idle"
+		}
+	}
+	if firstRun {
+		m.installMenu.message = "first run — choose integrations to install"
+	} else {
+		m.installMenu.message = ""
 	}
 }
 
@@ -370,8 +344,67 @@ func (m Model) cancelInputModePrompt() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m Model) handleInstallMenuKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	names := integrations.Available()
+	switch msg.String() {
+	case "ctrl+c", "q":
+		return m, tea.Quit
+	case "esc":
+		return m.closeInstallMenu()
+	case "up", "k":
+		m.installMenu.cursor = wrapCursorUp(m.installMenu.cursor, len(names))
+		return m, nil
+	case "down", "j":
+		m.installMenu.cursor = wrapCursorDown(m.installMenu.cursor, len(names))
+		return m, nil
+	case "enter", "i":
+		if len(names) == 0 {
+			return m, nil
+		}
+		name := names[m.installMenu.cursor]
+		m.installMenu.statuses[name] = "installing"
+		m.installMenu.message = "installing " + name + "…"
+		return m, installIntegrationCmd(name, "install")
+	case "u":
+		if len(names) == 0 {
+			return m, nil
+		}
+		name := names[m.installMenu.cursor]
+		m.installMenu.statuses[name] = "uninstalling"
+		m.installMenu.message = "uninstalling " + name + "…"
+		return m, installIntegrationCmd(name, "uninstall")
+	case "a":
+		cmds := make([]tea.Cmd, 0, len(names))
+		for _, n := range names {
+			m.installMenu.statuses[n] = "installing"
+			cmds = append(cmds, installIntegrationCmd(n, "install"))
+		}
+		m.installMenu.message = "installing all…"
+		return m, tea.Batch(cmds...)
+	}
+	return m, nil
+}
+
+func (m Model) closeInstallMenu() (tea.Model, tea.Cmd) {
+	m.installMenu.active = false
+	m.installMenu.message = ""
+	if !m.config.Setup.InstallMenuSeen {
+		cfg := m.config
+		cfg.Setup.InstallMenuSeen = true
+		if err := appconfig.Save(cfg); err != nil {
+			m.err = err
+			m.status = err.Error()
+			return m, nil
+		}
+		m.config = cfg
+	}
+	m.status = "install menu closed"
+	var refresh tea.Cmd
+	m, refresh = m.beginRefresh(m.source, true)
+	return m, refresh
+}
+
 func (m Model) applyTypeFirstSetup(enabled bool) (tea.Model, tea.Cmd) {
-	manual := m.setup.manual
 	cfg := m.config
 	cfg.TypeFirst.Enabled = enabled
 	if strings.TrimSpace(cfg.TypeFirst.Prefix) == "" {
@@ -392,10 +425,7 @@ func (m Model) applyTypeFirstSetup(enabled bool) (tea.Model, tea.Cmd) {
 	} else {
 		m.status = "classic input mode selected"
 	}
-	if manual {
-		return m, nil
-	}
-	return m, startupIntegrationsCmd()
+	return m, nil
 }
 
 func (m Model) switchSource(source sessionmgr.SourceMode) (tea.Model, tea.Cmd) {
@@ -414,30 +444,6 @@ func (m Model) switchSource(source sessionmgr.SourceMode) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(refresh, m.previewForSelection())
 }
 
-func (m Model) cycleAgentStateFilter() (tea.Model, tea.Cmd) {
-	if !isAgentSource(m.source) {
-		m.status = "state filter only applies to agent panes"
-		return m, nil
-	}
-	m.agentStateFilter = nextAgentStateFilter(m.agentStateFilter)
-	m.cursor = 0
-	m.clampCursor()
-	m.status = "agent state filter: " + agentStateFilterLabel(m.agentStateFilter)
-	return m, m.previewForSelection()
-}
-
-func (m Model) clearAgentStateFilter() (tea.Model, tea.Cmd) {
-	if !isAgentSource(m.source) {
-		m.status = "state filter only applies to agent panes"
-		return m, nil
-	}
-	m.agentStateFilter = ""
-	m.cursor = 0
-	m.clampCursor()
-	m.status = "agent state filter: all"
-	return m, m.previewForSelection()
-}
-
 func (m Model) activateSelected() (tea.Model, tea.Cmd) {
 	item, ok := m.selectedItem()
 	if !ok {
@@ -449,8 +455,24 @@ func (m Model) activateSelected() (tea.Model, tea.Cmd) {
 		m.status = "attaching " + item.Name
 		return m, attachCmd(item.Name)
 	case sessionmgr.KindAgent:
-		m.status = "focusing " + item.Location
-		return m, focusAgentCmd(item.PaneID)
+		if item.Session == "" || item.Window == "" || item.PaneID == "" {
+			m.status = "cannot focus agent (missing pane info)"
+			return m, nil
+		}
+		// Flip done→idle before focusing: the user is visiting the pane. Run
+		// synchronously because focusAgentCmd suspends the TUI (tea.ExecProcess),
+		// so the flip must persist first. Errors are non-fatal.
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_, _ = sessionmgr.MarkAgentVisited(ctx, item.PaneID)
+		m.status = fmt.Sprintf(
+			"focusing %s on %s:%s.%s",
+			item.DisplayName(),
+			item.Session,
+			item.Window,
+			item.Pane,
+		)
+		return m, focusAgentCmd(item.Session, item.Window, item.PaneID)
 	case sessionmgr.KindZoxide, sessionmgr.KindFD:
 		m.status = "creating session from " + item.Path
 		return m, createSessionCmd(item.Path)
@@ -469,11 +491,8 @@ func (m Model) deleteSelected() (tea.Model, tea.Cmd) {
 	case sessionmgr.KindSession:
 		m.status = "killing session " + item.Name
 		return m, deleteSessionCmd(item.Name)
-	case sessionmgr.KindAgent:
-		m.status = "killing pane " + item.PaneID
-		return m, deleteAgentCmd(item.PaneID)
 	default:
-		m.status = "delete only applies to sessions and agents"
+		m.status = "delete only applies to sessions"
 		return m, nil
 	}
 }
@@ -487,23 +506,19 @@ func (m Model) startRename() (tea.Model, tea.Cmd) {
 	switch item.Kind {
 	case sessionmgr.KindSession:
 		m.inputMode = modeRename
+		m.renameKind = item.Kind
 		m.renameFrom = item.Name
-		m.renamePaneID = ""
-		m.renameForAgent = ""
-		m.renameInput.Placeholder = "new session name"
-		m.renameInput.SetValue(item.Name)
 		m.renameInput.Focus()
 		m.status = "renaming " + item.Name
 		return m, textinput.Blink
 	case sessionmgr.KindAgent:
 		m.inputMode = modeRename
-		m.renameFrom = item.DisplayName()
-		m.renamePaneID = item.PaneID
-		m.renameForAgent = item.AgentName
-		m.renameInput.Placeholder = "agent display label"
+		m.renameKind = item.Kind
+		m.renameFrom = item.AgentName
+		m.renameSession = item.Session
 		m.renameInput.SetValue(item.DisplayName())
 		m.renameInput.Focus()
-		m.status = "renaming " + item.DisplayName()
+		m.status = "renaming agent " + item.AgentName
 		return m, textinput.Blink
 	default:
 		m.status = "rename only applies to sessions and agents"

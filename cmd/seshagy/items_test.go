@@ -136,18 +136,10 @@ func TestPrintItemsTextOutput(t *testing.T) {
 
 func TestPrintItemsWritesWarningToStderr(t *testing.T) {
 	manifestTestDirs(t)
-	const pane = "%1"
 	sessionLine := "dev\x1f100\x1f120\x1f/tmp/dev\x1f1\x1f2"
-	agentLine := strings.Join([]string{
-		pane, "work", "1", "0", t.TempDir(), "1", "1", "1", "0",
-		"claude", "", "claude", "working", "", "123", "seshagy:claude", "", "42", "12345",
-	}, "\x1f")
 	sessionmgr.SetTmuxHooksForTest(t, func(_ context.Context, args ...string) ([]byte, error) {
-		switch {
-		case len(args) >= 3 && args[0] == "list-sessions":
+		if len(args) >= 3 && args[0] == "list-sessions" {
 			return []byte(sessionLine), nil
-		case len(args) >= 4 && args[0] == "list-panes" && args[1] == "-a":
-			return []byte(agentLine + "\n"), nil
 		}
 		return nil, nil
 	}, nil)
@@ -177,21 +169,13 @@ func TestPrintItemsWritesWarningToStderr(t *testing.T) {
 
 func TestGetAllJSONIncludesZoxideWarning(t *testing.T) {
 	manifestTestDirs(t)
-	const pane = "%3"
 	sessionLine := "dev\x1f100\x1f120\x1f/tmp/dev\x1f1\x1f2"
-	agentLine := strings.Join([]string{
-		pane, "work", "1", "0", t.TempDir(), "1", "1", "1", "0",
-		"claude", "", "claude", "working", "", "123", "seshagy:claude", "", "42", "12345",
-	}, "\x1f")
 	sessionmgr.NewStrictFakeTmux(t, sessionmgr.NewFakeTmux()).
 		AllowPaneOptions().
 		AllowOutput(sessionmgr.MatchListSessions).
-		AllowOutput(sessionmgr.MatchListPanesAgents).
+		AllowOutput(sessionmgr.MatchListPanes).
 		HandleOutput(sessionmgr.MatchListSessions, func(_ context.Context, _ ...string) ([]byte, error) {
 			return []byte(sessionLine), nil
-		}).
-		HandleOutput(sessionmgr.MatchListPanesAgents, func(_ context.Context, _ ...string) ([]byte, error) {
-			return []byte(agentLine + "\n"), nil
 		}).
 		Install(t)
 
@@ -239,8 +223,8 @@ func TestGetAllJSONIncludesZoxideWarning(t *testing.T) {
 	for _, item := range payload.Items {
 		kinds[item.Kind]++
 	}
-	if kinds["session"] != 1 || kinds["agent"] != 1 || kinds["fd"] != 1 {
-		t.Fatalf("items = %#v, want session agent and fd", kinds)
+	if kinds["session"] != 1 || kinds["fd"] != 1 {
+		t.Fatalf("items = %#v, want session and fd", kinds)
 	}
 }
 
@@ -275,48 +259,6 @@ func TestDeleteItemSessionNonJSON(t *testing.T) {
 	}
 }
 
-func TestDeleteItemAgentJSON(t *testing.T) {
-	manifestTestDirs(t)
-	cfg, err := appconfig.Load()
-	if err != nil {
-		t.Fatalf("config.Load() error = %v", err)
-	}
-	line := sessionmgr.FormatLineWithIcons(
-		sessionmgr.Item{Kind: sessionmgr.KindAgent, PaneID: "%9", AgentName: "claude"},
-		cfg.IconSet(),
-	)
-	var killedPane string
-	installDeleteItemTmuxRecorder(t, "kill-pane", func(args []string) {
-		if len(args) >= 3 {
-			killedPane = args[2]
-		}
-	})
-
-	out, err := captureStdout(t, func() error {
-		return deleteItem(context.Background(), line, true)
-	})
-	if err != nil {
-		t.Fatalf("deleteItem() error = %v", err)
-	}
-	var payload struct {
-		Ok        bool   `json:"ok"`
-		Deleted   bool   `json:"deleted"`
-		Kind      string `json:"kind"`
-		PaneID    string `json:"pane_id"`
-		AgentName string `json:"agent_name"`
-	}
-	if err := json.Unmarshal([]byte(strings.TrimSpace(out)), &payload); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v, out=%q", err, out)
-	}
-	if !payload.Ok || !payload.Deleted || payload.Kind != "agent" ||
-		payload.PaneID != "%9" || payload.AgentName != "claude" {
-		t.Fatalf("delete payload = %#v", payload)
-	}
-	if killedPane != "%9" {
-		t.Fatalf("kill-pane target = %q, want %%9", killedPane)
-	}
-}
-
 func TestDeleteItemNonDeletableKind(t *testing.T) {
 	manifestTestDirs(t)
 	cfg, err := appconfig.Load()
@@ -330,37 +272,6 @@ func TestDeleteItemNonDeletableKind(t *testing.T) {
 	err = deleteItem(context.Background(), line, false)
 	if err == nil || !strings.Contains(err.Error(), "cannot be deleted") {
 		t.Fatalf("deleteItem() error = %v, want cannot be deleted", err)
-	}
-}
-
-func TestDeleteItemAgentNonJSON(t *testing.T) {
-	manifestTestDirs(t)
-	cfg, err := appconfig.Load()
-	if err != nil {
-		t.Fatalf("config.Load() error = %v", err)
-	}
-	line := sessionmgr.FormatLineWithIcons(
-		sessionmgr.Item{Kind: sessionmgr.KindAgent, PaneID: "%9", AgentName: "claude"},
-		cfg.IconSet(),
-	)
-	var killedPane string
-	installDeleteItemTmuxRecorder(t, "kill-pane", func(args []string) {
-		if len(args) >= 3 {
-			killedPane = args[2]
-		}
-	})
-
-	out, err := captureStdout(t, func() error {
-		return deleteItem(context.Background(), line, false)
-	})
-	if err != nil {
-		t.Fatalf("deleteItem() error = %v", err)
-	}
-	if strings.TrimSpace(out) != "" {
-		t.Fatalf("non-json delete should be silent, got %q", out)
-	}
-	if killedPane != "%9" {
-		t.Fatalf("kill-pane target = %q, want %%9", killedPane)
 	}
 }
 
@@ -383,96 +294,6 @@ func TestRunGetSessionsTextOutput(t *testing.T) {
 	}
 	if !strings.Contains(out, "demo") {
 		t.Fatalf("sessions output missing demo:\n%s", out)
-	}
-}
-
-func TestRunGetAgentsAndAllJSON(t *testing.T) {
-	cliTestEnv(t)
-	fdDir := t.TempDir()
-	writeFDTestConfig(t, fdDir)
-
-	const pane = "%11"
-	fields := strings.Join([]string{
-		pane, "work", "1", "0", t.TempDir(), "1", "1", "1", "0",
-		"claude", "", "claude", "working", "", "123", "seshagy:claude", "", "42", "12345",
-	}, "\x1f")
-	sessionmgr.SetTmuxHooksForTest(t, func(_ context.Context, args ...string) ([]byte, error) {
-		switch {
-		case len(args) >= 1 && args[0] == "list-sessions":
-			return nil, nil
-		case sessionmgr.MatchListPanesAgents(args):
-			return []byte(fields + "\n"), nil
-		default:
-			if len(args) >= 1 && args[0] == "list-panes" {
-				t.Fatalf("list-panes args = %v, want -a -F agentFormat", args)
-			}
-		}
-		return nil, nil
-	}, nil)
-
-	agentsOut, err := captureStdout(t, func() error {
-		return run([]string{"--get-agents", "--json"})
-	})
-	if err != nil {
-		t.Fatalf("run(--get-agents) error = %v", err)
-	}
-	var agentsPayload struct {
-		Ok    bool `json:"ok"`
-		Items []struct {
-			Kind      string `json:"kind"`
-			AgentName string `json:"agent_name"`
-		} `json:"items"`
-	}
-	if err := json.Unmarshal([]byte(strings.TrimSpace(agentsOut)), &agentsPayload); err != nil {
-		t.Fatalf("json.Unmarshal(--get-agents) error = %v, out=%q", err, agentsOut)
-	}
-	if !agentsPayload.Ok {
-		t.Fatalf("--get-agents payload = %#v", agentsPayload)
-	}
-	if len(agentsPayload.Items) != 1 {
-		t.Fatalf("--get-agents len(items) = %d, want 1", len(agentsPayload.Items))
-	}
-	if agentsPayload.Items[0].Kind != "agent" || agentsPayload.Items[0].AgentName != "claude" {
-		t.Fatalf("--get-agents items = %#v", agentsPayload.Items)
-	}
-
-	allOut, err := captureStdout(t, func() error {
-		return run([]string{"--get-all", "--json"})
-	})
-	if err != nil {
-		t.Fatalf("run(--get-all) error = %v", err)
-	}
-	var allPayload struct {
-		Ok    bool `json:"ok"`
-		Items []struct {
-			Kind      string `json:"kind"`
-			AgentName string `json:"agent_name"`
-			Path      string `json:"path"`
-		} `json:"items"`
-	}
-	if err := json.Unmarshal([]byte(strings.TrimSpace(allOut)), &allPayload); err != nil {
-		t.Fatalf("json.Unmarshal(--get-all) error = %v, out=%q", err, allOut)
-	}
-	if !allPayload.Ok {
-		t.Fatalf("--get-all payload = %#v", allPayload)
-	}
-	if len(allPayload.Items) < 2 {
-		t.Fatalf("--get-all len(items) = %d, want at least agent and fd", len(allPayload.Items))
-	}
-	kinds := map[string]int{}
-	for _, item := range allPayload.Items {
-		kinds[item.Kind]++
-	}
-	if kinds["agent"] != 1 || kinds["fd"] != 1 {
-		t.Fatalf("--get-all kinds = %#v, want one agent and one fd", kinds)
-	}
-	for _, item := range allPayload.Items {
-		if item.Kind == "agent" && item.AgentName != "claude" {
-			t.Fatalf("--get-all agent item = %#v, want claude", item)
-		}
-		if item.Kind == "fd" && item.Path != fdDir {
-			t.Fatalf("--get-all fd item path = %q, want %q", item.Path, fdDir)
-		}
 	}
 }
 
@@ -548,14 +369,6 @@ func TestDeleteItemKillFailure(t *testing.T) {
 				cfg.IconSet(),
 			),
 		},
-		{
-			name:    "agent",
-			wantCmd: "kill-pane",
-			line: sessionmgr.FormatLineWithIcons(
-				sessionmgr.Item{Kind: sessionmgr.KindAgent, PaneID: "%9", AgentName: "claude"},
-				cfg.IconSet(),
-			),
-		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -595,11 +408,18 @@ func TestDeleteItemKillFailureJSON(t *testing.T) {
 	})
 
 	args := []string{"--delete-item", line, "--json"}
-	out, err := captureStdout(t, func() error {
-		return runWithCLIJSONHandling(args)
+	err = run(args)
+	if err == nil {
+		t.Fatal("run() error = nil, want kill-session error")
+	}
+	if !strings.Contains(err.Error(), "tmux kill-session") {
+		t.Fatalf("error = %q, want tmux kill-session wrapper", err.Error())
+	}
+	out, encErr := captureStdout(t, func() error {
+		return encodeJSONError(err)
 	})
-	if err != nil {
-		t.Fatalf("runWithCLIJSONHandling() error = %v", err)
+	if encErr != nil {
+		t.Fatalf("encodeJSONError() error = %v", encErr)
 	}
 	var payload struct {
 		SchemaVersion int    `json:"schema_version"`

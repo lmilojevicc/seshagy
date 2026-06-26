@@ -2,836 +2,629 @@ package sessionmgr
 
 import (
 	"context"
-	"strings"
-	"sync"
 	"testing"
-	"time"
 )
 
-func TestReportAgentRequiresName(t *testing.T) {
-	const pane = "%15"
+func TestNormalizeAgentStateMapping(t *testing.T) {
+	cases := []struct {
+		input string
+		want  AgentState
+	}{
+		{"working", AgentWorking},
+		{"busy", AgentWorking},
+		{"running", AgentWorking},
+		{"thinking", AgentWorking},
+		{"processing", AgentWorking},
+		{"blocked", AgentBlocked},
+		{"permission", AgentBlocked},
+		{"question", AgentBlocked},
+		{"waiting", AgentBlocked},
+		{"done", AgentDone},
+		{"completed", AgentDone},
+		{"finished", AgentDone},
+		{"idle", AgentIdle},
+		{"ready", AgentIdle},
+		{"", AgentIdle},
+		{"bogus", AgentIdle},
+		{"aborted", AgentIdle},
+		{"error", AgentIdle},
+	}
+	for _, tc := range cases {
+		if got := NormalizeAgentState(tc.input); got != tc.want {
+			t.Errorf("NormalizeAgentState(%q) = %q, want %q", tc.input, got, tc.want)
+		}
+	}
+}
+
+func TestReportAgentWritesOptionsAndSeq(t *testing.T) {
+	ft := NewFakeTmux()
+	SetTmuxHooksForTest(t, ft.output, ft.run)
 	ctx := context.Background()
-	InstallReportFakeTmux(t, pane)
 
 	applied, err := ReportAgent(ctx, AgentReport{
-		Pane:       pane,
-		State:      AgentWorking,
-		Source:     "hook",
-		SourceSeen: true,
+		Pane:   "%5",
+		Name:   "pi",
+		State:  AgentWorking,
+		Source: "seshagy:pi",
+		Seq:    5,
 	})
-	if err == nil {
-		t.Fatal("ReportAgent() expected name required error")
+	if err != nil {
+		t.Fatalf("ReportAgent() error = %v", err)
 	}
-	if !strings.Contains(err.Error(), "--agent/--name is required") {
+	if !applied {
+		t.Fatal("ReportAgent() applied = false, want true")
+	}
+	if got := ft.Get("%5", "@seshagy_agent_state"); got != "working" {
+		t.Errorf("@seshagy_agent_state = %q, want working", got)
+	}
+	if got := ft.Get("%5", "@seshagy_agent_seq"); got != "5" {
+		t.Errorf("@seshagy_agent_seq = %q, want 5", got)
+	}
+	if got := ft.Get("%5", "@seshagy_agent_updated"); got == "" {
+		t.Error("@seshagy_agent_updated is empty, want a timestamp")
+	}
+}
+
+func TestReportAgentStaleSeqIgnored(t *testing.T) {
+	ft := NewFakeTmux()
+	ft.Set("%5", "@seshagy_agent_seq", "5")
+	SetTmuxHooksForTest(t, ft.output, ft.run)
+	ctx := context.Background()
+
+	applied, err := ReportAgent(ctx, AgentReport{
+		Pane:   "%5",
+		State:  AgentWorking,
+		Source: "test",
+		Seq:    3, // stale: 3 <= 5
+	})
+	if err != nil {
 		t.Fatalf("ReportAgent() error = %v", err)
 	}
 	if applied {
-		t.Fatal("ReportAgent() applied = true, want false on validation error")
+		t.Fatal("ReportAgent(seq=3, existing=5) applied = true, want false")
+	}
+	if got := ft.Get("%5", "@seshagy_agent_state"); got != "" {
+		t.Errorf("@seshagy_agent_state = %q, want empty (stale ignored)", got)
 	}
 }
 
-func TestReportAgentRejectsStaleSeq(t *testing.T) {
-	const pane = "%1"
+func TestReportAgentEqualSeqIgnored(t *testing.T) {
+	ft := NewFakeTmux()
+	ft.Set("%5", "@seshagy_agent_seq", "5")
+	SetTmuxHooksForTest(t, ft.output, ft.run)
 	ctx := context.Background()
-	SetFixedTrackTime(t, time.Unix(1_700_000_000, 0))
-	f := InstallReportFakeTmux(t, pane)
 
-	report := func(seq int64, state AgentState) (bool, error) {
-		return ReportAgent(ctx, AgentReport{
-			Pane:       pane,
-			Name:       "pi",
-			State:      state,
-			Source:     "hook",
-			SourceSeen: true,
-			Seq:        seq,
-			SeqSeen:    true,
+	applied, err := ReportAgent(ctx, AgentReport{
+		Pane:   "%5",
+		State:  AgentWorking,
+		Source: "test",
+		Seq:    5, // equal: 5 <= 5 is stale
+	})
+	if err != nil {
+		t.Fatalf("ReportAgent() error = %v", err)
+	}
+	if applied {
+		t.Fatal("ReportAgent(seq=5, existing=5) applied = true, want false (strict >)")
+	}
+}
+
+func TestReportAgentHigherSeqOverwrites(t *testing.T) {
+	ft := NewFakeTmux()
+	ft.Set("%5", "@seshagy_agent_seq", "3")
+	ft.Set("%5", "@seshagy_agent_state", "idle")
+	SetTmuxHooksForTest(t, ft.output, ft.run)
+	ctx := context.Background()
+
+	applied, err := ReportAgent(ctx, AgentReport{
+		Pane:   "%5",
+		State:  AgentWorking,
+		Source: "test",
+		Seq:    5,
+	})
+	if err != nil {
+		t.Fatalf("ReportAgent() error = %v", err)
+	}
+	if !applied {
+		t.Fatal("ReportAgent(seq=5, existing=3) applied = false, want true")
+	}
+	if got := ft.Get("%5", "@seshagy_agent_state"); got != "working" {
+		t.Errorf("@seshagy_agent_state = %q, want working", got)
+	}
+	if got := ft.Get("%5", "@seshagy_agent_seq"); got != "5" {
+		t.Errorf("@seshagy_agent_seq = %q, want 5", got)
+	}
+}
+
+func TestReleaseAgentClearsAllStateOptions(t *testing.T) {
+	ft := NewFakeTmux()
+	ft.Set("%5", "@seshagy_agent_seq", "5")
+	ft.Set("%5", "@seshagy_agent_state", "working")
+	ft.Set("%5", "@seshagy_agent_name", "pi")
+	ft.Set("%5", "@seshagy_agent_source", "seshagy:pi")
+	SetTmuxHooksForTest(t, ft.output, ft.run)
+	ctx := context.Background()
+
+	applied, err := ReleaseAgent(ctx, AgentRelease{
+		Pane:   "%5",
+		Source: "seshagy:pi",
+		Seq:    5, // equal seq is valid for release
+	})
+	if err != nil {
+		t.Fatalf("ReleaseAgent() error = %v", err)
+	}
+	if !applied {
+		t.Fatal("ReleaseAgent() applied = false, want true")
+	}
+	// State-bearing options must be cleared.
+	for _, opt := range []string{"@seshagy_agent_state", "@seshagy_agent_name", "@seshagy_agent_message", "@seshagy_agent_updated", "@seshagy_agent_source", "@seshagy_agent_session_id"} {
+		if got := ft.Get("%5", opt); got != "" {
+			t.Errorf("%s = %q after release, want empty", opt, got)
+		}
+	}
+	// @seshagy_agent_seq is retained as the tombstone high-water mark.
+	if got := ft.Get("%5", "@seshagy_agent_seq"); got != "5" {
+		t.Errorf("@seshagy_agent_seq = %q after release, want 5 (tombstone high-water)", got)
+	}
+}
+
+func TestReleaseAgentStaleSeqIgnored(t *testing.T) {
+	ft := NewFakeTmux()
+	ft.Set("%5", "@seshagy_agent_seq", "5")
+	ft.Set("%5", "@seshagy_agent_state", "working")
+	SetTmuxHooksForTest(t, ft.output, ft.run)
+	ctx := context.Background()
+
+	applied, err := ReleaseAgent(ctx, AgentRelease{
+		Pane:   "%5",
+		Source: "test",
+		Seq:    3, // stale: 3 < 5
+	})
+	if err != nil {
+		t.Fatalf("ReleaseAgent() error = %v", err)
+	}
+	if applied {
+		t.Fatal("ReleaseAgent(seq=3, existing=5) applied = true, want false")
+	}
+	if got := ft.Get("%5", "@seshagy_agent_state"); got != "working" {
+		t.Errorf("@seshagy_agent_state = %q, want working (stale release ignored)", got)
+	}
+}
+
+func TestReleaseAgentTombstoneBlocksStaleResurrection(t *testing.T) {
+	ft := NewFakeTmux()
+	SetTmuxHooksForTest(t, ft.output, ft.run)
+	ctx := context.Background()
+
+	// Report working at seq=5.
+	applied, err := ReportAgent(ctx, AgentReport{
+		Pane:   "%5",
+		Name:   "pi",
+		State:  AgentWorking,
+		Source: "test",
+		Seq:    5,
+	})
+	if err != nil || !applied {
+		t.Fatalf("ReportAgent(seq=5) failed: applied=%v err=%v", applied, err)
+	}
+
+	// Release at seq=10 — tombstone high-water.
+	applied, err = ReleaseAgent(ctx, AgentRelease{
+		Pane:   "%5",
+		Source: "test",
+		Seq:    10,
+	})
+	if err != nil || !applied {
+		t.Fatalf("ReleaseAgent(seq=10) failed: applied=%v err=%v", applied, err)
+	}
+	if got := ft.Get("%5", "@seshagy_agent_state"); got != "" {
+		t.Errorf("@seshagy_agent_state = %q after release, want empty", got)
+	}
+	if got := ft.Get("%5", "@seshagy_agent_seq"); got != "10" {
+		t.Errorf("@seshagy_agent_seq = %q after release, want 10 (tombstone)", got)
+	}
+
+	// Late stale report at seq=7 (< 10 tombstone) — must NOT resurrect.
+	applied, err = ReportAgent(ctx, AgentReport{
+		Pane:   "%5",
+		State:  AgentDone,
+		Source: "test",
+		Seq:    7, // stale: 7 <= 10 tombstone
+	})
+	if err != nil {
+		t.Fatalf("ReportAgent(seq=7) error = %v", err)
+	}
+	if applied {
+		t.Fatal(
+			"ReportAgent(seq=7, tombstone=10) applied = true, want false (stale resurrection blocked)",
+		)
+	}
+	if got := ft.Get("%5", "@seshagy_agent_state"); got != "" {
+		t.Errorf("@seshagy_agent_state = %q after stale report, want empty (no resurrection)", got)
+	}
+}
+
+func TestMarkAgentVisitedFlipsDoneToIdle(t *testing.T) {
+	ft := NewFakeTmux()
+	ft.Set("%5", "@seshagy_agent_state", "done")
+	ft.Set("%5", "@seshagy_agent_seq", "5")
+	SetTmuxHooksForTest(t, ft.output, ft.run)
+	ctx := context.Background()
+
+	flipped, err := MarkAgentVisited(ctx, "%5")
+	if err != nil {
+		t.Fatalf("MarkAgentVisited() error = %v", err)
+	}
+	if !flipped {
+		t.Fatal("MarkAgentVisited() flipped = false, want true for done pane")
+	}
+	if got := ft.Get("%5", "@seshagy_agent_state"); got != "idle" {
+		t.Errorf("@seshagy_agent_state = %q, want idle", got)
+	}
+	if got := ft.Get("%5", "@seshagy_agent_updated"); got == "" {
+		t.Error("@seshagy_agent_updated is empty, want a timestamp")
+	}
+	if got := ft.Get("%5", "@seshagy_agent_last_seen"); got == "" {
+		t.Error("@seshagy_agent_last_seen is empty, want a timestamp")
+	}
+	// Seq must be unchanged — the visit flip does not advance the epoch.
+	if got := ft.Get("%5", "@seshagy_agent_seq"); got != "5" {
+		t.Errorf("@seshagy_agent_seq = %q, want 5 (unchanged)", got)
+	}
+}
+
+func TestMarkAgentVisitedSeqSafeNoClobber(t *testing.T) {
+	base := NewFakeTmux()
+	base.Set("%5", "@seshagy_agent_state", "done")
+	base.Set("%5", "@seshagy_agent_seq", "5")
+	s := NewStrictFakeTmux(t, base).AllowPaneOptions()
+	// Simulate a higher-seq ReportAgent landing between the two seq reads:
+	// the first read returns "5", the defensive re-read returns "9".
+	var seqReads int
+	s.HandleOutput(func(args []string) bool {
+		return len(args) >= 4 && args[0] == "show-option" && args[3] == "@seshagy_agent_seq"
+	}, func(_ context.Context, _ ...string) ([]byte, error) {
+		seqReads++
+		if seqReads >= 2 {
+			return []byte("9"), nil
+		}
+		return []byte("5"), nil
+	})
+	s.Install(t)
+	ctx := context.Background()
+
+	flipped, err := MarkAgentVisited(ctx, "%5")
+	if err != nil {
+		t.Fatalf("MarkAgentVisited() error = %v", err)
+	}
+	if flipped {
+		t.Fatal("MarkAgentVisited() flipped = true, want false (seq changed mid-write)")
+	}
+	if got := base.Get("%5", "@seshagy_agent_state"); got != "done" {
+		t.Errorf("@seshagy_agent_state = %q, want done (not clobbered)", got)
+	}
+}
+
+func TestMarkAgentVisitedSkipsNonDone(t *testing.T) {
+	ctx := context.Background()
+	for _, state := range []string{"working", "blocked", "idle", ""} {
+		t.Run(state, func(t *testing.T) {
+			ft := NewFakeTmux()
+			ft.Set("%5", "@seshagy_agent_state", state)
+			ft.Set("%5", "@seshagy_agent_seq", "5")
+			SetTmuxHooksForTest(t, ft.output, ft.run)
+
+			flipped, err := MarkAgentVisited(ctx, "%5")
+			if err != nil {
+				t.Fatalf("MarkAgentVisited() error = %v", err)
+			}
+			if flipped {
+				t.Fatalf("MarkAgentVisited(state=%q) flipped = true, want false", state)
+			}
+			want := state
+			if got := ft.Get("%5", "@seshagy_agent_state"); got != want {
+				t.Errorf("@seshagy_agent_state = %q, want %q (untouched)", got, want)
+			}
 		})
 	}
+}
 
-	applied, err := report(10, AgentWorking)
+func TestResolvePaneByCwdExactMatch(t *testing.T) {
+	s := NewStrictFakeTmux(t, nil)
+	s.HandleOutput(func(args []string) bool {
+		return len(args) >= 1 && args[0] == "list-panes"
+	}, func(_ context.Context, _ ...string) ([]byte, error) {
+		return []byte("%1\x1f/Users/milo/proj\n%2\x1f/Users/milo/other\n"), nil
+	})
+	s.Install(t)
+	ctx := context.Background()
+
+	got, err := ResolvePaneByCwd(ctx, "/Users/milo/proj")
 	if err != nil {
-		t.Fatalf("report seq 10: %v", err)
+		t.Fatalf("ResolvePaneByCwd: %v", err)
+	}
+	if want := "%1"; got != want {
+		t.Errorf("ResolvePaneByCwd = %q, want %q", got, want)
+	}
+}
+
+func TestResolvePaneByCwdParentChild(t *testing.T) {
+	s := NewStrictFakeTmux(t, nil)
+	s.HandleOutput(func(args []string) bool {
+		return len(args) >= 1 && args[0] == "list-panes"
+	}, func(_ context.Context, _ ...string) ([]byte, error) {
+		// cwd is a child of the pane path → prefix match.
+		return []byte("%3\x1f/Users/milo/proj\n"), nil
+	})
+	s.Install(t)
+	ctx := context.Background()
+
+	got, err := ResolvePaneByCwd(ctx, "/Users/milo/proj/sub")
+	if err != nil {
+		t.Fatalf("ResolvePaneByCwd: %v", err)
+	}
+	if want := "%3"; got != want {
+		t.Errorf("ResolvePaneByCwd = %q, want %q (parent/child)", got, want)
+	}
+}
+
+func TestResolvePaneByCwdAmbiguousRefuses(t *testing.T) {
+	s := NewStrictFakeTmux(t, nil)
+	s.HandleOutput(func(args []string) bool {
+		return len(args) >= 1 && args[0] == "list-panes"
+	}, func(_ context.Context, _ ...string) ([]byte, error) {
+		return []byte("%1\x1f/Users/milo/proj\n%2\x1f/Users/milo/proj\n"), nil
+	})
+	s.Install(t)
+	ctx := context.Background()
+
+	got, err := ResolvePaneByCwd(ctx, "/Users/milo/proj")
+	if err != nil {
+		t.Fatalf("ResolvePaneByCwd: %v", err)
+	}
+	if got != "" {
+		t.Errorf("ResolvePaneByCwd = %q, want \"\" (ambiguous, refuse to guess)", got)
+	}
+}
+
+func TestResolvePaneByCwdNoneFalse(t *testing.T) {
+	s := NewStrictFakeTmux(t, nil)
+	s.HandleOutput(func(args []string) bool {
+		return len(args) >= 1 && args[0] == "list-panes"
+	}, func(_ context.Context, _ ...string) ([]byte, error) {
+		return []byte("%1\x1f/elsewhere\n"), nil
+	})
+	s.Install(t)
+	ctx := context.Background()
+
+	got, err := ResolvePaneByCwd(ctx, "/Users/milo/proj")
+	if err != nil {
+		t.Fatalf("ResolvePaneByCwd: %v", err)
+	}
+	if got != "" {
+		t.Errorf("ResolvePaneByCwd = %q, want \"\" (no match)", got)
+	}
+}
+
+func TestResolvePaneByCwdTrailingSlash(t *testing.T) {
+	s := NewStrictFakeTmux(t, nil)
+	s.HandleOutput(func(args []string) bool {
+		return len(args) >= 1 && args[0] == "list-panes"
+	}, func(_ context.Context, _ ...string) ([]byte, error) {
+		return []byte("%1\x1f/Users/milo/proj\n"), nil
+	})
+	s.Install(t)
+	ctx := context.Background()
+
+	// cwd has a trailing slash; filepath.Clean normalizes it to match.
+	got, err := ResolvePaneByCwd(ctx, "/Users/milo/proj/")
+	if err != nil {
+		t.Fatalf("ResolvePaneByCwd: %v", err)
+	}
+	if want := "%1"; got != want {
+		t.Errorf("ResolvePaneByCwd = %q, want %q (trailing slash normalized)", got, want)
+	}
+}
+
+func TestResolvePaneByCwdCleaned(t *testing.T) {
+	s := NewStrictFakeTmux(t, nil)
+	s.HandleOutput(func(args []string) bool {
+		return len(args) >= 1 && args[0] == "list-panes"
+	}, func(_ context.Context, _ ...string) ([]byte, error) {
+		return []byte("%1\x1f/Users/milo/proj\n"), nil
+	})
+	s.Install(t)
+	ctx := context.Background()
+
+	// cwd has a relative component; filepath.Clean normalizes it.
+	got, err := ResolvePaneByCwd(ctx, "/Users/milo/./proj")
+	if err != nil {
+		t.Fatalf("ResolvePaneByCwd: %v", err)
+	}
+	if want := "%1"; got != want {
+		t.Errorf("ResolvePaneByCwd = %q, want %q (relative component cleaned)", got, want)
+	}
+}
+
+func TestMarkActiveDoneAgentsIdleFlipsActiveDonePane(t *testing.T) {
+	base := NewFakeTmux()
+	base.Set("%1", "@seshagy_agent_state", "done")
+	base.Set("%1", "@seshagy_agent_seq", "1")
+	base.Set("%2", "@seshagy_agent_state", "done")
+	base.Set("%2", "@seshagy_agent_seq", "2")
+	s := NewStrictFakeTmux(t, base).AllowPaneOptions()
+	s.HandleOutput(func(args []string) bool {
+		// list-panes -a -f #{pane_active} -F #{pane_id} → only %1 is active.
+		return len(args) >= 1 && args[0] == "list-panes"
+	}, func(_ context.Context, _ ...string) ([]byte, error) {
+		return []byte("%1"), nil
+	})
+	s.Install(t)
+	ctx := context.Background()
+
+	items := []Item{
+		{Kind: KindAgent, AgentState: AgentDone, PaneID: "%1"},
+		{Kind: KindAgent, AgentState: AgentDone, PaneID: "%2"},
+		{Kind: KindAgent, AgentState: AgentWorking, PaneID: "%3"},
+	}
+	MarkActiveDoneAgentsIdle(ctx, items)
+
+	if got := base.Get("%1", "@seshagy_agent_state"); got != "idle" {
+		t.Errorf("active done pane %%1 state = %q, want idle", got)
+	}
+	if got := base.Get("%2", "@seshagy_agent_state"); got != "done" {
+		t.Errorf("inactive done pane %%2 state = %q, want done (untouched)", got)
+	}
+}
+
+func TestMarkActiveDoneAgentsIdleNoopWithoutDone(t *testing.T) {
+	called := false
+	SetTmuxHooksForTest(t, func(_ context.Context, args ...string) ([]byte, error) {
+		if len(args) >= 1 && args[0] == "list-panes" {
+			called = true
+		}
+		return nil, nil
+	}, nil)
+	ctx := context.Background()
+
+	MarkActiveDoneAgentsIdle(ctx, []Item{
+		{Kind: KindAgent, AgentState: AgentWorking, PaneID: "%1"},
+	})
+	if called {
+		t.Fatal("list-panes called when no done agents exist; want no tmux call")
+	}
+}
+
+func TestReleaseAgentRejectsCrossSource(t *testing.T) {
+	ft := NewFakeTmux()
+	ft.Set("%5", "@seshagy_agent_seq", "5")
+	ft.Set("%5", "@seshagy_agent_state", "working")
+	ft.Set("%5", "@seshagy_agent_source", "seshagy:opencode")
+	SetTmuxHooksForTest(t, ft.output, ft.run)
+	ctx := context.Background()
+
+	// Release from a DIFFERENT source (seshagy:pi) at a higher seq — must NOT clear.
+	applied, err := ReleaseAgent(ctx, AgentRelease{
+		Pane:   "%5",
+		Source: "seshagy:pi",
+		Seq:    10,
+	})
+	if err != nil {
+		t.Fatalf("ReleaseAgent() error = %v", err)
+	}
+	if applied {
+		t.Fatal("cross-source release applied = true, want false (refused)")
+	}
+	if got := ft.Get("%5", "@seshagy_agent_state"); got != "working" {
+		t.Errorf(
+			"@seshagy_agent_state = %q, want working (not cleared by cross-source release)",
+			got,
+		)
+	}
+	if got := ft.Get("%5", "@seshagy_agent_source"); got != "seshagy:opencode" {
+		t.Errorf("@seshagy_agent_source = %q, want seshagy:opencode", got)
+	}
+}
+
+func TestReleaseAgentSameSourceSucceeds(t *testing.T) {
+	ft := NewFakeTmux()
+	ft.Set("%5", "@seshagy_agent_seq", "5")
+	ft.Set("%5", "@seshagy_agent_state", "working")
+	ft.Set("%5", "@seshagy_agent_source", "seshagy:opencode")
+	SetTmuxHooksForTest(t, ft.output, ft.run)
+	ctx := context.Background()
+
+	// Release from the SAME source at equal seq — must clear.
+	applied, err := ReleaseAgent(ctx, AgentRelease{
+		Pane:   "%5",
+		Source: "seshagy:opencode",
+		Seq:    5,
+	})
+	if err != nil {
+		t.Fatalf("ReleaseAgent() error = %v", err)
 	}
 	if !applied {
-		t.Fatal("report seq 10 should apply")
+		t.Fatal("same-source release applied = false, want true")
 	}
-	if got := f.Get(pane, "@agent_state"); got != "working" {
-		t.Fatalf("@agent_state after seq 10 = %q, want working", got)
+	if got := ft.Get("%5", "@seshagy_agent_state"); got != "" {
+		t.Errorf("@seshagy_agent_state = %q, want empty", got)
 	}
-	if got := f.Get(pane, "@agent_seq"); got != "10" {
-		t.Fatalf("@agent_seq after seq 10 = %q, want 10", got)
-	}
-
-	applied, err = report(9, AgentIdle)
-	if err != nil {
-		t.Fatalf("report seq 9: %v", err)
-	}
-	if applied {
-		t.Fatal("stale seq 9 should not apply")
-	}
-	if got := f.Get(pane, "@agent_state"); got != "working" {
-		t.Fatalf("stale seq changed @agent_state = %q, want working", got)
-	}
-	if got := f.Get(pane, "@agent_seq"); got != "10" {
-		t.Fatalf("stale seq changed @agent_seq = %q, want 10", got)
+	if got := ft.Get("%5", "@seshagy_agent_released_at"); got == "" {
+		t.Error("@seshagy_agent_released_at is empty after release, want timestamp")
 	}
 }
 
-func TestReportAgentRejectsEqualSeq(t *testing.T) {
-	const pane = "%5"
+func TestReleaseAgentEmptyExistingSourceSucceeds(t *testing.T) {
+	ft := NewFakeTmux()
+	ft.Set("%5", "@seshagy_agent_seq", "5")
+	SetTmuxHooksForTest(t, ft.output, ft.run)
 	ctx := context.Background()
-	SetFixedTrackTime(t, time.Unix(1_700_000_000, 0))
-	f := InstallReportFakeTmux(t, pane)
 
-	report := func(seq int64, state AgentState, message string) (bool, error) {
-		return ReportAgent(ctx, AgentReport{
-			Pane:        pane,
-			Name:        "pi",
-			State:       state,
-			Message:     message,
-			MessageSeen: true,
-			Source:      "hook",
-			SourceSeen:  true,
-			Seq:         seq,
-			SeqSeen:     true,
-		})
-	}
-
-	applied, err := report(10, AgentWorking, "busy")
+	// No existing source set → release from any source should proceed.
+	applied, err := ReleaseAgent(ctx, AgentRelease{
+		Pane:   "%5",
+		Source: "seshagy:codex",
+		Seq:    10,
+	})
 	if err != nil {
-		t.Fatalf("report seq 10: %v", err)
+		t.Fatalf("ReleaseAgent() error = %v", err)
 	}
 	if !applied {
-		t.Fatal("report seq 10 should apply")
-	}
-	snap := map[string]string{
-		"@agent_name":    f.Get(pane, "@agent_name"),
-		"@agent_state":   f.Get(pane, "@agent_state"),
-		"@agent_message": f.Get(pane, "@agent_message"),
-		"@agent_seq":     f.Get(pane, "@agent_seq"),
-	}
-
-	applied, err = report(10, AgentIdle, "duplicate")
-	if err != nil {
-		t.Fatalf("report equal seq 10: %v", err)
-	}
-	if applied {
-		t.Fatal("equal seq 10 should not apply")
-	}
-	for opt, want := range snap {
-		if got := f.Get(pane, opt); got != want {
-			t.Fatalf("equal seq changed %s = %q, want %q", opt, got, want)
-		}
+		t.Fatal("release with empty existing source applied = false, want true")
 	}
 }
 
-func TestReportAgentClearsMessageWhenEmptyMessageSeen(t *testing.T) {
-	const pane = "%6"
+func TestReleaseAgentRejectsEmptySourceAgainstSetSource(t *testing.T) {
+	ft := NewFakeTmux()
+	ft.Set("%5", "@seshagy_agent_seq", "5")
+	ft.Set("%5", "@seshagy_agent_state", "blocked")
+	ft.Set("%5", "@seshagy_agent_source", "seshagy:opencode")
+	SetTmuxHooksForTest(t, ft.output, ft.run)
 	ctx := context.Background()
-	SetFixedTrackTime(t, time.Unix(1_700_000_000, 0))
-	f := InstallReportFakeTmux(t, pane)
 
-	if _, err := ReportAgent(ctx, AgentReport{
-		Pane:        pane,
-		Name:        "pi",
-		State:       AgentWorking,
-		Message:     "busy",
-		MessageSeen: true,
-		Source:      "hook",
-		SourceSeen:  true,
-		Seq:         10,
-		SeqSeen:     true,
-	}); err != nil {
-		t.Fatalf("report with message: %v", err)
-	}
-	if got := f.Get(pane, "@agent_message"); got != "busy" {
-		t.Fatalf("@agent_message = %q, want busy", got)
-	}
-
-	if _, err := ReportAgent(ctx, AgentReport{
-		Pane:        pane,
-		Name:        "pi",
-		State:       AgentWorking,
-		Message:     "",
-		MessageSeen: true,
-		Source:      "hook",
-		SourceSeen:  true,
-		Seq:         11,
-		SeqSeen:     true,
-	}); err != nil {
-		t.Fatalf("report clearing message: %v", err)
-	}
-	if got := f.Get(pane, "@agent_message"); got != "" {
-		t.Fatalf("@agent_message = %q, want cleared", got)
-	}
-}
-
-func TestReportAgentAppliesNewerSeq(t *testing.T) {
-	const pane = "%2"
-	ctx := context.Background()
-	SetFixedTrackTime(t, time.Unix(1_700_000_000, 0))
-	f := InstallReportFakeTmux(t, pane)
-
-	if _, err := ReportAgent(ctx, AgentReport{
-		Pane:       pane,
-		Name:       "pi",
-		State:      AgentWorking,
-		Source:     "hook",
-		SourceSeen: true,
-		Seq:        10,
-		SeqSeen:    true,
-	}); err != nil {
-		t.Fatalf("report seq 10: %v", err)
-	}
-	if _, err := ReportAgent(ctx, AgentReport{
-		Pane:       pane,
-		Name:       "pi",
-		State:      AgentBlocked,
-		Source:     "hook",
-		SourceSeen: true,
-		Seq:        11,
-		SeqSeen:    true,
-	}); err != nil {
-		t.Fatalf("report seq 11: %v", err)
-	}
-	if got := f.Get(pane, "@agent_state"); got != "blocked" {
-		t.Fatalf("@agent_state after seq 11 = %q, want blocked", got)
-	}
-	if got := f.Get(pane, "@agent_seq"); got != "11" {
-		t.Fatalf("@agent_seq after seq 11 = %q, want 11", got)
-	}
-}
-
-func TestReportAgentDoesNotResurrectAfterReleaseTombstone(t *testing.T) {
-	const pane = "%3"
-	ctx := context.Background()
-	SetFixedTrackTime(t, time.Unix(1_700_000_000, 0))
-	f := InstallReportFakeTmux(t, pane)
-
-	applied, err := ReportAgent(ctx, AgentReport{
-		Pane:       pane,
-		Name:       "pi",
-		State:      AgentWorking,
-		Source:     "hook",
-		SourceSeen: true,
-		Seq:        100,
-		SeqSeen:    true,
+	// Unidentified release (Source="") against a source-tagged pane at a
+	// higher seq — must NOT clear. Regression for the cross-source guard.
+	applied, err := ReleaseAgent(ctx, AgentRelease{
+		Pane:   "%5",
+		Source: "",
+		Seq:    10,
 	})
 	if err != nil {
-		t.Fatalf("report seq 100: %v", err)
+		t.Fatalf("ReleaseAgent() error = %v", err)
+	}
+	if applied {
+		t.Fatal("unidentified release applied = true, want false (refused)")
+	}
+	if got := ft.Get("%5", "@seshagy_agent_state"); got != "blocked" {
+		t.Errorf("@seshagy_agent_state = %q, want blocked (not cleared)", got)
+	}
+	if got := ft.Get("%5", "@seshagy_agent_source"); got != "seshagy:opencode" {
+		t.Errorf("@seshagy_agent_source = %q, want seshagy:opencode", got)
+	}
+}
+
+func TestReportAgentClearsReleasedAt(t *testing.T) {
+	ft := NewFakeTmux()
+	ft.Set("%5", "@seshagy_agent_seq", "5")
+	ft.Set("%5", "@seshagy_agent_released_at", "2026-06-26T20:00:00Z")
+	SetTmuxHooksForTest(t, ft.output, ft.run)
+	ctx := context.Background()
+
+	// A fresh report that passes the seq guard must clear the release tombstone
+	// so manifest classification is no longer suppressed for this pane.
+	applied, err := ReportAgent(ctx, AgentReport{
+		Pane:   "%5",
+		Name:   "codex",
+		State:  AgentWorking,
+		Source: "seshagy:codex",
+		Seq:    10,
+	})
+	if err != nil {
+		t.Fatalf("ReportAgent() error = %v", err)
 	}
 	if !applied {
-		t.Fatal("report seq 100 should apply")
+		t.Fatal("ReportAgent() applied = false, want true")
 	}
-	released, err := ReleaseAgent(ctx, AgentRelease{
-		Pane:       pane,
-		Source:     "hook",
-		SourceSeen: true,
-		Seq:        101,
-		SeqSeen:    true,
-	})
-	if err != nil {
-		t.Fatalf("release seq 101: %v", err)
-	}
-	if !released {
-		t.Fatal("release seq 101 should apply")
-	}
-	if got := f.Get(pane, "@agent_seq"); got != "101" {
-		t.Fatalf("tombstone @agent_seq = %q, want 101", got)
-	}
-	if got := f.Get(pane, "@agent_name"); got != "" {
-		t.Fatalf("release @agent_name = %q, want cleared", got)
-	}
-
-	applied, err = ReportAgent(ctx, AgentReport{
-		Pane:       pane,
-		Name:       "pi",
-		State:      AgentWorking,
-		Source:     "hook",
-		SourceSeen: true,
-		Seq:        100,
-		SeqSeen:    true,
-	})
-	if err != nil {
-		t.Fatalf("stale report seq 100: %v", err)
-	}
-	if applied {
-		t.Fatal("stale report seq 100 should not apply")
-	}
-	if got := f.Get(pane, "@agent_name"); got != "" {
-		t.Fatalf("stale report resurrected @agent_name = %q", got)
-	}
-	if got := f.Get(pane, "@agent_state"); got != "" {
-		t.Fatalf("stale report resurrected @agent_state = %q", got)
-	}
-	if got := f.Get(pane, "@agent_seq"); got != "101" {
-		t.Fatalf("stale report changed @agent_seq = %q, want tombstone 101", got)
-	}
-}
-
-func TestReportAgentSeqRejectionLeavesOptionsSnapshot(t *testing.T) {
-	const pane = "%4"
-	ctx := context.Background()
-	SetFixedTrackTime(t, time.Unix(1_700_000_000, 0))
-	f := InstallReportFakeTmux(t, pane)
-
-	before := func() map[string]string {
-		snap := map[string]string{}
-		for _, opt := range []string{"@agent_name", "@agent_state", "@agent_message", "@agent_seq"} {
-			snap[opt] = f.Get(pane, opt)
-		}
-		return snap
-	}
-
-	applied, err := ReportAgent(ctx, AgentReport{
-		Pane:        pane,
-		Name:        "pi",
-		State:       AgentWorking,
-		Message:     "busy",
-		MessageSeen: true,
-		Source:      "hook",
-		SourceSeen:  true,
-		Seq:         10,
-		SeqSeen:     true,
-	})
-	if err != nil {
-		t.Fatalf("report seq 10: %v", err)
-	}
-	if !applied {
-		t.Fatal("report seq 10 should apply")
-	}
-	snap := before()
-
-	applied, err = ReportAgent(ctx, AgentReport{
-		Pane:        pane,
-		Name:        "pi",
-		State:       AgentIdle,
-		Message:     "stale",
-		MessageSeen: true,
-		Source:      "hook",
-		SourceSeen:  true,
-		Seq:         9,
-		SeqSeen:     true,
-	})
-	if err != nil {
-		t.Fatalf("report seq 9: %v", err)
-	}
-	if applied {
-		t.Fatal("stale seq 9 should not apply")
-	}
-	for opt, want := range snap {
-		if got := f.Get(pane, opt); got != want {
-			t.Fatalf("stale seq changed %s = %q, want %q", opt, got, want)
-		}
-	}
-	if strings.Contains(f.Get(pane, "@agent_message"), "stale") {
-		t.Fatalf("stale seq updated message = %q", f.Get(pane, "@agent_message"))
-	}
-}
-
-func TestReportAgentRejectsSeqLessWhenSeqExists(t *testing.T) {
-	const pane = "%11"
-	ctx := context.Background()
-	SetFixedTrackTime(t, time.Unix(1_700_000_000, 0))
-	f := InstallReportFakeTmux(t, pane)
-
-	applied, err := ReportAgent(ctx, AgentReport{
-		Pane:       pane,
-		Name:       "pi",
-		State:      AgentWorking,
-		Source:     "hook",
-		SourceSeen: true,
-		Seq:        50,
-		SeqSeen:    true,
-	})
-	if err != nil {
-		t.Fatalf("report seq 50: %v", err)
-	}
-	if !applied {
-		t.Fatal("report seq 50 should apply")
-	}
-
-	applied, err = ReportAgent(ctx, AgentReport{
-		Pane:       pane,
-		Name:       "pi",
-		State:      AgentIdle,
-		Source:     "hook",
-		SourceSeen: true,
-	})
-	if err != nil {
-		t.Fatalf("seq-less report: %v", err)
-	}
-	if applied {
-		t.Fatal("seq-less report should not apply when @agent_seq exists")
-	}
-	if got := f.Get(pane, "@agent_state"); got != "working" {
-		t.Fatalf("@agent_state after seq-less report = %q, want working", got)
-	}
-	if got := f.Get(pane, "@agent_seq"); got != "50" {
-		t.Fatalf("@agent_seq after seq-less report = %q, want 50", got)
-	}
-}
-
-func TestReleaseAgentRejectsStaleSeq(t *testing.T) {
-	const pane = "%7"
-	ctx := context.Background()
-	SetFixedTrackTime(t, time.Unix(1_700_000_000, 0))
-	f := InstallReportFakeTmux(t, pane)
-
-	if _, err := ReportAgent(ctx, AgentReport{
-		Pane:       pane,
-		Name:       "pi",
-		State:      AgentWorking,
-		Source:     "hook",
-		SourceSeen: true,
-		Seq:        20,
-		SeqSeen:    true,
-	}); err != nil {
-		t.Fatalf("report seq 20: %v", err)
-	}
-	snap := map[string]string{
-		"@agent_name":  f.Get(pane, "@agent_name"),
-		"@agent_state": f.Get(pane, "@agent_state"),
-		"@agent_seq":   f.Get(pane, "@agent_seq"),
-	}
-
-	released, err := ReleaseAgent(ctx, AgentRelease{
-		Pane:       pane,
-		Source:     "hook",
-		SourceSeen: true,
-		Seq:        19,
-		SeqSeen:    true,
-	})
-	if err != nil {
-		t.Fatalf("release stale seq 19: %v", err)
-	}
-	if released {
-		t.Fatal("stale release should not apply")
-	}
-	for opt, want := range snap {
-		if got := f.Get(pane, opt); got != want {
-			t.Fatalf("stale release changed %s = %q, want %q", opt, got, want)
-		}
-	}
-}
-
-func TestReleaseAgentRejectsEqualSeq(t *testing.T) {
-	const pane = "%8"
-	ctx := context.Background()
-	SetFixedTrackTime(t, time.Unix(1_700_000_000, 0))
-	f := InstallReportFakeTmux(t, pane)
-
-	if _, err := ReportAgent(ctx, AgentReport{
-		Pane:       pane,
-		Name:       "pi",
-		State:      AgentWorking,
-		Source:     "hook",
-		SourceSeen: true,
-		Seq:        30,
-		SeqSeen:    true,
-	}); err != nil {
-		t.Fatalf("report seq 30: %v", err)
-	}
-	snap := map[string]string{
-		"@agent_name":  f.Get(pane, "@agent_name"),
-		"@agent_state": f.Get(pane, "@agent_state"),
-		"@agent_seq":   f.Get(pane, "@agent_seq"),
-	}
-
-	released, err := ReleaseAgent(ctx, AgentRelease{
-		Pane:       pane,
-		Source:     "hook",
-		SourceSeen: true,
-		Seq:        30,
-		SeqSeen:    true,
-	})
-	if err != nil {
-		t.Fatalf("release equal seq 30: %v", err)
-	}
-	if released {
-		t.Fatal("equal release should not apply")
-	}
-	for opt, want := range snap {
-		if got := f.Get(pane, opt); got != want {
-			t.Fatalf("equal release changed %s = %q, want %q", opt, got, want)
-		}
-	}
-}
-
-func TestReleaseAgentRejectsDifferentActiveSource(t *testing.T) {
-	const pane = "%9"
-	ctx := context.Background()
-	SetFixedTrackTime(t, time.Unix(1_700_000_000, 0))
-	f := InstallReportFakeTmux(t, pane)
-
-	if _, err := ReportAgent(ctx, AgentReport{
-		Pane:       pane,
-		Name:       "pi",
-		State:      AgentWorking,
-		Source:     "hook-a",
-		SourceSeen: true,
-		Seq:        40,
-		SeqSeen:    true,
-	}); err != nil {
-		t.Fatalf("report seq 40: %v", err)
-	}
-	snap := map[string]string{
-		"@agent_name":   f.Get(pane, "@agent_name"),
-		"@agent_state":  f.Get(pane, "@agent_state"),
-		"@agent_source": f.Get(pane, "@agent_source"),
-		"@agent_seq":    f.Get(pane, "@agent_seq"),
-	}
-
-	released, err := ReleaseAgent(ctx, AgentRelease{
-		Pane:       pane,
-		Source:     "hook-b",
-		SourceSeen: true,
-		Seq:        41,
-		SeqSeen:    true,
-	})
-	if err != nil {
-		t.Fatalf("release from different source: %v", err)
-	}
-	if released {
-		t.Fatal("different-source release should not apply")
-	}
-	for opt, want := range snap {
-		if got := f.Get(pane, opt); got != want {
-			t.Fatalf("different-source release changed %s = %q, want %q", opt, got, want)
-		}
-	}
-}
-
-func TestConcurrentReportAgentSeqOrdering(t *testing.T) {
-	// withAgentPaneLock serializes concurrent ReportAgent calls per pane; the
-	// higher seq must win regardless of which goroutine acquires the lock first.
-	const pane = "%10"
-	ctx := context.Background()
-	SetFixedTrackTime(t, time.Unix(1_700_000_000, 0))
-	f := InstallReportFakeTmux(t, pane)
-
-	type reportOutcome struct {
-		seq int64
-		err error
-	}
-
-	report := func(seq int64, state AgentState) reportOutcome {
-		_, err := ReportAgent(ctx, AgentReport{
-			Pane:       pane,
-			Name:       "pi",
-			State:      state,
-			Source:     "hook",
-			SourceSeen: true,
-			Seq:        seq,
-			SeqSeen:    true,
-		})
-		return reportOutcome{seq: seq, err: err}
-	}
-
-	results := make(chan reportOutcome, 2)
-	var wg sync.WaitGroup
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
-		results <- report(99, AgentWorking)
-	}()
-	go func() {
-		defer wg.Done()
-		results <- report(100, AgentBlocked)
-	}()
-	wg.Wait()
-	close(results)
-
-	for r := range results {
-		if r.err != nil {
-			t.Errorf("report seq %d: %v", r.seq, r.err)
-		}
-	}
-
-	if got := f.Get(pane, "@agent_seq"); got != "100" {
-		t.Fatalf("@agent_seq = %q, want 100", got)
-	}
-	if got := f.Get(pane, "@agent_state"); got != "blocked" {
-		t.Fatalf("@agent_state = %q, want blocked from higher seq", got)
-	}
-}
-
-func TestReportAfterReleaseSeqOrdering(t *testing.T) {
-	// Release first, then report with lower seq — release tombstone must win.
-	const pane = "%12"
-	ctx := context.Background()
-	SetFixedTrackTime(t, time.Unix(1_700_000_000, 0))
-	f := InstallReportFakeTmux(t, pane)
-
-	released, err := ReleaseAgent(ctx, AgentRelease{
-		Pane:       pane,
-		Source:     "hook",
-		SourceSeen: true,
-		Seq:        201,
-		SeqSeen:    true,
-	})
-	if err != nil {
-		t.Fatalf("release seq 201: %v", err)
-	}
-	if !released {
-		t.Fatal("release seq 201 should apply")
-	}
-
-	applied, err := ReportAgent(ctx, AgentReport{
-		Pane:       pane,
-		Name:       "pi",
-		State:      AgentWorking,
-		Source:     "hook",
-		SourceSeen: true,
-		Seq:        200,
-		SeqSeen:    true,
-	})
-	if err != nil {
-		t.Fatalf("report seq 200: %v", err)
-	}
-	if applied {
-		t.Fatal("report seq 200 should not apply after release tombstone")
-	}
-	if got := f.Get(pane, "@agent_seq"); got != "201" {
-		t.Fatalf("@agent_seq = %q, want release tombstone 201", got)
-	}
-	if got := f.Get(pane, "@agent_name"); got != "" {
-		t.Fatalf("@agent_name = %q, want cleared by release", got)
-	}
-	if got := f.Get(pane, "@agent_state"); got != "" {
-		t.Fatalf("@agent_state = %q, want cleared by release", got)
-	}
-}
-
-func TestReportThenReleaseSeqOrdering(t *testing.T) {
-	// Report first, then release with higher seq — release tombstone must win.
-	const pane = "%16"
-	ctx := context.Background()
-	SetFixedTrackTime(t, time.Unix(1_700_000_000, 0))
-	f := InstallReportFakeTmux(t, pane)
-
-	applied, err := ReportAgent(ctx, AgentReport{
-		Pane:       pane,
-		Name:       "pi",
-		State:      AgentWorking,
-		Source:     "hook",
-		SourceSeen: true,
-		Seq:        300,
-		SeqSeen:    true,
-	})
-	if err != nil {
-		t.Fatalf("report seq 300: %v", err)
-	}
-	if !applied {
-		t.Fatal("report seq 300 should apply when it runs first")
-	}
-
-	released, err := ReleaseAgent(ctx, AgentRelease{
-		Pane:       pane,
-		Source:     "hook",
-		SourceSeen: true,
-		Seq:        301,
-		SeqSeen:    true,
-	})
-	if err != nil {
-		t.Fatalf("release seq 301: %v", err)
-	}
-	if !released {
-		t.Fatal("release seq 301 should apply after report")
-	}
-	if got := f.Get(pane, "@agent_seq"); got != "301" {
-		t.Fatalf("@agent_seq = %q, want 301", got)
-	}
-	if got := f.Get(pane, "@agent_name"); got != "" {
-		t.Fatalf("@agent_name = %q, want cleared by release", got)
-	}
-}
-
-func TestReleaseThenReportSeqOrdering(t *testing.T) {
-	// Release completes before report; stale report must not resurrect metadata.
-	const pane = "%17"
-	ctx := context.Background()
-	SetFixedTrackTime(t, time.Unix(1_700_000_000, 0))
-	f := InstallReportFakeTmux(t, pane)
-
-	released, err := ReleaseAgent(ctx, AgentRelease{
-		Pane:       pane,
-		Source:     "hook",
-		SourceSeen: true,
-		Seq:        401,
-		SeqSeen:    true,
-	})
-	if err != nil {
-		t.Fatalf("release: %v", err)
-	}
-	if !released {
-		t.Fatal("release seq 401 should apply")
-	}
-
-	applied, err := ReportAgent(ctx, AgentReport{
-		Pane:       pane,
-		Name:       "pi",
-		State:      AgentWorking,
-		Source:     "hook",
-		SourceSeen: true,
-		Seq:        400,
-		SeqSeen:    true,
-	})
-	if err != nil {
-		t.Fatalf("report: %v", err)
-	}
-	if applied {
-		t.Fatal("report seq 400 should not apply after release seq 401 tombstone")
-	}
-	if got := f.Get(pane, "@agent_seq"); got != "401" {
-		t.Fatalf("@agent_seq = %q, want 401", got)
-	}
-	if got := f.Get(pane, "@agent_name"); got != "" {
-		t.Fatalf("@agent_name = %q, want cleared", got)
-	}
-}
-
-func TestReleaseAgentRejectsSeqLessWhenSeqExists(t *testing.T) {
-	const pane = "%18"
-	ctx := context.Background()
-	SetFixedTrackTime(t, time.Unix(1_700_000_000, 0))
-	f := InstallReportFakeTmux(t, pane)
-
-	if _, err := ReportAgent(ctx, AgentReport{
-		Pane:       pane,
-		Name:       "pi",
-		State:      AgentWorking,
-		Source:     "hook",
-		SourceSeen: true,
-		Seq:        70,
-		SeqSeen:    true,
-	}); err != nil {
-		t.Fatalf("report seq 70: %v", err)
-	}
-	snap := map[string]string{
-		"@agent_name":  f.Get(pane, "@agent_name"),
-		"@agent_state": f.Get(pane, "@agent_state"),
-		"@agent_seq":   f.Get(pane, "@agent_seq"),
-	}
-
-	released, err := ReleaseAgent(ctx, AgentRelease{
-		Pane:       pane,
-		Source:     "hook",
-		SourceSeen: true,
-	})
-	if err != nil {
-		t.Fatalf("seq-less release: %v", err)
-	}
-	if released {
-		t.Fatal("seq-less release should not apply when @agent_seq exists")
-	}
-	for opt, want := range snap {
-		if got := f.Get(pane, opt); got != want {
-			t.Fatalf("seq-less release changed %s = %q, want %q", opt, got, want)
-		}
-	}
-}
-
-func TestReleaseAgentWithoutSourceClearsForeignMetadata(t *testing.T) {
-	// Release without --source skips source matching and clears metadata even when
-	// @agent_source was set by a different hook integration.
-	const pane = "%13"
-	ctx := context.Background()
-	SetFixedTrackTime(t, time.Unix(1_700_000_000, 0))
-	f := InstallReportFakeTmux(t, pane)
-
-	applied, err := ReportAgent(ctx, AgentReport{
-		Pane:       pane,
-		Name:       "pi",
-		State:      AgentWorking,
-		Source:     "hook-a",
-		SourceSeen: true,
-		Seq:        60,
-		SeqSeen:    true,
-	})
-	if err != nil {
-		t.Fatalf("report seq 60: %v", err)
-	}
-	if !applied {
-		t.Fatal("report seq 60 should apply")
-	}
-	if got := f.Get(pane, "@agent_source"); got != "hook-a" {
-		t.Fatalf("@agent_source = %q, want hook-a", got)
-	}
-
-	released, err := ReleaseAgent(ctx, AgentRelease{
-		Pane:    pane,
-		Seq:     61,
-		SeqSeen: true,
-	})
-	if err != nil {
-		t.Fatalf("release without source seq 61: %v", err)
-	}
-	if !released {
-		t.Fatal("release without source should apply")
-	}
-	for _, opt := range []string{"@agent_name", "@agent_state", "@agent_source"} {
-		if got := f.Get(pane, opt); got != "" {
-			t.Fatalf("release without source left %s = %q, want cleared", opt, got)
-		}
-	}
-	if got := f.Get(pane, "@agent_seq"); got != "61" {
-		t.Fatalf("@agent_seq = %q, want tombstone 61", got)
-	}
-}
-
-func TestReportAgentRejectsWhenSeqCorrupted(t *testing.T) {
-	const pane = "%14"
-	ctx := context.Background()
-	SetFixedTrackTime(t, time.Unix(1_700_000_000, 0))
-	f := InstallReportFakeTmux(t, pane)
-
-	f.Set(pane, "@agent_seq", "bad")
-
-	applied, err := ReportAgent(ctx, AgentReport{
-		Pane:       pane,
-		Name:       "pi",
-		State:      AgentWorking,
-		Source:     "hook",
-		SourceSeen: true,
-		Seq:        10,
-		SeqSeen:    true,
-	})
-	if err != nil {
-		t.Fatalf("report seq 10: %v", err)
-	}
-	if applied {
-		t.Fatal("report should not apply when existing @agent_seq is malformed")
-	}
-	if got := f.Get(pane, "@agent_name"); got != "" {
-		t.Fatalf("@agent_name = %q, want unchanged", got)
-	}
-}
-
-func TestReleaseAgentRejectsWhenSeqCorrupted(t *testing.T) {
-	const pane = "%15"
-	ctx := context.Background()
-	f := InstallReportFakeTmux(t, pane)
-
-	f.Set(pane, "@agent_name", "pi")
-	f.Set(pane, "@agent_state", string(AgentWorking))
-	f.Set(pane, "@agent_source", "hook")
-	f.Set(pane, "@agent_seq", "bad")
-
-	released, err := ReleaseAgent(ctx, AgentRelease{
-		Pane:       pane,
-		Source:     "hook",
-		SourceSeen: true,
-		Seq:        11,
-		SeqSeen:    true,
-	})
-	if err != nil {
-		t.Fatalf("release seq 11: %v", err)
-	}
-	if released {
-		t.Fatal("release should not apply when existing @agent_seq is malformed")
-	}
-	if got := f.Get(pane, "@agent_name"); got != "pi" {
-		t.Fatalf("@agent_name = %q, want unchanged", got)
+	if got := ft.Get("%5", "@seshagy_agent_released_at"); got != "" {
+		t.Errorf("@seshagy_agent_released_at = %q, want empty (cleared by fresh report)", got)
 	}
 }

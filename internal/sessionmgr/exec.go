@@ -72,6 +72,19 @@ func detectTmuxPopup(envPane, currentPane string) bool {
 	return envPane != currentPane
 }
 
+func showPaneOption(ctx context.Context, pane, opt string) (string, error) {
+	out, err := tmuxOutput(ctx, "show-option", "-qvpt", pane, opt)
+	return strings.TrimSpace(string(out)), err
+}
+
+func setPaneOption(ctx context.Context, pane, opt, value string) error {
+	return tmuxRun(ctx, "set-option", "-qpt", pane, opt, value)
+}
+
+func unsetPaneOption(ctx context.Context, pane, opt string) error {
+	return tmuxRun(ctx, "set-option", "-qupt", pane, opt)
+}
+
 func CurrentTmuxSession(ctx context.Context) (string, error) {
 	out, err := tmuxOutput(ctx, "display-message", "-p", "#S")
 	if err != nil {

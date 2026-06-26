@@ -196,6 +196,25 @@ func AttachOrSwitchCommand(name string) *exec.Cmd {
 	return exec.Command("tmux", "attach-session", "-t", exactSession(name))
 }
 
+// FocusAgentCommand builds a command that focuses an agent pane. When the
+// user is inside tmux, select-window + select-pane only change server-side
+// state; the client stays put. The trailing switch-client is what actually
+// moves the user to the agent's session (mirrors AttachOrSwitchCommand).
+func FocusAgentCommand(session, window, paneID string) *exec.Cmd {
+	target := session + ":" + window
+	selectCmd := "tmux select-window -t " + shellQuote(target) +
+		" && tmux select-pane -t " + shellQuote(paneID)
+	if InTmux() {
+		selectCmd += " && tmux switch-client -t " + shellQuote(session)
+	}
+	return exec.Command("sh", "-c", selectCmd)
+}
+
+// shellQuote single-quote-escapes a string for safe inclusion in a sh -c arg.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
+}
+
 func unixTime(s string) time.Time {
 	n := atoi(s)
 	if n <= 0 {

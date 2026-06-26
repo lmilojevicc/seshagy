@@ -30,24 +30,6 @@ func TestIconSetForTmuxState(t *testing.T) {
 	}
 }
 
-func TestIconSetForState(t *testing.T) {
-	set := IconSet{
-		AgentStates: AgentStateStyles{
-			Working: IconStyle{Icon: "W", ASCII: "work"},
-			Blocked: IconStyle{Icon: "B", ASCII: "block"},
-		},
-	}
-	if style := set.ForState(AgentWorking); style.Icon != "W" || style.ASCII != "work" {
-		t.Fatalf("working = %#v, want custom working style", style)
-	}
-	if style := set.ForState(AgentBlocked); style.Icon != "B" || style.ASCII != "block" {
-		t.Fatalf("blocked = %#v, want custom blocked style", style)
-	}
-	if style := DefaultIconSet().ForState(AgentDone); style.Icon != "✓" {
-		t.Fatalf("default done icon = %q, want ✓", style.Icon)
-	}
-}
-
 func TestParseActionLineWithIcons(t *testing.T) {
 	icons := DefaultIconSet()
 	tests := []struct {
@@ -96,65 +78,36 @@ func TestParseActionLineWithIcons(t *testing.T) {
 }
 
 func TestIconSetStateDisplayModes(t *testing.T) {
-	hidden := IconSet{AgentStateMode: "none", TmuxStateMode: "none"}
-	if !hidden.AgentStateHidden() || !hidden.TmuxStateHidden() {
+	hidden := IconSet{TmuxStateMode: "none"}
+	if !hidden.TmuxStateHidden() {
 		t.Fatal("none mode should hide states")
 	}
-	if hidden.AgentStateUsesIcons() || hidden.AgentStateUsesLabels() ||
-		hidden.TmuxStateUsesIcons() || hidden.TmuxStateUsesLabels() {
+	if hidden.TmuxStateUsesIcons() || hidden.TmuxStateUsesLabels() {
 		t.Fatal("hidden states should not use icons or labels")
 	}
 
-	iconMode := IconSet{Enabled: true, AgentStateMode: "icons", TmuxStateMode: "icons"}
-	if !iconMode.AgentStateUsesIcons() || iconMode.AgentStateUsesLabels() {
-		t.Fatalf("icons mode = agent icons:%v labels:%v",
-			iconMode.AgentStateUsesIcons(), iconMode.AgentStateUsesLabels())
-	}
+	iconMode := IconSet{Enabled: true, TmuxStateMode: "icons"}
 	if !iconMode.TmuxStateUsesIcons() || iconMode.TmuxStateUsesLabels() {
 		t.Fatalf("icons mode = tmux icons:%v labels:%v",
 			iconMode.TmuxStateUsesIcons(), iconMode.TmuxStateUsesLabels())
 	}
 
-	textMode := IconSet{Enabled: true, ASCII: true, AgentStateMode: "text", TmuxStateMode: "text"}
-	if textMode.AgentStateUsesIcons() || !textMode.AgentStateUsesLabels() {
-		t.Fatalf("text mode = agent icons:%v labels:%v",
-			textMode.AgentStateUsesIcons(), textMode.AgentStateUsesLabels())
-	}
+	textMode := IconSet{Enabled: true, ASCII: true, TmuxStateMode: "text"}
 	if textMode.TmuxStateUsesIcons() || !textMode.TmuxStateUsesLabels() {
 		t.Fatalf("text mode = tmux icons:%v labels:%v",
 			textMode.TmuxStateUsesIcons(), textMode.TmuxStateUsesLabels())
 	}
 
-	inherit := IconSet{Enabled: true, AgentStateMode: "inherit", TmuxStateMode: "inherit"}
-	if !inherit.AgentStateUsesIcons() || inherit.AgentStateUsesLabels() {
-		t.Fatalf("inherit mode = agent icons:%v labels:%v",
-			inherit.AgentStateUsesIcons(), inherit.AgentStateUsesLabels())
-	}
-}
-
-func TestLooksPaneIDAndWindowPane(t *testing.T) {
-	if !looksPaneID("%12") || looksPaneID("12") || looksPaneID("%ab") {
-		t.Fatal("looksPaneID() misclassified pane ids")
-	}
-	if !looksWindowPane("1.2") || looksWindowPane("1.") || looksWindowPane("a.2") {
-		t.Fatal("looksWindowPane() misclassified locations")
-	}
-}
-
-func TestParseActionLineBracketAgentLine(t *testing.T) {
-	line := "[working]\tclaude\t%3\twork:1.0\t/path"
-	item, ok := ParseActionLine(line)
-	if !ok || item.Kind != KindAgent || item.PaneID != "%3" || item.AgentName != "claude" {
-		t.Fatalf("ParseActionLine() = %#v, %v", item, ok)
+	inherit := IconSet{Enabled: true, TmuxStateMode: "inherit"}
+	if !inherit.TmuxStateUsesIcons() || inherit.TmuxStateUsesLabels() {
+		t.Fatalf("inherit mode = tmux icons:%v labels:%v",
+			inherit.TmuxStateUsesIcons(), inherit.TmuxStateUsesLabels())
 	}
 }
 
 func TestDefaultIconTextModes(t *testing.T) {
 	if got := defaultIconText(KindSession, true); got != "S" {
 		t.Fatalf("ascii session = %q", got)
-	}
-	if got := defaultIconText(KindAgent, false); !strings.HasPrefix(got, IconAgent) {
-		t.Fatalf("icon agent = %q", got)
 	}
 }
 
@@ -180,49 +133,6 @@ func TestHexToRGBRejectsInvalid(t *testing.T) {
 	t.Fatal("hexToRGB should reject short hex")
 }
 
-func TestRawStateUsesConfiguredStyles(t *testing.T) {
-	set := IconSet{
-		AgentStates: AgentStateStyles{
-			Working: IconStyle{Icon: "W"},
-			Blocked: IconStyle{Icon: "B"},
-			Aborted: IconStyle{Icon: "A"},
-			Done:    IconStyle{Icon: "D"},
-			Idle:    IconStyle{Icon: "I"},
-			Unknown: IconStyle{Icon: "U"},
-		},
-	}
-	cases := map[AgentState]string{
-		AgentWorking: "W",
-		AgentBlocked: "B",
-		AgentAborted: "A",
-		AgentDone:    "D",
-		AgentIdle:    "I",
-		AgentUnknown: "U",
-	}
-	for state, want := range cases {
-		if got := set.rawState(state).Icon; got != want {
-			t.Fatalf("rawState(%s).Icon = %q, want %q", state, got, want)
-		}
-	}
-}
-
-func TestDefaultStateStyleCoversAllStates(t *testing.T) {
-	cases := map[AgentState]string{
-		AgentWorking: "▶",
-		AgentBlocked: "◆",
-		AgentAborted: "■",
-		AgentDone:    "✓",
-		AgentIdle:    "◌",
-		AgentUnknown: "?",
-	}
-	for state, wantIcon := range cases {
-		style := defaultStateStyle(state)
-		if style.Icon != wantIcon {
-			t.Fatalf("defaultStateStyle(%s).Icon = %q, want %q", state, style.Icon, wantIcon)
-		}
-	}
-}
-
 func TestFormatLineDefaultKindUsesDisplayName(t *testing.T) {
 	item := Item{Kind: Kind("custom"), Name: "fallback-name"}
 	if got := FormatLine(item); got != "fallback-name" {
@@ -235,12 +145,7 @@ func TestItemDisplayName(t *testing.T) {
 		item Item
 		want string
 	}{
-		{Item{Kind: KindAgent, AgentName: "claude", PaneID: "%1"}, "claude"},
-		{
-			Item{Kind: KindAgent, AgentName: "pi", AgentDisplayName: "my bot", PaneID: "%1"},
-			"my bot",
-		},
-		{Item{Kind: KindAgent, PaneID: "%2"}, "%2"},
+		{},
 		{Item{Kind: KindZoxide, Path: "~/Projects"}, "~/Projects"},
 		{Item{Kind: KindSession, Name: "work"}, "work"},
 	}
@@ -253,7 +158,7 @@ func TestItemDisplayName(t *testing.T) {
 
 func TestIconSetForKindDisabled(t *testing.T) {
 	set := IconSet{Enabled: false}
-	for _, kind := range []Kind{KindSession, KindZoxide, KindFD, KindAgent} {
+	for _, kind := range []Kind{KindSession, KindZoxide, KindFD} {
 		style := set.For(kind)
 		if style.Text != "" {
 			t.Fatalf("For(%q).Text = %q, want empty when icons disabled", kind, style.Text)

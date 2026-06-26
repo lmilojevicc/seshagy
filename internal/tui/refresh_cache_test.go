@@ -22,18 +22,18 @@ func TestSwitchSourceUsesFreshCacheWithoutBlockingLoad(t *testing.T) {
 	m.items = testItems("stale-session")
 	m.loading = false
 	m.cache = map[sessionmgr.SourceMode]modeCache{
-		sessionmgr.ModeAgents: {
-			items:     testItems("cached-agent"),
+		sessionmgr.ModeZoxide: {
+			items:     testItems("cached-zoxide"),
 			fetchedAt: time.Now(),
 		},
 	}
 
-	model, cmd := m.switchSource(sessionmgr.ModeAgents)
+	model, cmd := m.switchSource(sessionmgr.ModeZoxide)
 	got := model.(Model)
 	if got.loading {
 		t.Fatal("loading = true, want false for fresh cache hit")
 	}
-	if len(got.items) != 1 || got.items[0].Name != "cached-agent" {
+	if len(got.items) != 1 || got.items[0].Name != "cached-zoxide" {
 		t.Fatalf("items = %#v, want cached agent", got.items)
 	}
 	if cmd == nil {
@@ -47,7 +47,7 @@ func TestSwitchSourceClearsItemsWhenCacheMissing(t *testing.T) {
 	m.items = testItems("session-a")
 	m.loading = false
 
-	model, _ := m.switchSource(sessionmgr.ModeAgents)
+	model, _ := m.switchSource(sessionmgr.ModeZoxide)
 	got := model.(Model)
 	if !got.loading {
 		t.Fatalf("loading = %v, want true", got.loading)
@@ -87,11 +87,11 @@ func TestRefreshMsgUpdatesCacheForBackgroundMode(t *testing.T) {
 	m.source = sessionmgr.ModeSessions
 	m.items = testItems("session-a")
 	m.inflightRefresh = map[sessionmgr.SourceMode]uint64{
-		sessionmgr.ModeAgents: 1,
+		sessionmgr.ModeZoxide: 1,
 	}
 
 	model, cmd := m.Update(refreshMsg{
-		source: sessionmgr.ModeAgents,
+		source: sessionmgr.ModeZoxide,
 		gen:    1,
 		items:  testItems("agent-a"),
 	})
@@ -102,7 +102,7 @@ func TestRefreshMsgUpdatesCacheForBackgroundMode(t *testing.T) {
 	if len(got.items) != 1 || got.items[0].Name != "session-a" {
 		t.Fatalf("visible items changed = %#v", got.items)
 	}
-	entry, ok := got.cache[sessionmgr.ModeAgents]
+	entry, ok := got.cache[sessionmgr.ModeZoxide]
 	if !ok || len(entry.items) != 1 || entry.items[0].Name != "agent-a" {
 		t.Fatalf("agents cache = %#v, ok=%v", entry, ok)
 	}
@@ -130,7 +130,7 @@ func TestTickSkipsRefreshWhenCacheFresh(t *testing.T) {
 
 func TestTickSkipsRefreshWhenOverlayActive(t *testing.T) {
 	m := New()
-	m.integration.active = true
+	m.setup.active = true
 	beforeGen := m.refreshGen[m.source]
 
 	model, cmd := m.Update(tickMsg(time.Now()))
@@ -139,7 +139,7 @@ func TestTickSkipsRefreshWhenOverlayActive(t *testing.T) {
 		t.Fatal("expected tick reschedule command")
 	}
 	if got.refreshGen[got.source] != beforeGen {
-		t.Fatal("tick started refresh during integration overlay")
+		t.Fatal("tick started refresh during setup overlay")
 	}
 }
 
@@ -162,15 +162,15 @@ func TestInvalidateCachesOnAttachDone(t *testing.T) {
 func TestBeginRefreshCoalescesInflight(t *testing.T) {
 	m := New()
 	m.inflightRefresh = map[sessionmgr.SourceMode]uint64{
-		sessionmgr.ModeAgents: 1,
+		sessionmgr.ModeZoxide: 1,
 	}
 
-	model, cmd := m.beginRefresh(sessionmgr.ModeAgents, false)
+	model, cmd := m.beginRefresh(sessionmgr.ModeZoxide, false)
 	if cmd != nil {
 		t.Fatal("expected nil cmd for inflight coalesce")
 	}
-	if model.inflightRefresh[sessionmgr.ModeAgents] != 1 {
-		t.Fatalf("inflight gen = %d, want 1", model.inflightRefresh[sessionmgr.ModeAgents])
+	if model.inflightRefresh[sessionmgr.ModeZoxide] != 1 {
+		t.Fatalf("inflight gen = %d, want 1", model.inflightRefresh[sessionmgr.ModeZoxide])
 	}
 }
 
@@ -189,56 +189,56 @@ func TestInvalidateAllCachesDropsInflightRefresh(t *testing.T) {
 	m := New()
 	m.source = sessionmgr.ModeSessions
 	m.refreshGen = map[sessionmgr.SourceMode]uint64{
-		sessionmgr.ModeAgents: 1,
+		sessionmgr.ModeZoxide: 1,
 	}
 	m.inflightRefresh = map[sessionmgr.SourceMode]uint64{
-		sessionmgr.ModeAgents: 1,
+		sessionmgr.ModeZoxide: 1,
 	}
 	m.cache = map[sessionmgr.SourceMode]modeCache{
-		sessionmgr.ModeAgents: {items: testItems("old-agent"), fetchedAt: time.Now()},
+		sessionmgr.ModeZoxide: {items: testItems("old-agent"), fetchedAt: time.Now()},
 	}
 
 	got := m.invalidateAllCaches()
-	if got.inflightRefresh[sessionmgr.ModeAgents] != 0 {
+	if got.inflightRefresh[sessionmgr.ModeZoxide] != 0 {
 		t.Fatalf(
 			"inflight gen = %d, want 0 after invalidation",
-			got.inflightRefresh[sessionmgr.ModeAgents],
+			got.inflightRefresh[sessionmgr.ModeZoxide],
 		)
 	}
-	if got.refreshGen[sessionmgr.ModeAgents] != 2 {
-		t.Fatalf("refreshGen = %d, want 2 after bump", got.refreshGen[sessionmgr.ModeAgents])
+	if got.refreshGen[sessionmgr.ModeZoxide] != 2 {
+		t.Fatalf("refreshGen = %d, want 2 after bump", got.refreshGen[sessionmgr.ModeZoxide])
 	}
 	if len(got.cache) != 0 {
 		t.Fatalf("cache not cleared = %#v", got.cache)
 	}
 
 	model, cmd := got.handleRefreshMsg(refreshMsg{
-		source: sessionmgr.ModeAgents,
+		source: sessionmgr.ModeZoxide,
 		gen:    1,
 		items:  testItems("stale-agent"),
 	})
 	if cmd != nil {
 		t.Fatal("expected no follow-up command for dropped refresh")
 	}
-	if _, ok := model.cache[sessionmgr.ModeAgents]; ok {
+	if _, ok := model.cache[sessionmgr.ModeZoxide]; ok {
 		t.Fatal("stale refresh repopulated cache after invalidation")
 	}
 }
 
 func TestHandleRefreshMsgStoresErrorInCache(t *testing.T) {
 	m := New()
-	m.source = sessionmgr.ModeAgents
+	m.source = sessionmgr.ModeZoxide
 	m.inflightRefresh = map[sessionmgr.SourceMode]uint64{
-		sessionmgr.ModeAgents: 1,
+		sessionmgr.ModeZoxide: 1,
 	}
 	loadErr := errors.New("load failed")
 
 	got, _ := m.handleRefreshMsg(refreshMsg{
-		source: sessionmgr.ModeAgents,
+		source: sessionmgr.ModeZoxide,
 		gen:    1,
 		err:    loadErr,
 	})
-	entry, ok := got.cache[sessionmgr.ModeAgents]
+	entry, ok := got.cache[sessionmgr.ModeZoxide]
 	if !ok || !errors.Is(entry.err, loadErr) {
 		t.Fatalf("cache err = %v, ok=%v", entry.err, ok)
 	}
@@ -275,14 +275,14 @@ func TestSwitchSourceAppliesCachedWarningStatus(t *testing.T) {
 	m := New()
 	m.source = sessionmgr.ModeSessions
 	m.cache = map[sessionmgr.SourceMode]modeCache{
-		sessionmgr.ModeAgents: {
+		sessionmgr.ModeZoxide: {
 			items:     testItems("agent-a"),
 			fetchedAt: time.Now(),
 			warning:   warn,
 		},
 	}
 
-	model, _ := m.switchSource(sessionmgr.ModeAgents)
+	model, _ := m.switchSource(sessionmgr.ModeZoxide)
 	got := model.(Model)
 	if got.status != warn {
 		t.Fatalf("status = %q, want cached warning %q", got.status, warn)

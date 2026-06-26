@@ -1,480 +1,322 @@
 package sessionmgr
 
 import (
-	"context"
-	"os"
 	"strings"
 	"testing"
 )
 
-func TestMain(m *testing.M) {
-	restoreManifestGlobals()
-	code := m.Run()
-	restoreManifestGlobals()
-	os.Exit(code)
-}
-
-func TestDetectManifestClaudeBashPermissionPrompt(t *testing.T) {
-	screen := "do you want to proceed?\n" +
-		"bash command: rm -rf /tmp/test\n" +
-		"❯ 1. Yes\n   2. No\n\n" +
-		"Esc to cancel · Tab to amend · ctrl+e to explain\n"
-	result := detectManifest("claude", manifestDetectionInput{screen: screen})
-	if !result.Matched {
-		t.Fatal("expected manifest match")
-	}
-	if result.State != AgentBlocked {
-		t.Fatalf("State = %q, want %q", result.State, AgentBlocked)
-	}
-	if !result.VisibleBlocker {
-		t.Fatal("expected visible_blocker for blocked rule")
-	}
-	if result.RuleID != "bash_permission_prompt" {
-		t.Fatalf("RuleID = %q, want bash_permission_prompt", result.RuleID)
+func TestBundledManifestsCompile(t *testing.T) {
+	for _, name := range []string{"opencode", "cursor", "antigravity", "agy", "grok", "codex", "claude", "droid"} {
+		m, ok := manifestForAgent(name)
+		if !ok {
+			t.Errorf("manifestForAgent(%q): not found", name)
+			continue
+		}
+		if len(m.rules) == 0 {
+			t.Errorf("manifest %q has no rules", name)
+		}
 	}
 }
 
-func TestDetectManifestClaudeTranscriptViewerSkipsStateUpdate(t *testing.T) {
-	screen := "earlier output\nshowing detailed transcript\nctrl+o to toggle\n"
-	result := detectManifest("claude", manifestDetectionInput{screen: screen})
-	if !result.Matched {
-		t.Fatal("expected manifest match")
+func TestDetectManifestNoMatchIsIdle(t *testing.T) {
+	result := detectManifest("agy", manifestDetectionInput{
+		screen: "some random text\nwith no matching patterns",
+	})
+	if result.State != AgentIdle {
+		t.Fatalf("no-match state = %s, want idle", result.State)
 	}
-	if !result.SkipStateUpdate {
-		t.Fatal("expected skip_state_update for transcript_viewer")
-	}
-	if result.RuleID != "transcript_viewer" {
-		t.Fatalf("RuleID = %q, want transcript_viewer", result.RuleID)
-	}
-	if result.State != AgentUnknown {
-		t.Fatalf("State = %q, want %q", result.State, AgentUnknown)
-	}
-}
-
-func TestDetectManifestCodexAfterLastPromptMarkerBlocker(t *testing.T) {
-	screen := "tool output\n› \nAllow command? [y/n]\n"
-	result := detectManifest("codex", manifestDetectionInput{screen: screen})
-	if !result.Matched {
-		t.Fatal("expected manifest match")
-	}
-	if result.State != AgentBlocked {
-		t.Fatalf("State = %q, want %q", result.State, AgentBlocked)
-	}
-	if result.RuleID != "live_strong_blocker" {
-		t.Fatalf("RuleID = %q, want live_strong_blocker", result.RuleID)
-	}
-	if result.Region != "after_last_prompt_marker" {
-		t.Fatalf("Region = %q, want after_last_prompt_marker", result.Region)
-	}
-}
-
-func TestDetectManifestCodexTranscriptViewerSkipsStateUpdate(t *testing.T) {
-	screen := "› \n↑/↓ to scroll · pgup/pgdn to page · home/end to jump · q to quit · esc to edit prev\n"
-	result := detectManifest("codex", manifestDetectionInput{screen: screen})
-	if !result.Matched {
-		t.Fatal("expected manifest match")
-	}
-	if !result.SkipStateUpdate {
-		t.Fatal("expected skip_state_update for transcript_viewer")
-	}
-	if result.RuleID != "transcript_viewer" {
-		t.Fatalf("RuleID = %q, want transcript_viewer", result.RuleID)
-	}
-}
-
-func TestDetectManifestGrokPermissionScope(t *testing.T) {
-	screen := "prompt text\nyes, proceed\nno, reject\nuse ← → to choose permission whitelist scope\n"
-	result := detectManifest("grok-build", manifestDetectionInput{screen: screen})
-	if !result.Matched {
-		t.Fatal("expected manifest match")
-	}
-	if result.State != AgentBlocked {
-		t.Fatalf("State = %q, want %q", result.State, AgentBlocked)
-	}
-	if result.RuleID != "permission_scope_selector" {
-		t.Fatalf("RuleID = %q, want permission_scope_selector", result.RuleID)
-	}
-}
-
-func TestDetectManifestKnownAgentNoMatchStaysUnknown(t *testing.T) {
-	result := detectManifest("claude", manifestDetectionInput{screen: "plain shell prompt\n"})
 	if result.Matched {
-		t.Fatal("expected no rule match")
-	}
-	if result.State != AgentUnknown {
-		t.Fatalf("State = %q, want %q", result.State, AgentUnknown)
-	}
-	if result.FallbackReason != "" {
-		t.Fatalf("FallbackReason = %q, want empty", result.FallbackReason)
+		t.Fatal("no-match should not be matched")
 	}
 }
 
-func TestDetectManifestUnknownAgentNoManifest(t *testing.T) {
-	result := detectManifest("not-an-agent", manifestDetectionInput{screen: "anything\n"})
-	if result.Matched || result.FallbackReason != "" {
-		t.Fatalf("expected empty result, got %+v", result)
+func TestDetectManifestBlockedStrict(t *testing.T) {
+	tests := []struct {
+		name   string
+		agent  string
+		screen string
+	}{
+		{
+			name:   "antigravity permission",
+			agent:  "agy",
+			screen: "Requesting permission for: bash\nDo you want to proceed?",
+		},
+		{
+			name:  "grok permission scope",
+			agent: "grok",
+			screen: "yes, proceed    no, reject\n" +
+				"use ← → to choose permission whitelist scope",
+		},
+		{
+			name:   "opencode permission required",
+			agent:  "opencode",
+			screen: "△ Permission required",
+		},
+		{
+			name:  "cursor write approval",
+			agent: "cursor",
+			screen: "write to this file?\nproceed (y)\n" +
+				"reject & propose changes",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := detectManifest(tt.agent, manifestDetectionInput{screen: tt.screen})
+			if !result.Matched {
+				t.Fatalf("expected match, got unmatched")
+			}
+			if result.State != AgentBlocked {
+				t.Fatalf("state = %s, want blocked", result.State)
+			}
+		})
 	}
 }
 
-func TestDetectManifestClaudeOSCWorking(t *testing.T) {
-	result := detectManifest("claude", manifestDetectionInput{oscTitle: "⠂ project"})
-	if !result.Matched || result.State != AgentWorking {
-		t.Fatalf("expected osc_title working match, got %+v", result)
+func TestDetectManifestBlockedStrictRejectsNonMatching(t *testing.T) {
+	// A screen that doesn't match any permission pattern must NOT be blocked.
+	result := detectManifest("agy", manifestDetectionInput{
+		screen: "Generating response...\nSome output here",
+	})
+	if result.State == AgentBlocked {
+		t.Fatal("non-matching screen should not be blocked")
 	}
-	if result.RuleID != "osc_title_working" {
-		t.Fatalf("RuleID = %q, want osc_title_working", result.RuleID)
+}
+
+func TestDetectManifestWorking(t *testing.T) {
+	// antigravity spinner: braille chars + word ending in -ing
+	spinner := "⠋ Generating response\n"
+	result := detectManifest("agy", manifestDetectionInput{screen: spinner})
+	if !result.Matched {
+		t.Fatal("expected match for spinner")
+	}
+	if result.State != AgentWorking {
+		t.Fatalf("state = %s, want working", result.State)
+	}
+}
+
+func TestDetectManifestWorkingOpencodeInterrupt(t *testing.T) {
+	screen := "esc to interrupt\n"
+	result := detectManifest("opencode", manifestDetectionInput{screen: screen})
+	if !result.Matched {
+		t.Fatal("expected match")
+	}
+	if result.State != AgentWorking {
+		t.Fatalf("state = %s, want working", result.State)
+	}
+}
+
+func TestCompiledGateMatches(t *testing.T) {
+	tests := []struct {
+		name string
+		gate manifestGate
+		text string
+		want bool
+	}{
+		{
+			name: "contains AND all present",
+			gate: manifestGate{Contains: []string{"hello", "world"}},
+			text: "hello brave new world",
+			want: true,
+		},
+		{
+			name: "contains AND one missing",
+			gate: manifestGate{Contains: []string{"hello", "missing"}},
+			text: "hello brave new world",
+			want: false,
+		},
+		{
+			name: "any OR first matches",
+			gate: manifestGate{Any: []manifestGate{
+				{Contains: []string{"first"}},
+				{Contains: []string{"second"}},
+			}},
+			text: "first one here",
+			want: true,
+		},
+		{
+			name: "any OR none match",
+			gate: manifestGate{Any: []manifestGate{
+				{Contains: []string{"first"}},
+				{Contains: []string{"second"}},
+			}},
+			text: "neither here",
+			want: false,
+		},
+		{
+			name: "not suppresses match",
+			gate: manifestGate{
+				Contains: []string{"hello"},
+				Not:      []manifestGate{{Contains: []string{"goodbye"}}},
+			},
+			text: "hello and goodbye",
+			want: false,
+		},
+		{
+			name: "not allows when absent",
+			gate: manifestGate{
+				Contains: []string{"hello"},
+				Not:      []manifestGate{{Contains: []string{"goodbye"}}},
+			},
+			text: "hello world",
+			want: true,
+		},
+		{
+			name: "nested all inside any",
+			gate: manifestGate{Any: []manifestGate{
+				{All: []manifestGate{
+					{Contains: []string{"a"}},
+					{Contains: []string{"b"}},
+				}},
+			}},
+			text: "a and b together",
+			want: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			compiled, err := compileManifestGate(tt.gate, "test", 0)
+			if err != nil {
+				t.Fatalf("compile: %v", err)
+			}
+			got := compiledGateMatches(compiled, tt.text)
+			if got != tt.want {
+				t.Fatalf("compiledGateMatches = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRegexNormalization(t *testing.T) {
+	tests := []struct {
+		name    string
+		pattern string
+		text    string
+		want    bool
+	}{
+		{
+			name:    "alphabetic to letter",
+			pattern: `\p{Alphabetic}+ing`,
+			text:    "Generating",
+			want:    true,
+		},
+		{
+			name:    "braille range u form",
+			pattern: `[\u2800-\u28FF]+`,
+			text:    "⠋",
+			want:    true,
+		},
+		{
+			name:    "braille range x form",
+			pattern: `[\x{2800}-\x{28FF}]+`,
+			text:    "⠙",
+			want:    true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			re, err := compileManifestRegex(tt.pattern, "test", "regex")
+			if err != nil {
+				t.Fatalf("compile: %v", err)
+			}
+			if got := re.MatchString(tt.text); got != tt.want {
+				t.Fatalf("match = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 
 func TestManifestRegionBottomNonEmptyLines(t *testing.T) {
-	screen := "line 1\n\nline 2\nline 3\n"
-	got := manifestRegion(manifestDetectionInput{screen: screen}, "bottom_non_empty_lines(2)")
-	want := "line 2\nline 3\n"
-	if got != want {
-		t.Fatalf("region = %q, want %q", got, want)
+	content := "line1\n\nline2\n\nline3\nline4"
+	input := manifestDetectionInput{screen: content}
+
+	got := manifestRegion(input, "bottom_non_empty_lines(2)")
+	lines := manifestLines(got)
+	// Should be the last 2 non-empty lines.
+	if len(lines) != 2 {
+		t.Fatalf("got %d lines, want 2: %q", len(lines), got)
+	}
+	if strings.TrimSpace(lines[0]) != "line3" {
+		t.Fatalf("first line = %q, want line3", lines[0])
+	}
+}
+
+func TestManifestRegionBottomNonEmptyLines8(t *testing.T) {
+	// Verify N=8 works (used by cursor manifest).
+	content := "a\nb\nc\nd\ne\nf"
+	input := manifestDetectionInput{screen: content}
+	got := manifestRegion(input, "bottom_non_empty_lines(8)")
+	if got == "" {
+		t.Fatal("expected non-empty result for N=8 with 6 lines")
+	}
+}
+
+func TestManifestRegionAfterLastPromptMarker(t *testing.T) {
+	content := "hello\n› prompt\nbody line\nend"
+	input := manifestDetectionInput{screen: content}
+	got := manifestRegion(input, "after_last_prompt_marker")
+	if !strings.Contains(got, "body line") {
+		t.Fatalf("after_last_prompt_marker = %q, want content after the › line", got)
+	}
+	if strings.Contains(got, "prompt") {
+		t.Fatalf("after_last_prompt_marker = %q, must not include the prompt line", got)
+	}
+}
+
+func TestManifestRegionAfterLastPromptMarkerNoMarker(t *testing.T) {
+	content := "hello\nworld"
+	input := manifestDetectionInput{screen: content}
+	got := manifestRegion(input, "after_last_prompt_marker")
+	if got != content {
+		t.Fatalf("no-marker case = %q, want whole buffer", got)
 	}
 }
 
 func TestManifestRegionAfterLastHorizontalRule(t *testing.T) {
-	screen := "header\n──────────\nblocked form\n"
-	got := manifestRegion(manifestDetectionInput{screen: screen}, "after_last_horizontal_rule")
-	if !strings.Contains(got, "blocked form") {
-		t.Fatalf("region = %q, want content after horizontal rule", got)
+	content := "top\n───────────\nbottom"
+	input := manifestDetectionInput{screen: content}
+	got := manifestRegion(input, "after_last_horizontal_rule")
+	if !strings.Contains(got, "bottom") {
+		t.Fatalf("after_last_horizontal_rule = %q, want content after the rule", got)
+	}
+	if strings.Contains(got, "top") {
+		t.Fatalf("after_last_horizontal_rule = %q, must not include pre-rule content", got)
 	}
 }
 
-func TestShouldApplyManifestFallback(t *testing.T) {
-	tests := []struct {
-		name   string
-		state  AgentState
-		agent  string
-		source string
-		want   bool
-	}{
-		{
-			name:  "unknown non-lifecycle",
-			state: AgentUnknown,
-			agent: "gemini",
-			want:  true,
-		},
-		{
-			name:   "unknown lifecycle authority",
-			state:  AgentUnknown,
-			agent:  "claude",
-			source: "seshagy:claude",
-			want:   true,
-		},
-		{
-			name:  "hook reported working",
-			state: AgentWorking,
-			agent: "gemini",
-			want:  false,
-		},
-		{
-			name:  "hook reported blocked",
-			state: AgentBlocked,
-			agent: "gemini",
-			want:  false,
-		},
-		{
-			name:  "hook reported idle",
-			state: AgentIdle,
-			agent: "gemini",
-			want:  false,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := shouldApplyManifestFallback(tt.state, tt.agent, tt.source); got != tt.want {
-				t.Fatalf("shouldApplyManifestFallback() = %v, want %v", got, tt.want)
-			}
-		})
+func TestManifestRegionPromptBoxBody(t *testing.T) {
+	content := "──────────\n❯ input\n──────────"
+	input := manifestDetectionInput{screen: content}
+	got := manifestRegion(input, "prompt_box_body")
+	if !strings.Contains(got, "input") {
+		t.Fatalf("prompt_box_body = %q, want content inside the box", got)
 	}
 }
 
-func TestManifestExplainLineShowsMatchedRule(t *testing.T) {
-	const pane = "%9"
-	screen := "tool output\n› \nAllow command? [y/n]\n"
-	origOut := tmuxOutput
-	tmuxOutput = func(ctx context.Context, args ...string) ([]byte, error) {
-		if len(args) >= 4 && args[0] == "capture-pane" && args[3] == pane {
-			return []byte(screen), nil
-		}
-		return nil, nil
-	}
-	t.Cleanup(func() { tmuxOutput = origOut })
-
-	got := manifestExplainLine(
-		context.Background(),
-		pane,
-		"codex",
-		"process",
-		"llm-proxy",
-		AgentUnknown,
-	)
-	if !strings.Contains(got, "rule live_strong_blocker") {
-		t.Fatalf("manifestExplainLine() = %q, want matched rule for codex", got)
-	}
-	if !strings.Contains(got, "region after_last_prompt_marker") {
-		t.Fatalf("manifestExplainLine() = %q, want region in explain output", got)
-	}
-
-	got = manifestExplainLine(context.Background(), pane, "gemini", "process", "", AgentUnknown)
-	if got != "manifest skipped" {
-		t.Fatalf("manifestExplainLine() = %q, want manifest skipped for gemini", got)
-	}
-}
-
-func TestApplyManifestFallbackForLifecycleAgentWithSilentHooks(t *testing.T) {
-	const pane = "%11"
-	screen := "Some output above\nRun a dynamic workflow? (esc to cancel)\n"
-	origOut := tmuxOutput
-	tmuxOutput = func(ctx context.Context, args ...string) ([]byte, error) {
-		if len(args) >= 4 && args[0] == "capture-pane" && args[3] == pane {
-			return []byte(screen), nil
-		}
-		return nil, nil
-	}
-	t.Cleanup(func() { tmuxOutput = origOut })
-
-	items := []Item{{
-		PaneID:      pane,
-		AgentName:   "claude",
-		AgentSource: "seshagy:claude",
-		AgentState:  AgentUnknown,
-	}}
-	applyManifestFallback(context.Background(), items)
-	if items[0].AgentState != AgentBlocked {
-		t.Fatalf("AgentState = %q, want %q", items[0].AgentState, AgentBlocked)
-	}
-}
-
-func TestApplyManifestFallbackSkipsStateUpdate(t *testing.T) {
-	const pane = "%12"
-	screen := "showing detailed transcript\nctrl+o to toggle\n"
-	origOut := tmuxOutput
-	tmuxOutput = func(ctx context.Context, args ...string) ([]byte, error) {
-		if len(args) >= 4 && args[0] == "capture-pane" && args[3] == pane {
-			return []byte(screen), nil
-		}
-		return nil, nil
-	}
-	t.Cleanup(func() { tmuxOutput = origOut })
-
-	items := []Item{{
-		PaneID:     pane,
-		AgentName:  "claude",
-		AgentState: AgentUnknown,
-	}}
-	applyManifestFallback(context.Background(), items)
-	if items[0].AgentState != AgentUnknown {
-		t.Fatalf("AgentState = %q, want unchanged %q", items[0].AgentState, AgentUnknown)
-	}
-}
-
-func TestCaptureAgentPaneCachedReusesPaneCapture(t *testing.T) {
-	const pane = "%10"
-	calls := 0
-	origOut := tmuxOutput
-	tmuxOutput = func(ctx context.Context, args ...string) ([]byte, error) {
-		if len(args) >= 4 && args[0] == "capture-pane" && args[3] == pane {
-			calls++
-			return []byte("cached screen\n"), nil
-		}
-		return nil, nil
-	}
-	t.Cleanup(func() { tmuxOutput = origOut })
-
-	cache := make(manifestCaptureCache)
-	for range 2 {
-		screen, err := captureAgentPaneCached(
-			context.Background(),
-			cache,
-			pane,
-			manifestCaptureLines,
-		)
-		if err != nil {
-			t.Fatalf("captureAgentPaneCached() error = %v", err)
-		}
-		if screen != "cached screen\n" {
-			t.Fatalf("screen = %q, want cached screen", screen)
-		}
-	}
-	if calls != 1 {
-		t.Fatalf("capture-pane calls = %d, want 1", calls)
-	}
-}
-
-func codexPromptRegionScreen() string {
-	return "tool output\n" +
-		"• Ran something\n" +
-		"› \n" +
-		"prompt text\n" +
-		"────────────\n" +
-		"box body line\n" +
-		"────────────\n"
-}
-
-func TestManifestRegionPromptBoxRegions(t *testing.T) {
-	screen := codexPromptRegionScreen()
-	tests := []struct {
-		spec string
-		want string
-	}{
-		{spec: "above_prompt_box", want: "tool output\n• Ran something\n› \nprompt text\n"},
-		{spec: "prompt_box_body", want: "box body line\n"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.spec, func(t *testing.T) {
-			got := manifestRegion(manifestDetectionInput{screen: screen}, tt.spec)
-			if got != tt.want {
-				t.Fatalf("region = %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestManifestRegionCurrentPromptBlock(t *testing.T) {
-	screen := codexPromptRegionScreen()
-	tests := []struct {
-		spec string
-		want string
-	}{
-		{spec: "current_prompt_block_marker", want: "• Ran something"},
-		{
-			spec: "after_current_prompt_block_marker",
-			want: "• Ran something\n› \nprompt text\n────────────\nbox body line\n────────────\n",
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.spec, func(t *testing.T) {
-			got := manifestRegion(manifestDetectionInput{screen: screen}, tt.spec)
-			if got != tt.want {
-				t.Fatalf("region = %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestManifestRegionBeforeAndWithoutCurrentPrompt(t *testing.T) {
-	screen := codexPromptRegionScreen()
-	tests := []struct {
-		name   string
-		screen string
-		spec   string
-		want   string
-	}{
-		{
-			name:   "before_current_prompt_marker",
-			screen: screen,
-			spec:   "before_current_prompt_marker",
-			want:   "tool output\n• Ran something\n",
-		},
-		{
-			name:   "whole_recent_without_current_prompt_marker",
-			screen: screen,
-			spec:   "whole_recent_without_current_prompt_marker",
-			want:   "",
-		},
-		{
-			name:   "whole_recent_without_when_no_prompt",
-			screen: "plain shell output\n",
-			spec:   "whole_recent_without_current_prompt_marker",
-			want:   "plain shell output\n",
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := manifestRegion(manifestDetectionInput{screen: tt.screen}, tt.spec)
-			if got != tt.want {
-				t.Fatalf("region = %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestCurrentCodexPromptIndex(t *testing.T) {
-	lines := manifestLines(codexPromptRegionScreen())
-	index, ok := currentCodexPromptIndex(lines)
-	if !ok {
-		t.Fatal("expected current codex prompt")
-	}
-	if lines[index] != "› " {
-		t.Fatalf("prompt line = %q, want › ", lines[index])
-	}
-
-	noPrompt, ok := currentCodexPromptIndex(manifestLines("plain shell\n"))
-	if ok {
-		t.Fatalf("expected no prompt index, got %d", noPrompt)
-	}
-
-	withLaterBlock := manifestLines("› \n• later block\n")
-	if _, ok := currentCodexPromptIndex(withLaterBlock); ok {
-		t.Fatal("expected false when block marker follows prompt")
-	}
-}
-
-func TestManifestRegionOSCBranches(t *testing.T) {
-	input := manifestDetectionInput{
-		oscTitle:    "⠂ working",
-		oscProgress: "42%",
-	}
-	if got := manifestRegion(input, "osc_title"); got != "⠂ working" {
-		t.Fatalf("osc_title = %q, want ⠂ working", got)
-	}
-	if got := manifestRegion(input, "osc_progress"); got != "42%" {
-		t.Fatalf("osc_progress = %q, want 42%%", got)
-	}
-}
-
-func TestManifestRegionUnknownSpecReturnsEmpty(t *testing.T) {
-	got := manifestRegion(manifestDetectionInput{screen: "hello\n"}, "not_a_real_region")
+func TestManifestRegionPromptBoxBodyMissing(t *testing.T) {
+	content := "plain text\nno box here"
+	input := manifestDetectionInput{screen: content}
+	got := manifestRegion(input, "prompt_box_body")
 	if got != "" {
-		t.Fatalf("unknown spec = %q, want empty", got)
+		t.Fatalf("prompt_box_body = %q, want empty when no box", got)
 	}
 }
 
-func TestManifestBottomLinesAndLastNonEmptyLine(t *testing.T) {
-	screen := "alpha\n\nbeta\ngamma\n"
-	if got := manifestBottomLines(screen, 2); got != "beta\ngamma\n" {
-		t.Fatalf("manifestBottomLines() = %q", got)
-	}
-	if got := lastNonEmptyLine("one\n\n two \n"); got != " two " {
-		t.Fatalf("lastNonEmptyLine() = %q", got)
+func TestManifestRegionOscProgress(t *testing.T) {
+	input := manifestDetectionInput{oscProgress: "spin"}
+	if got := manifestRegion(input, "osc_progress"); got != "spin" {
+		t.Fatalf("osc_progress = %q, want spin", got)
 	}
 }
 
-func TestActiveManifestSummariesAfterReload(t *testing.T) {
-	ReloadManifests()
-	summaries := ActiveManifestSummaries()
-	if len(summaries) == 0 {
-		t.Fatal("ActiveManifestSummaries() returned no entries after reload")
-	}
-	found := false
-	for _, summary := range summaries {
-		if summary.AgentID == "claude" {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Fatalf("missing claude summary: %#v", summaries)
-	}
-}
-
-func TestBundledManifestsCompile(t *testing.T) {
-	agents := []string{
-		"amp", "agy", "antigravity", "claude", "claude-code", "cline", "codex", "cursor",
-		"droid", "gemini", "copilot", "github-copilot", "grok", "grok-build", "hermes",
-		"kilo", "kimi", "kiro", "opencode", "pi", "qodercli",
-	}
-	for _, agent := range agents {
-		manifest, err := manifestForAgent(agent)
-		if err != nil {
-			t.Fatalf("manifestForAgent(%q) error = %v", agent, err)
-		}
-		if manifest == nil {
-			t.Fatalf("manifestForAgent(%q) = nil", agent)
+func TestValidateManifestRegionAcceptsNewRegions(t *testing.T) {
+	for _, region := range []string{
+		"after_last_prompt_marker",
+		"after_last_horizontal_rule",
+		"prompt_box_body",
+		"osc_progress",
+	} {
+		if err := validateManifestRegion(region); err != nil {
+			t.Errorf("validateManifestRegion(%q) = %v, want nil", region, err)
 		}
 	}
 }

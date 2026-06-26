@@ -4,12 +4,10 @@ import (
 	"context"
 	"strings"
 	"testing"
-	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
 	appconfig "github.com/lmilojevicc/seshagy/internal/config"
-	"github.com/lmilojevicc/seshagy/internal/integrations"
 	"github.com/lmilojevicc/seshagy/internal/sessionmgr"
 )
 
@@ -68,6 +66,7 @@ func TestHandleKeyRenameModeCancelAndSubmit(t *testing.T) {
 
 	m.inputMode = modeRename
 	m.renameFrom = "demo"
+	m.renameKind = sessionmgr.KindSession
 	m.renameInput.SetValue("renamed")
 	model, cmd = m.handleKey(enterMsg())
 	got = model.(Model)
@@ -76,7 +75,7 @@ func TestHandleKeyRenameModeCancelAndSubmit(t *testing.T) {
 	}
 }
 
-func TestDeleteSelectedSessionAndAgent(t *testing.T) {
+func TestDeleteSelectedSession(t *testing.T) {
 	m := newTestModel(t)
 	m.items = []sessionmgr.Item{
 		{Kind: sessionmgr.KindSession, Name: "demo"},
@@ -87,110 +86,11 @@ func TestDeleteSelectedSessionAndAgent(t *testing.T) {
 		t.Fatalf("session delete = status:%q cmd:%v", got.status, cmd)
 	}
 
-	m.items = []sessionmgr.Item{
-		{Kind: sessionmgr.KindAgent, PaneID: "%3"},
-	}
-	model, cmd = m.deleteSelected()
-	got = model.(Model)
-	if got.status != "killing pane %3" || cmd == nil {
-		t.Fatalf("agent delete = status:%q cmd:%v", got.status, cmd)
-	}
-
 	m.items = nil
 	model, cmd = m.deleteSelected()
 	got = model.(Model)
 	if got.status != "nothing selected" || cmd != nil {
 		t.Fatalf("empty delete = status:%q cmd:%v", got.status, cmd)
-	}
-}
-
-func TestStartRenameAgentEntersRenameMode(t *testing.T) {
-	m := newTestModel(t)
-	m.items = []sessionmgr.Item{
-		{Kind: sessionmgr.KindAgent, PaneID: "%1", AgentName: "pi", AgentDisplayName: "my bot"},
-	}
-	model, cmd := m.startRename()
-	got := model.(Model)
-	if got.inputMode != modeRename || got.renamePaneID != "%1" || got.renameForAgent != "pi" ||
-		got.renameInput.Value() != "my bot" || cmd == nil {
-		t.Fatalf(
-			"agent rename = mode:%v pane:%q agent:%q value:%q cmd:%v",
-			got.inputMode,
-			got.renamePaneID,
-			got.renameForAgent,
-			got.renameInput.Value(),
-			cmd,
-		)
-	}
-
-	m.items = []sessionmgr.Item{{Kind: sessionmgr.KindZoxide, Path: "/tmp/demo"}}
-	model, cmd = m.startRename()
-	got = model.(Model)
-	if got.status != "rename only applies to sessions and agents" || cmd != nil {
-		t.Fatalf("zoxide rename = status:%q cmd:%v", got.status, cmd)
-	}
-
-	m.items = nil
-	model, cmd = m.startRename()
-	got = model.(Model)
-	if got.status != "nothing selected" || cmd != nil {
-		t.Fatalf("empty rename = status:%q cmd:%v", got.status, cmd)
-	}
-}
-
-func TestHandleKeyRenameModeAgentSubmit(t *testing.T) {
-	m := newTestModel(t)
-	m.inputMode = modeRename
-	m.renamePaneID = "%1"
-	m.renameForAgent = "pi"
-	m.renameFrom = "pi"
-	m.renameInput.SetValue("my bot")
-	m.renameInput.Focus()
-
-	model, cmd := m.handleKey(enterMsg())
-	got := model.(Model)
-	if got.inputMode != modeNormal || got.renamePaneID != "" || cmd == nil {
-		t.Fatalf(
-			"agent rename submit = mode:%v pane:%q cmd:%v",
-			got.inputMode,
-			got.renamePaneID,
-			cmd,
-		)
-	}
-}
-
-func TestHandleKeyRenameModeAgentClearLabel(t *testing.T) {
-	m := newTestModel(t)
-	m.inputMode = modeRename
-	m.renamePaneID = "%1"
-	m.renameForAgent = "pi"
-	m.renameFrom = "my bot"
-	m.renameInput.SetValue("   ")
-	m.renameInput.Focus()
-
-	model, cmd := m.handleKey(enterMsg())
-	got := model.(Model)
-	if got.inputMode != modeNormal || got.renamePaneID != "" || cmd == nil {
-		t.Fatalf(
-			"agent clear submit = mode:%v pane:%q cmd:%v",
-			got.inputMode,
-			got.renamePaneID,
-			cmd,
-		)
-	}
-}
-
-func TestHandleActionKeyRenameAgent(t *testing.T) {
-	m := newTestModel(t)
-	m.items = []sessionmgr.Item{
-		{Kind: sessionmgr.KindAgent, PaneID: "%2", AgentName: "claude"},
-	}
-
-	model, cmd := m.handleActionKey(keyMsg("R"))
-	got := model.(Model)
-	if got.inputMode != modeRename || got.renamePaneID != "%2" || got.renameForAgent != "claude" ||
-		cmd == nil {
-		t.Fatalf("R on agent = mode:%v pane:%q cmd:%v", got.inputMode, got.renamePaneID, cmd)
 	}
 }
 
@@ -222,6 +122,53 @@ func TestHandleActionKeyPgUpDownHomeEnd(t *testing.T) {
 	got = model.(Model)
 	if got.cursor != 0 || cmd == nil {
 		t.Fatalf("home = cursor:%d cmd:%v", got.cursor, cmd)
+	}
+}
+
+func TestActivateSelectedAgentFocusesPane(t *testing.T) {
+	m := newTestModel(t)
+	m.source = sessionmgr.ModeAgents
+	m.items = []sessionmgr.Item{{
+		Kind:      sessionmgr.KindAgent,
+		Name:      "pi",
+		AgentName: "pi",
+		Session:   "seshagy",
+		Window:    "1",
+		Pane:      "2",
+		PaneID:    "%5",
+		Location:  "seshagy:1.2",
+	}}
+	m.cursor = 0
+
+	model, cmd := m.activateSelected()
+	got := model.(Model)
+	if cmd == nil {
+		t.Fatal("activateSelected on agent returned nil cmd")
+	}
+	if !strings.Contains(got.status, "focusing pi on seshagy:1.2") {
+		t.Fatalf("status = %q, want 'focusing pi on seshagy:1.2'", got.status)
+	}
+}
+
+func TestActivateSelectedAgentMissingPaneInfoNoOps(t *testing.T) {
+	m := newTestModel(t)
+	m.source = sessionmgr.ModeAgents
+	m.items = []sessionmgr.Item{{
+		Kind:    sessionmgr.KindAgent,
+		Name:    "pi",
+		PaneID:  "%5",
+		Session: "seshagy",
+		// Window + PaneID pane empty: Window missing
+	}}
+	m.cursor = 0
+
+	model, cmd := m.activateSelected()
+	got := model.(Model)
+	if cmd != nil {
+		t.Fatal("activateSelected on malformed agent should return nil cmd")
+	}
+	if !strings.Contains(got.status, "cannot focus") {
+		t.Fatalf("status = %q, want 'cannot focus'", got.status)
 	}
 }
 
@@ -315,9 +262,7 @@ func TestHandleActionKeySourceSwitchesAndNumberKeys(t *testing.T) {
 	m.source = sessionmgr.ModeSessions
 	m.inflightRefresh = map[sessionmgr.SourceMode]uint64{}
 	m.refreshGen = map[sessionmgr.SourceMode]uint64{}
-	m.cache = map[sessionmgr.SourceMode]modeCache{
-		sessionmgr.ModeAgents: {items: testKeyItems("agent"), fetchedAt: time.Now()},
-	}
+	m.cache = map[sessionmgr.SourceMode]modeCache{}
 
 	cases := []struct {
 		key    string
@@ -325,8 +270,6 @@ func TestHandleActionKeySourceSwitchesAndNumberKeys(t *testing.T) {
 	}{
 		{"a", sessionmgr.ModeAll},
 		{"t", sessionmgr.ModeSessions},
-		{"g", sessionmgr.ModeAgents},
-		{"o", sessionmgr.ModeCurrentAgents},
 		{"z", sessionmgr.ModeZoxide},
 		{"f", sessionmgr.ModeFD},
 		{"1", sessionmgr.ModeAll},
@@ -351,13 +294,6 @@ func TestHandleActionKeyActivateSelectedKinds(t *testing.T) {
 		t.Fatalf("session enter = status:%q cmd:%v", got.status, cmd)
 	}
 
-	m.items = []sessionmgr.Item{{Kind: sessionmgr.KindAgent, PaneID: "%2", Location: "demo:1.1"}}
-	model, cmd = m.handleActionKey(enterMsg())
-	got = model.(Model)
-	if got.status != "focusing demo:1.1" || cmd == nil {
-		t.Fatalf("agent enter = status:%q cmd:%v", got.status, cmd)
-	}
-
 	m.items = []sessionmgr.Item{{Kind: sessionmgr.KindZoxide, Path: "/tmp/demo"}}
 	model, cmd = m.handleActionKey(enterMsg())
 	got = model.(Model)
@@ -373,17 +309,10 @@ func TestHandleActionKeyActivateSelectedKinds(t *testing.T) {
 	}
 }
 
-func TestHandleActionKeyIntegrationAndModePrompt(t *testing.T) {
+func TestHandleActionKeyModePrompt(t *testing.T) {
 	m := newTestModel(t)
-	model, cmd := m.handleActionKey(keyMsg("i"))
+	model, cmd := m.handleActionKey(keyMsg("m"))
 	got := model.(Model)
-	if !got.integration.active || got.status != "scanning hook integrations" || cmd == nil {
-		t.Fatalf("integration scan = active:%v status:%q cmd:%v",
-			got.integration.active, got.status, cmd)
-	}
-
-	model, cmd = m.handleActionKey(keyMsg("m"))
-	got = model.(Model)
 	if !got.setup.active || got.status != "change input mode" || cmd != nil {
 		t.Fatalf("mode prompt = active:%v status:%q cmd:%v", got.setup.active, got.status, cmd)
 	}
@@ -418,61 +347,50 @@ func TestStartYaziOutsidePopup(t *testing.T) {
 	}
 }
 
-func TestHandleIntegrationKeyToggleEnterRescan(t *testing.T) {
-	m := newTestModel(t)
-	m.integration.active = true
-	m.integration.rows = []integrations.Recommendation{
-		{
-			Target:         integrations.TargetPi,
-			AgentAvailable: true,
-			Installable:    true,
-			State:          integrations.StatusNotInstalled,
-		},
-	}
-	m.integration.selected = map[integrations.Target]bool{integrations.TargetPi: true}
-
-	model, cmd := m.handleIntegrationKey(keyMsg(" "))
-	got := model.(Model)
-	if got.integration.selected[integrations.TargetPi] || cmd != nil {
-		t.Fatalf(
-			"space toggle = selected:%v cmd:%v",
-			got.integration.selected[integrations.TargetPi],
-			cmd,
-		)
-	}
-
-	model, _ = got.handleIntegrationKey(keyMsg(" "))
-	got = model.(Model)
-	if !got.integration.selected[integrations.TargetPi] {
-		t.Fatal("space should reselect integration")
-	}
-
-	model, cmd = got.handleIntegrationKey(enterMsg())
-	got = model.(Model)
-	if got.status != "installing selected hook integrations" || cmd == nil {
-		t.Fatalf("enter install = status:%q cmd:%v", got.status, cmd)
-	}
-
-	model, cmd = got.handleIntegrationKey(keyMsg("r"))
-	got = model.(Model)
-	if got.status != "rescanning hook integrations" || cmd == nil {
-		t.Fatalf("rescan = status:%q cmd:%v", got.status, cmd)
-	}
-
-	model, cmd = got.handleIntegrationKey(keyMsg("esc"))
-	got = model.(Model)
-	if got.integration.active || got.status != "hook installation skipped" || cmd != nil {
-		t.Fatalf("esc skip = active:%v status:%q cmd:%v", got.integration.active, got.status, cmd)
-	}
-}
-
 func TestDeleteSelectedUnsupportedKind(t *testing.T) {
 	m := newTestModel(t)
 	m.items = []sessionmgr.Item{{Kind: sessionmgr.KindZoxide, Path: "/tmp/demo"}}
 	model, cmd := m.deleteSelected()
 	got := model.(Model)
-	if got.status != "delete only applies to sessions and agents" || cmd != nil {
+	if got.status != "delete only applies to sessions" || cmd != nil {
 		t.Fatalf("zoxide delete = status:%q cmd:%v", got.status, cmd)
+	}
+}
+
+func TestRenameAgentEmptyInputClearsLabel(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+
+	// Pre-populate an alias so the clear path has something to remove.
+	if err := sessionmgr.SaveAgentLabel("pi", "seshagy", "frontend-bot"); err != nil {
+		t.Fatalf("seed label: %v", err)
+	}
+
+	m := newTestModel(t)
+	m.inputMode = modeRename
+	m.renameKind = sessionmgr.KindAgent
+	m.renameFrom = "pi"
+	m.renameSession = "seshagy"
+	m.renameInput.SetValue("")
+	m.renameInput.Focus()
+
+	model, cmd := m.handleKey(enterMsg())
+	got := model.(Model)
+	if got.inputMode != modeNormal || got.renameKind != "" || cmd == nil {
+		t.Fatalf("enter = mode:%v renameKind:%q cmd:%v", got.inputMode, got.renameKind, cmd)
+	}
+
+	msg := cmd()
+	done, ok := msg.(actionDoneMsg)
+	if !ok {
+		t.Fatalf("cmd msg = %T, want actionDoneMsg", msg)
+	}
+	if done.err != nil || !strings.Contains(done.status, "cleared agent alias") {
+		t.Fatalf("action = status:%q err:%v", done.status, done.err)
+	}
+
+	store := sessionmgr.LoadAgentLabels()
+	if _, ok := store.Labels["pi:seshagy"]; ok {
+		t.Fatalf("label not cleared; store=%+v", store.Labels)
 	}
 }
 

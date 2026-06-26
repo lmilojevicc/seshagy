@@ -24,15 +24,6 @@ func TestLoadDefaultWhenMissing(t *testing.T) {
 	if cfg.LoadOptions().FDCommand != sessionmgr.DefaultFDCommand {
 		t.Fatalf("default fd command = %q", cfg.LoadOptions().FDCommand)
 	}
-	if cfg.Agents.ManifestFallback {
-		t.Fatalf("default manifest fallback = %v, want false", cfg.Agents.ManifestFallback)
-	}
-	if cfg.LoadOptions().ManifestFallback {
-		t.Fatalf(
-			"default load options manifest fallback = %v, want false",
-			cfg.LoadOptions().ManifestFallback,
-		)
-	}
 	if cfg.Theme.Colors.FocusedBorder != "13" || cfg.Theme.Colors.ActiveTab != "default" ||
 		cfg.Theme.Colors.Border != "8" ||
 		cfg.Theme.Colors.InactiveTab != "8" ||
@@ -49,7 +40,7 @@ func TestLoadDefaultWhenMissing(t *testing.T) {
 	if got := cfg.Sources.Order; strings.Join(
 		got,
 		",",
-	) != "all,sessions,agents,current-agents,zoxide,fd" {
+	) != "all,sessions,zoxide,fd,agents" {
 		t.Fatalf("default source order = %#v", got)
 	}
 	if cfg.Icons.Mode != IconModeIcons {
@@ -67,8 +58,8 @@ func TestSaveAndLoadConfig(t *testing.T) {
 	cfg.Icons.Mode = IconModeText
 	cfg.Icons.Session.Label = "X"
 	cfg.Icons.Session.Color = "#a6e3a1"
-	cfg.Sources.Default = "current-agents"
-	cfg.Sources.Order = []string{"sessions", "agents", "current-agents", "zoxide", "fd", "all"}
+	cfg.Sources.Default = "zoxide"
+	cfg.Sources.Order = []string{"sessions", "zoxide", "fd", "all"}
 	cfg.Directories.FDCommand = `printf '%s\n' /tmp/project`
 	cfg.Theme.Colors.FocusedBorder = "#ff79c6"
 	cfg.Theme.Colors.ActiveTab = "#f5c2e7"
@@ -107,7 +98,7 @@ func TestSaveAndLoadConfig(t *testing.T) {
 		t.Fatalf("saved config missing text mode, label, or hex color: %s", data)
 	}
 	if !strings.Contains(string(data), `[sources]`) ||
-		!strings.Contains(string(data), `current-agents`) {
+		!strings.Contains(string(data), `zoxide`) {
 		t.Fatalf("saved config missing source config: %s", data)
 	}
 	if !strings.Contains(string(data), `[directories]`) ||
@@ -127,12 +118,11 @@ func TestSaveAndLoadConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
-	if loaded.DefaultSource() != sessionmgr.ModeCurrentAgents {
-		t.Fatalf("loaded default source = %v, want current agents", loaded.DefaultSource())
+	if loaded.DefaultSource() != sessionmgr.ModeZoxide {
+		t.Fatalf("loaded default source = %v, want zoxide", loaded.DefaultSource())
 	}
-	if order := loaded.SourceOrder(); len(order) != 6 || order[0] != sessionmgr.ModeSessions ||
-		order[2] != sessionmgr.ModeCurrentAgents ||
-		order[5] != sessionmgr.ModeAll {
+	if order := loaded.SourceOrder(); len(order) != 5 || order[0] != sessionmgr.ModeSessions ||
+		order[3] != sessionmgr.ModeAll || order[4] != sessionmgr.ModeAgents {
 		t.Fatalf("loaded source order = %#v", order)
 	}
 	if loaded.LoadOptions().FDCommand != `printf '%s\n' /tmp/project` {
@@ -169,15 +159,39 @@ func TestSaveAndLoadConfig(t *testing.T) {
 
 func TestNormalizeSourceOrder(t *testing.T) {
 	cfg := Default()
-	cfg.Sources.Default = "current_session_agents"
-	cfg.Sources.Order = []string{"fd", "agents", "fd", "bad"}
+	cfg.Sources.Default = "zoxide"
+	cfg.Sources.Order = []string{"fd", "sessions", "fd", "bad"}
 	cfg.Normalize()
-	if cfg.Sources.Default != "current-agents" {
+	if cfg.Sources.Default != "zoxide" {
 		t.Fatalf("normalized default source = %q", cfg.Sources.Default)
 	}
-	want := []string{"fd", "agents", "all", "sessions", "current-agents", "zoxide"}
+	want := []string{"fd", "sessions", "all", "zoxide", "agents"}
 	if strings.Join(cfg.Sources.Order, ",") != strings.Join(want, ",") {
 		t.Fatalf("normalized source order = %#v, want %#v", cfg.Sources.Order, want)
+	}
+}
+
+// TestSourceOrderDropsStaleCurrentAgentsTab proves that a config persisted on
+// a prior version (where current-agents was a tab) is migrated clean: the
+// current-agents entry is dropped from both the persisted order and the
+// rendered tab list.
+func TestSourceOrderDropsStaleCurrentAgentsTab(t *testing.T) {
+	cfg := Default()
+	cfg.Sources.Order = []string{"all", "sessions", "current-agents", "agents"}
+	cfg.Normalize()
+
+	// normalizeSourceOrder must have dropped current-agents from the persisted order.
+	for _, name := range cfg.Sources.Order {
+		if name == "current-agents" {
+			t.Fatalf("current-agents still in normalized order: %#v", cfg.Sources.Order)
+		}
+	}
+
+	// SourceOrder must not include ModeCurrentAgents as a tab.
+	for _, mode := range cfg.SourceOrder() {
+		if mode == sessionmgr.ModeCurrentAgents {
+			t.Fatalf("ModeCurrentAgents in SourceOrder: %#v", cfg.SourceOrder())
+		}
 	}
 }
 
@@ -205,64 +219,6 @@ mode = "icons"
 	defaults := Default().Theme.Colors
 	if loaded.Theme.Colors != defaults {
 		t.Fatalf("theme defaults from older config = %#v, want %#v", loaded.Theme.Colors, defaults)
-	}
-}
-
-func TestLoadMigratesPreviousDefaultIcons(t *testing.T) {
-	for _, agentIcon := range []string{"󰚩", sessionmgr.IconAgent + " "} {
-		dir := t.TempDir()
-		t.Setenv("XDG_CONFIG_HOME", dir)
-		path := Path()
-		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-			t.Fatalf("mkdir config dir: %v", err)
-		}
-		data := []byte(strings.Replace(`
-[icons]
-mode = "icons"
-
-[icons.session]
-icon = ""
-
-[icons.zoxide]
-icon = "󰉖"
-
-[icons.fd]
-icon = "󰥩"
-
-[icons.agent]
-icon = "$AGENT"
-`, "$AGENT", agentIcon, 1))
-		if err := os.WriteFile(path, data, 0o600); err != nil {
-			t.Fatalf("write old icon config: %v", err)
-		}
-		loaded, err := Load()
-		if err != nil {
-			t.Fatalf("Load() error = %v", err)
-		}
-		icons := loaded.IconSet()
-		if got := icons.For(sessionmgr.KindSession).Text; got != sessionmgr.IconSession+" " {
-			t.Fatalf("session icon = %q, want trailing-space default", got)
-		}
-		if got := icons.For(sessionmgr.KindAgent).Text; got != sessionmgr.IconAgent+"  " {
-			t.Fatalf("agent icon from %q = %q, want new two-space default", agentIcon, got)
-		}
-	}
-}
-
-func TestIconModes(t *testing.T) {
-	cfg := Default()
-	if got := cfg.IconSet().For(sessionmgr.KindAgent).Text; got != sessionmgr.IconAgent+"  " {
-		t.Fatalf("default agent icon = %q", got)
-	}
-
-	cfg.Icons.Mode = IconModeText
-	if got := cfg.IconSet().For(sessionmgr.KindAgent).Text; got != "A" {
-		t.Fatalf("text-mode agent label = %q", got)
-	}
-
-	cfg.Icons.Mode = IconModeNone
-	if got := cfg.IconSet().For(sessionmgr.KindAgent).Text; got != "" {
-		t.Fatalf("no-icons agent text = %q, want empty", got)
 	}
 }
 
@@ -294,63 +250,6 @@ func TestNormalizeStateDisplayMode(t *testing.T) {
 			" GLYPHS ",
 			got,
 			StateDisplayModeIcons,
-		)
-	}
-}
-
-func TestIconSetAgentStateProjection(t *testing.T) {
-	cfg := Default()
-	icons := cfg.IconSet()
-	if icons.AgentStateMode != StateDisplayModeInherit {
-		t.Fatalf("default agent_state_mode = %q, want inherit", icons.AgentStateMode)
-	}
-	if !icons.AgentStateUsesIcons() || icons.AgentStateUsesLabels() {
-		t.Fatalf(
-			"inherit + icons mode projection = icons:%v labels:%v",
-			icons.AgentStateUsesIcons(),
-			icons.AgentStateUsesLabels(),
-		)
-	}
-
-	cfg.Icons.Mode = IconModeText
-	icons = cfg.IconSet()
-	if icons.AgentStateUsesIcons() || !icons.AgentStateUsesLabels() {
-		t.Fatalf(
-			"inherit + text mode projection = icons:%v labels:%v",
-			icons.AgentStateUsesIcons(),
-			icons.AgentStateUsesLabels(),
-		)
-	}
-
-	cfg.Icons.AgentStateMode = StateDisplayModeIcons
-	icons = cfg.IconSet()
-	if !icons.AgentStateUsesIcons() || icons.AgentStateUsesLabels() {
-		t.Fatalf(
-			"icons override + text mode projection = icons:%v labels:%v",
-			icons.AgentStateUsesIcons(),
-			icons.AgentStateUsesLabels(),
-		)
-	}
-
-	cfg.Icons.Mode = IconModeIcons
-	cfg.Icons.AgentStateMode = StateDisplayModeText
-	icons = cfg.IconSet()
-	if icons.AgentStateUsesIcons() || !icons.AgentStateUsesLabels() {
-		t.Fatalf(
-			"agent_state_mode=text overrides icons mode projection = icons:%v labels:%v",
-			icons.AgentStateUsesIcons(),
-			icons.AgentStateUsesLabels(),
-		)
-	}
-
-	cfg.Icons.AgentStateMode = StateDisplayModeNone
-	icons = cfg.IconSet()
-	if icons.AgentStateUsesIcons() || icons.AgentStateUsesLabels() || !icons.AgentStateHidden() {
-		t.Fatalf(
-			"agent_state_mode=none projection = icons:%v labels:%v hidden:%v",
-			icons.AgentStateUsesIcons(),
-			icons.AgentStateUsesLabels(),
-			icons.AgentStateHidden(),
 		)
 	}
 }
@@ -503,86 +402,6 @@ func TestNormalizeTmuxStatePartialOverride(t *testing.T) {
 	}
 }
 
-func TestLoadAgentStateModeConfig(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", dir)
-	path := Path()
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		t.Fatalf("mkdir config dir: %v", err)
-	}
-	data := []byte(`
-[icons]
-mode = "icons"
-agent_state_mode = "text"
-`)
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
-	loaded, err := Load()
-	if err != nil {
-		t.Fatalf("Load() error = %v", err)
-	}
-	if loaded.Icons.AgentStateMode != StateDisplayModeText {
-		t.Fatalf("loaded agent_state_mode = %q, want text", loaded.Icons.AgentStateMode)
-	}
-}
-
-func TestLoadPerStateAgentStateConfig(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", dir)
-	path := Path()
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		t.Fatalf("mkdir config dir: %v", err)
-	}
-	data := []byte(`
-[icons]
-mode = "icons"
-
-[icons.agent_state.working]
-icon = "▶"
-label = "working"
-color = "10"
-
-[icons.agent_state.blocked]
-icon = "◆"
-label = "blocked"
-color = "11"
-`)
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
-	loaded, err := Load()
-	if err != nil {
-		t.Fatalf("Load() error = %v", err)
-	}
-	if loaded.Icons.AgentState.Working.Icon != "▶" {
-		t.Fatalf("working icon = %q, want ▶", loaded.Icons.AgentState.Working.Icon)
-	}
-	if loaded.Icons.AgentState.Blocked.Color != "11" {
-		t.Fatalf("blocked color = %q, want 11", loaded.Icons.AgentState.Blocked.Color)
-	}
-	icons := loaded.IconSet()
-	if got := icons.ForState(sessionmgr.AgentWorking).Icon; got != "▶" {
-		t.Fatalf("projected working icon = %q, want ▶", got)
-	}
-	if got := icons.ForState(sessionmgr.AgentBlocked).Color; got != "11" {
-		t.Fatalf("projected blocked color = %q, want 11", got)
-	}
-}
-
-func TestNormalizeAgentStatePartialOverride(t *testing.T) {
-	cfg := Default()
-	cfg.Icons.AgentState.Working.Icon = "★"
-	cfg.Icons.AgentState.Working.Label = ""
-	cfg.Normalize()
-	if cfg.Icons.AgentState.Working.Icon != "★" {
-		t.Fatalf("working icon = %q, want ★", cfg.Icons.AgentState.Working.Icon)
-	}
-	if cfg.Icons.AgentState.Working.Label != "working" {
-		t.Fatalf("working label = %q, want working", cfg.Icons.AgentState.Working.Label)
-	}
-}
-
 func TestLoadMigratesEnabledFalseToNoneMode(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
@@ -725,29 +544,6 @@ func TestLoadFailsWhenConfigUnreadable(t *testing.T) {
 	}
 	if _, err := Load(); err == nil {
 		t.Fatal("Load() expected error for unreadable config")
-	}
-}
-
-func TestManifestFallbackRoundTrip(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", dir)
-	cfg := Default()
-	cfg.Agents.ManifestFallback = true
-	if err := Save(cfg); err != nil {
-		t.Fatalf("Save() error = %v", err)
-	}
-	loaded, err := Load()
-	if err != nil {
-		t.Fatalf("Load() error = %v", err)
-	}
-	if !loaded.Agents.ManifestFallback {
-		t.Fatalf("loaded manifest_fallback = %v, want true", loaded.Agents.ManifestFallback)
-	}
-	if !loaded.LoadOptions().ManifestFallback {
-		t.Fatalf(
-			"loaded load options manifest_fallback = %v, want true",
-			loaded.LoadOptions().ManifestFallback,
-		)
 	}
 }
 

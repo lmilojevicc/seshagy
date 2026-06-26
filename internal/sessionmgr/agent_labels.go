@@ -2,7 +2,6 @@ package sessionmgr
 
 import (
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,142 +9,84 @@ import (
 	"github.com/lmilojevicc/seshagy/internal/xdg"
 )
 
-const maxAgentDisplayLabelLen = 128
+const (
+	appStateDir     = "seshagy"
+	agentLabelsFile = "agent-labels.json"
+)
 
-type AgentLabelEntry struct {
-	Label    string `json:"label"`
-	ForAgent string `json:"for_agent"`
+// AgentLabelStore persists display-only aliases for agent panes, keyed by
+// agentType:sessionName. Keying on the agent type (rather than the pane id)
+// means restarting the same agent in the same session keeps its alias, while
+// swapping one agent for another (e.g. pi -> claude) reads as a different
+// identity and does not bleed the alias across.
+type AgentLabelStore struct {
+	Labels map[string]string `json:"labels"`
 }
 
-type AgentLabelsStore struct {
-	entries map[string]AgentLabelEntry
+func agentLabelKey(agentType, session string) string {
+	return agentType + ":" + session
 }
 
 func agentLabelsPath() string {
-	return filepath.Join(xdg.StateHome(), "seshagy", "agent-labels.json")
+	return filepath.Join(xdg.StateHome(), appStateDir, agentLabelsFile)
 }
 
-func LoadAgentLabels() (*AgentLabelsStore, error) {
+// LoadAgentLabels reads the persisted alias store. A missing or unreadable
+// file yields an empty store rather than an error so a first run is clean.
+func LoadAgentLabels() AgentLabelStore {
+	data, err := os.ReadFile(agentLabelsPath())
+	if err != nil {
+		return AgentLabelStore{Labels: map[string]string{}}
+	}
+	var store AgentLabelStore
+	if err := json.Unmarshal(data, &store); err != nil {
+		return AgentLabelStore{Labels: map[string]string{}}
+	}
+	if store.Labels == nil {
+		store.Labels = map[string]string{}
+	}
+	return store
+}
+
+// SaveAgentLabel sets (or clears, when displayName is empty) the alias for the
+// given agent type and session, persisting the whole store.
+func SaveAgentLabel(agentType, session, displayName string) error {
+	store := LoadAgentLabels()
+	key := agentLabelKey(agentType, session)
+	if strings.TrimSpace(displayName) == "" {
+		delete(store.Labels, key)
+	} else {
+		store.Labels[key] = displayName
+	}
+	return saveAgentLabels(store)
+}
+
+func saveAgentLabels(store AgentLabelStore) error {
 	path := agentLabelsPath()
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return &AgentLabelsStore{entries: map[string]AgentLabelEntry{}}, nil
-		}
-		return nil, err
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
 	}
-	var raw map[string]AgentLabelEntry
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return nil, fmt.Errorf("agent labels: %w", err)
-	}
-	if raw == nil {
-		raw = map[string]AgentLabelEntry{}
-	}
-	return &AgentLabelsStore{entries: raw}, nil
-}
-
-func (s *AgentLabelsStore) Save() error {
-	path := agentLabelsPath()
-	data, err := json.MarshalIndent(s.entries, "", "  ")
+	data, err := json.MarshalIndent(store, "", "  ")
 	if err != nil {
 		return err
 	}
-	return atomicWriteFile(path, data)
+	return os.WriteFile(path, data, 0o600)
 }
 
-func (s *AgentLabelsStore) Set(paneID, label, forAgent string) error {
-	label = strings.TrimSpace(label)
-	if label == "" {
-		return s.Clear(paneID)
+// ApplyAgentLabels overlays persisted aliases onto agent items, setting
+// AgentDisplayName where an alias exists.
+func ApplyAgentLabels(items []Item) []Item {
+	store := LoadAgentLabels()
+	if len(store.Labels) == 0 {
+		return items
 	}
-	if len([]rune(label)) > maxAgentDisplayLabelLen {
-		return fmt.Errorf("agent label must be at most %d characters", maxAgentDisplayLabelLen)
-	}
-	paneID = strings.TrimSpace(paneID)
-	forAgent = strings.TrimSpace(forAgent)
-	if paneID == "" || forAgent == "" {
-		return fmt.Errorf("pane id and agent name are required")
-	}
-	if s.entries == nil {
-		s.entries = map[string]AgentLabelEntry{}
-	}
-	s.entries[paneID] = AgentLabelEntry{Label: label, ForAgent: forAgent}
-	return s.Save()
-}
-
-func (s *AgentLabelsStore) Clear(paneID string) error {
-	paneID = strings.TrimSpace(paneID)
-	if paneID == "" {
-		return fmt.Errorf("pane id is required")
-	}
-	if len(s.entries) == 0 {
-		return nil
-	}
-	delete(s.entries, paneID)
-	return s.Save()
-}
-
-func (s *AgentLabelsStore) Get(paneID, agentName string) string {
-	entry, ok := s.entries[paneID]
-	if !ok || entry.ForAgent != agentName {
-		return ""
-	}
-	return entry.Label
-}
-
-func (s *AgentLabelsStore) Prune(knownPaneIDs []string) error {
-	if len(s.entries) == 0 {
-		return nil
-	}
-	known := make(map[string]struct{}, len(knownPaneIDs))
-	for _, paneID := range knownPaneIDs {
-		known[paneID] = struct{}{}
-	}
-	changed := false
-	for paneID := range s.entries {
-		if _, ok := known[paneID]; !ok {
-			delete(s.entries, paneID)
-			changed = true
-		}
-	}
-	if !changed {
-		return nil
-	}
-	return s.Save()
-}
-
-func SetAgentDisplayName(paneID, label, forAgent string) error {
-	store, err := LoadAgentLabels()
-	if err != nil {
-		return err
-	}
-	return store.Set(paneID, label, forAgent)
-}
-
-func ClearAgentDisplayName(paneID string) error {
-	store, err := LoadAgentLabels()
-	if err != nil {
-		return err
-	}
-	return store.Clear(paneID)
-}
-
-func ApplyAgentLabels(items []Item, sessionFilter string) {
-	store, err := LoadAgentLabels()
-	if err != nil || store == nil {
-		return
-	}
-	paneIDs := make([]string, 0, len(items))
 	for i := range items {
 		if items[i].Kind != KindAgent {
 			continue
 		}
-		paneIDs = append(paneIDs, items[i].PaneID)
-		if label := store.Get(items[i].PaneID, items[i].AgentName); label != "" {
+		if label, ok := store.Labels[agentLabelKey(items[i].AgentName, items[i].Session)]; ok {
 			items[i].AgentDisplayName = label
 		}
 	}
-	if sessionFilter == "" && len(paneIDs) > 0 {
-		_ = store.Prune(paneIDs)
-	}
+	return items
 }

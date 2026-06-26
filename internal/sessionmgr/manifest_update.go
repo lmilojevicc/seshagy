@@ -4,579 +4,285 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
-	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/BurntSushi/toml"
 )
 
-type manifestCatalog struct {
+// defaultManifestCatalogURL is the herdr public catalog — the source of truth
+// for detection manifests. Verified live (HTTP 200, TOML, 20+ agents). herdr
+// actively maintains these rules; our bundled embeds are the offline fallback.
+const defaultManifestCatalogURL = "https://herdr.dev/agent-detection/index.toml"
+
+const (
+	manifestFetchTimeout   = 10 * time.Second
+	allowHTTPCatalogEnv    = "SESHAGY_ALLOW_HTTP_CATALOG"
+	agentDetectionCacheDir = "agent-detection"
+	manifestCacheAppDir    = "seshagy"
+)
+
+// manifestCatalogIndex is the TOML shape of the herdr index:
+//
+//	schema_version = 1
+//	[[agents]]
+//	id = "agy"
+//	path = "antigravity.toml"
+type manifestCatalogIndex struct {
 	SchemaVersion int                    `toml:"schema_version"`
-	Agents        []manifestCatalogAgent `toml:"agents"`
+	Agents        []manifestCatalogEntry `toml:"agents"`
 }
 
-type manifestCatalogAgent struct {
+type manifestCatalogEntry struct {
 	ID   string `toml:"id"`
 	Path string `toml:"path"`
 }
 
-type catalogAgentEntry struct {
-	agentID string
-	path    string
+// ManifestFetchResult summarises a catalog refresh pass.
+type ManifestFetchResult struct {
+	Fetched []string // agent ids written to cache
+	Skipped []string // agent ids that failed (parse/compile/network)
+	Err     error    // non-nil only on index-level failures (not per-agent)
 }
 
-var manifestUpdateMu sync.Mutex
-
-const (
-	manifestAllowFileCatalogEnv = "SESHAGY_MANIFEST_ALLOW_FILE_CATALOG"
-	manifestAllowHTTPCatalogEnv = "SESHAGY_MANIFEST_ALLOW_HTTP_CATALOG"
-)
-
-type manifestFetchPolicy struct {
-	allowHTTP      bool
-	allowFile      bool
-	allowPrivateIP bool
-}
-
-func manifestFetchPolicyFromEnv() manifestFetchPolicy {
-	allowFile := strings.TrimSpace(os.Getenv(manifestAllowFileCatalogEnv)) == "1"
-	allowHTTP := strings.TrimSpace(os.Getenv(manifestAllowHTTPCatalogEnv)) == "1"
-	return manifestFetchPolicy{
-		allowHTTP:      allowHTTP,
-		allowFile:      allowFile,
-		allowPrivateIP: allowHTTP || allowFile,
+// FetchManifestUpdates fetches the herdr catalog index and each manifest into
+// the local cache dir. Each manifest is compile-validated before writing so a
+// malformed remote rule can never poison the cache. Per-agent failures are
+// collected in Skipped; only index-level failures set Err.
+func FetchManifestUpdates(ctx context.Context, catalogURL string) (ManifestFetchResult, error) {
+	if err := validateCatalogURL(catalogURL); err != nil {
+		return ManifestFetchResult{}, err
 	}
-}
+	result := ManifestFetchResult{}
 
-func validateManifestCatalogURL(rawURL string, policy manifestFetchPolicy) error {
-	parsed, err := url.Parse(rawURL)
+	client := &http.Client{Timeout: manifestFetchTimeout}
+	index, err := fetchCatalogIndex(ctx, client, catalogURL)
 	if err != nil {
-		return fmt.Errorf("catalog URL %q is invalid: %w", rawURL, err)
+		return result, err
 	}
-	switch parsed.Scheme {
-	case "https":
-		return validateManifestFetchHost(parsed.Hostname(), policy)
-	case "http":
-		if !policy.allowHTTP {
-			return fmt.Errorf(
-				"catalog URL must use https:// (set %s=1 for local development)",
-				manifestAllowHTTPCatalogEnv,
-			)
-		}
-		return validateManifestFetchHost(parsed.Hostname(), policy)
-	case "file":
-		if !policy.allowFile {
-			return fmt.Errorf(
-				"file:// catalog URLs require %s=1",
-				manifestAllowFileCatalogEnv,
-			)
-		}
-		return nil
-	default:
-		return fmt.Errorf("unsupported catalog URL scheme %q", parsed.Scheme)
-	}
-}
 
-func validateManifestFetchHost(host string, policy manifestFetchPolicy) error {
-	host = strings.TrimSpace(host)
-	if host == "" {
-		return fmt.Errorf("catalog URL has an empty host")
-	}
-	ips, err := net.LookupIP(host)
+	cacheDir, err := cachedManifestDir()
 	if err != nil {
-		return fmt.Errorf("resolve catalog host %q: %w", host, err)
+		return result, err
 	}
-	if len(ips) == 0 {
-		return fmt.Errorf("catalog host %q has no addresses", host)
-	}
-	for _, ip := range ips {
-		if isBlockedManifestFetchIP(ip) && !policy.allowPrivateIP {
-			return fmt.Errorf("catalog fetch blocked for private/metadata IP %s", ip)
-		}
-	}
-	return nil
-}
-
-func isBlockedManifestFetchIP(ip net.IP) bool {
-	return ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsPrivate()
-}
-
-var manifestFetchHTTPClient = &http.Client{
-	CheckRedirect: func(req *http.Request, via []*http.Request) error {
-		if req.URL.Scheme != "https" {
-			policy := manifestFetchPolicyFromEnv()
-			if req.URL.Scheme != "http" || !policy.allowHTTP {
-				return fmt.Errorf("redirect to non-https URL %q is not allowed", req.URL.String())
-			}
-		}
-		if err := validateManifestFetchHost(req.URL.Hostname(), manifestFetchPolicy{}); err != nil {
-			return err
-		}
-		if len(via) >= 10 {
-			return fmt.Errorf("stopped after 10 redirects")
-		}
-		return nil
-	},
-}
-
-func CheckAndUpdateManifests(catalogURL string) (ManifestUpdateOutput, error) {
-	return checkAndUpdateManifests(context.Background(), catalogURL)
-}
-
-func checkAndUpdateManifests(ctx context.Context, catalogURL string) (ManifestUpdateOutput, error) {
-	manifestUpdateMu.Lock()
-	defer manifestUpdateMu.Unlock()
-	return checkAndUpdateFromURL(ctx, ResolveManifestCatalogURL(catalogURL))
-}
-
-func checkAndUpdateFromURL(ctx context.Context, catalogURL string) (ManifestUpdateOutput, error) {
-	policy := manifestFetchPolicyFromEnv()
-	if err := validateManifestCatalogURL(catalogURL, policy); err != nil {
-		return ManifestUpdateOutput{}, err
-	}
-	catalogContent, err := fetchManifestText(ctx, catalogURL, policy)
-	if err != nil {
-		return ManifestUpdateOutput{}, err
-	}
-	catalog, err := parseManifestCatalog(catalogContent)
-	if err != nil {
-		return ManifestUpdateOutput{}, err
-	}
-	baseURL, err := manifestCatalogBaseURL(catalogURL)
-	if err != nil {
-		return ManifestUpdateOutput{}, err
+	if err := os.MkdirAll(cacheDir, 0o700); err != nil {
+		return result, err
 	}
 
-	status := LoadManifestUpdateStatus()
-	checkTime := manifestCheckUnix()
-	status.LastCheckUnix = &checkTime
-	checked := "checked"
-	status.LastResult = &checked
-
-	bundledIDs, err := bundledManifestAgentIDs()
-	if err != nil {
-		return ManifestUpdateOutput{}, err
-	}
-
-	var updated []ManifestUpdateCommit
-	for _, entry := range catalog {
-		if !bundledIDs[entry.agentID] {
+	catalogBase := catalogBaseURL(catalogURL)
+	for _, entry := range index.Agents {
+		id := strings.TrimSpace(entry.ID)
+		if id == "" {
 			continue
 		}
-		manifestURL, err := joinManifestCatalogURL(baseURL, entry.path)
-		if err != nil {
-			return ManifestUpdateOutput{}, fmt.Errorf("catalog entry %s: %w", entry.agentID, err)
+		if err := fetchAndCacheManifest(ctx, client, catalogBase, entry, cacheDir); err != nil {
+			result.Skipped = append(result.Skipped, id)
+			continue
 		}
-		content, fetchErr := fetchManifestText(ctx, manifestURL, policy)
-		switch {
-		case fetchErr != nil:
-			recordAgentUpdateFailure(&status, entry.agentID, checkTime, fetchErr.Error())
-		default:
-			commit, processErr := processAgentManifestUpdate(entry.agentID, content)
-			switch {
-			case processErr != nil:
-				recordAgentUpdateFailure(&status, entry.agentID, checkTime, processErr.Error())
-			case commit != nil:
-				recordAgentUpdateSuccess(&status, entry.agentID, checkTime, commit.Version.String())
-				updated = append(updated, *commit)
-			default:
-				recordAgentUpdateCurrent(&status, entry.agentID, checkTime)
-			}
-		}
+		result.Fetched = append(result.Fetched, id)
 	}
-
-	if err := saveManifestUpdateStatus(status); err != nil {
-		return ManifestUpdateOutput{Updated: updated, Status: status}, fmt.Errorf(
-			"save manifest update status: %w",
-			err,
-		)
-	}
-	return ManifestUpdateOutput{Updated: updated, Status: status}, nil
+	return result, nil
 }
 
-func processAgentManifestUpdate(agentID, content string) (*ManifestUpdateCommit, error) {
-	parsed, err := parseRemoteManifestForAgent(agentID, content)
-	if err != nil {
-		return nil, err
-	}
-	if bundledVersion, ok, err := bundledManifestVersion(agentID); err != nil {
-		return nil, err
-	} else if ok && CompareManifestVersion(parsed.version, bundledVersion) < 0 {
-		return nil, fmt.Errorf(
-			"remote version %s is older than bundled %s",
-			parsed.version,
-			bundledVersion,
-		)
-	}
-	if current, ok := cachedRemoteVersion(agentID); ok {
-		switch CompareManifestVersion(parsed.version, current) {
-		case -1:
-			return nil, fmt.Errorf(
-				"remote version %s is older than cached %s",
-				parsed.version,
-				current,
-			)
-		case 0:
-			committed, readErr := os.ReadFile(remoteManifestPath(agentID))
-			if readErr != nil {
-				return nil, readErr
-			}
-			if string(committed) != content {
-				return nil, fmt.Errorf(
-					"remote version %s changed content without a version bump",
-					parsed.version,
-				)
-			}
-			return nil, nil
-		}
-	}
-	if _, err := compileManifest(parsed.manifest); err != nil {
-		return nil, fmt.Errorf("compile manifest: %w", err)
-	}
-	if err := commitRemoteManifest(agentID, content); err != nil {
-		return nil, err
-	}
-	return &ManifestUpdateCommit{
-		AgentID: agentID,
-		Version: parsed.version,
-	}, nil
-}
-
-func parseManifestCatalog(content string) ([]catalogAgentEntry, error) {
-	var catalog manifestCatalog
-	if _, err := toml.Decode(content, &catalog); err != nil {
-		return nil, fmt.Errorf("failed to parse catalog TOML: %w", err)
-	}
-	if catalog.SchemaVersion != 1 {
-		return nil, fmt.Errorf("unsupported catalog schema_version %d", catalog.SchemaVersion)
-	}
-
-	seen := map[string]struct{}{}
-	entries := make([]catalogAgentEntry, 0, len(catalog.Agents))
-	for _, entry := range catalog.Agents {
-		agentID := strings.ToLower(strings.TrimSpace(entry.ID))
-		if agentID == "" {
-			return nil, fmt.Errorf("catalog entry has an empty id")
-		}
-		path := strings.TrimSpace(entry.Path)
-		if path == "" {
-			return nil, fmt.Errorf("catalog entry %s has an empty path", entry.ID)
-		}
-		if err := validateCatalogManifestPath(path); err != nil {
-			return nil, fmt.Errorf(
-				"catalog entry %s has an unsafe path %q: %w",
-				entry.ID,
-				path,
-				err,
-			)
-		}
-		if _, ok := seen[agentID]; ok {
-			return nil, fmt.Errorf("catalog contains duplicate agent %s", entry.ID)
-		}
-		seen[agentID] = struct{}{}
-		entries = append(entries, catalogAgentEntry{agentID: agentID, path: path})
-	}
-	sort.Slice(entries, func(i, j int) bool { return entries[i].agentID < entries[j].agentID })
-	return entries, nil
-}
-
-func validateCatalogManifestPath(path string) error {
-	if strings.Contains(path, "://") || strings.HasPrefix(path, "/") {
-		return fmt.Errorf("absolute or remote paths are not allowed")
-	}
-	if strings.Contains(path, `\`) {
-		return fmt.Errorf("backslashes are not allowed")
-	}
-	cleaned := filepath.ToSlash(path)
-	cleaned = filepath.Clean(cleaned)
-	if cleaned == "" || cleaned == "." {
-		return fmt.Errorf("empty path is not allowed")
-	}
-	if cleaned == ".." || strings.HasPrefix(cleaned, "../") || strings.Contains(cleaned, "/../") {
-		return fmt.Errorf("path traversal is not allowed")
-	}
-	for _, part := range strings.Split(cleaned, "/") {
-		if part == ".." {
-			return fmt.Errorf("path traversal is not allowed")
-		}
-	}
-	return nil
-}
-
-func manifestCatalogBaseURL(catalogURL string) (string, error) {
-	parsed, err := url.Parse(catalogURL)
-	if err != nil {
-		return "", fmt.Errorf("catalog URL %q is invalid: %w", catalogURL, err)
-	}
-	if parsed.Scheme == "file" {
-		dir := filepathDir(parsed.Path)
-		if dir == "" {
-			return "", fmt.Errorf("catalog URL %q has no base path", catalogURL)
-		}
-		return parsed.Scheme + "://" + dir, nil
-	}
-	idx := strings.LastIndex(catalogURL, "/")
-	if idx < 0 {
-		return "", fmt.Errorf("catalog URL %q has no base path", catalogURL)
-	}
-	return catalogURL[:idx], nil
-}
-
-func joinManifestCatalogURL(baseURL, path string) (string, error) {
-	if err := validateCatalogManifestPath(path); err != nil {
-		return "", err
-	}
-	if strings.HasPrefix(baseURL, "file://") {
-		return baseURL + "/" + strings.TrimPrefix(path, "/"), nil
-	}
-	return strings.TrimSuffix(baseURL, "/") + "/" + strings.TrimPrefix(path, "/"), nil
-}
-
-func filepathDir(path string) string {
-	path = strings.TrimSuffix(path, "/")
-	if idx := strings.LastIndex(path, "/"); idx >= 0 {
-		return path[:idx]
-	}
-	return ""
-}
-
-func fetchManifestText(
+func fetchCatalogIndex(
 	ctx context.Context,
-	rawURL string,
-	policy manifestFetchPolicy,
-) (string, error) {
-	if err := validateManifestCatalogURL(rawURL, policy); err != nil {
+	client *http.Client,
+	catalogURL string,
+) (*manifestCatalogIndex, error) {
+	body, err := httpGet(ctx, client, catalogURL)
+	if err != nil {
+		return nil, fmt.Errorf("fetch catalog index: %w", err)
+	}
+	var index manifestCatalogIndex
+	if _, err := toml.Decode(string(body), &index); err != nil {
+		return nil, fmt.Errorf("parse catalog index: %w", err)
+	}
+	return &index, nil
+}
+
+func fetchAndCacheManifest(
+	ctx context.Context,
+	client *http.Client,
+	catalogBase string,
+	entry manifestCatalogEntry,
+	cacheDir string,
+) error {
+	manifestURL := strings.TrimRight(catalogBase, "/") + "/" + entry.Path
+	body, err := httpGet(ctx, client, manifestURL)
+	if err != nil {
+		return err
+	}
+	// Validate before writing: a malformed remote rule must never poison the
+	// cache (we'd rather fall back to the embed).
+	var parsed agentManifest
+	if _, err := toml.Decode(string(body), &parsed); err != nil {
+		return fmt.Errorf("parse %s: %w", entry.ID, err)
+	}
+	if _, err := compileManifest(parsed); err != nil {
+		return fmt.Errorf("compile %s: %w", entry.ID, err)
+	}
+	// Atomic write: temp + rename.
+	dest := filepath.Join(cacheDir, entry.ID+".toml")
+	tmp, err := os.CreateTemp(cacheDir, ".manifest-*.toml")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+	if _, err := tmp.Write(body); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpName, dest)
+}
+
+// ReloadManifests resets the in-memory manifest cache and rebuilds it from
+// (embed + cache + override). Safe to call from any goroutine; the refresh
+// command calls it after a successful fetch so new rules take effect without a
+// restart.
+func ReloadManifests() {
+	manifestMu.Lock()
+	manifestByAgent = nil
+	manifestErr = nil
+	manifestLoaded = false
+	manifestMu.Unlock()
+	ensureManifestsLoaded()
+}
+
+func cachedManifestDir() (string, error) {
+	dir, err := userCacheDir()
+	if err != nil {
 		return "", err
 	}
-	if strings.HasPrefix(rawURL, "file://") {
-		parsed, err := url.Parse(rawURL)
-		if err != nil {
-			return "", fmt.Errorf("invalid file URL %q: %w", rawURL, err)
-		}
-		data, err := os.ReadFile(parsed.Path)
-		if err != nil {
-			return "", fmt.Errorf("failed to read %q: %w", rawURL, err)
-		}
-		if len(data) > maxManifestFetchBytes {
-			return "", fmt.Errorf(
-				"response from %s exceeded %d bytes",
-				rawURL,
-				maxManifestFetchBytes,
-			)
-		}
-		return string(data), nil
-	}
+	return filepath.Join(dir, manifestCacheAppDir, agentDetectionCacheDir), nil
+}
 
-	reqCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-	defer cancel()
-
-	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, rawURL, nil)
+func overrideManifestDir() (string, error) {
+	dir, err := userConfigDir()
 	if err != nil {
-		return "", fmt.Errorf("create request for %q: %w", rawURL, err)
+		return "", err
 	}
-	resp, err := manifestFetchHTTPClient.Do(req)
+	return filepath.Join(dir, manifestCacheAppDir, agentDetectionCacheDir), nil
+}
+
+func httpGet(ctx context.Context, client *http.Client, url string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return "", fmt.Errorf("failed to fetch %q: %w", rawURL, err)
+		return nil, err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", fmt.Errorf("failed to fetch %q: HTTP %d", rawURL, resp.StatusCode)
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("%s: HTTP %d", url, resp.StatusCode)
 	}
-	limited := io.LimitReader(resp.Body, maxManifestFetchBytes+1)
-	data, err := io.ReadAll(limited)
+	return io.ReadAll(io.LimitReader(resp.Body, 1<<20)) // 1 MiB cap
+}
+
+// validateCatalogURL enforces HTTPS by default. http:// is allowed only when
+// SESHAGY_ALLOW_HTTP_CATALOG=1 is set (local/dev catalog testing).
+func validateCatalogURL(raw string) error {
+	parsed, err := url.Parse(raw)
 	if err != nil {
-		return "", fmt.Errorf("failed to read response from %q: %w", rawURL, err)
+		return fmt.Errorf("invalid catalog URL: %w", err)
 	}
-	if len(data) > maxManifestFetchBytes {
-		return "", fmt.Errorf("response from %q exceeded %d bytes", rawURL, maxManifestFetchBytes)
+	if parsed.Scheme == "https" {
+		return nil
 	}
-	return string(data), nil
+	if parsed.Scheme == "http" && os.Getenv(allowHTTPCatalogEnv) == "1" {
+		return nil
+	}
+	return fmt.Errorf("catalog URL must be HTTPS (or set %s=1): %s", allowHTTPCatalogEnv, raw)
 }
 
-func recordAgentUpdateSuccess(
-	status *ManifestUpdateStatus,
-	agentID string,
-	checkTime uint64,
-	version string,
-) {
-	cached := version
-	attempted := version
-	status.Agents[agentID] = AgentRemoteStatus{
-		CachedVersion:    &cached,
-		AttemptedVersion: &attempted,
-		LastCheckedUnix:  &checkTime,
-		LastResult:       "updated",
+// catalogBaseURL returns the directory portion of the catalog index URL so
+// per-manifest paths can be resolved relative to it.
+func catalogBaseURL(catalogURL string) string {
+	idx := strings.LastIndexByte(catalogURL, '/')
+	if idx < 0 {
+		return catalogURL
 	}
+	return catalogURL[:idx]
 }
 
-func recordAgentUpdateCurrent(status *ManifestUpdateStatus, agentID string, checkTime uint64) {
-	var cached *string
-	if version, ok := cachedRemoteVersion(agentID); ok {
-		value := version.String()
-		cached = &value
+// compareManifestVersion compares two dotted-numeric version strings (e.g.
+// "2026.06.10.1" vs "2026.06.24.1"). Returns -1, 0, +1. Non-numeric segments
+// compare lexicographically; missing segments are treated as "0".
+func compareManifestVersion(a, b string) int {
+	pa := strings.Split(a, ".")
+	pb := strings.Split(b, ".")
+	max := len(pa)
+	if len(pb) > max {
+		max = len(pb)
 	}
-	status.Agents[agentID] = AgentRemoteStatus{
-		CachedVersion:   cached,
-		LastCheckedUnix: &checkTime,
-		LastResult:      "current",
-	}
-}
-
-func recordAgentUpdateFailure(
-	status *ManifestUpdateStatus,
-	agentID string,
-	checkTime uint64,
-	errMsg string,
-) {
-	var cached *string
-	if version, ok := cachedRemoteVersion(agentID); ok {
-		value := version.String()
-		cached = &value
-	}
-	status.Agents[agentID] = AgentRemoteStatus{
-		CachedVersion:   cached,
-		LastCheckedUnix: &checkTime,
-		LastResult:      "failed",
-		LastError:       &errMsg,
-	}
-}
-
-func bundledManifestVersion(agentID string) (ManifestVersion, bool, error) {
-	agentID = strings.ToLower(strings.TrimSpace(agentID))
-	entries, err := manifestFS.ReadDir("manifests")
-	if err != nil {
-		return ManifestVersion{}, false, err
-	}
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".toml") {
+	for i := 0; i < max; i++ {
+		sa := "0"
+		sb := "0"
+		if i < len(pa) {
+			sa = pa[i]
+		}
+		if i < len(pb) {
+			sb = pb[i]
+		}
+		na, ea := parseUint(sa)
+		nb, eb := parseUint(sb)
+		if ea == nil && eb == nil {
+			if na < nb {
+				return -1
+			}
+			if na > nb {
+				return 1
+			}
 			continue
 		}
-		data, err := manifestFS.ReadFile("manifests/" + entry.Name())
-		if err != nil {
-			return ManifestVersion{}, false, err
+		if sa < sb {
+			return -1
 		}
-		manifest, err := parseLocalManifest(string(data))
-		if err != nil {
-			return ManifestVersion{}, false, err
-		}
-		if !manifestMatchesAgentID(&manifest, agentID) {
-			continue
-		}
-		version, err := ParseManifestVersion(strings.TrimSpace(manifest.Version))
-		if err != nil {
-			return ManifestVersion{}, false, err
-		}
-		return version, true, nil
-	}
-	return ManifestVersion{}, false, nil
-}
-
-func bundledManifestAgentIDs() (map[string]bool, error) {
-	entries, err := manifestFS.ReadDir("manifests")
-	if err != nil {
-		return nil, err
-	}
-	ids := map[string]bool{}
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".toml") {
-			continue
-		}
-		data, err := manifestFS.ReadFile("manifests/" + entry.Name())
-		if err != nil {
-			return nil, err
-		}
-		manifest, err := parseLocalManifest(string(data))
-		if err != nil {
-			return nil, err
-		}
-		ids[strings.ToLower(strings.TrimSpace(manifest.ID))] = true
-	}
-	return ids, nil
-}
-
-func ManifestAutoUpdateEnabled(configured bool) bool {
-	switch strings.TrimSpace(os.Getenv("SESHAGY_MANIFEST_AUTO_UPDATE")) {
-	case "0", "false", "False", "FALSE":
-		return false
-	}
-	return configured
-}
-
-var manifestAutoUpdateInterval atomic.Int64
-
-func init() {
-	manifestAutoUpdateInterval.Store((30 * time.Minute).Nanoseconds())
-}
-
-func manifestAutoUpdateTickerInterval() time.Duration {
-	return time.Duration(manifestAutoUpdateInterval.Load())
-}
-
-var (
-	manifestAutoUpdateMu     sync.Mutex
-	manifestAutoUpdateCancel context.CancelFunc
-	manifestAutoUpdateDone   chan struct{}
-)
-
-func StartManifestAutoUpdate(catalogURL string, enabled bool) {
-	if !ManifestAutoUpdateEnabled(enabled) {
-		return
-	}
-	manifestAutoUpdateMu.Lock()
-	defer manifestAutoUpdateMu.Unlock()
-	stopManifestAutoUpdateLocked()
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	manifestAutoUpdateCancel = cancel
-	manifestAutoUpdateDone = done
-	go runManifestAutoUpdateLoop(ctx, catalogURL, done)
-}
-
-func StopManifestAutoUpdate() {
-	manifestAutoUpdateMu.Lock()
-	defer manifestAutoUpdateMu.Unlock()
-	stopManifestAutoUpdateLocked()
-}
-
-func stopManifestAutoUpdateLocked() {
-	if manifestAutoUpdateCancel == nil {
-		return
-	}
-	manifestAutoUpdateCancel()
-	<-manifestAutoUpdateDone
-	manifestAutoUpdateCancel = nil
-	manifestAutoUpdateDone = nil
-}
-
-func runManifestAutoUpdateLoop(ctx context.Context, catalogURL string, done chan struct{}) {
-	defer close(done)
-	runManifestAutoUpdate(ctx, catalogURL)
-	ticker := time.NewTicker(manifestAutoUpdateTickerInterval())
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			runManifestAutoUpdate(ctx, catalogURL)
+		if sa > sb {
+			return 1
 		}
 	}
+	return 0
 }
 
-func runManifestAutoUpdate(ctx context.Context, catalogURL string) {
-	output, err := checkAndUpdateManifests(ctx, catalogURL)
-	if err != nil {
-		return
+func parseUint(s string) (uint64, error) {
+	var n uint64
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return 0, fmt.Errorf("not a number")
+		}
+		n = n*10 + uint64(c-'0')
 	}
-	if len(output.Updated) > 0 {
-		ReloadManifests()
+	return n, nil
+}
+
+// DefaultManifestCatalogURL returns the default herdr catalog URL.
+func DefaultManifestCatalogURL() string { return defaultManifestCatalogURL }
+
+// userCacheDir returns the cache directory, honoring XDG_CACHE_HOME on all
+// platforms (os.UserCacheDir ignores it on macOS, returning ~/Library/Caches).
+func userCacheDir() (string, error) {
+	if xdg := os.Getenv("XDG_CACHE_HOME"); xdg != "" {
+		return xdg, nil
 	}
+	return os.UserCacheDir()
+}
+
+// userConfigDir returns the config directory, honoring XDG_CONFIG_HOME on
+// all platforms (os.UserConfigDir ignores it on macOS, returning
+// ~/Library/Application Support).
+func userConfigDir() (string, error) {
+	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
+		return xdg, nil
+	}
+	return os.UserConfigDir()
 }

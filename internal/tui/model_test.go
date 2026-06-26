@@ -45,10 +45,9 @@ func TestSelectedKeySortItemsAndPlural(t *testing.T) {
 	m.items = []sessionmgr.Item{
 		{Kind: sessionmgr.KindFD, Path: "/tmp/b"},
 		{Kind: sessionmgr.KindSession, Name: "alpha"},
-		{Kind: sessionmgr.KindAgent, PaneID: "%1", AgentName: "claude"},
 	}
 	SortItems(m.items)
-	if m.items[0].Kind != sessionmgr.KindSession || m.items[1].Kind != sessionmgr.KindAgent {
+	if m.items[0].Kind != sessionmgr.KindSession {
 		t.Fatalf("sort order = %#v", m.items)
 	}
 
@@ -67,42 +66,12 @@ func TestSelectedKeySortItemsAndPlural(t *testing.T) {
 	}
 }
 
-func TestNextAgentStateFilterCyclesAndResets(t *testing.T) {
-	state := sessionmgr.AgentState("")
-	for _, want := range []sessionmgr.AgentState{
-		sessionmgr.AgentWorking,
-		sessionmgr.AgentBlocked,
-		sessionmgr.AgentAborted,
-		sessionmgr.AgentDone,
-		sessionmgr.AgentIdle,
-		sessionmgr.AgentUnknown,
-	} {
-		got := nextAgentStateFilter(state)
-		if got != want {
-			t.Fatalf("nextAgentStateFilter(%q) = %q, want %q", state, got, want)
-		}
-		state = got
-	}
-	if nextAgentStateFilter(state) != "" {
-		t.Fatal("expected filter reset after unknown")
-	}
-	if agentStateFilterLabel("") != "all" ||
-		agentStateFilterLabel(sessionmgr.AgentWorking) != "working" {
-		t.Fatalf(
-			"labels = %q / %q",
-			agentStateFilterLabel(""),
-			agentStateFilterLabel(sessionmgr.AgentWorking),
-		)
-	}
-}
-
 func TestSortedCountsGroupsItemsByKind(t *testing.T) {
 	counts := sortedCounts([]sessionmgr.Item{
 		{Kind: sessionmgr.KindSession},
-		{Kind: sessionmgr.KindAgent},
 		{Kind: sessionmgr.KindSession},
 	})
-	if counts[sessionmgr.KindSession] != 2 || counts[sessionmgr.KindAgent] != 1 {
+	if counts[sessionmgr.KindSession] != 2 {
 		t.Fatalf("counts = %#v", counts)
 	}
 }

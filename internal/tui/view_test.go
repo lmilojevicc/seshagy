@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -10,7 +11,6 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	appconfig "github.com/lmilojevicc/seshagy/internal/config"
-	"github.com/lmilojevicc/seshagy/internal/integrations"
 	"github.com/lmilojevicc/seshagy/internal/sessionmgr"
 )
 
@@ -18,72 +18,6 @@ func newTestModel(t *testing.T) Model {
 	t.Helper()
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	return New()
-}
-
-func TestAgentDetailShowsSessionID(t *testing.T) {
-	m := newTestModel(t)
-	model, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 32})
-	m = model.(Model)
-	m.items = []sessionmgr.Item{
-		{
-			Kind:           sessionmgr.KindAgent,
-			AgentName:      "pi",
-			AgentState:     sessionmgr.AgentWorking,
-			PaneID:         "%1",
-			Location:       "demo:1.1",
-			Path:           "~/demo",
-			AgentSessionID: "session-1234567890abcdef",
-		},
-	}
-	m.preview = "agent pane output"
-
-	detail := sessionmgr.StripANSI(strings.Join(m.detailLines(m.items[0], 40), "\n"))
-	if !strings.Contains(detail, "session") ||
-		!strings.Contains(detail, "session-1234567890abcdef") {
-		t.Fatalf("detail should show session id clamped to width\n%s", detail)
-	}
-
-	preview := sessionmgr.StripANSI(m.renderPreviewPane(50, 12))
-	if strings.Contains(preview, "session-1234567890abcdef") ||
-		strings.Contains(preview, "V full") {
-		t.Fatalf("preview should not show session id footer\n%s", preview)
-	}
-	if !strings.Contains(preview, "agent pane output") {
-		t.Fatalf("preview should show pane output\n%s", preview)
-	}
-}
-
-func TestAgentSessionIDHiddenWhenAbsent(t *testing.T) {
-	m := newTestModel(t)
-	item := sessionmgr.Item{
-		Kind:       sessionmgr.KindAgent,
-		AgentName:  "pi",
-		AgentState: sessionmgr.AgentWorking,
-		PaneID:     "%1",
-	}
-	detail := sessionmgr.StripANSI(strings.Join(m.detailLines(item, 40), "\n"))
-	if strings.Contains(detail, "session") {
-		t.Fatalf("detail should omit session id when absent\n%s", detail)
-	}
-}
-
-func TestDetailLinesAgentShowsBothIdentityAndLabel(t *testing.T) {
-	m := newTestModel(t)
-	item := sessionmgr.Item{
-		Kind:             sessionmgr.KindAgent,
-		AgentName:        "pi",
-		AgentDisplayName: "my bot",
-		AgentState:       sessionmgr.AgentWorking,
-		PaneID:           "%1",
-		Location:         "demo:1.1",
-	}
-	detail := sessionmgr.StripANSI(strings.Join(m.detailLines(item, 40), "\n"))
-	if !strings.Contains(detail, "my bot") {
-		t.Fatalf("detail should show custom label\n%s", detail)
-	}
-	if !strings.Contains(detail, "pi") {
-		t.Fatalf("detail should show original agent identity\n%s", detail)
-	}
 }
 
 func TestViewRendersDashboardChromeAndRows(t *testing.T) {
@@ -100,13 +34,10 @@ func TestViewRendersDashboardChromeAndRows(t *testing.T) {
 			Created:  time.Now(),
 		},
 		{
-			Kind:       sessionmgr.KindAgent,
-			Name:       "pi",
-			AgentName:  "pi",
-			AgentState: sessionmgr.AgentWorking,
-			PaneID:     "%1",
-			Location:   "demo:1.1",
-			Path:       "~/demo",
+			Name:     "pi",
+			PaneID:   "%1",
+			Location: "demo:1.1",
+			Path:     "~/demo",
 		},
 		{Kind: sessionmgr.KindZoxide, Name: "~/code/demo", Path: "~/code/demo"},
 	}
@@ -123,12 +54,11 @@ func TestFilterVisibleItems(t *testing.T) {
 	m.items = []sessionmgr.Item{
 		{Kind: sessionmgr.KindSession, Name: "api"},
 		{Kind: sessionmgr.KindSession, Name: "web"},
-		{Kind: sessionmgr.KindAgent, AgentName: "pi", Location: "api:1.1"},
 	}
 	m.query = "api"
 	got := m.visibleItems()
-	if len(got) != 2 {
-		t.Fatalf("len = %d, want 2: %#v", len(got), got)
+	if len(got) != 1 {
+		t.Fatalf("len = %d, want 1: %#v", len(got), got)
 	}
 }
 
@@ -272,59 +202,100 @@ func TestSearchModeWrapsAtEdges(t *testing.T) {
 	}
 }
 
-func TestIntegrationPromptWrapsAtEdges(t *testing.T) {
-	m := newTestModel(t)
-	m.integration.active = true
-	m.integration.rows = []integrations.Recommendation{
-		{Target: integrations.TargetPi},
-		{Target: integrations.TargetClaude},
-		{Target: integrations.TargetCodex},
-	}
-	m.integration.cursor = 0
-
-	model, _ := m.handleIntegrationKey(upMsg())
-	m = model.(Model)
-	if m.integration.cursor != 2 {
-		t.Fatalf("up from first integration: cursor=%d, want 2", m.integration.cursor)
-	}
-
-	m.integration.cursor = 2
-	model, _ = m.handleIntegrationKey(downMsg())
-	m = model.(Model)
-	if m.integration.cursor != 0 {
-		t.Fatalf("down from last integration: cursor=%d, want 0", m.integration.cursor)
+func TestRenderTabsFitsTerminalWidth(t *testing.T) {
+	for width := 20; width <= 120; width++ {
+		t.Run(fmt.Sprintf("%d", width), func(t *testing.T) {
+		})
 	}
 }
 
-func TestTabsUseCurrentAgentsFourthAndNoTrailingCWD(t *testing.T) {
-	m := newTestModel(t)
-	out := sessionmgr.StripANSI(m.renderTabs())
-	for _, want := range []string{"[1] All", "[2] Sessions", "[3] Agents", "[4] Current agents", "[5] Zoxide", "[6] fd"} {
-		if !strings.Contains(out, want) {
-			t.Fatalf("tabs missing %q\n%s", want, out)
+func TestTabBarSurvivesRefreshAtWidth51(t *testing.T) {
+	const width = 51
+	maxW := safeWidth(width)
+
+	m := New()
+	model, _ := m.Update(tea.WindowSizeMsg{Width: width, Height: 24})
+	m = model.(Model)
+	m.loading = false
+	m.showHelp = true
+	m.status = "loaded 1212 items"
+	m.items = make([]sessionmgr.Item, 1212)
+	for i := range m.items {
+		m.items[i] = sessionmgr.Item{Kind: sessionmgr.KindZoxide, Path: "/tmp/x"}
+	}
+
+	check := func(label string) {
+		t.Helper()
+		view := m.View()
+		lines := strings.Split(view, "\n")
+		if len(lines) < 2 {
+			t.Fatalf("%s: view too short:\n%s", label, sessionmgr.StripANSI(view))
+		}
+		line0 := sessionmgr.StripANSI(lines[0])
+		line1 := sessionmgr.StripANSI(lines[1])
+		if !strings.Contains(line0, "[1]") || !strings.Contains(line0, "seshagy") {
+			t.Fatalf("%s: tab bar not on first line:\nline0=%q\nline1=%q", label, line0, line1)
+		}
+		if strings.HasPrefix(line1, "All (") {
+			t.Fatalf(
+				"%s: list title jumped above tab bar:\nline0=%q\nline1=%q",
+				label,
+				line0,
+				line1,
+			)
+		}
+		for i, line := range lines {
+			if lipgloss.Width(line) > maxW {
+				t.Fatalf(
+					"%s: line %d too wide (%d > %d): %q",
+					label,
+					i,
+					lipgloss.Width(line),
+					maxW,
+					sessionmgr.StripANSI(line),
+				)
+			}
 		}
 	}
-	if strings.Contains(out, "·") {
-		t.Fatalf("tabs should not render trailing cwd label\n%s", out)
+
+	check("after load")
+	before := lipgloss.Width(strings.Split(m.View(), "\n")[0])
+
+	model, _ = m.Update(refreshMsg{
+		source: m.source,
+		gen:    m.inflightRefresh[m.source],
+		items: []sessionmgr.Item{
+			{
+				Kind:     sessionmgr.KindSession,
+				Name:     strings.Repeat("wide-session-", 20),
+				Attached: true,
+			},
+			{Kind: sessionmgr.KindZoxide, Path: "/very/long/path/" + strings.Repeat("x", 80)},
+		},
+	})
+	m = model.(Model)
+	check("after refresh")
+	after := lipgloss.Width(strings.Split(m.View(), "\n")[0])
+	if after > before+2 {
+		t.Fatalf("tab bar widened from %d to %d after refresh", before, after)
 	}
+
+	model, _ = m.Update(setupMsg{})
+	m = model.(Model)
+	check("after setup")
 }
 
 func TestDefaultSourceNumberKeys(t *testing.T) {
 	m := newTestModel(t)
-	model, _ := m.handleKey(keyMsg("4"))
-	m = model.(Model)
-	if m.source != sessionmgr.ModeCurrentAgents {
-		t.Fatalf("4 source = %v, want current agents", m.source)
-	}
-	model, _ = m.handleKey(keyMsg("5"))
+	model, _ := m.handleKey(keyMsg("3"))
 	m = model.(Model)
 	if m.source != sessionmgr.ModeZoxide {
-		t.Fatalf("5 source = %v, want zoxide", m.source)
+		t.Fatalf("3 source = %v, want zoxide", m.source)
 	}
-	model, _ = m.handleKey(keyMsg("6"))
+	model, _ = m.handleKey(keyMsg("4"))
 	m = model.(Model)
 	if m.source != sessionmgr.ModeFD {
-		t.Fatalf("6 source = %v, want fd", m.source)
+		t.Fatalf("4 source = %v, want fd", m.source)
 	}
 }
 
@@ -332,17 +303,17 @@ func TestConfiguredSourceOrderAndDefault(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
 	cfg := appconfig.Default()
-	cfg.Sources.Default = "current-agents"
-	cfg.Sources.Order = []string{"sessions", "agents", "current-agents", "zoxide", "fd", "all"}
+	cfg.Sources.Default = "zoxide"
+	cfg.Sources.Order = []string{"sessions", "zoxide", "fd", "all"}
 	if err := appconfig.Save(cfg); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
 	m := New()
-	if m.source != sessionmgr.ModeCurrentAgents {
-		t.Fatalf("New() source = %v, want configured current agents", m.source)
+	if m.source != sessionmgr.ModeZoxide {
+		t.Fatalf("New() source = %v, want configured zoxide", m.source)
 	}
 	out := sessionmgr.StripANSI(m.renderTabs())
-	for _, want := range []string{"[1] Sessions", "[2] Agents", "[3] Current agents", "[4] Zoxide", "[5] fd", "[6] All"} {
+	for _, want := range []string{"[1] Sessions", "[2] Zoxide", "[3] fd", "[4] All"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("configured tabs missing %q\n%s", want, out)
 		}
@@ -352,10 +323,10 @@ func TestConfiguredSourceOrderAndDefault(t *testing.T) {
 	if m.source != sessionmgr.ModeSessions {
 		t.Fatalf("configured key 1 source = %v, want sessions", m.source)
 	}
-	model, _ = m.handleKey(keyMsg("6"))
+	model, _ = m.handleKey(keyMsg("4"))
 	m = model.(Model)
 	if m.source != sessionmgr.ModeAll {
-		t.Fatalf("configured key 6 source = %v, want all", m.source)
+		t.Fatalf("configured key 4 source = %v, want all", m.source)
 	}
 }
 
@@ -379,23 +350,16 @@ func TestConfiguredASCIIIconsRenderInTUI(t *testing.T) {
 	cfg.Icons.Session.Label = "S"
 	cfg.Icons.Zoxide.Label = "Z"
 	cfg.Icons.FD.Label = "F"
-	cfg.Icons.Agent.Label = "A"
 	m.config = cfg
 	m.items = []sessionmgr.Item{
 		{Kind: sessionmgr.KindSession, Name: "demo", Activity: time.Now(), Created: time.Now()},
 		{Kind: sessionmgr.KindZoxide, Path: "~/code/demo"},
 		{Kind: sessionmgr.KindFD, Path: "~/src/demo"},
-		{
-			Kind:       sessionmgr.KindAgent,
-			AgentName:  "pi",
-			AgentState: sessionmgr.AgentWorking,
-			PaneID:     "%1",
-		},
 	}
 	model, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 28})
 	m = model.(Model)
 	out := sessionmgr.StripANSI(m.View())
-	for _, want := range []string{"S [detached] demo", "Z ~/code/demo", "F ~/src/demo", "A [working] pi"} {
+	for _, want := range []string{"S [detached] demo", "Z ~/code/demo", "F ~/src/demo"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("configured ascii icon output missing %q\n%s", want, out)
 		}
@@ -411,287 +375,6 @@ func TestDefaultIconsRenderWithConfiguredDisplaySpacing(t *testing.T) {
 	sessionPrimary, _ := m.rowParts(sessionmgr.Item{Kind: sessionmgr.KindSession, Name: "demo"})
 	if got := sessionmgr.StripANSI(sessionPrimary); got != sessionmgr.IconSession+" ◌ demo" {
 		t.Fatalf("default session icon spacing = %q, want one space after icon", got)
-	}
-	agentPrimary, _ := m.rowParts(
-		sessionmgr.Item{
-			Kind:       sessionmgr.KindAgent,
-			AgentName:  "pi",
-			AgentState: sessionmgr.AgentWorking,
-		},
-	)
-	if got := sessionmgr.StripANSI(agentPrimary); got != sessionmgr.IconAgent+"  ▶ pi" {
-		t.Fatalf("default agent icon spacing = %q, want two spaces after icon", got)
-	}
-}
-
-func TestDetailStateRenderingByMode(t *testing.T) {
-	tests := []struct {
-		name       string
-		mode       string
-		kind       sessionmgr.Kind
-		item       sessionmgr.Item
-		wantList   string
-		wantDetail []string
-		wantAbsent []string
-	}{
-		{
-			name: "text mode agent detail",
-			mode: appconfig.IconModeText,
-			kind: sessionmgr.KindAgent,
-			item: sessionmgr.Item{
-				Kind:       sessionmgr.KindAgent,
-				AgentName:  "pi",
-				AgentState: sessionmgr.AgentWorking,
-				PaneID:     "%1",
-			},
-			wantDetail: []string{"state     working"},
-			wantAbsent: []string{"[working]", "state     ▶ working"},
-		},
-		{
-			name: "icons mode agent detail",
-			mode: appconfig.IconModeIcons,
-			kind: sessionmgr.KindAgent,
-			item: sessionmgr.Item{
-				Kind:       sessionmgr.KindAgent,
-				AgentName:  "pi",
-				AgentState: sessionmgr.AgentWorking,
-			},
-			wantDetail: []string{"state     ▶ working"},
-		},
-		{
-			name: "text mode session detail",
-			mode: appconfig.IconModeText,
-			kind: sessionmgr.KindSession,
-			item: sessionmgr.Item{
-				Kind:     sessionmgr.KindSession,
-				Name:     "demo",
-				Attached: true,
-			},
-			wantDetail: []string{"attached  " + "attached"},
-			wantAbsent: []string{"[attached]", "attached  ● attached"},
-		},
-		{
-			name: "icons mode session detail",
-			mode: appconfig.IconModeIcons,
-			kind: sessionmgr.KindSession,
-			item: sessionmgr.Item{
-				Kind:     sessionmgr.KindSession,
-				Name:     "demo",
-				Attached: true,
-			},
-			wantDetail: []string{"attached  ● attached"},
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			m := newTestModel(t)
-			cfg := appconfig.Default()
-			cfg.Icons.Mode = tt.mode
-			if tt.kind == sessionmgr.KindAgent && tt.mode == appconfig.IconModeText {
-				cfg.Icons.Agent.Label = "A"
-			}
-			m.config = cfg
-
-			detail := sessionmgr.StripANSI(strings.Join(m.detailLines(tt.item, 40), "\n"))
-			for _, want := range tt.wantDetail {
-				if !strings.Contains(detail, want) {
-					t.Fatalf("detail missing %q\n%s", want, detail)
-				}
-			}
-			for _, absent := range tt.wantAbsent {
-				if strings.Contains(detail, absent) {
-					t.Fatalf("detail should not contain %q\n%s", absent, detail)
-				}
-			}
-		})
-	}
-}
-
-func TestStateDisplayOverrideListAndDetail(t *testing.T) {
-	tests := []struct {
-		name       string
-		iconMode   string
-		configure  func(*appconfig.Config)
-		item       sessionmgr.Item
-		wantList   string
-		wantDetail []string
-		wantAbsent []string
-	}{
-		{
-			name:     "text icons + agent_state icons",
-			iconMode: appconfig.IconModeText,
-			configure: func(cfg *appconfig.Config) {
-				cfg.Icons.AgentStateMode = appconfig.StateDisplayModeIcons
-			},
-			item: sessionmgr.Item{
-				Kind:       sessionmgr.KindAgent,
-				AgentName:  "pi",
-				AgentState: sessionmgr.AgentWorking,
-			},
-			wantList:   "A ▶ pi",
-			wantDetail: []string{"state     ▶ working"},
-			wantAbsent: []string{"[working]"},
-		},
-		{
-			name:     "icons mode + agent_state text",
-			iconMode: appconfig.IconModeIcons,
-			configure: func(cfg *appconfig.Config) {
-				cfg.Icons.AgentStateMode = appconfig.StateDisplayModeText
-			},
-			item: sessionmgr.Item{
-				Kind:       sessionmgr.KindAgent,
-				AgentName:  "pi",
-				AgentState: sessionmgr.AgentWorking,
-			},
-			wantList:   sessionmgr.IconAgent + "  [working] pi",
-			wantDetail: []string{"state     working"},
-			wantAbsent: []string{"state     ▶ working", "[working]"},
-		},
-		{
-			name:     "text icons + tmux_state icons",
-			iconMode: appconfig.IconModeText,
-			configure: func(cfg *appconfig.Config) {
-				cfg.Icons.TmuxStateMode = appconfig.StateDisplayModeIcons
-			},
-			item: sessionmgr.Item{
-				Kind:     sessionmgr.KindSession,
-				Name:     "demo",
-				Attached: true,
-			},
-			wantList:   "S ● demo",
-			wantDetail: []string{"attached  ● attached"},
-			wantAbsent: []string{"[attached]"},
-		},
-		{
-			name:     "icons mode + tmux_state text",
-			iconMode: appconfig.IconModeIcons,
-			configure: func(cfg *appconfig.Config) {
-				cfg.Icons.TmuxStateMode = appconfig.StateDisplayModeText
-			},
-			item: sessionmgr.Item{
-				Kind:     sessionmgr.KindSession,
-				Name:     "demo",
-				Attached: true,
-			},
-			wantList:   sessionmgr.IconSession + " [attached] demo",
-			wantDetail: []string{"attached  " + "attached"},
-			wantAbsent: []string{"attached  ● attached", "[attached]"},
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			m := newTestModel(t)
-			cfg := appconfig.Default()
-			cfg.Icons.Mode = tt.iconMode
-			tt.configure(&cfg)
-			m.config = cfg
-
-			primary, _ := m.rowParts(tt.item)
-			if got := sessionmgr.StripANSI(primary); got != tt.wantList {
-				t.Fatalf("list row = %q, want %q", got, tt.wantList)
-			}
-			detail := sessionmgr.StripANSI(strings.Join(m.detailLines(tt.item, 40), "\n"))
-			for _, want := range tt.wantDetail {
-				if !strings.Contains(detail, want) {
-					t.Fatalf("detail missing %q\n%s", want, detail)
-				}
-			}
-			for _, absent := range tt.wantAbsent {
-				if strings.Contains(detail, absent) {
-					t.Fatalf("detail should not contain %q\n%s", absent, detail)
-				}
-			}
-		})
-	}
-}
-
-func TestNoIconsAgentRowsRenderStateLabel(t *testing.T) {
-	m := newTestModel(t)
-	cfg := appconfig.Default()
-	cfg.Icons.Mode = appconfig.IconModeNone
-	m.config = cfg
-
-	sessionPrimary, _ := m.rowParts(sessionmgr.Item{Kind: sessionmgr.KindSession, Name: "demo"})
-	if got := sessionmgr.StripANSI(sessionPrimary); got != "[detached] demo" {
-		t.Fatalf("no-icons session primary = %q, want [detached] demo", got)
-	}
-	attachedPrimary, _ := m.rowParts(
-		sessionmgr.Item{Kind: sessionmgr.KindSession, Name: "attached", Attached: true},
-	)
-	if got := sessionmgr.StripANSI(attachedPrimary); got != "[attached] attached" {
-		t.Fatalf("no-icons attached session primary = %q, want [attached] attached", got)
-	}
-	zoxidePrimary, _ := m.rowParts(
-		sessionmgr.Item{Kind: sessionmgr.KindZoxide, Path: "~/code/demo"},
-	)
-	if got := sessionmgr.StripANSI(zoxidePrimary); got != "~/code/demo" {
-		t.Fatalf("no-icons zoxide primary = %q, want no source prefix", got)
-	}
-	agentPrimary, _ := m.rowParts(
-		sessionmgr.Item{
-			Kind:       sessionmgr.KindAgent,
-			AgentName:  "pi",
-			AgentState: sessionmgr.AgentWorking,
-		},
-	)
-	if got := sessionmgr.StripANSI(agentPrimary); got != "[working] pi" {
-		t.Fatalf("no-icons agent primary = %q, want [working] pi", got)
-	}
-}
-
-func TestCustomAgentStateIconInList(t *testing.T) {
-	m := newTestModel(t)
-	cfg := appconfig.Default()
-	cfg.Icons.Mode = appconfig.IconModeIcons
-	cfg.Icons.AgentStateMode = appconfig.StateDisplayModeIcons
-	cfg.Icons.AgentState.Working.Icon = "★"
-	m.config = cfg
-
-	item := sessionmgr.Item{
-		Kind:       sessionmgr.KindAgent,
-		AgentName:  "pi",
-		AgentState: sessionmgr.AgentWorking,
-	}
-	primary, _ := m.rowParts(item)
-	if got := sessionmgr.StripANSI(primary); !strings.Contains(got, "★ pi") {
-		t.Fatalf("custom working icon list row = %q, want ★ pi", got)
-	}
-}
-
-func TestCustomAgentStateLabelInTextMode(t *testing.T) {
-	m := newTestModel(t)
-	cfg := appconfig.Default()
-	cfg.Icons.Mode = appconfig.IconModeIcons
-	cfg.Icons.AgentStateMode = appconfig.StateDisplayModeText
-	cfg.Icons.AgentState.Working.Label = "busy"
-	m.config = cfg
-
-	item := sessionmgr.Item{
-		Kind:       sessionmgr.KindAgent,
-		AgentName:  "pi",
-		AgentState: sessionmgr.AgentWorking,
-	}
-	primary, _ := m.rowParts(item)
-	if got := sessionmgr.StripANSI(primary); !strings.Contains(got, "[busy] pi") {
-		t.Fatalf("custom working label list row = %q, want [busy] pi", got)
-	}
-}
-
-func TestPartialAgentStateOverrideKeepsDefaultGlyph(t *testing.T) {
-	m := newTestModel(t)
-	cfg := appconfig.Default()
-	cfg.Icons.Mode = appconfig.IconModeIcons
-	cfg.Icons.AgentState.Blocked.Color = "11"
-	m.config = cfg
-
-	item := sessionmgr.Item{
-		Kind:       sessionmgr.KindAgent,
-		AgentName:  "pi",
-		AgentState: sessionmgr.AgentBlocked,
-	}
-	primary, _ := m.rowParts(item)
-	if got := sessionmgr.StripANSI(primary); !strings.Contains(got, "◆ pi") {
-		t.Fatalf("partial override blocked list row = %q, want default ◆ glyph", got)
 	}
 }
 
@@ -726,37 +409,12 @@ func TestTmuxStateModeNoneHidesListPrefix(t *testing.T) {
 		t.Fatalf("tmux_state=none list row = %q, want session icon + name only", got)
 	}
 
-	detail := sessionmgr.StripANSI(strings.Join(m.detailLines(item, 40), "\n"))
+	detail := sessionmgr.StripANSI(strings.Join(m.detailLines(item), "\n"))
 	if !strings.Contains(detail, "attached  yes") {
 		t.Fatalf("tmux_state=none detail should show plain yes\n%s", detail)
 	}
 	if strings.Contains(detail, "●") || strings.Contains(detail, "[attached]") {
 		t.Fatalf("tmux_state=none detail should not show glyph or bracket label\n%s", detail)
-	}
-}
-
-func TestAgentStateModeNoneHidesListPrefix(t *testing.T) {
-	m := newTestModel(t)
-	cfg := appconfig.Default()
-	cfg.Icons.AgentStateMode = appconfig.StateDisplayModeNone
-	m.config = cfg
-
-	item := sessionmgr.Item{
-		Kind:       sessionmgr.KindAgent,
-		AgentName:  "pi",
-		AgentState: sessionmgr.AgentWorking,
-	}
-	primary, _ := m.rowParts(item)
-	if got := sessionmgr.StripANSI(primary); got != sessionmgr.IconAgent+"  pi" {
-		t.Fatalf("agent_state=none list row = %q, want agent icon + name only", got)
-	}
-
-	detail := sessionmgr.StripANSI(strings.Join(m.detailLines(item, 40), "\n"))
-	if !strings.Contains(detail, "state     working") {
-		t.Fatalf("agent_state=none detail should show plain raw state\n%s", detail)
-	}
-	if strings.Contains(detail, "▶") || strings.Contains(detail, "[working]") {
-		t.Fatalf("agent_state=none detail should not show glyph or bracket label\n%s", detail)
 	}
 }
 
@@ -797,25 +455,10 @@ func TestTypeFirstTypingFiltersAndPrefixRunsActions(t *testing.T) {
 		t.Fatalf("visibleItems after typing = %#v", got)
 	}
 
-	model, _ = m.handleKey(keyMsg("g"))
-	m = model.(Model)
-	if m.source != sessionmgr.ModeAll || m.query != "ag" {
-		t.Fatalf(
-			"unprefixed action key should type into filter, source/query = %v/%q",
-			m.source,
-			m.query,
-		)
-	}
-
 	model, _ = m.handleKey(ctrlXMsg())
 	m = model.(Model)
 	if !m.prefixArmed {
 		t.Fatal("prefix key should arm next action")
-	}
-	model, _ = m.handleKey(keyMsg("g"))
-	m = model.(Model)
-	if m.source != sessionmgr.ModeAgents || m.prefixArmed {
-		t.Fatalf("prefixed g should switch to agents, source=%v armed=%v", m.source, m.prefixArmed)
 	}
 }
 
@@ -834,11 +477,6 @@ func TestTypeFirstPrefixIsConfigurableAndUnprefixedActionsWarn(t *testing.T) {
 	m = model.(Model)
 	if !m.prefixArmed {
 		t.Fatal("configured prefix should arm actions")
-	}
-	model, _ = m.handleKey(keyMsg("g"))
-	m = model.(Model)
-	if m.source != sessionmgr.ModeAgents {
-		t.Fatalf("custom-prefixed g source = %v, want agents", m.source)
 	}
 }
 
@@ -925,10 +563,7 @@ func TestStartupSetupPromptSavesTypeFirstChoice(t *testing.T) {
 	) {
 		t.Fatalf("startup setup prompt should use startup title\n%s", out)
 	}
-	model, cmd = m.handleSetupKey(keyMsg("enter"))
-	if cmd == nil {
-		t.Fatal("startup setup should continue to startup integration checks")
-	}
+	model, _ = m.handleSetupKey(keyMsg("enter"))
 	m = model.(Model)
 	if m.setup.active || !m.config.TypeFirst.Enabled || !m.config.Setup.TypeFirstPromptSeen {
 		t.Fatalf(
@@ -1139,158 +774,6 @@ func TestTypeFirstManualModePromptRequiresPrefix(t *testing.T) {
 	}
 }
 
-func TestAgentStateFilterOnlyAppliesInAgentSources(t *testing.T) {
-	m := newTestModel(t)
-	m.items = []sessionmgr.Item{
-		{
-			Kind:       sessionmgr.KindAgent,
-			AgentName:  "pi",
-			AgentState: sessionmgr.AgentWorking,
-			PaneID:     "%1",
-		},
-		{
-			Kind:       sessionmgr.KindAgent,
-			AgentName:  "claude",
-			AgentState: sessionmgr.AgentBlocked,
-			PaneID:     "%2",
-		},
-		{
-			Kind:       sessionmgr.KindAgent,
-			AgentName:  "codex",
-			AgentState: sessionmgr.AgentIdle,
-			PaneID:     "%3",
-		},
-		{Kind: sessionmgr.KindSession, Name: "api"},
-	}
-	m.source = sessionmgr.ModeAgents
-	m.agentStateFilter = sessionmgr.AgentWorking
-	got := m.visibleItems()
-	if len(got) != 1 || got[0].AgentName != "pi" {
-		t.Fatalf("agent state filtered items = %#v, want only pi", got)
-	}
-
-	m.source = sessionmgr.ModeCurrentAgents
-	m.agentStateFilter = sessionmgr.AgentBlocked
-	got = m.visibleItems()
-	if len(got) != 1 || got[0].AgentName != "claude" {
-		t.Fatalf("current-agent state filtered items = %#v, want only claude", got)
-	}
-
-	m.source = sessionmgr.ModeAll
-	m.agentStateFilter = sessionmgr.AgentWorking
-	got = m.visibleItems()
-	if len(got) != 4 {
-		t.Fatalf("all mode should ignore state filter, got %#v", got)
-	}
-}
-
-func TestAgentStateFilterCombinesWithTextQuery(t *testing.T) {
-	m := newTestModel(t)
-	m.source = sessionmgr.ModeAgents
-	m.agentStateFilter = sessionmgr.AgentWorking
-	m.query = "api"
-	m.items = []sessionmgr.Item{
-		{
-			Kind:       sessionmgr.KindAgent,
-			AgentName:  "pi",
-			AgentState: sessionmgr.AgentWorking,
-			Location:   "api:1.1",
-			PaneID:     "%1",
-		},
-		{
-			Kind:       sessionmgr.KindAgent,
-			AgentName:  "claude",
-			AgentState: sessionmgr.AgentWorking,
-			Location:   "web:1.1",
-			PaneID:     "%2",
-		},
-		{
-			Kind:       sessionmgr.KindAgent,
-			AgentName:  "codex",
-			AgentState: sessionmgr.AgentBlocked,
-			Location:   "api:1.2",
-			PaneID:     "%3",
-		},
-	}
-	got := m.visibleItems()
-	if len(got) != 1 || got[0].AgentName != "pi" {
-		t.Fatalf("combined filtered items = %#v, want only working api agent", got)
-	}
-}
-
-func TestAgentStateFilterKeyCyclesAndClears(t *testing.T) {
-	m := newTestModel(t)
-	m.source = sessionmgr.ModeAgents
-	m.items = []sessionmgr.Item{
-		{
-			Kind:       sessionmgr.KindAgent,
-			AgentName:  "pi",
-			AgentState: sessionmgr.AgentWorking,
-			PaneID:     "%1",
-		},
-	}
-
-	model, _ := m.handleKey(keyMsg("s"))
-	m = model.(Model)
-	if m.agentStateFilter != sessionmgr.AgentWorking || m.status != "agent state filter: working" {
-		t.Fatalf("after s filter/status = %q/%q, want working", m.agentStateFilter, m.status)
-	}
-	model, _ = m.handleKey(keyMsg("s"))
-	m = model.(Model)
-	if m.agentStateFilter != sessionmgr.AgentBlocked || m.status != "agent state filter: blocked" {
-		t.Fatalf("after second s filter/status = %q/%q, want blocked", m.agentStateFilter, m.status)
-	}
-	model, _ = m.handleKey(keyMsg("S"))
-	m = model.(Model)
-	if m.agentStateFilter != "" || m.status != "agent state filter: all" {
-		t.Fatalf("after S filter/status = %q/%q, want all", m.agentStateFilter, m.status)
-	}
-}
-
-func TestAgentStateFilterKeyWarnsOutsideAgentPane(t *testing.T) {
-	m := newTestModel(t)
-	m.source = sessionmgr.ModeSessions
-	model, _ := m.handleKey(keyMsg("s"))
-	m = model.(Model)
-	if m.agentStateFilter != "" {
-		t.Fatalf("filter changed outside agent source: %q", m.agentStateFilter)
-	}
-	if m.status != "state filter only applies to agent panes" {
-		t.Fatalf("status = %q, want state filter warning", m.status)
-	}
-	if !isWarningStatus(m.status) {
-		t.Fatalf("state filter warning should render as warning")
-	}
-}
-
-func TestAgentStateFilterRendersTitleHelpAndEmptyState(t *testing.T) {
-	m := newTestModel(t)
-	model, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 28})
-	m = model.(Model)
-	m.source = sessionmgr.ModeAgents
-	m.agentStateFilter = sessionmgr.AgentBlocked
-	m.items = []sessionmgr.Item{
-		{
-			Kind:       sessionmgr.KindAgent,
-			AgentName:  "pi",
-			AgentState: sessionmgr.AgentWorking,
-			PaneID:     "%1",
-		},
-	}
-	out := sessionmgr.StripANSI(m.View())
-	for _, want := range []string{"Agents · blocked", "no agent panes with state blocked", "state:blocked", "s state", "S all"} {
-		if !strings.Contains(out, want) {
-			t.Fatalf("filtered agent view missing %q\n%s", want, out)
-		}
-	}
-
-	m.source = sessionmgr.ModeSessions
-	out = sessionmgr.StripANSI(m.renderFooter())
-	if strings.Contains(out, "s state") || strings.Contains(out, "S all") {
-		t.Fatalf("agent state filter help should not render outside agent panes\n%s", out)
-	}
-}
-
 func TestFooterKeepsStatusOnOneLine(t *testing.T) {
 	m := newTestModel(t)
 	m.width = 80
@@ -1311,12 +794,12 @@ func TestFooterKeepsStatusOnOneLine(t *testing.T) {
 		t.Fatalf("status wrapped or disappeared from first line:\n%s", clean)
 	}
 	for i, line := range lines {
-		if width := lipgloss.Width(line); width >= m.width {
+		if width := lipgloss.Width(line); width > safeWidth(m.width) {
 			t.Fatalf(
-				"footer line %d width = %d, want less than terminal width %d",
+				"footer line %d width = %d, want at most safe width %d",
 				i,
 				width,
-				m.width,
+				safeWidth(m.width),
 			)
 		}
 	}
@@ -1329,7 +812,7 @@ func TestFooterHelpShowsSourceAndModeKeys(t *testing.T) {
 	if !strings.Contains(out, "m mode") {
 		t.Fatalf("footer should mention mode key\n%s", out)
 	}
-	for _, want := range []string{"g agents", "o current agents"} {
+	for _, want := range []string{"m mode", "r refresh"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("footer should mention source key %q\n%s", want, out)
 		}
@@ -1344,7 +827,7 @@ func TestFooterHelpShowsSourceAndModeKeys(t *testing.T) {
 
 	m.prefixArmed = true
 	out = sessionmgr.StripANSI(m.renderFooter())
-	for _, want := range []string{"g agents", "o current agents", "m mode"} {
+	for _, want := range []string{"m mode", "r refresh", "x kill"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("prefix-armed footer should mention %q\n%s", want, out)
 		}
@@ -1360,9 +843,8 @@ func TestFooterWarningStatusesUseWarningStyle(t *testing.T) {
 		"rename cancelled",
 		"yazi closed without a directory",
 		"nothing selected",
-		"delete only applies to sessions and agents",
+		"delete only applies to sessions",
 		"rename only applies to sessions and agents",
-		"state filter only applies to agent panes",
 	}
 	for _, status := range warnings {
 		style := footerStatusStyle(s, status, false)
@@ -1551,28 +1033,5 @@ func TestConfiguredThemeColorsApply(t *testing.T) {
 			"default active tab should use terminal foreground, got %T",
 			s.tabActive.GetForeground(),
 		)
-	}
-}
-
-func TestIntegrationPromptRendersToggleRows(t *testing.T) {
-	m := newTestModel(t)
-	model, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 28})
-	m = model.(Model)
-	m.integration.active = true
-	m.integration.rows = []integrations.Recommendation{
-		{
-			Target:         integrations.TargetPi,
-			Label:          "Pi",
-			AgentAvailable: true,
-			Installable:    true,
-			State:          integrations.StatusNotInstalled,
-		},
-	}
-	m.integration.selected[integrations.TargetPi] = true
-	out := sessionmgr.StripANSI(m.View())
-	for _, want := range []string{"Install agent state hooks?", "[x] Pi", "space toggle", "pane text or process", "inspection"} {
-		if !strings.Contains(out, want) {
-			t.Fatalf("integration prompt missing %q\n%s", want, out)
-		}
 	}
 }

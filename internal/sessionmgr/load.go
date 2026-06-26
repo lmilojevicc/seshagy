@@ -23,10 +23,10 @@ type LoadResult struct {
 const (
 	ModeAll SourceMode = iota
 	ModeSessions
-	ModeAgents
-	ModeCurrentAgents
 	ModeZoxide
 	ModeFD
+	ModeAgents
+	ModeCurrentAgents
 )
 
 func LoadWithOptions(ctx context.Context, mode SourceMode, opts LoadOptions) (LoadResult, error) {
@@ -34,21 +34,27 @@ func LoadWithOptions(ctx context.Context, mode SourceMode, opts LoadOptions) (Lo
 	case ModeSessions:
 		items, err := ListSessions(ctx)
 		return LoadResult{Items: items}, err
+	case ModeZoxide:
+		items, err := ListZoxideDirs(ctx)
+		return LoadResult{Items: items}, err
+	case ModeFD:
+		items, err := ListFDirsWithCommand(ctx, opts.FDCommand)
+		return LoadResult{Items: items}, err
 	case ModeAgents:
-		items, err := ListAgents(ctx, "", opts)
+		items, err := ListAgents(ctx, "")
+		if err == nil && opts.ManifestFallback {
+			ApplyManifestFallback(ctx, items)
+		}
 		return LoadResult{Items: items}, err
 	case ModeCurrentAgents:
 		session, err := CurrentTmuxSession(ctx)
 		if err != nil {
 			return LoadResult{}, err
 		}
-		items, err := ListAgents(ctx, session, opts)
-		return LoadResult{Items: items}, err
-	case ModeZoxide:
-		items, err := ListZoxideDirs(ctx)
-		return LoadResult{Items: items}, err
-	case ModeFD:
-		items, err := ListFDirsWithCommand(ctx, opts.FDCommand)
+		items, err := ListAgents(ctx, session)
+		if err == nil && opts.ManifestFallback {
+			ApplyManifestFallback(ctx, items)
+		}
 		return LoadResult{Items: items}, err
 	case ModeAll:
 		fallthrough
@@ -56,10 +62,6 @@ func LoadWithOptions(ctx context.Context, mode SourceMode, opts LoadOptions) (Lo
 		var out []Item
 		var warnings []string
 		sessions, err := ListSessions(ctx)
-		if err != nil {
-			return LoadResult{}, err
-		}
-		agents, err := ListAgents(ctx, "", opts)
 		if err != nil {
 			return LoadResult{}, err
 		}
@@ -72,9 +74,16 @@ func LoadWithOptions(ctx context.Context, mode SourceMode, opts LoadOptions) (Lo
 			warnings = append(warnings, err.Error())
 		}
 		out = append(out, sessions...)
-		out = append(out, agents...)
 		out = append(out, zoxide...)
 		out = append(out, fd...)
+		agents, err := ListAgents(ctx, "")
+		if err != nil {
+			warnings = append(warnings, err.Error())
+		}
+		if err == nil && opts.ManifestFallback {
+			ApplyManifestFallback(ctx, agents)
+		}
+		out = append(out, agents...)
 		return LoadResult{Items: out, Warning: strings.Join(warnings, "; ")}, nil
 	}
 }

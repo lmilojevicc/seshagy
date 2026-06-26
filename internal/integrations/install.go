@@ -1,363 +1,499 @@
+// Package integrations manages per-agent hook/extension installers.
 package integrations
 
 import (
+	_ "embed"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 )
 
-func installPi(binaryPath string) ([]string, error) {
-	dir := filepath.Join(piDir(), "extensions")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return nil, err
-	}
-	path := filepath.Join(dir, "seshagy-agent-state.ts")
-	if err := os.WriteFile(path, []byte(piExtensionAsset(binaryPath)), 0o644); err != nil {
-		return nil, err
-	}
-	return []string{fmt.Sprintf("installed Pi extension to %s", path)}, nil
+//go:embed assets/seshagy-agent-state.ts
+var piExtensionSource string
+
+//go:embed assets/seshagy-agent-state.sh
+var sharedHookScript string
+
+//go:embed assets/seshagy-opencode-plugin.ts
+var opencodePluginSource string
+
+// scriptMarker identifies seshagy-managed entries inside an agent's hooks
+// config so install (refresh) and uninstall can find them deterministically.
+const scriptMarker = "seshagy-agent-state.sh"
+
+// Integration describes a single agent hook installer.
+type Integration struct {
+	Name         string
+	InstallPath  func() (string, error)
+	AssetContent string
+	// ShellHook describes a shell-hook integration (codex/claude/droid). Nil
+	// for asset-only integrations (pi).
+	ShellHook *shellHookSpec
+	// LifecycleAuthority is true when the integration's hooks/plugins emit
+	// the FULL lifecycle (idle, working, blocked, done). For such agents the
+	// detection engine suppresses screen-manifest fallback when hooks are
+	// fresh. Agents with partial hooks (codex/claude/droid) or no hooks
+	// (cursor/agy/grok) are false — screen manifest always runs so it can
+	// overwrite stale hook state (herdr authority model).
+	LifecycleAuthority bool
 }
 
-func installClaude(binaryPath string) ([]string, error) {
-	return installNestedLifecycleHooks(
-		TargetClaude,
-		claudeDir(),
-		filepath.Join(claudeDir(), "settings.json"),
-		binaryPath,
-		claudeLifecycleHooks,
-		true,
-	)
+// hookEvent maps one agent hook event to a seshagy state.
+type hookEvent struct {
+	event   string // e.g. "PreToolUse", "Notification"
+	matcher string // "" = omit matcher field; "permission_prompt", "*" etc.
+	state   string // working|blocked|done|idle|release|session
 }
 
-func installDroid(binaryPath string) ([]string, error) {
-	messages, err := installNestedLifecycleHooks(
-		TargetDroid,
-		droidDir(),
-		filepath.Join(droidDir(), "settings.json"),
-		binaryPath,
-		droidLifecycleHooks,
-		true,
-	)
-	if err != nil {
-		return nil, err
-	}
-	hooksPath := filepath.Join(droidDir(), "hooks.json")
-	if updated, err := removeCommandsFromJSON(
-		hooksPath,
-		removeNestedCommands,
-	); err != nil {
-		return nil, err
-	} else if updated {
-		messages = append(
-			messages,
-			fmt.Sprintf("removed stale seshagy hook entries from %s", hooksPath),
-		)
-	}
-	return messages, nil
+// shellHookSpec describes a shell-hook integration (codex/claude/droid).
+type shellHookSpec struct {
+	agentName  string
+	configPath func() (string, error) // target settings/hooks JSON path
+	scriptPath func() (string, error) // where to install the .sh script
+	events     []hookEvent
 }
 
-func installQodercli(binaryPath string) ([]string, error) {
-	return installNestedLifecycleHooks(
-		TargetQodercli,
-		qoderDir(),
-		filepath.Join(qoderDir(), "settings.json"),
-		binaryPath,
-		qodercliLifecycleHooks,
-		true,
-	)
+func codexBase() string {
+	if dir := os.Getenv("CODEX_HOME"); dir != "" {
+		return dir
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".codex")
 }
 
-func installCodex(binaryPath string) ([]string, error) {
-	dir := codexDir()
-	if !configDirExists(dir) {
-		return nil, fmt.Errorf("codex config directory not found at %s", dir)
+func claudeBase() string {
+	if dir := os.Getenv("CLAUDE_CONFIG_DIR"); dir != "" {
+		return dir
 	}
-	hookPath := filepath.Join(dir, shellHookName)
-	if err := writeShellHook(TargetCodex, hookPath, binaryPath); err != nil {
-		return nil, err
-	}
-	hooksPath := filepath.Join(dir, "hooks.json")
-	root, err := readJSONObject(hooksPath)
+	home, err := os.UserHomeDir()
 	if err != nil {
-		return nil, err
+		return ""
 	}
-	hooks, err := hooksObject(root)
-	if err != nil {
-		return nil, err
-	}
-	removeNestedCommands(hooks, shellHookName)
-	if err := ensureNestedLifecycleHooks(
-		hooks,
-		hookPath,
-		TargetCodex,
-		codexLifecycleHooks,
-		false,
-	); err != nil {
-		return nil, err
-	}
-	if err := writeJSONObject(hooksPath, root); err != nil {
-		return nil, err
-	}
-	configPath := filepath.Join(dir, "config.toml")
-	if err := ensureCodexHooksEnabled(configPath); err != nil {
-		return nil, err
-	}
-	return []string{
-		fmt.Sprintf("installed Codex hook to %s", hookPath),
-		fmt.Sprintf("updated %s", hooksPath),
-		fmt.Sprintf("enabled Codex hooks in %s", configPath),
-	}, nil
+	return filepath.Join(home, ".claude")
 }
 
-func installCopilot(binaryPath string) ([]string, error) {
-	dir := copilotDir()
-	if !configDirExists(dir) {
-		return nil, fmt.Errorf("copilot config directory not found at %s", dir)
-	}
-	hookPath := filepath.Join(dir, "hooks", shellHookName)
-	if err := writeShellHook(TargetCopilot, hookPath, binaryPath); err != nil {
-		return nil, err
-	}
-	settingsPath := filepath.Join(dir, "settings.json")
-	root, err := readJSONObject(settingsPath)
+func factoryBase() string {
+	home, err := os.UserHomeDir()
 	if err != nil {
-		return nil, err
+		return ""
 	}
-	hooks, err := hooksObject(root)
-	if err != nil {
-		return nil, err
-	}
-	removeDirectCommands(hooks, shellHookName)
-	for _, event := range copilotStaleLifecycleHooks {
-		removeDirectCommandsForEvent(hooks, event)
-	}
-	if err := ensureDirectLifecycleHooks(
-		hooks,
-		hookPath,
-		TargetCopilot,
-		copilotLifecycleHooks,
-	); err != nil {
-		return nil, err
-	}
-	if err := writeJSONObject(settingsPath, root); err != nil {
-		return nil, err
-	}
-	return []string{
-		fmt.Sprintf("installed Copilot hook to %s", hookPath),
-		fmt.Sprintf("updated %s", settingsPath),
-	}, nil
+	return filepath.Join(home, ".factory")
 }
 
-func installOpencode(binaryPath string) ([]string, error) {
-	dir := opencodeDir()
-	if !configDirExists(dir) {
-		return nil, fmt.Errorf("OpenCode config directory not found at %s", dir)
-	}
-	pluginsDir := filepath.Join(dir, "plugins")
-	if err := os.MkdirAll(pluginsDir, 0o755); err != nil {
-		return nil, err
-	}
-	path := filepath.Join(pluginsDir, "seshagy-agent-state.js")
-	if err := os.WriteFile(path, []byte(opencodePluginAsset(binaryPath)), 0o644); err != nil {
-		return nil, err
-	}
-	return []string{fmt.Sprintf("installed OpenCode plugin to %s", path)}, nil
+var codexSpec = &shellHookSpec{
+	agentName: "codex",
+	configPath: func() (string, error) {
+		return filepath.Join(codexBase(), "hooks.json"), nil
+	},
+	scriptPath: func() (string, error) {
+		return filepath.Join(codexBase(), "hooks", "seshagy-agent-state.sh"), nil
+	},
+	events: []hookEvent{
+		{event: "UserPromptSubmit", state: "working"},
+		{event: "PreToolUse", state: "working"},
+		{event: "PermissionRequest", state: "blocked"},
+		{event: "Stop", state: "done"},
+	},
 }
 
-func installCursor(binaryPath string) ([]string, error) {
-	dir := cursorDir()
-	if !configDirExists(dir) {
-		return nil, fmt.Errorf("cursor config directory not found at %s", dir)
-	}
-	hookPath := filepath.Join(dir, shellHookName)
-	if err := writeShellHook(TargetCursor, hookPath, binaryPath); err != nil {
-		return nil, err
-	}
-	hooksPath := filepath.Join(dir, "hooks.json")
-	root, err := readJSONObject(hooksPath)
-	if err != nil {
-		return nil, err
-	}
-	hooks, err := hooksObject(root)
-	if err != nil {
-		return nil, err
-	}
-	removeSimpleCommands(hooks, shellHookName)
-	for _, hook := range cursorStaleLifecycleHooks {
-		removeSimpleCommandsForAction(hooks, hook.event, hook.action)
-	}
-	if _, ok := root["version"]; !ok {
-		root["version"] = float64(1)
-	}
-	if err := ensureSimpleLifecycleHooks(
-		hooks,
-		hookPath,
-		TargetCursor,
-		cursorLifecycleHooks,
-	); err != nil {
-		return nil, err
-	}
-	if err := writeJSONObject(hooksPath, root); err != nil {
-		return nil, err
-	}
-	return []string{
-		fmt.Sprintf("installed Cursor hook to %s", hookPath),
-		fmt.Sprintf("updated %s", hooksPath),
-	}, nil
+var claudeSpec = &shellHookSpec{
+	agentName: "claude",
+	configPath: func() (string, error) {
+		return filepath.Join(claudeBase(), "settings.json"), nil
+	},
+	scriptPath: func() (string, error) {
+		return filepath.Join(claudeBase(), "hooks", "seshagy-agent-state.sh"), nil
+	},
+	events: []hookEvent{
+		{event: "UserPromptSubmit", state: "working"},
+		{event: "PreToolUse", state: "working"},
+		{event: "Notification", matcher: "permission_prompt", state: "blocked"},
+		{event: "Notification", matcher: "elicitation_dialog", state: "blocked"},
+		{event: "Stop", state: "done"},
+		{event: "SessionEnd", state: "release"},
+	},
 }
 
-func installNestedLifecycleHooks(
-	target Target,
-	dir, settingsPath, binaryPath string,
-	events []lifecycleHook,
-	matcherStar bool,
-) ([]string, error) {
-	if !configDirExists(dir) {
-		return nil, fmt.Errorf("%s config directory not found at %s", TargetLabel(target), dir)
-	}
-	hookPath := filepath.Join(dir, "hooks", shellHookName)
-	if err := writeShellHook(target, hookPath, binaryPath); err != nil {
-		return nil, err
-	}
-	root, err := readJSONObject(settingsPath)
-	if err != nil {
-		return nil, err
-	}
-	hooks, err := hooksObject(root)
-	if err != nil {
-		return nil, err
-	}
-	removeNestedCommands(hooks, shellHookName)
-	if err := ensureNestedLifecycleHooks(hooks, hookPath, target, events, matcherStar); err != nil {
-		return nil, err
-	}
-	if err := writeJSONObject(settingsPath, root); err != nil {
-		return nil, err
-	}
-	return []string{
-		fmt.Sprintf("installed %s hook to %s", TargetLabel(target), hookPath),
-		fmt.Sprintf("updated %s", settingsPath),
-	}, nil
+var droidSpec = &shellHookSpec{
+	agentName: "droid",
+	configPath: func() (string, error) {
+		return filepath.Join(factoryBase(), "settings.json"), nil
+	},
+	scriptPath: func() (string, error) {
+		return filepath.Join(factoryBase(), "hooks", "seshagy-agent-state.sh"), nil
+	},
+	events: []hookEvent{
+		{event: "SessionStart", matcher: "*", state: "session"},
+		{event: "UserPromptSubmit", state: "working"},
+		{event: "PreToolUse", state: "working"},
+		{event: "PostToolUse", state: "working"},
+		{event: "PreCompact", state: "working"},
+		{event: "Notification", state: "blocked"},
+		{event: "PermissionRequest", state: "blocked"},
+		{event: "PermissionDenied", state: "idle"},
+		{event: "Stop", state: "done"},
+		{event: "SessionEnd", state: "release"},
+	},
 }
 
-func ensureNestedLifecycleHooks(
-	hooks map[string]any,
-	hookPath string,
-	target Target,
-	events []lifecycleHook,
-	matcherStar bool,
-) error {
-	for _, hook := range events {
-		command := shellHookCommand(hookPath, target, hook.action)
-		if err := ensureNestedCommandHook(
-			hooks,
-			hook.event,
-			command,
-			nestedLifecycleMatcher(hook.event, matcherStar),
-		); err != nil {
-			return err
+var piIntegration = Integration{
+	Name:               "pi",
+	LifecycleAuthority: true,
+	InstallPath: func() (string, error) {
+		base := os.Getenv("PI_CODING_AGENT_DIR")
+		if base == "" {
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return "", err
+			}
+			base = filepath.Join(home, ".pi", "agent")
 		}
-	}
-	return nil
+		return filepath.Join(base, "extensions", "seshagy-agent-state.ts"), nil
+	},
+	AssetContent: piExtensionSource,
 }
 
-func ensureDirectLifecycleHooks(
-	hooks map[string]any,
-	hookPath string,
-	target Target,
-	events []lifecycleHook,
-) error {
-	for _, hook := range events {
-		command := shellHookCommand(hookPath, target, hook.action)
-		if err := ensureDirectCommandHook(hooks, hook.event, command); err != nil {
-			return err
+// opencodeConfigBase resolves the opencode config directory, honoring
+// $XDG_CONFIG_HOME (opencode follows the XDG convention).
+func opencodeConfigBase() string {
+	if dir := os.Getenv("XDG_CONFIG_HOME"); dir != "" {
+		return filepath.Join(dir, "opencode")
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".config", "opencode")
+}
+
+var opencodeIntegration = Integration{
+	Name:               "opencode",
+	LifecycleAuthority: true,
+	InstallPath: func() (string, error) {
+		// opencode auto-discovers {plugin,plugins}/*.{ts,js} relative to its
+		// config dir; dropping the .ts here is enough — no opencode.json patch.
+		return filepath.Join(opencodeConfigBase(), "plugin", "seshagy-opencode-plugin.ts"), nil
+	},
+	AssetContent: opencodePluginSource,
+}
+
+var integrations = map[string]Integration{
+	"pi":       piIntegration,
+	"codex":    {Name: "codex", ShellHook: codexSpec},   // partial hooks
+	"claude":   {Name: "claude", ShellHook: claudeSpec}, // partial hooks
+	"droid":    {Name: "droid", ShellHook: droidSpec},   // partial hooks
+	"opencode": opencodeIntegration,
+}
+
+// LifecycleAuthorityFor returns true when the named agent's integration
+// emits the full lifecycle (idle/working/blocked/done). Unregistered agents
+// (cursor, antigravity, grok) default to false — their state comes entirely
+// from the screen manifest.
+func LifecycleAuthorityFor(agentName string) bool {
+	integ, ok := integrations[agentName]
+	if !ok {
+		return false
+	}
+	return integ.LifecycleAuthority
+}
+
+// Install writes the integration's hook/extension file to the agent's
+// configuration directory.
+func Install(name string) (string, error) {
+	integ, ok := integrations[name]
+	if !ok {
+		return "", fmt.Errorf("unknown integration: %s", name)
+	}
+	if integ.ShellHook != nil {
+		path, err := installShellHook(integ.ShellHook)
+		if err != nil {
+			return "", err
 		}
-	}
-	return nil
-}
-
-func ensureSimpleLifecycleHooks(
-	hooks map[string]any,
-	hookPath string,
-	target Target,
-	events []lifecycleHook,
-) error {
-	for _, hook := range events {
-		command := shellHookCommand(hookPath, target, hook.action)
-		if err := ensureSimpleCommandHook(hooks, hook.event, command); err != nil {
-			return err
+		if name == "codex" {
+			warnCodexFeatureFlag()
 		}
+		return path, nil
 	}
-	return nil
-}
-
-func writeShellHook(target Target, path, binaryPath string) error {
+	path, err := integ.InstallPath()
+	if err != nil {
+		return "", err
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
+		return "", err
 	}
-	if err := os.WriteFile(path, []byte(shellHookAsset(target, binaryPath)), 0o755); err != nil {
-		return err
+	if err := os.WriteFile(path, []byte(integ.AssetContent), 0o644); err != nil {
+		return "", err
 	}
-	return os.Chmod(path, 0o755)
+	return path, nil
 }
 
-func ensureCodexHooksEnabled(path string) error {
-	data, err := os.ReadFile(path)
-	if err != nil && !os.IsNotExist(err) {
-		return err
+// Uninstall removes seshagy-managed hook entries from an agent's hooks config
+// and deletes the installed shell script.
+func Uninstall(name string) (string, error) {
+	integ, ok := integrations[name]
+	if !ok {
+		return "", fmt.Errorf("unknown integration: %s", name)
 	}
-	content := string(data)
-	updated := buildCodexConfigWithHooks(content)
-	if updated == content && err == nil {
-		return nil
-	}
-	return os.WriteFile(path, []byte(updated), 0o644)
-}
-
-func buildCodexConfigWithHooks(content string) string {
-	lines := strings.Split(content, "\n")
-	filtered := lines[:0]
-	section := ""
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
-			section = strings.TrimSpace(strings.Trim(trimmed, "[]"))
+	if integ.ShellHook == nil {
+		// Asset-only integration (pi, opencode): remove the installed file.
+		path, err := integ.InstallPath()
+		if err != nil {
+			return "", err
 		}
-		if section == "features" && strings.HasPrefix(trimmed, "codex_hooks") {
+		_ = os.Remove(path)
+		return path, nil
+	}
+	spec := integ.ShellHook
+	configPath, err := spec.configPath()
+	if err != nil {
+		return "", err
+	}
+	if err := removeSeshagyHooks(configPath); err != nil {
+		return "", err
+	}
+	scriptPath, err := spec.scriptPath()
+	if err == nil {
+		_ = os.Remove(scriptPath)
+	}
+	return configPath, nil
+}
+
+// installShellHook writes the shared script and merges the event hooks into the
+// agent's config JSON, preserving existing non-seshagy entries.
+func installShellHook(spec *shellHookSpec) (string, error) {
+	scriptPath, err := spec.scriptPath()
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(filepath.Dir(scriptPath), 0o755); err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(scriptPath, []byte(sharedHookScript), 0o755); err != nil {
+		return "", err
+	}
+	configPath, err := spec.configPath()
+	if err != nil {
+		return "", err
+	}
+	if err := mergeShellHooks(configPath, scriptPath, spec); err != nil {
+		return "", err
+	}
+	return configPath, nil
+}
+
+// commandFor builds the hook command string for one event. Codex
+// PermissionRequest appends `; exit 1` defensively: codex treats exit 0 as
+// auto-approve, so the hook must decline-to-decide to let the normal approval
+// UI show. All other events exit 0 via the script's own default.
+func commandFor(scriptPath, agent, state, event string) string {
+	cmd := fmt.Sprintf("bash '%s' %s %s", scriptPath, agent, state)
+	if agent == "codex" && event == "PermissionRequest" {
+		cmd += "; exit 1"
+	}
+	return cmd
+}
+
+// matcherGroup builds the JSON-decodable matcher-group for one event.
+type matcherGroup struct {
+	Matcher string      `json:"matcher,omitempty"`
+	Hooks   []hookEntry `json:"hooks"`
+}
+
+type hookEntry struct {
+	Type    string `json:"type"`
+	Command string `json:"command"`
+	Timeout int    `json:"timeout"`
+}
+
+// mergeShellHooks writes the seshagy matcher-groups for each event into the
+// agent's config JSON, preserving existing non-seshagy entries. Events sharing
+// the same event key (e.g. claude's two Notification matchers) are accumulated
+// into the same matcher-group list before replacing.
+func mergeShellHooks(configPath, scriptPath string, spec *shellHookSpec) error {
+	root := readConfigRoot(configPath)
+	hooks, _ := root["hooks"].(map[string]any)
+	if hooks == nil {
+		hooks = make(map[string]any)
+	}
+	// Group events by key so multiple matchers on one event are added together.
+	type pending struct {
+		evs []hookEvent
+	}
+	byEvent := make(map[string]*pending)
+	order := []string{}
+	for _, ev := range spec.events {
+		p, ok := byEvent[ev.event]
+		if !ok {
+			p = &pending{}
+			byEvent[ev.event] = p
+			order = append(order, ev.event)
+		}
+		p.evs = append(p.evs, ev)
+	}
+	for _, event := range order {
+		p := byEvent[event]
+		groups := []map[string]any{}
+		for _, ev := range p.evs {
+			mg := matcherGroup{
+				Hooks: []hookEntry{{
+					Type:    "command",
+					Command: commandFor(scriptPath, spec.agentName, ev.state, ev.event),
+					Timeout: 10,
+				}},
+			}
+			if ev.matcher != "" {
+				mg.Matcher = ev.matcher
+			}
+			encoded, _ := json.Marshal(mg)
+			var decoded map[string]any
+			_ = json.Unmarshal(encoded, &decoded)
+			groups = append(groups, decoded)
+		}
+		hooks[event] = replaceSeshagyGroupsMulti(hooks[event], groups)
+	}
+	root["hooks"] = hooks
+	return writeConfigRoot(configPath, root)
+}
+
+// replaceSeshagyGroupsMulti drops existing seshagy matcher-groups from a list
+// (refresh) and appends the new ones, preserving non-seshagy entries.
+func replaceSeshagyGroupsMulti(existing any, newGroups []map[string]any) []any {
+	var out []any
+	if list, ok := existing.([]any); ok {
+		for _, item := range list {
+			mg, ok := item.(map[string]any)
+			if !ok {
+				out = append(out, item)
+				continue
+			}
+			if groupHasSeshagy(mg) {
+				continue
+			}
+			out = append(out, item)
+		}
+	}
+	for _, g := range newGroups {
+		out = append(out, g)
+	}
+	return out
+}
+
+func groupHasSeshagy(mg map[string]any) bool {
+	hooks, ok := mg["hooks"].([]any)
+	if !ok {
+		return false
+	}
+	for _, h := range hooks {
+		entry, ok := h.(map[string]any)
+		if !ok {
 			continue
 		}
-		filtered = append(filtered, line)
-	}
-	lines = filtered
-	features := -1
-	for i, line := range lines {
-		if strings.TrimSpace(line) == "[features]" {
-			features = i
-			break
+		if cmd, _ := entry["command"].(string); strings.Contains(cmd, scriptMarker) {
+			return true
 		}
 	}
-	if features == -1 {
-		base := strings.TrimRight(strings.Join(lines, "\n"), "\n")
-		if base != "" {
-			base += "\n\n"
+	return false
+}
+
+func removeSeshagyHooks(configPath string) error {
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
 		}
-		return base + "[features]\nhooks = true\n"
+		return err
 	}
-	for i := features + 1; i < len(lines); i++ {
-		trimmed := strings.TrimSpace(lines[i])
-		if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
-			break
+	var root map[string]any
+	if err := json.Unmarshal(data, &root); err != nil {
+		return fmt.Errorf("parse %s: %w", configPath, err)
+	}
+	hooks, ok := root["hooks"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	for event, existing := range hooks {
+		list, ok := existing.([]any)
+		if !ok {
+			continue
 		}
-		if strings.HasPrefix(trimmed, "hooks") {
-			lines[i] = "hooks = true"
-			return strings.TrimRight(strings.Join(lines, "\n"), "\n") + "\n"
+		var kept []any
+		for _, item := range list {
+			mg, ok := item.(map[string]any)
+			if !ok {
+				kept = append(kept, item)
+				continue
+			}
+			if groupHasSeshagy(mg) {
+				continue
+			}
+			kept = append(kept, item)
+		}
+		if len(kept) == 0 {
+			delete(hooks, event)
+		} else {
+			hooks[event] = kept
 		}
 	}
-	inserted := make([]string, 0, len(lines)+1)
-	inserted = append(inserted, lines[:features+1]...)
-	inserted = append(inserted, "hooks = true")
-	inserted = append(inserted, lines[features+1:]...)
-	lines = inserted
-	return strings.TrimRight(strings.Join(lines, "\n"), "\n") + "\n"
+	if len(hooks) == 0 {
+		delete(root, "hooks")
+	} else {
+		root["hooks"] = hooks
+	}
+	return writeConfigRoot(configPath, root)
+}
+
+func readConfigRoot(configPath string) map[string]any {
+	root := make(map[string]any)
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return root
+	}
+	_ = json.Unmarshal(data, &root)
+	return root
+}
+
+func writeConfigRoot(configPath string, root map[string]any) error {
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(root, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp := configPath + ".seshagy-tmp"
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, configPath)
+}
+
+// warnCodexFeatureFlag prints a stderr warning if codex's [features] hooks flag
+// is not enabled in $CODEX_HOME/config.toml. It does not modify the file.
+func warnCodexFeatureFlag() {
+	configPath := filepath.Join(codexBase(), "config.toml")
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		fmt.Fprintf(
+			os.Stderr,
+			"seshagy: codex hooks require [features] hooks = true in %s; enable it and restart codex\n",
+			configPath,
+		)
+		return
+	}
+	if strings.Contains(string(data), "hooks = true") {
+		return
+	}
+	fmt.Fprintf(os.Stderr,
+		"seshagy: codex hooks require [features] hooks = true in %s; enable it and restart codex\n",
+		configPath)
+}
+
+// Available returns the list of installable integrations.
+func Available() []string {
+	return []string{"pi", "codex", "claude", "droid", "opencode"}
 }

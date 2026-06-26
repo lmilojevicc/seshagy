@@ -2,11 +2,11 @@ package tui
 
 import (
 	"fmt"
-	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/lmilojevicc/seshagy/internal/integrations"
+	"github.com/lmilojevicc/seshagy/internal/sessionmgr"
 )
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -18,77 +18,72 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.renameInput.Width = max(20, msg.Width/3)
 		return m, m.previewForSelection()
 	case tickMsg:
-		if m.integration.active || m.setup.active {
-			return m, tickCmd()
+		interval := tickIntervalFor(m.source)
+		if m.setup.active {
+			return m, tea.Tick(interval, func(t time.Time) tea.Msg { return tickMsg(t) })
+		}
+		if m.installMenu.active {
+			return m, tea.Tick(interval, func(t time.Time) tea.Msg { return tickMsg(t) })
 		}
 		if m.cacheFresh(m.source) {
-			return m, tickCmd()
+			return m, tea.Tick(interval, func(t time.Time) tea.Msg { return tickMsg(t) })
 		}
 		var cmd tea.Cmd
 		m, cmd = m.beginRefresh(m.source, false)
-		return m, tea.Batch(cmd, tickCmd())
-	case integrationsMsg:
-		if msg.err != nil {
-			m.status = msg.err.Error()
-			return m, nil
-		}
-		m.integration.rows = msg.recs
-		m.integration.selected = map[integrations.Target]bool{}
-		for _, rec := range msg.recs {
-			m.integration.selected[rec.Target] = rec.AgentAvailable && rec.Installable &&
-				rec.State != integrations.StatusCurrent
-		}
-		if m.integration.cursor >= len(m.integration.rows) {
-			m.integration.cursor = max(0, len(m.integration.rows)-1)
-		}
-		if len(msg.recs) > 0 {
-			m.integration.active = true
-			if msg.startup {
-				m.integration.startupPrompt = true
-			}
-			m.status = "install hook integrations for detected agents"
-		} else if m.integration.active {
-			m.integration.active = false
-			m.status = "no missing hook integrations for detected agents"
-		}
-		return m, nil
-	case integrationsInstalledMsg:
-		m.integration.messages = msg.messages
-		if msg.err != nil {
-			m.err = msg.err
-			m.status = msg.err.Error()
-			return m, integrationsCmd()
-		}
-		m.err = nil
-		if len(msg.messages) == 0 {
-			m.status = "no integrations selected"
-		} else {
-			m.status = strings.Join(msg.messages, " · ")
-		}
-		if m.integration.startupPrompt {
-			if err := recordIntegrationPromptDismissed(); err != nil {
-				m.status = err.Error()
-				return m, nil
-			}
-			m.integration.startupPrompt = false
-		}
-		m.integration.active = false
-		m = m.invalidateAllCaches()
-		var refresh tea.Cmd
-		m, refresh = m.beginRefresh(m.source, true)
-		return m, tea.Batch(integrationsCmd(), refresh)
+		return m, tea.Batch(
+			cmd,
+			tea.Tick(interval, func(t time.Time) tea.Msg { return tickMsg(t) }),
+		)
 	case setupMsg:
 		if msg.err != nil {
 			m.err = msg.err
 			m.status = msg.err.Error()
-			return m, startupIntegrationsCmd()
+			return m, nil
 		}
 		if msg.prompt {
 			m.openInputModePrompt(false)
 			m.status = "choose startup input mode"
 			return m, nil
 		}
-		return m, startupIntegrationsCmd()
+		return m, nil
+	case installMenuMsg:
+		if msg.show {
+			if m.setup.active {
+				m.pendingInstall = true
+				return m, nil
+			}
+			m.openInstallMenu(true)
+			return m, nil
+		}
+		return m, nil
+	case installResultMsg:
+		if msg.err != nil {
+			m.installMenu.statuses[msg.name] = "failed"
+			m.installMenu.message = msg.name + " " + msg.action + " failed: " + msg.err.Error()
+		} else {
+			if msg.action == "install" {
+				m.installMenu.statuses[msg.name] = "installed"
+			} else {
+				m.installMenu.statuses[msg.name] = "uninstalled"
+			}
+			m.installMenu.message = msg.name + " " + msg.action + " ok"
+		}
+		return m, nil
+	case catalogRefreshMsg:
+		if msg.err != nil {
+			m.status = "catalog refresh skipped"
+			return m, nil
+		}
+		sessionmgr.ReloadManifests()
+		updated := len(msg.result.Fetched)
+		if updated > 0 {
+			m.status = fmt.Sprintf("agent rules updated (%d)", updated)
+			m = m.invalidateAllCaches()
+			var refresh tea.Cmd
+			m, refresh = m.beginRefresh(m.source, true)
+			return m, tea.Batch(refresh, m.previewForSelection())
+		}
+		return m, nil
 	case refreshMsg:
 		return m.handleRefreshMsg(msg)
 	case previewMsg:
@@ -153,10 +148,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, createSessionCmd(msg.path)
 	case tea.KeyMsg:
 		if m.setup.active {
-			return m.handleSetupKey(msg)
+			model, cmd := m.handleSetupKey(msg)
+			if mm, ok := model.(Model); ok && !mm.setup.active && mm.pendingInstall {
+				mm.pendingInstall = false
+				mm.openInstallMenu(true)
+				return mm, nil
+			}
+			return model, cmd
 		}
-		if m.integration.active {
-			return m.handleIntegrationKey(msg)
+		if m.installMenu.active {
+			return m.handleInstallMenuKey(msg)
 		}
 		return m.handleKey(msg)
 	}

@@ -1,19 +1,15 @@
 // Package sessionmgr test helpers in this file are exported for cross-package
-// CLI tests (cmd/seshagy) and sessionmgr tests. They override tmux hooks, agent
-// tracking time, manifest auto-update intervals, and pane-lock behavior for the
-// duration of each test via t.Cleanup.
+// CLI tests (cmd/seshagy) and sessionmgr tests. They swap tmux hooks for an
+// in-memory fake and record matcher helpers for the duration of each test via
+// t.Cleanup.
 package sessionmgr
 
 import (
 	"context"
 	"fmt"
-	"strings"
 	"sync"
 	"testing"
-	"time"
 )
-
-const fakePaneVisibilityActive = "1 1 1"
 
 // FakeTmux is an in-memory stand-in for a tmux server's pane options.
 type FakeTmux struct {
@@ -73,35 +69,6 @@ func (f *FakeTmux) run(_ context.Context, args ...string) error {
 		}
 	}
 	return nil
-}
-
-// agentExplainFields builds a list-panes -F line for agent tests.
-func agentExplainFields(paneID string, overrides map[int]string) []string {
-	fields := []string{
-		paneID,
-		"work",
-		"1",
-		"0",
-		"/Users/milo/Projects/seshagy",
-		"1",
-		"1",
-		"1",
-		"0",
-		"claude",
-		"",
-		"claude",
-		"working",
-		"needs ok",
-		"123",
-		"seshagy:claude",
-		"session-123",
-		"42",
-		"12345",
-	}
-	for idx, value := range overrides {
-		fields[idx] = value
-	}
-	return fields
 }
 
 // TmuxCall records one tmux hook invocation from a strict fake.
@@ -265,172 +232,14 @@ func MatchListSessions(args []string) bool {
 	return len(args) >= 1 && args[0] == "list-sessions"
 }
 
+// MatchListPanes matches list-panes calls.
+func MatchListPanes(args []string) bool {
+	return len(args) >= 1 && args[0] == "list-panes"
+}
+
 // MatchNewSession matches detached new-session creation.
 func MatchNewSession(args []string) bool {
 	return len(args) >= 2 && args[0] == "new-session" && args[1] == "-d"
-}
-
-// MatchListPanesAgents matches list-panes -a -F agentFormat queries.
-func MatchListPanesAgents(args []string) bool {
-	return len(args) >= 4 && args[0] == "list-panes" && args[1] == "-a" &&
-		args[2] == "-F" && args[3] == agentFormat
-}
-
-// MatchCapturePane matches capture-pane reads for a pane target.
-func MatchCapturePane(pane string) func([]string) bool {
-	return func(args []string) bool {
-		return len(args) >= 4 && args[0] == "capture-pane" && args[3] == pane
-	}
-}
-
-// InstallListAgentsFakeTmux installs a strict fake for ListAgents tests.
-func InstallListAgentsFakeTmux(
-	t *testing.T,
-	pane string,
-	listOut []byte,
-	visibility string,
-	captureScreen string,
-) *FakeTmux {
-	t.Helper()
-	if visibility == "" {
-		visibility = fakePaneVisibilityActive
-	}
-	strict := NewStrictFakeTmux(t, nil).
-		AllowPaneOptions().
-		AllowOutput(MatchListPanesAgents).
-		AllowOutput(MatchDisplayMessage(pane, "#{pane_active} #{window_active} #{session_attached}"))
-	if captureScreen != "" {
-		strict = strict.AllowOutput(MatchCapturePane(pane))
-	}
-	strict.
-		HandleOutput(MatchListPanesAgents, func(_ context.Context, _ ...string) ([]byte, error) {
-			return listOut, nil
-		}).
-		HandleOutput(
-			MatchDisplayMessage(pane, "#{pane_active} #{window_active} #{session_attached}"),
-			func(_ context.Context, _ ...string) ([]byte, error) {
-				return []byte(visibility), nil
-			},
-		)
-	if captureScreen != "" {
-		strict.HandleOutput(
-			MatchCapturePane(pane),
-			func(_ context.Context, _ ...string) ([]byte, error) {
-				return []byte(captureScreen), nil
-			},
-		)
-	}
-	return strict.Install(t)
-}
-
-// InstallExplainFakeTmux installs a strict fake for ExplainAgent tests.
-func InstallExplainFakeTmux(
-	t *testing.T,
-	pane string,
-	fields []string,
-	captureScreen string,
-) *FakeTmux {
-	t.Helper()
-	displayLine := strings.Join(fields, paneSep)
-	strict := NewStrictFakeTmux(t, nil).
-		AllowPaneOptions().
-		AllowOutput(MatchDisplayMessage(pane, "#{pane_id}", agentFormat))
-	if captureScreen != "" {
-		strict = strict.AllowOutput(MatchCapturePane(pane))
-	}
-	strict.
-		HandleOutput(MatchDisplayMessage(pane, "#{pane_id}"), func(_ context.Context, _ ...string) ([]byte, error) {
-			return []byte(pane), nil
-		}).
-		HandleOutput(MatchDisplayMessage(pane, agentFormat), func(_ context.Context, _ ...string) ([]byte, error) {
-			return []byte(displayLine), nil
-		})
-	if captureScreen != "" {
-		strict.HandleOutput(
-			MatchCapturePane(pane),
-			func(_ context.Context, _ ...string) ([]byte, error) {
-				return []byte(captureScreen), nil
-			},
-		)
-	}
-	return strict.Install(t)
-}
-
-// InstallAgentCLIFakeTmux installs a strict fake for cmd/seshagy agent CLI tests.
-func InstallAgentCLIFakeTmux(t *testing.T, pane string, listOut []byte) *FakeTmux {
-	t.Helper()
-	base := NewFakeTmux()
-	strict := NewStrictFakeTmux(t, base).
-		AllowPaneOptions().
-		AllowOutput(func(args []string) bool {
-			return len(args) >= 3 && args[0] == "list-panes" && args[1] == "-a"
-		}).
-		AllowOutput(MatchDisplayMessage(
-			pane,
-			"#{pane_id}",
-			"#{pane_active} #{window_active} #{session_attached}",
-		))
-	if listOut != nil {
-		strict = strict.AllowOutput(func(args []string) bool {
-			return len(args) >= 5 && args[0] == "display-message" && args[1] == "-p" &&
-				args[2] == "-t" && args[3] == pane && args[4] == agentFormat
-		})
-	}
-	strict.
-		HandleOutput(func(args []string) bool {
-			return len(args) >= 3 && args[0] == "list-panes" && args[1] == "-a"
-		}, func(_ context.Context, _ ...string) ([]byte, error) {
-			return listOut, nil
-		}).
-		HandleOutput(MatchDisplayMessage(pane, "#{pane_id}"), func(_ context.Context, _ ...string) ([]byte, error) {
-			return []byte(pane), nil
-		}).
-		HandleOutput(
-			MatchDisplayMessage(pane, "#{pane_active} #{window_active} #{session_attached}"),
-			func(_ context.Context, _ ...string) ([]byte, error) {
-				return []byte(fakePaneVisibilityActive), nil
-			},
-		)
-	if listOut != nil {
-		strict.HandleOutput(func(args []string) bool {
-			return len(args) >= 5 && args[0] == "display-message" && args[1] == "-p" &&
-				args[2] == "-t" && args[3] == pane && args[4] == agentFormat
-		}, func(_ context.Context, _ ...string) ([]byte, error) {
-			return listOut, nil
-		})
-	}
-	strict.Install(t)
-	return base
-}
-
-func InstallReportFakeTmux(t *testing.T, pane string) *FakeTmux {
-	t.Helper()
-	return NewStrictFakeTmux(t, nil).
-		AllowPaneOptions().
-		AllowOutput(MatchDisplayMessage(
-			pane,
-			"#{pane_id}",
-			"#{pane_active} #{window_active} #{session_attached}",
-		)).
-		HandleOutput(MatchDisplayMessage(pane, "#{pane_id}"), func(_ context.Context, _ ...string) ([]byte, error) {
-			return []byte(pane), nil
-		}).
-		HandleOutput(
-			MatchDisplayMessage(pane, "#{pane_active} #{window_active} #{session_attached}"),
-			func(_ context.Context, _ ...string) ([]byte, error) {
-				return []byte(fakePaneVisibilityActive), nil
-			},
-		).
-		Install(t)
-}
-
-// InstallTrackFakeTmux installs a strict fake for agent status tracking tests.
-func InstallTrackFakeTmux(t *testing.T, f *FakeTmux) *FakeTmux {
-	t.Helper()
-	if f == nil {
-		f = NewFakeTmux()
-	}
-	return NewStrictFakeTmux(t, f).AllowPaneOptions().Install(t)
 }
 
 // SetTmuxHooksForTest swaps tmuxOutput/tmuxRun for the duration of a test.
@@ -451,43 +260,4 @@ func SetTmuxHooksForTest(
 		tmuxOutput = origOut
 		tmuxRun = origRun
 	})
-}
-
-// SetAgentTrackNowForTest pins agentTrackNow for cross-package CLI tests.
-func SetAgentTrackNowForTest(t *testing.T, now time.Time) {
-	t.Helper()
-	orig := agentTrackNow
-	agentTrackNow = func() time.Time { return now }
-	t.Cleanup(func() { agentTrackNow = orig })
-}
-
-// SetFixedTrackTime pins agentTrackNow within sessionmgr tests.
-func SetFixedTrackTime(t *testing.T, now time.Time) {
-	SetAgentTrackNowForTest(t, now)
-}
-
-// SetManifestAutoUpdateIntervalForTest overrides the auto-update ticker interval.
-func SetManifestAutoUpdateIntervalForTest(t *testing.T, interval time.Duration) {
-	t.Helper()
-	old := manifestAutoUpdateInterval.Load()
-	manifestAutoUpdateInterval.Store(interval.Nanoseconds())
-	t.Cleanup(func() { manifestAutoUpdateInterval.Store(old) })
-}
-
-// SetAgentPaneLockHookForTest overrides per-pane lock acquisition for tests.
-func SetAgentPaneLockHookForTest(t *testing.T, hook func(pane string, fn func() error) error) {
-	t.Helper()
-	orig := agentPaneLockHook
-	agentPaneLockHook = hook
-	t.Cleanup(func() { agentPaneLockHook = orig })
-}
-
-// StopManifestAutoUpdateForTest stops any manifest auto-update goroutine during tests.
-func StopManifestAutoUpdateForTest(t *testing.T) {
-	t.Helper()
-	t.Cleanup(StopManifestAutoUpdate)
-}
-
-func formatUnix(ts time.Time) string {
-	return fmt.Sprintf("%d", ts.Unix())
 }

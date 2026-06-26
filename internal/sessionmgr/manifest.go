@@ -1,16 +1,25 @@
 package sessionmgr
 
 import (
-	"context"
 	"embed"
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
+
+	"github.com/BurntSushi/toml"
 )
+
+// Manifest engine: capture-pane screen-rule classification for agent panes
+// that lack fresh hook state (hook-less agents: opencode, cursor, antigravity,
+// grok). Ported + simplified from the prior implementation. Runs only when
+// [agents].manifest_fallback is enabled (default on) and only for agent panes
+// whose @seshagy_agent_state is absent or stale (60s window). The classifier
+// sets AgentState in-memory — it never writes tmux options, so the seq/flock/
+// tombstone invariant is untouched.
 
 //go:embed manifests/*.toml
 var manifestFS embed.FS
@@ -19,23 +28,14 @@ const (
 	manifestCaptureLines = 30
 	maxRulesPerManifest  = 128
 	maxGateDepth         = 8
-	maxTotalGates        = 512
 	maxMatchersPerGate   = 32
-	maxTotalMatchers     = 1024
 	maxMatcherChars      = 512
 )
 
-type manifestDetectionResult struct {
-	State           AgentState
-	Matched         bool
-	SkipStateUpdate bool
-	VisibleIdle     bool
-	VisibleBlocker  bool
-	VisibleWorking  bool
-	RuleID          string
-	Region          string
-	FallbackReason  string
-}
+var (
+	manifestBrailleClass = "[\U00002800-\U000028FF]"
+	reManifestHexEscape  = regexp.MustCompile(`\\x\{([0-9A-Fa-f]+)\}`)
+)
 
 type agentManifest struct {
 	ID               string         `toml:"id"`
@@ -83,9 +83,6 @@ type compiledManifestRule struct {
 	state           AgentState
 	priority        int
 	region          string
-	visibleIdle     bool
-	visibleBlocker  bool
-	visibleWorking  bool
 	skipStateUpdate bool
 	gate            compiledGate
 }
@@ -99,374 +96,26 @@ type compiledGate struct {
 	lineRegex []*regexp.Regexp
 }
 
-type manifestComplexity struct {
-	totalGates    int
-	totalMatchers int
+type manifestDetectionInput struct {
+	screen      string
+	oscTitle    string
+	oscProgress string
 }
 
-type manifestCacheEntry struct {
-	compiled *compiledManifest
-	info     LoadedManifestInfo
+type manifestDetectionResult struct {
+	State           AgentState
+	Matched         bool
+	SkipStateUpdate bool
+	RuleID          string
+	Region          string
 }
 
 var (
 	manifestMu      sync.RWMutex
-	manifestByAgent map[string]*manifestCacheEntry
+	manifestByAgent map[string]*compiledManifest
 	manifestErr     error
 	manifestLoaded  bool
-
-	manifestBrailleClass = "[\U00002800-\U000028FF]"
-	reManifestHexEscape  = regexp.MustCompile(`\\x\{([0-9A-Fa-f]+)\}`)
 )
-
-func ReloadManifests() []AgentManifestSummary {
-	manifestMu.Lock()
-	defer manifestMu.Unlock()
-	manifestByAgent, manifestErr = buildManifestCache()
-	manifestLoaded = true
-	return manifestSummariesLocked()
-}
-
-func buildManifestCache() (map[string]*manifestCacheEntry, error) {
-	entries, err := manifestFS.ReadDir("manifests")
-	if err != nil {
-		return nil, err
-	}
-
-	cache := make(map[string]*manifestCacheEntry)
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".toml") {
-			continue
-		}
-		data, err := manifestFS.ReadFile("manifests/" + entry.Name())
-		if err != nil {
-			return nil, fmt.Errorf("read manifest %s: %w", entry.Name(), err)
-		}
-		bundled, err := parseLocalManifest(string(data))
-		if err != nil {
-			return nil, fmt.Errorf("parse manifest %s: %w", entry.Name(), err)
-		}
-		loaded, err := loadManifestForAgent(bundled)
-		if err != nil {
-			return nil, fmt.Errorf("load manifest %s: %w", entry.Name(), err)
-		}
-		registerManifestEntry(cache, loaded)
-	}
-	return cache, nil
-}
-
-func registerManifestEntry(cache map[string]*manifestCacheEntry, loaded *manifestCacheEntry) {
-	agentID := strings.ToLower(strings.TrimSpace(loaded.compiled.agent))
-	cache[agentID] = loaded
-	for _, alias := range loaded.compiled.aliases {
-		cache[strings.ToLower(strings.TrimSpace(alias))] = loaded
-	}
-}
-
-func loadManifestForAgent(bundled agentManifest) (*manifestCacheEntry, error) {
-	agentID := strings.ToLower(strings.TrimSpace(bundled.ID))
-	remote := readRemoteManifestEntry(agentID, bundled)
-	cachedRemoteVersion := remoteCachedVersion(remote)
-
-	overridePath := manifestOverridePath(agentID)
-	localOverrideShadowingRemote := fileExists(overridePath) && cachedRemoteVersion != ""
-	if remote != nil {
-		remote.info.CachedRemoteVersion = cachedRemoteVersion
-		remote.info.LocalOverrideShadowingRemote = localOverrideShadowingRemote
-	}
-
-	if !fileExists(overridePath) {
-		if remote != nil {
-			return remote, nil
-		}
-		return bundledManifestEntry(bundled, "", cachedRemoteVersion, localOverrideShadowingRemote)
-	}
-
-	content, err := os.ReadFile(overridePath)
-	if err != nil {
-		return fallbackManifestEntry(
-			bundled,
-			remote,
-			cachedRemoteVersion,
-			localOverrideShadowingRemote,
-			fmt.Sprintf(
-				"ignored override %s because it could not be loaded: %v",
-				overridePath,
-				err,
-			),
-		)
-	}
-	override, err := parseLocalManifest(string(content))
-	if err != nil {
-		return fallbackManifestEntry(
-			bundled,
-			remote,
-			cachedRemoteVersion,
-			localOverrideShadowingRemote,
-			fmt.Sprintf(
-				"ignored override %s because it could not be loaded: %v",
-				overridePath,
-				err,
-			),
-		)
-	}
-	if !manifestMatchesAgentID(&override, agentID) {
-		return fallbackManifestEntry(
-			bundled,
-			remote,
-			cachedRemoteVersion,
-			localOverrideShadowingRemote,
-			fmt.Sprintf(
-				"ignored override %s because manifest id %q does not match %q",
-				overridePath,
-				override.ID,
-				agentID,
-			),
-		)
-	}
-	entry, err := compileManifestEntry(
-		override,
-		ManifestSource{
-			Kind:    ManifestSourceOverride,
-			Path:    overridePath,
-			Version: manifestVersionString(override),
-		},
-		"",
-		cachedRemoteVersion,
-		localOverrideShadowingRemote,
-	)
-	if err != nil {
-		return fallbackManifestEntry(
-			bundled,
-			remote,
-			cachedRemoteVersion,
-			localOverrideShadowingRemote,
-			fmt.Sprintf(
-				"ignored override %s because it could not be compiled: %v",
-				overridePath,
-				err,
-			),
-		)
-	}
-	return entry, nil
-}
-
-func readRemoteManifestEntry(agentID string, bundled agentManifest) *manifestCacheEntry {
-	path := remoteManifestPath(agentID)
-	if !fileExists(path) {
-		return nil
-	}
-	content, err := os.ReadFile(path)
-	if err != nil {
-		return bundledManifestEntryWithWarning(
-			bundled,
-			fmt.Sprintf(
-				"ignored remote manifest %s because it could not be loaded: %v",
-				path,
-				err,
-			),
-			"",
-		)
-	}
-	parsed, err := parseRemoteManifestForAgent(agentID, string(content))
-	if err != nil {
-		return bundledManifestEntryWithWarning(
-			bundled,
-			fmt.Sprintf(
-				"ignored remote manifest %s because it could not be loaded: %v",
-				path,
-				err,
-			),
-			"",
-		)
-	}
-	remoteVersion := parsed.version.String()
-	if bundledVersion, err := ParseManifestVersion(strings.TrimSpace(bundled.Version)); err == nil {
-		if CompareManifestVersion(parsed.version, bundledVersion) < 0 {
-			return bundledManifestEntryWithWarning(
-				bundled,
-				fmt.Sprintf(
-					"ignored remote manifest %s because cached version %s is older than bundled %s",
-					path,
-					parsed.version,
-					bundledVersion,
-				),
-				remoteVersion,
-			)
-		}
-	}
-	entry, err := compileManifestEntry(
-		parsed.manifest,
-		ManifestSource{
-			Kind:    ManifestSourceRemote,
-			Path:    path,
-			Version: remoteVersion,
-		},
-		"",
-		"",
-		false,
-	)
-	if err != nil {
-		return bundledManifestEntryWithWarning(
-			bundled,
-			fmt.Sprintf(
-				"ignored remote manifest %s because it could not be compiled: %v",
-				path,
-				err,
-			),
-			remoteVersion,
-		)
-	}
-	return entry
-}
-
-func remoteCachedVersion(remote *manifestCacheEntry) string {
-	if remote == nil {
-		return ""
-	}
-	if remote.info.Source.Kind == ManifestSourceRemote {
-		return remote.info.Source.Version
-	}
-	return remote.info.CachedRemoteVersion
-}
-
-func bundledManifestEntry(
-	bundled agentManifest,
-	warning string,
-	cachedRemoteVersion string,
-	localOverrideShadowingRemote bool,
-) (*manifestCacheEntry, error) {
-	entry, err := compileManifestEntry(
-		bundled,
-		ManifestSource{Kind: ManifestSourceBundled, Version: manifestVersionString(bundled)},
-		warning,
-		cachedRemoteVersion,
-		localOverrideShadowingRemote,
-	)
-	if err != nil {
-		return nil, err
-	}
-	return entry, nil
-}
-
-func bundledManifestEntryWithWarning(
-	bundled agentManifest,
-	warning string,
-	cachedRemoteVersion string,
-) *manifestCacheEntry {
-	entry, err := bundledManifestEntry(
-		bundled,
-		warning,
-		cachedRemoteVersion,
-		false,
-	)
-	if err != nil {
-		panic(fmt.Sprintf("bundled %q manifest could not be compiled: %v", bundled.ID, err))
-	}
-	return entry
-}
-
-func fallbackManifestEntry(
-	bundled agentManifest,
-	remote *manifestCacheEntry,
-	cachedRemoteVersion string,
-	localOverrideShadowingRemote bool,
-	warning string,
-) (*manifestCacheEntry, error) {
-	if remote != nil {
-		if warning != "" {
-			remote.info.Warning = warning
-		}
-		return remote, nil
-	}
-	return bundledManifestEntry(
-		bundled,
-		warning,
-		cachedRemoteVersion,
-		localOverrideShadowingRemote,
-	)
-}
-
-func compileManifestEntry(
-	parsed agentManifest,
-	source ManifestSource,
-	warning string,
-	cachedRemoteVersion string,
-	localOverrideShadowingRemote bool,
-) (*manifestCacheEntry, error) {
-	compiled, err := compileManifest(parsed)
-	if err != nil {
-		return nil, err
-	}
-	return &manifestCacheEntry{
-		compiled: compiled,
-		info: LoadedManifestInfo{
-			Source:                       source,
-			Version:                      manifestVersionString(parsed),
-			CachedRemoteVersion:          cachedRemoteVersion,
-			LocalOverrideShadowingRemote: localOverrideShadowingRemote,
-			Warning:                      warning,
-		},
-	}, nil
-}
-
-func manifestSummariesLocked() []AgentManifestSummary {
-	summaries := make([]AgentManifestSummary, 0)
-	seen := map[string]struct{}{}
-	for agentName, entry := range manifestByAgent {
-		agentID := strings.ToLower(strings.TrimSpace(entry.compiled.agent))
-		if agentName != agentID {
-			continue
-		}
-		if _, ok := seen[agentID]; ok {
-			continue
-		}
-		seen[agentID] = struct{}{}
-		summaries = append(summaries, AgentManifestSummary{
-			AgentID:                      agentID,
-			ActiveSource:                 entry.info.Source,
-			ActiveVersion:                entry.info.Version,
-			CachedRemoteVersion:          entry.info.CachedRemoteVersion,
-			LocalOverrideShadowingRemote: entry.info.LocalOverrideShadowingRemote,
-			Warning:                      entry.info.Warning,
-		})
-	}
-	sortManifestSummaries(summaries)
-	return summaries
-}
-
-func sortManifestSummaries(summaries []AgentManifestSummary) {
-	sort.Slice(summaries, func(i, j int) bool {
-		return summaries[i].AgentID < summaries[j].AgentID
-	})
-}
-
-func ManifestSummaries() []AgentManifestSummary {
-	manifestMu.RLock()
-	defer manifestMu.RUnlock()
-	if !manifestLoaded {
-		return nil
-	}
-	return manifestSummariesLocked()
-}
-
-func ActiveManifestSummaries() []AgentManifestSummary {
-	ensureManifestsLoaded()
-	manifestMu.RLock()
-	defer manifestMu.RUnlock()
-	if manifestErr != nil {
-		return nil
-	}
-	return manifestSummariesLocked()
-}
-
-func ManifestInfoForAgent(agentName string) (LoadedManifestInfo, bool) {
-	entry, err := manifestEntryForAgent(agentName)
-	if err != nil || entry == nil {
-		return LoadedManifestInfo{}, false
-	}
-	return entry.info, true
-}
 
 func ensureManifestsLoaded() {
 	manifestMu.RLock()
@@ -475,12 +124,175 @@ func ensureManifestsLoaded() {
 	if loaded {
 		return
 	}
-	ReloadManifests()
+	manifestMu.Lock()
+	defer manifestMu.Unlock()
+	if manifestLoaded {
+		return
+	}
+	manifestByAgent, manifestErr = buildManifestCache()
+	manifestLoaded = true
 }
 
-func fileExists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
+// buildManifestCache assembles the manifest cache from three layers with
+// precedence: local override > cached remote > bundled embed. A remote/cache
+// manifest shadows the embed only when its version is >= the embed's version
+// (equal versions = remote wins, since it's the freshest copy). Malformed
+// override/cache files are skipped so they can never poison the cache.
+func buildManifestCache() (map[string]*compiledManifest, error) {
+	cache := make(map[string]*compiledManifest)
+	versions := make(map[string]string) // agent id → version string (winner)
+
+	// Layer 1: bundled embed (offline fallback).
+	entries, err := manifestFS.ReadDir("manifests")
+	if err != nil {
+		return nil, err
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".toml") {
+			continue
+		}
+		data, err := manifestFS.ReadFile("manifests/" + entry.Name())
+		if err != nil {
+			return nil, fmt.Errorf("read manifest %s: %w", entry.Name(), err)
+		}
+		registerFromTOML(cache, versions, string(data))
+	}
+
+	// Layer 2: cached remote (from herdr catalog refresh).
+	loadManifestLayer(cache, versions, cachedManifestDir)
+	// Layer 3: local override (user edits — always wins, bypasses version guard).
+	loadManifestLayerForced(cache, versions, overrideManifestDir)
+
+	return cache, nil
+}
+
+// loadManifestLayer walks a filesystem dir, parsing + compiling each *.toml
+// and applying the version-guarded precedence against the current cache.
+func loadManifestLayer(
+	cache map[string]*compiledManifest,
+	versions map[string]string,
+	dirFn func() (string, error),
+) {
+	dir, err := dirFn()
+	if err != nil || dir == "" {
+		return
+	}
+	files, err := readDirToml(dir)
+	if err != nil {
+		return
+	}
+	for _, f := range files {
+		path := filepath.Join(dir, f)
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		registerFromTOML(cache, versions, string(data))
+	}
+}
+
+// loadManifestLayerForced walks a filesystem dir, parsing + compiling each
+// *.toml and registering it unconditionally (bypassing the version guard).
+// Used for local overrides where the user's file always wins regardless of
+// version, matching herdr's 'local overrides always win' contract.
+func loadManifestLayerForced(
+	cache map[string]*compiledManifest,
+	versions map[string]string,
+	dirFn func() (string, error),
+) {
+	dir, err := dirFn()
+	if err != nil || dir == "" {
+		return
+	}
+	files, err := readDirToml(dir)
+	if err != nil {
+		return
+	}
+	for _, f := range files {
+		path := filepath.Join(dir, f)
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		var parsed agentManifest
+		if _, err := toml.Decode(string(data), &parsed); err != nil {
+			continue // skip malformed override
+		}
+		compiled, err := compileManifest(parsed)
+		if err != nil {
+			continue
+		}
+		id := strings.ToLower(strings.TrimSpace(compiled.agent))
+		versions[id] = parsed.Version
+		registerManifest(cache, compiled)
+	}
+}
+
+// registerFromTOML parses + compiles a single manifest TOML blob and, if valid,
+// registers it in the cache with version-guarded precedence.
+func registerFromTOML(
+	cache map[string]*compiledManifest,
+	versions map[string]string,
+	data string,
+) {
+	var parsed agentManifest
+	if _, err := toml.Decode(data, &parsed); err != nil {
+		return // skip malformed
+	}
+	compiled, err := compileManifest(parsed)
+	if err != nil {
+		return // skip malformed
+	}
+	id := strings.ToLower(strings.TrimSpace(compiled.agent))
+	if existing, ok := cache[id]; ok {
+		// Version guard: don't let an older override/cache downgrade a newer
+		// embed. Equal versions: the new one wins (freshest copy).
+		if compareManifestVersion(parsed.Version, versions[id]) < 0 {
+			return
+		}
+		_ = existing
+	}
+	versions[id] = parsed.Version
+	registerManifest(cache, compiled)
+}
+
+// readDirToml returns *.toml filenames in a dir (best-effort; ignores errors).
+func readDirToml(dir string) ([]string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	var files []string
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".toml") {
+			continue
+		}
+		files = append(files, entry.Name())
+	}
+	return files, nil
+}
+
+func registerManifest(cache map[string]*compiledManifest, compiled *compiledManifest) {
+	agentID := strings.ToLower(strings.TrimSpace(compiled.agent))
+	cache[agentID] = compiled
+	for _, alias := range compiled.aliases {
+		cache[strings.ToLower(strings.TrimSpace(alias))] = compiled
+	}
+}
+
+func manifestForAgent(agentName string) (*compiledManifest, bool) {
+	ensureManifestsLoaded()
+	manifestMu.RLock()
+	defer manifestMu.RUnlock()
+	if manifestErr != nil {
+		return nil, false
+	}
+	name := strings.ToLower(strings.TrimSpace(agentName))
+	if name == "" {
+		return nil, false
+	}
+	m, ok := manifestByAgent[name]
+	return m, ok
 }
 
 func compileManifest(parsed agentManifest) (*compiledManifest, error) {
@@ -498,8 +310,6 @@ func compileManifest(parsed agentManifest) (*compiledManifest, error) {
 			maxRulesPerManifest,
 		)
 	}
-
-	complexity := manifestComplexity{}
 	compiled := &compiledManifest{
 		agent:   parsed.ID,
 		aliases: append([]string(nil), parsed.Aliases...),
@@ -516,21 +326,7 @@ func compileManifest(parsed agentManifest) (*compiledManifest, error) {
 			return nil, fmt.Errorf("rule %q: %w", rule.ID, err)
 		}
 		state := NormalizeAgentState(rule.State)
-		if rule.SkipStateUpdate {
-			if state != AgentUnknown {
-				return nil, fmt.Errorf(
-					"rule %q uses skip_state_update without state = \"unknown\"",
-					rule.ID,
-				)
-			}
-			if rule.VisibleIdle || rule.VisibleBlocker || rule.VisibleWorking {
-				return nil, fmt.Errorf(
-					"rule %q uses skip_state_update with visible state evidence",
-					rule.ID,
-				)
-			}
-		}
-		gate, err := compileManifestGate(manifestGateFromRule(rule), "rule", 0, &complexity)
+		gate, err := compileManifestGate(manifestGateFromRule(rule), "rule", 0)
 		if err != nil {
 			return nil, fmt.Errorf("rule %q: %w", rule.ID, err)
 		}
@@ -539,9 +335,6 @@ func compileManifest(parsed agentManifest) (*compiledManifest, error) {
 			state:           state,
 			priority:        rule.Priority,
 			region:          region,
-			visibleIdle:     rule.VisibleIdle,
-			visibleBlocker:  rule.VisibleBlocker,
-			visibleWorking:  rule.VisibleWorking,
 			skipStateUpdate: rule.SkipStateUpdate,
 			gate:            gate,
 		})
@@ -560,29 +353,17 @@ func manifestGateFromRule(rule manifestRule) manifestGate {
 	}
 }
 
-func compileManifestGate(
-	gate manifestGate,
-	context string,
-	depth int,
-	complexity *manifestComplexity,
-) (compiledGate, error) {
+func compileManifestGate(gate manifestGate, context string, depth int) (compiledGate, error) {
 	if depth > maxGateDepth {
 		return compiledGate{}, fmt.Errorf("%s exceeds max gate depth %d", context, maxGateDepth)
 	}
-	complexity.totalGates++
-	if complexity.totalGates > maxTotalGates {
-		return compiledGate{}, fmt.Errorf("manifest exceeds max gate count %d", maxTotalGates)
-	}
-	if err := validateMatcherLimits(gate, context, complexity); err != nil {
+	if err := validateMatcherLimits(gate, context); err != nil {
 		return compiledGate{}, err
 	}
 	if !gateHasPositiveMatcher(gate) {
 		return compiledGate{}, fmt.Errorf("%s must contain a positive matcher", context)
 	}
-
-	compiled := compiledGate{
-		contains: lowerStrings(gate.Contains),
-	}
+	compiled := compiledGate{contains: lowerStrings(gate.Contains)}
 	for _, pattern := range gate.Regex {
 		re, err := compileManifestRegex(pattern, context, "regex")
 		if err != nil {
@@ -598,14 +379,14 @@ func compileManifestGate(
 		compiled.lineRegex = append(compiled.lineRegex, re)
 	}
 	for _, nested := range gate.All {
-		child, err := compileManifestGate(nested, "all gate", depth+1, complexity)
+		child, err := compileManifestGate(nested, "all gate", depth+1)
 		if err != nil {
 			return compiledGate{}, err
 		}
 		compiled.all = append(compiled.all, child)
 	}
 	for _, nested := range gate.Any {
-		child, err := compileManifestGate(nested, "any gate", depth+1, complexity)
+		child, err := compileManifestGate(nested, "any gate", depth+1)
 		if err != nil {
 			return compiledGate{}, err
 		}
@@ -615,67 +396,7 @@ func compileManifestGate(
 		if !gateHasAnyMatcher(nested) {
 			return compiledGate{}, fmt.Errorf("%s contains an empty not gate", context)
 		}
-		child, err := compileManifestNotGate(nested, depth+1, complexity)
-		if err != nil {
-			return compiledGate{}, err
-		}
-		compiled.not = append(compiled.not, child)
-	}
-	return compiled, nil
-}
-
-func compileManifestNotGate(
-	gate manifestGate,
-	depth int,
-	complexity *manifestComplexity,
-) (compiledGate, error) {
-	if depth > maxGateDepth {
-		return compiledGate{}, fmt.Errorf("not gate exceeds max gate depth %d", maxGateDepth)
-	}
-	complexity.totalGates++
-	if complexity.totalGates > maxTotalGates {
-		return compiledGate{}, fmt.Errorf("manifest exceeds max gate count %d", maxTotalGates)
-	}
-	if err := validateMatcherLimits(gate, "not gate", complexity); err != nil {
-		return compiledGate{}, err
-	}
-	if !gateHasAnyMatcher(gate) {
-		return compiledGate{}, fmt.Errorf("not gate must contain a matcher")
-	}
-
-	compiled := compiledGate{
-		contains: lowerStrings(gate.Contains),
-	}
-	for _, pattern := range gate.Regex {
-		re, err := compileManifestRegex(pattern, "not gate", "regex")
-		if err != nil {
-			return compiledGate{}, err
-		}
-		compiled.regex = append(compiled.regex, re)
-	}
-	for _, pattern := range gate.LineRegex {
-		re, err := compileManifestRegex(pattern, "not gate", "line_regex")
-		if err != nil {
-			return compiledGate{}, err
-		}
-		compiled.lineRegex = append(compiled.lineRegex, re)
-	}
-	for _, nested := range gate.All {
-		child, err := compileManifestGate(nested, "not all gate", depth+1, complexity)
-		if err != nil {
-			return compiledGate{}, err
-		}
-		compiled.all = append(compiled.all, child)
-	}
-	for _, nested := range gate.Any {
-		child, err := compileManifestGate(nested, "not any gate", depth+1, complexity)
-		if err != nil {
-			return compiledGate{}, err
-		}
-		compiled.any = append(compiled.any, child)
-	}
-	for _, nested := range gate.Not {
-		child, err := compileManifestNotGate(nested, depth+1, complexity)
+		child, err := compileManifestGate(nested, "not gate", depth+1)
 		if err != nil {
 			return compiledGate{}, err
 		}
@@ -687,32 +408,21 @@ func compileManifestNotGate(
 func compileManifestRegex(pattern, context, field string) (*regexp.Regexp, error) {
 	normalized, err := normalizeManifestRegexPattern(pattern)
 	if err != nil {
-		return nil, fmt.Errorf(
-			"%s contains invalid %s pattern %q: %w",
-			context,
-			field,
-			pattern,
-			err,
-		)
+		return nil, fmt.Errorf("%s invalid %s pattern %q: %w", context, field, pattern, err)
 	}
 	re, err := regexp.Compile(normalized)
 	if err != nil {
-		return nil, fmt.Errorf(
-			"%s contains invalid %s pattern %q: %w",
-			context,
-			field,
-			pattern,
-			err,
-		)
+		return nil, fmt.Errorf("%s invalid %s pattern %q: %w", context, field, pattern, err)
 	}
 	return re, nil
 }
 
+// normalizeManifestRegexPattern translates RE2-incompatible escapes used in
+// manifest TOMLs into Go regexp equivalents.
 func normalizeManifestRegexPattern(pattern string) (string, error) {
 	pattern = strings.ReplaceAll(pattern, `\p{Alphabetic}`, `\p{Letter}`)
 	pattern = strings.ReplaceAll(pattern, `[\x{2800}-\x{28FF}]`, manifestBrailleClass)
 	pattern = strings.ReplaceAll(pattern, `[\u2800-\u28FF]`, manifestBrailleClass)
-
 	var normalizeErr error
 	pattern = reManifestHexEscape.ReplaceAllStringFunc(pattern, func(match string) string {
 		if normalizeErr != nil {
@@ -736,11 +446,7 @@ func normalizeManifestRegexPattern(pattern string) (string, error) {
 	return pattern, nil
 }
 
-func validateMatcherLimits(
-	gate manifestGate,
-	context string,
-	complexity *manifestComplexity,
-) error {
+func validateMatcherLimits(gate manifestGate, context string) error {
 	matcherCount := len(gate.Contains) + len(gate.Regex) + len(gate.LineRegex)
 	if matcherCount > maxMatchersPerGate {
 		return fmt.Errorf(
@@ -750,22 +456,18 @@ func validateMatcherLimits(
 			maxMatchersPerGate,
 		)
 	}
-	complexity.totalMatchers += matcherCount
-	if complexity.totalMatchers > maxTotalMatchers {
-		return fmt.Errorf("manifest exceeds max matcher count %d", maxTotalMatchers)
-	}
-	for _, value := range gate.Contains {
-		if len([]rune(value)) > maxMatcherChars {
+	for _, v := range gate.Contains {
+		if len([]rune(v)) > maxMatcherChars {
 			return fmt.Errorf("%s matcher exceeds max length %d", context, maxMatcherChars)
 		}
 	}
-	for _, value := range gate.Regex {
-		if len([]rune(value)) > maxMatcherChars {
+	for _, v := range gate.Regex {
+		if len([]rune(v)) > maxMatcherChars {
 			return fmt.Errorf("%s matcher exceeds max length %d", context, maxMatcherChars)
 		}
 	}
-	for _, value := range gate.LineRegex {
-		if len([]rune(value)) > maxMatcherChars {
+	for _, v := range gate.LineRegex {
+		if len([]rune(v)) > maxMatcherChars {
 			return fmt.Errorf("%s matcher exceeds max length %d", context, maxMatcherChars)
 		}
 	}
@@ -795,18 +497,8 @@ func gateHasAnyMatcher(gate manifestGate) bool {
 
 func validateManifestRegion(region string) error {
 	switch region {
-	case "whole_recent",
-		"after_last_prompt_marker",
-		"before_current_prompt_marker",
-		"whole_recent_without_current_prompt_marker",
-		"current_prompt_block_marker",
-		"after_current_prompt_block_marker",
-		"prompt_box_body",
-		"above_prompt_box",
-		"last_non_empty_above_prompt_box",
-		"after_last_horizontal_rule",
-		"osc_title",
-		"osc_progress":
+	case "whole_recent", "osc_title", "osc_progress",
+		"after_last_prompt_marker", "after_last_horizontal_rule", "prompt_box_body":
 		return nil
 	}
 	if _, ok := manifestRegionCount(region, "bottom_lines"); ok {
@@ -818,38 +510,17 @@ func validateManifestRegion(region string) error {
 	return fmt.Errorf("unsupported region %q", region)
 }
 
-func manifestForAgent(agentName string) (*compiledManifest, error) {
-	entry, err := manifestEntryForAgent(agentName)
-	if err != nil || entry == nil {
-		return nil, err
-	}
-	return entry.compiled, nil
-}
-
-func manifestEntryForAgent(agentName string) (*manifestCacheEntry, error) {
-	ensureManifestsLoaded()
-	manifestMu.RLock()
-	defer manifestMu.RUnlock()
-	if manifestErr != nil {
-		return nil, manifestErr
-	}
-	agentName = strings.ToLower(strings.TrimSpace(agentName))
-	if agentName == "" {
-		return nil, nil
-	}
-	return manifestByAgent[agentName], nil
-}
-
+// detectManifest classifies the captured screen against the agent's rules.
+// No-match returns AgentIdle (the 4-state model has no unknown state). A
+// skip_state_update guard match returns SkipStateUpdate=true so the caller
+// keeps the prior state. Highest-priority matching rule wins.
 func detectManifest(agentName string, input manifestDetectionInput) manifestDetectionResult {
-	manifest, err := manifestForAgent(agentName)
-	if err != nil || manifest == nil {
+	manifest, ok := manifestForAgent(agentName)
+	if !ok || manifest == nil {
 		return manifestDetectionResult{}
 	}
-
-	var (
-		best      *compiledManifestRule
-		bestScore int
-	)
+	var best *compiledManifestRule
+	var bestScore int
 	for i := range manifest.rules {
 		rule := &manifest.rules[i]
 		regionText := manifestRegion(input, rule.region)
@@ -861,117 +532,24 @@ func detectManifest(agentName string, input manifestDetectionInput) manifestDete
 			bestScore = rule.priority
 		}
 	}
-
 	if best == nil {
-		return manifestDetectionResult{State: AgentUnknown}
+		return manifestDetectionResult{State: AgentIdle}
 	}
-
-	state := best.state
 	if best.skipStateUpdate {
-		state = AgentUnknown
-	}
-
-	result := manifestDetectionResult{
-		State:           state,
-		Matched:         true,
-		SkipStateUpdate: best.skipStateUpdate,
-		RuleID:          best.id,
-		Region:          best.region,
-	}
-	switch state {
-	case AgentIdle:
-		result.VisibleIdle = best.visibleIdle
-	case AgentWorking:
-		result.VisibleWorking = best.visibleWorking
-	case AgentBlocked:
-		result.VisibleBlocker = best.visibleBlocker
-	}
-	return result
-}
-
-func shouldApplyManifestFallback(state AgentState, agentName, source string) bool {
-	_ = agentName
-	_ = source
-	return state == AgentUnknown
-}
-
-func manifestExplainLine(
-	ctx context.Context,
-	pane, agentName, source, title string,
-	state AgentState,
-) string {
-	if !shouldApplyManifestFallback(state, agentName, source) {
-		return "manifest skipped"
-	}
-	screen, err := captureAgentPaneCached(ctx, nil, pane, manifestCaptureLines)
-	if err != nil {
-		return "manifest skipped"
-	}
-	result := detectManifest(agentName, manifestDetectionInput{
-		screen:      screen,
-		oscTitle:    strings.TrimSpace(StripANSI(title)),
-		oscProgress: "",
-	})
-	return formatManifestExplain(result)
-}
-
-func formatManifestExplain(result manifestDetectionResult) string {
-	if result.FallbackReason != "" {
-		return fmt.Sprintf("fallback %s → %s", result.FallbackReason, AgentStateLabel(result.State))
-	}
-	if !result.Matched {
-		return "manifest skipped"
-	}
-	if result.SkipStateUpdate {
-		return fmt.Sprintf(
-			"rule %s (region %s) → skip [skip_state_update]",
-			result.RuleID,
-			result.Region,
-		)
-	}
-	line := fmt.Sprintf(
-		"rule %s (region %s) → %s",
-		result.RuleID,
-		result.Region,
-		AgentStateLabel(result.State),
-	)
-	var flags []string
-	if result.VisibleIdle {
-		flags = append(flags, "visible_idle")
-	}
-	if result.VisibleBlocker {
-		flags = append(flags, "visible_blocker")
-	}
-	if result.VisibleWorking {
-		flags = append(flags, "visible_working")
-	}
-	if len(flags) > 0 {
-		line += " [" + strings.Join(flags, ", ") + "]"
-	}
-	return line
-}
-
-type manifestCaptureCache map[string]string
-
-func captureAgentPaneCached(
-	ctx context.Context,
-	cache manifestCaptureCache,
-	pane string,
-	lines int,
-) (string, error) {
-	if cache != nil {
-		if screen, ok := cache[pane]; ok {
-			return screen, nil
+		return manifestDetectionResult{
+			State:           AgentIdle,
+			Matched:         false,
+			SkipStateUpdate: true,
+			RuleID:          best.id,
+			Region:          best.region,
 		}
 	}
-	screen, err := CaptureAgentPane(ctx, pane, lines)
-	if err != nil {
-		return "", err
+	return manifestDetectionResult{
+		State:   best.state,
+		Matched: true,
+		RuleID:  best.id,
+		Region:  best.region,
 	}
-	if cache != nil {
-		cache[pane] = screen
-	}
-	return screen, nil
 }
 
 func compiledGateMatches(gate compiledGate, text string) bool {
@@ -1083,8 +661,8 @@ func manifestSliceFromLineIndex(content string, lines []string, index int) strin
 
 func lowerStrings(values []string) []string {
 	out := make([]string, len(values))
-	for i, value := range values {
-		out[i] = strings.ToLower(value)
+	for i, v := range values {
+		out[i] = strings.ToLower(v)
 	}
 	return out
 }

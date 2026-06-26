@@ -6,27 +6,25 @@ const (
 	IconSession = ""
 	IconZoxide  = "󰉖"
 	IconFD      = "󰥩"
-	IconAgent   = ""
 )
 
 type Kind string
 
 const (
 	KindSession Kind = "session"
-	KindAgent   Kind = "agent"
 	KindZoxide  Kind = "zoxide"
 	KindFD      Kind = "fd"
+	KindAgent   Kind = "agent"
 )
 
+// AgentState is the lifecycle state of a discovered agent pane.
 type AgentState string
 
 const (
+	AgentIdle    AgentState = "idle"
 	AgentWorking AgentState = "working"
 	AgentBlocked AgentState = "blocked"
-	AgentAborted AgentState = "aborted"
 	AgentDone    AgentState = "done"
-	AgentIdle    AgentState = "idle"
-	AgentUnknown AgentState = "unknown"
 )
 
 type Item struct {
@@ -50,13 +48,9 @@ type Item struct {
 	AgentName        string
 	AgentDisplayName string
 	AgentState       AgentState
-	AgentMessage     string
+	AgentUpdated     time.Time
+	AgentSeq         int64
 	AgentSource      string
-	AgentUpdated     string
-	AgentSessionID   string
-	AgentSeq         string
-	PaneTitle        string
-	Visible          bool
 }
 
 func (i Item) Key() string {
@@ -76,10 +70,7 @@ func (i Item) DisplayName() string {
 		if i.AgentDisplayName != "" {
 			return i.AgentDisplayName
 		}
-		if i.AgentName != "" {
-			return i.AgentName
-		}
-		return i.PaneID
+		return i.AgentName
 	case KindZoxide, KindFD:
 		return i.Path
 	default:
