@@ -46,6 +46,49 @@ func ResolvePane(ctx context.Context, pane string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
+// ResolvePaneByCwd resolves a working directory to a unique tmux pane id by
+// matching against pane_current_path across all panes. Exact match wins; else a
+// parent/child prefix match. Refuses (returns "", nil) on 0 or >1 matches so the
+// caller can no-op silently — mirroring the opensessions unique-match model.
+func ResolvePaneByCwd(ctx context.Context, cwd string) (string, error) {
+	if cwd == "" {
+		return "", nil
+	}
+	out, err := tmuxOutput(ctx, "list-panes", "-a", "-F", "#{pane_id}\x1f#{pane_current_path}")
+	if err != nil {
+		return "", err
+	}
+	var exact, prefix []string
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimRight(line, "\r")
+		if line == "" {
+			continue
+		}
+		paneID, path, ok := strings.Cut(line, "\x1f")
+		if !ok {
+			continue
+		}
+		paneID = strings.TrimSpace(paneID)
+		path = strings.TrimSpace(path)
+		if paneID == "" || path == "" {
+			continue
+		}
+		switch {
+		case path == cwd:
+			exact = append(exact, paneID)
+		case strings.HasPrefix(path, cwd+"/") || strings.HasPrefix(cwd, path+"/"):
+			prefix = append(prefix, paneID)
+		}
+	}
+	if len(exact) == 1 {
+		return exact[0], nil
+	}
+	if len(exact) == 0 && len(prefix) == 1 {
+		return prefix[0], nil
+	}
+	return "", nil // 0 or ambiguous — refuse to guess
+}
+
 // ReportAgent writes a state update to the pane's @seshagy_agent_* options. It enforces
 // the AGENTS.md-mandated sequence invariant: a report with seq <= the existing
 // @seshagy_agent_seq is silently ignored so stale updates cannot resurrect cleared

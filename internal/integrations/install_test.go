@@ -362,3 +362,71 @@ func TestSharedHookScriptContent(t *testing.T) {
 		t.Errorf("shared script contains hardcoded /Users/milo path")
 	}
 }
+
+func TestAvailableIncludesOpenCode(t *testing.T) {
+	for _, name := range Available() {
+		if name == "opencode" {
+			return
+		}
+	}
+	t.Errorf("Available() does not include opencode")
+}
+
+func TestSeshagyOpenCodePluginContent(t *testing.T) {
+	s := opencodePluginSource
+	for _, want := range []string{
+		"--report-agent",
+		"--cwd",
+		"opencode",
+		"permission.ask",
+		"session.idle",
+		"seshagy:opencode",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("opencode plugin missing %q", want)
+		}
+	}
+	if strings.Contains(s, "/Users/milo") {
+		t.Errorf("opencode plugin contains hardcoded /Users/milo path")
+	}
+}
+
+func TestInstallOpenCodeWritesPlugin(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", "")
+
+	path, err := Install("opencode")
+	if err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("plugin file not written at %s: %v", path, err)
+	}
+
+	// Uninstall removes the file.
+	if _, err := Uninstall("opencode"); err != nil {
+		t.Fatalf("Uninstall: %v", err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("plugin file still exists after uninstall (err=%v)", err)
+	}
+}
+
+func TestInstallOpenCodeHonorsXDGConfigHome(t *testing.T) {
+	xdg := t.TempDir()
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+
+	path, err := Install("opencode")
+	if err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	if want := filepath.Join(
+		xdg,
+		"opencode",
+		"plugin",
+		"seshagy-opencode-plugin.ts",
+	); path != want {
+		t.Errorf("path = %s, want %s", path, want)
+	}
+}

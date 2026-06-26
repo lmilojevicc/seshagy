@@ -328,6 +328,83 @@ func TestMarkAgentVisitedSkipsNonDone(t *testing.T) {
 	}
 }
 
+func TestResolvePaneByCwdExactMatch(t *testing.T) {
+	s := NewStrictFakeTmux(t, nil)
+	s.HandleOutput(func(args []string) bool {
+		return len(args) >= 1 && args[0] == "list-panes"
+	}, func(_ context.Context, _ ...string) ([]byte, error) {
+		return []byte("%1\x1f/Users/milo/proj\n%2\x1f/Users/milo/other\n"), nil
+	})
+	s.Install(t)
+	ctx := context.Background()
+
+	got, err := ResolvePaneByCwd(ctx, "/Users/milo/proj")
+	if err != nil {
+		t.Fatalf("ResolvePaneByCwd: %v", err)
+	}
+	if want := "%1"; got != want {
+		t.Errorf("ResolvePaneByCwd = %q, want %q", got, want)
+	}
+}
+
+func TestResolvePaneByCwdParentChild(t *testing.T) {
+	s := NewStrictFakeTmux(t, nil)
+	s.HandleOutput(func(args []string) bool {
+		return len(args) >= 1 && args[0] == "list-panes"
+	}, func(_ context.Context, _ ...string) ([]byte, error) {
+		// cwd is a child of the pane path → prefix match.
+		return []byte("%3\x1f/Users/milo/proj\n"), nil
+	})
+	s.Install(t)
+	ctx := context.Background()
+
+	got, err := ResolvePaneByCwd(ctx, "/Users/milo/proj/sub")
+	if err != nil {
+		t.Fatalf("ResolvePaneByCwd: %v", err)
+	}
+	if want := "%3"; got != want {
+		t.Errorf("ResolvePaneByCwd = %q, want %q (parent/child)", got, want)
+	}
+}
+
+func TestResolvePaneByCwdAmbiguousRefuses(t *testing.T) {
+	s := NewStrictFakeTmux(t, nil)
+	s.HandleOutput(func(args []string) bool {
+		return len(args) >= 1 && args[0] == "list-panes"
+	}, func(_ context.Context, _ ...string) ([]byte, error) {
+		return []byte("%1\x1f/Users/milo/proj\n%2\x1f/Users/milo/proj\n"), nil
+	})
+	s.Install(t)
+	ctx := context.Background()
+
+	got, err := ResolvePaneByCwd(ctx, "/Users/milo/proj")
+	if err != nil {
+		t.Fatalf("ResolvePaneByCwd: %v", err)
+	}
+	if got != "" {
+		t.Errorf("ResolvePaneByCwd = %q, want \"\" (ambiguous, refuse to guess)", got)
+	}
+}
+
+func TestResolvePaneByCwdNoneFalse(t *testing.T) {
+	s := NewStrictFakeTmux(t, nil)
+	s.HandleOutput(func(args []string) bool {
+		return len(args) >= 1 && args[0] == "list-panes"
+	}, func(_ context.Context, _ ...string) ([]byte, error) {
+		return []byte("%1\x1f/elsewhere\n"), nil
+	})
+	s.Install(t)
+	ctx := context.Background()
+
+	got, err := ResolvePaneByCwd(ctx, "/Users/milo/proj")
+	if err != nil {
+		t.Fatalf("ResolvePaneByCwd: %v", err)
+	}
+	if got != "" {
+		t.Errorf("ResolvePaneByCwd = %q, want \"\" (no match)", got)
+	}
+}
+
 func TestMarkActiveDoneAgentsIdleFlipsActiveDonePane(t *testing.T) {
 	base := NewFakeTmux()
 	base.Set("%1", "@seshagy_agent_state", "done")

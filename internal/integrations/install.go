@@ -16,6 +16,9 @@ var piExtensionSource string
 //go:embed assets/seshagy-agent-state.sh
 var sharedHookScript string
 
+//go:embed assets/seshagy-opencode-plugin.ts
+var opencodePluginSource string
+
 // scriptMarker identifies seshagy-managed entries inside an agent's hooks
 // config so install (refresh) and uninstall can find them deterministically.
 const scriptMarker = "seshagy-agent-state.sh"
@@ -147,11 +150,35 @@ var piIntegration = Integration{
 	AssetContent: piExtensionSource,
 }
 
+// opencodeConfigBase resolves the opencode config directory, honoring
+// $XDG_CONFIG_HOME (opencode follows the XDG convention).
+func opencodeConfigBase() string {
+	if dir := os.Getenv("XDG_CONFIG_HOME"); dir != "" {
+		return filepath.Join(dir, "opencode")
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".config", "opencode")
+}
+
+var opencodeIntegration = Integration{
+	Name: "opencode",
+	InstallPath: func() (string, error) {
+		// opencode auto-discovers {plugin,plugins}/*.{ts,js} relative to its
+		// config dir; dropping the .ts here is enough — no opencode.json patch.
+		return filepath.Join(opencodeConfigBase(), "plugin", "seshagy-opencode-plugin.ts"), nil
+	},
+	AssetContent: opencodePluginSource,
+}
+
 var integrations = map[string]Integration{
-	"pi":     piIntegration,
-	"codex":  {Name: "codex", ShellHook: codexSpec},
-	"claude": {Name: "claude", ShellHook: claudeSpec},
-	"droid":  {Name: "droid", ShellHook: droidSpec},
+	"pi":       piIntegration,
+	"codex":    {Name: "codex", ShellHook: codexSpec},
+	"claude":   {Name: "claude", ShellHook: claudeSpec},
+	"droid":    {Name: "droid", ShellHook: droidSpec},
+	"opencode": opencodeIntegration,
 }
 
 // Install writes the integration's hook/extension file to the agent's
@@ -192,7 +219,13 @@ func Uninstall(name string) (string, error) {
 		return "", fmt.Errorf("unknown integration: %s", name)
 	}
 	if integ.ShellHook == nil {
-		return "", fmt.Errorf("integration %s is not a shell-hook integration", name)
+		// Asset-only integration (pi, opencode): remove the installed file.
+		path, err := integ.InstallPath()
+		if err != nil {
+			return "", err
+		}
+		_ = os.Remove(path)
+		return path, nil
 	}
 	spec := integ.ShellHook
 	configPath, err := spec.configPath()
@@ -441,5 +474,5 @@ func warnCodexFeatureFlag() {
 
 // Available returns the list of installable integrations.
 func Available() []string {
-	return []string{"pi", "codex", "claude", "droid"}
+	return []string{"pi", "codex", "claude", "droid", "opencode"}
 }

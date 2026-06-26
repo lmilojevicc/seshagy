@@ -111,9 +111,23 @@ func runGetItems(
 	return printItems(ctx, mode, jsonOutput)
 }
 
+// resolvePaneTarget resolves a pane from --pane (wins) or --cwd. When only --cwd
+// is given, ResolvePaneByCwd maps it to a unique pane via pane_current_path
+// (refuses on 0 or >1 matches, returning "" for a silent no-op).
+func resolvePaneTarget(ctx context.Context, pane, cwd string) (string, error) {
+	if pane == "" && cwd == "" {
+		return "", errors.New("requires --pane or --cwd")
+	}
+	if pane != "" {
+		return sessionmgr.ResolvePane(ctx, pane)
+	}
+	return sessionmgr.ResolvePaneByCwd(ctx, cwd)
+}
+
 func runReportAgent(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("--report-agent", flag.ContinueOnError)
 	pane := fs.String("pane", "", "target pane id (e.g. %5)")
+	cwd := fs.String("cwd", "", "target by working directory (alternative to --pane)")
 	agent := fs.String("agent", "", "agent name")
 	state := fs.String("state", "", "agent state")
 	source := fs.String("source", "", "report source")
@@ -124,12 +138,15 @@ func runReportAgent(ctx context.Context, args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if *pane == "" || *state == "" || *source == "" {
-		return errors.New("--report-agent requires --pane, --state, --source")
+	if *state == "" || *source == "" {
+		return errors.New("--report-agent requires --state, --source")
 	}
-	resolved, err := sessionmgr.ResolvePane(ctx, *pane)
+	resolved, err := resolvePaneTarget(ctx, *pane, *cwd)
 	if err != nil {
 		return err
+	}
+	if resolved == "" {
+		return nil // no unique cwd match — silent no-op
 	}
 	applied, err := sessionmgr.ReportAgent(ctx, sessionmgr.AgentReport{
 		Pane:      resolved,
@@ -157,18 +174,22 @@ func runReportAgent(ctx context.Context, args []string) error {
 func runReleaseAgent(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("--release-agent", flag.ContinueOnError)
 	pane := fs.String("pane", "", "target pane id (e.g. %5)")
+	cwd := fs.String("cwd", "", "target by working directory (alternative to --pane)")
 	source := fs.String("source", "", "report source")
 	seq := fs.Int64("seq", 0, "monotonic sequence number")
 	jsonOutput := fs.Bool("json", false, "JSON output")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if *pane == "" || *source == "" {
-		return errors.New("--release-agent requires --pane, --source")
+	if *source == "" {
+		return errors.New("--release-agent requires --source")
 	}
-	resolved, err := sessionmgr.ResolvePane(ctx, *pane)
+	resolved, err := resolvePaneTarget(ctx, *pane, *cwd)
 	if err != nil {
 		return err
+	}
+	if resolved == "" {
+		return nil // no unique cwd match — silent no-op
 	}
 	applied, err := sessionmgr.ReleaseAgent(ctx, sessionmgr.AgentRelease{
 		Pane:   resolved,
@@ -362,8 +383,11 @@ Scripting:
   Human text output is unchanged when --json is omitted.
   seshagy --report-agent --pane %N --state <state> --source <src> --seq <n>
                                   report agent state to a tmux pane
+                                  (--cwd <dir> may replace --pane; resolved by
+                                  working directory when unique)
   seshagy --release-agent --pane %N --source <src> --seq <n>
                                   clear agent state from a tmux pane
+                                  (--cwd <dir> may replace --pane)
   seshagy integration install <name>
                                   install an agent hook/extension
   seshagy integration uninstall <name>
