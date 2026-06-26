@@ -31,6 +31,13 @@ type Integration struct {
 	// ShellHook describes a shell-hook integration (codex/claude/droid). Nil
 	// for asset-only integrations (pi).
 	ShellHook *shellHookSpec
+	// LifecycleAuthority is true when the integration's hooks/plugins emit
+	// the FULL lifecycle (idle, working, blocked, done). For such agents the
+	// detection engine suppresses screen-manifest fallback when hooks are
+	// fresh. Agents with partial hooks (codex/claude/droid) or no hooks
+	// (cursor/agy/grok) are false — screen manifest always runs so it can
+	// overwrite stale hook state (herdr authority model).
+	LifecycleAuthority bool
 }
 
 // hookEvent maps one agent hook event to a seshagy state.
@@ -135,7 +142,8 @@ var droidSpec = &shellHookSpec{
 }
 
 var piIntegration = Integration{
-	Name: "pi",
+	Name:               "pi",
+	LifecycleAuthority: true,
 	InstallPath: func() (string, error) {
 		base := os.Getenv("PI_CODING_AGENT_DIR")
 		if base == "" {
@@ -164,7 +172,8 @@ func opencodeConfigBase() string {
 }
 
 var opencodeIntegration = Integration{
-	Name: "opencode",
+	Name:               "opencode",
+	LifecycleAuthority: true,
 	InstallPath: func() (string, error) {
 		// opencode auto-discovers {plugin,plugins}/*.{ts,js} relative to its
 		// config dir; dropping the .ts here is enough — no opencode.json patch.
@@ -175,10 +184,22 @@ var opencodeIntegration = Integration{
 
 var integrations = map[string]Integration{
 	"pi":       piIntegration,
-	"codex":    {Name: "codex", ShellHook: codexSpec},
-	"claude":   {Name: "claude", ShellHook: claudeSpec},
-	"droid":    {Name: "droid", ShellHook: droidSpec},
+	"codex":    {Name: "codex", ShellHook: codexSpec},   // partial hooks
+	"claude":   {Name: "claude", ShellHook: claudeSpec}, // partial hooks
+	"droid":    {Name: "droid", ShellHook: droidSpec},   // partial hooks
 	"opencode": opencodeIntegration,
+}
+
+// LifecycleAuthorityFor returns true when the named agent's integration
+// emits the full lifecycle (idle/working/blocked/done). Unregistered agents
+// (cursor, antigravity, grok) default to false — their state comes entirely
+// from the screen manifest.
+func LifecycleAuthorityFor(agentName string) bool {
+	integ, ok := integrations[agentName]
+	if !ok {
+		return false
+	}
+	return integ.LifecycleAuthority
 }
 
 // Install writes the integration's hook/extension file to the agent's

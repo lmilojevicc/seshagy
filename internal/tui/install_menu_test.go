@@ -212,3 +212,44 @@ func TestInstallMenuFirstRunDeferredUntilSetupCloses(t *testing.T) {
 		t.Fatalf("expected nil cmd during setup deferral, got %v", cmd)
 	}
 }
+
+func TestInstallMenuDeferredOpenFiresAfterSetupDismiss(t *testing.T) {
+	m := newTestModel(t)
+	m.width, m.height = 120, 32
+	// Set up: setup active, pendingInstall true.
+	m.setup.active = true
+	m.pendingInstall = true
+	// Simulate a setup-dismiss key (esc cancels the type-first setup prompt).
+	model, _ := m.Update(keyMsg("esc"))
+	mm := model.(Model)
+	if mm.setup.active {
+		t.Fatal("setup should be deactivated after esc")
+	}
+	if !mm.installMenu.active {
+		t.Fatal("install menu should open after setup dismisses when pendingInstall is set")
+	}
+	if mm.pendingInstall {
+		t.Fatal("pendingInstall should be cleared after opening")
+	}
+}
+
+func TestInstallMenuInstallAllBatch(t *testing.T) {
+	m := newTestModel(t)
+	m.width, m.height = 120, 32
+	m.openInstallMenu(false)
+	names := integrations.Available()
+	model, cmd := m.handleInstallMenuKey(keyMsg("a"))
+	mm := model.(Model)
+	if cmd == nil {
+		t.Fatal("a (install all): expected a non-nil cmd (tea.Batch)")
+	}
+	for _, name := range names {
+		if mm.installMenu.statuses[name] != "installing" {
+			t.Fatalf(
+				"a: expected statuses[%s]=installing, got %q",
+				name,
+				mm.installMenu.statuses[name],
+			)
+		}
+	}
+}

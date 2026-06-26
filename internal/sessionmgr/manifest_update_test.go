@@ -287,3 +287,49 @@ func TestHttpsOnlyByDefault(t *testing.T) {
 		t.Error("http:// should be allowed with env override")
 	}
 }
+
+func TestOverrideAlwaysWinsRegardlessOfVersion(t *testing.T) {
+	t.Cleanup(ReloadManifests)
+	tmpCache := t.TempDir()
+	tmpConfig := t.TempDir()
+	t.Setenv("XDG_CACHE_HOME", tmpCache)
+	t.Setenv("XDG_CONFIG_HOME", tmpConfig)
+
+	// Cache manifest has version 9 (very high).
+	cacheDir, _ := cachedManifestDir()
+	mustMkdirAll(t, cacheDir)
+	mustWriteFile(t, filepath.Join(cacheDir, "agy.toml"), `id = "agy"
+version = "9.0.0.0"
+aliases = ["antigravity"]
+[[rules]]
+id = "cache-rule"
+state = "blocked"
+priority = 100
+region = "whole_recent"
+contains = ["cache version text"]
+`)
+
+	// Override has version 1 (much lower). It should STILL win (always-wins).
+	overrideDir, _ := overrideManifestDir()
+	mustMkdirAll(t, overrideDir)
+	mustWriteFile(t, filepath.Join(overrideDir, "agy.toml"), `id = "agy"
+version = "1.0.0.0"
+aliases = ["antigravity"]
+[[rules]]
+id = "override-rule"
+state = "blocked"
+priority = 100
+region = "whole_recent"
+contains = ["override version text"]
+`)
+
+	ReloadManifests()
+
+	m, ok := manifestForAgent("agy")
+	if !ok {
+		t.Fatal("agy manifest not found")
+	}
+	if len(m.rules) != 1 || m.rules[0].id != "override-rule" {
+		t.Errorf("override should win regardless of version, got rules: %+v", m.rules)
+	}
+}

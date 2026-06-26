@@ -430,3 +430,27 @@ func TestInstallOpenCodeHonorsXDGConfigHome(t *testing.T) {
 		t.Errorf("path = %s, want %s", path, want)
 	}
 }
+
+func TestLifecycleAuthorityFor(t *testing.T) {
+	tests := []struct {
+		agent string
+		want  bool
+	}{
+		{"pi", true},
+		{"opencode", true},
+		{"codex", false},
+		{"claude", false},
+		{"droid", false},
+		{"cursor", false},      // unregistered
+		{"antigravity", false}, // unregistered
+		{"grok", false},        // unregistered
+		{"", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.agent, func(t *testing.T) {
+			if got := LifecycleAuthorityFor(tt.agent); got != tt.want {
+				t.Fatalf("LifecycleAuthorityFor(%q) = %v, want %v", tt.agent, got, tt.want)
+			}
+		})
+	}
+}

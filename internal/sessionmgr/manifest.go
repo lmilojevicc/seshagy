@@ -159,8 +159,8 @@ func buildManifestCache() (map[string]*compiledManifest, error) {
 
 	// Layer 2: cached remote (from herdr catalog refresh).
 	loadManifestLayer(cache, versions, cachedManifestDir)
-	// Layer 3: local override (user edits — always wins).
-	loadManifestLayer(cache, versions, overrideManifestDir)
+	// Layer 3: local override (user edits — always wins, bypasses version guard).
+	loadManifestLayerForced(cache, versions, overrideManifestDir)
 
 	return cache, nil
 }
@@ -187,6 +187,43 @@ func loadManifestLayer(
 			continue
 		}
 		registerFromTOML(cache, versions, string(data))
+	}
+}
+
+// loadManifestLayerForced walks a filesystem dir, parsing + compiling each
+// *.toml and registering it unconditionally (bypassing the version guard).
+// Used for local overrides where the user's file always wins regardless of
+// version, matching herdr's 'local overrides always win' contract.
+func loadManifestLayerForced(
+	cache map[string]*compiledManifest,
+	versions map[string]string,
+	dirFn func() (string, error),
+) {
+	dir, err := dirFn()
+	if err != nil || dir == "" {
+		return
+	}
+	files, err := readDirToml(dir)
+	if err != nil {
+		return
+	}
+	for _, f := range files {
+		path := filepath.Join(dir, f)
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		var parsed agentManifest
+		if _, err := toml.Decode(string(data), &parsed); err != nil {
+			continue // skip malformed override
+		}
+		compiled, err := compileManifest(parsed)
+		if err != nil {
+			continue
+		}
+		id := strings.ToLower(strings.TrimSpace(compiled.agent))
+		versions[id] = parsed.Version
+		registerManifest(cache, compiled)
 	}
 }
 
