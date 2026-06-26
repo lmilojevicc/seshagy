@@ -405,6 +405,46 @@ func TestResolvePaneByCwdNoneFalse(t *testing.T) {
 	}
 }
 
+func TestResolvePaneByCwdTrailingSlash(t *testing.T) {
+	s := NewStrictFakeTmux(t, nil)
+	s.HandleOutput(func(args []string) bool {
+		return len(args) >= 1 && args[0] == "list-panes"
+	}, func(_ context.Context, _ ...string) ([]byte, error) {
+		return []byte("%1\x1f/Users/milo/proj\n"), nil
+	})
+	s.Install(t)
+	ctx := context.Background()
+
+	// cwd has a trailing slash; filepath.Clean normalizes it to match.
+	got, err := ResolvePaneByCwd(ctx, "/Users/milo/proj/")
+	if err != nil {
+		t.Fatalf("ResolvePaneByCwd: %v", err)
+	}
+	if want := "%1"; got != want {
+		t.Errorf("ResolvePaneByCwd = %q, want %q (trailing slash normalized)", got, want)
+	}
+}
+
+func TestResolvePaneByCwdCleaned(t *testing.T) {
+	s := NewStrictFakeTmux(t, nil)
+	s.HandleOutput(func(args []string) bool {
+		return len(args) >= 1 && args[0] == "list-panes"
+	}, func(_ context.Context, _ ...string) ([]byte, error) {
+		return []byte("%1\x1f/Users/milo/proj\n"), nil
+	})
+	s.Install(t)
+	ctx := context.Background()
+
+	// cwd has a relative component; filepath.Clean normalizes it.
+	got, err := ResolvePaneByCwd(ctx, "/Users/milo/./proj")
+	if err != nil {
+		t.Fatalf("ResolvePaneByCwd: %v", err)
+	}
+	if want := "%1"; got != want {
+		t.Errorf("ResolvePaneByCwd = %q, want %q (relative component cleaned)", got, want)
+	}
+}
+
 func TestMarkActiveDoneAgentsIdleFlipsActiveDonePane(t *testing.T) {
 	base := NewFakeTmux()
 	base.Set("%1", "@seshagy_agent_state", "done")

@@ -187,6 +187,7 @@ func TestListAgentsPropagatesError(t *testing.T) {
 	}
 }
 
+//nolint:unparam // test builder; values are intentionally constant across callers
 func agentPaneLineWithState(
 	pane, session, win, paneIdx, path, cmd, pid, dead, state, updated, seq string,
 ) string {
@@ -251,7 +252,7 @@ func TestParseAgentsStaleStateFallsBackToIdle(t *testing.T) {
 		"0",
 		"0",
 		"/home/work",
-		"pi",
+		"codex",
 		"111",
 		"0",
 		"working",
@@ -263,6 +264,65 @@ func TestParseAgentsStaleStateFallsBackToIdle(t *testing.T) {
 		t.Fatalf("ParseAgents() = %d items, want 1", len(items))
 	}
 	if items[0].AgentState != AgentIdle {
-		t.Errorf("AgentState = %q, want idle (stale report)", items[0].AgentState)
+		t.Errorf("AgentState = %q, want idle (stale non-lifecycle report)", items[0].AgentState)
+	}
+}
+
+func TestParseAgentsPreservesStaleLifecycleState(t *testing.T) {
+	old := time.Now().Add(-2 * time.Minute).Format(time.RFC3339Nano)
+	raw := agentPaneLineWithState(
+		"%1",
+		"work",
+		"0",
+		"0",
+		"/home/work",
+		"pi",
+		"111",
+		"0",
+		"working",
+		old,
+		"123",
+	)
+	items := ParseAgents([]byte(raw), "")
+	if len(items) != 1 {
+		t.Fatalf("ParseAgents() = %d items, want 1", len(items))
+	}
+	if items[0].AgentState != AgentWorking {
+		t.Errorf(
+			"AgentState = %q, want working (lifecycle stale state preserved)",
+			items[0].AgentState,
+		)
+	}
+	// AgentUpdated must be set (to the stale timestamp) so hasFreshHookState
+	// returns false, allowing manifest to still positively correct.
+	if items[0].AgentUpdated.IsZero() {
+		t.Error("AgentUpdated = zero, want the stale timestamp")
+	}
+}
+
+func TestParseAgentsPreservesStaleLifecycleBlocked(t *testing.T) {
+	old := time.Now().Add(-2 * time.Minute).Format(time.RFC3339Nano)
+	raw := agentPaneLineWithState(
+		"%2",
+		"dev",
+		"0",
+		"0",
+		"/home/work",
+		"opencode",
+		"111",
+		"0",
+		"blocked",
+		old,
+		"123",
+	)
+	items := ParseAgents([]byte(raw), "")
+	if len(items) != 1 {
+		t.Fatalf("ParseAgents() = %d items, want 1", len(items))
+	}
+	if items[0].AgentState != AgentBlocked {
+		t.Errorf(
+			"AgentState = %q, want blocked (lifecycle stale state preserved)",
+			items[0].AgentState,
+		)
 	}
 }

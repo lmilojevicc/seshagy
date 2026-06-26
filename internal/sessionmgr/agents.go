@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/lmilojevicc/seshagy/internal/integrations"
 )
 
 // agentPaneFormat is the tmux list-panes format used for agent discovery. Fields
@@ -152,8 +154,11 @@ func ParseAgents(raw []byte, sessionFilter string) []Item {
 			continue
 		}
 
-		// Resolve state from @seshagy_agent_* metadata. Falls back to idle when
-		// hooks are absent or the report is stale.
+		// Resolve state from @seshagy_agent_* metadata. Fresh reports are
+		// authoritative. Stale reports: lifecycle-authority agents (pi/opencode)
+		// preserve their last hook state (herdr model — silence is not idle);
+		// non-lifecycle agents fall back to idle so capture-pane manifest
+		// classification takes over.
 		agentState := AgentIdle
 		agentUpdated := time.Time{}
 		if len(parts) > 10 {
@@ -161,6 +166,17 @@ func ParseAgents(raw []byte, sessionFilter string) []Item {
 			updated := parts[9]  // @seshagy_agent_updated
 			seqStr := parts[10]  // @seshagy_agent_seq
 			if rawState != "" && isStateFresh(updated, seqStr) {
+				agentState = NormalizeAgentState(rawState)
+				if t, err := time.Parse(time.RFC3339Nano, updated); err == nil {
+					agentUpdated = t
+				}
+			} else if rawState != "" && integrations.LifecycleAuthorityFor(agentName) {
+				// Lifecycle agent with stale report: preserve last state (matches
+				// herdr authority model — hooks own state; silence is not idle).
+				// AgentUpdated is set to the stale timestamp so hasFreshHookState
+				// returns false and manifest can still positively correct (e.g.
+				// to idle when the screen shows the prompt is back), but no-match
+				// preserves the hook state.
 				agentState = NormalizeAgentState(rawState)
 				if t, err := time.Parse(time.RFC3339Nano, updated); err == nil {
 					agentUpdated = t

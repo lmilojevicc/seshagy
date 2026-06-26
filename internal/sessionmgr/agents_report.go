@@ -2,6 +2,7 @@ package sessionmgr
 
 import (
 	"context"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -54,6 +55,12 @@ func ResolvePaneByCwd(ctx context.Context, cwd string) (string, error) {
 	if cwd == "" {
 		return "", nil
 	}
+	// Clean + evaluate symlinks on both sides to avoid mismatches on
+	// trailing slashes, relative components ("./"), and symlinks.
+	cwd = filepath.Clean(cwd)
+	if resolved, err := filepath.EvalSymlinks(cwd); err == nil {
+		cwd = resolved
+	}
 	out, err := tmuxOutput(ctx, "list-panes", "-a", "-F", "#{pane_id}\x1f#{pane_current_path}")
 	if err != nil {
 		return "", err
@@ -64,19 +71,25 @@ func ResolvePaneByCwd(ctx context.Context, cwd string) (string, error) {
 		if line == "" {
 			continue
 		}
-		paneID, path, ok := strings.Cut(line, "\x1f")
+		paneID, rawPath, ok := strings.Cut(line, "\x1f")
 		if !ok {
 			continue
 		}
 		paneID = strings.TrimSpace(paneID)
-		path = strings.TrimSpace(path)
-		if paneID == "" || path == "" {
+		if paneID == "" {
 			continue
+		}
+		path := filepath.Clean(strings.TrimSpace(rawPath))
+		if path == "" || path == "." {
+			continue
+		}
+		if resolved, err := filepath.EvalSymlinks(path); err == nil {
+			path = resolved
 		}
 		switch {
 		case path == cwd:
 			exact = append(exact, paneID)
-		case strings.HasPrefix(path, cwd+"/") || strings.HasPrefix(cwd, path+"/"):
+		case strings.HasPrefix(path, cwd+string(filepath.Separator)) || strings.HasPrefix(cwd, path+string(filepath.Separator)):
 			prefix = append(prefix, paneID)
 		}
 	}

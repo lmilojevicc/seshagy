@@ -10,17 +10,23 @@ import type { Plugin } from "@opencode-ai/plugin";
 const BIN = process.env.SESHAGY_BIN || "seshagy";
 const SOURCE = "seshagy:opencode";
 
-// Monotonic sequence number generated in-process (no python3 fork). Wall-clock
-// nanoseconds are sufficient for sequence ordering within a single session.
-let seqCounter = 0;
+// Monotonic sequence number generated in-process (no python3 fork). Uses
+// BigInt microseconds — the shared unit across all producers (shell hook uses
+// time.time_ns()//1000). BigInt avoids the JS Number.MAX_SAFE_INTEGER overflow
+// that the prior Date.now()*1e6 implementation had (~1.7e18 > 9e15).
+// Note: opencode cannot easily read the pane's existing seq (it runs in the
+// opencode server process, not the tmux pane). The shell hook bridges to this
+// high-water mark; the reverse (opencode after shell) works because µs
+// wall-clock naturally exceeds prior µs values.
+let seqCounter = 0n;
 function seq(): string {
-	const ts = Date.now() * 1_000_000;
+	const ts = BigInt(Date.now()) * 1000n; // microseconds
 	if (ts <= seqCounter) {
-		seqCounter += 1;
-		return String(seqCounter);
+		seqCounter += 1n;
+		return seqCounter.toString();
 	}
 	seqCounter = ts;
-	return String(seqCounter);
+	return seqCounter.toString();
 }
 
 function run(args: string[]) {

@@ -51,6 +51,18 @@ next_seq() {
     echo 0
     return 0
   fi
+  # Bridge: if the pane already has a higher seq (e.g. left by a different
+  # producer like the opencode plugin, or a prior agent with clock skew), seed
+  # the counter above it so new reports aren't rejected as stale by seshagy's
+  # strict-> guard. Best-effort: on error, fall back to wall-clock base.
+  if [ -n "${TMUX_PANE:-}" ]; then
+    existing_seq="$(tmux show-option -qvpt "$TMUX_PANE" @seshagy_agent_seq 2>/dev/null || true)"
+    if [ -n "$existing_seq" ] && [ "$existing_seq" -ge 0 ] 2>/dev/null; then
+      if [ "$((existing_seq + 1))" -gt "$base" ]; then
+        base="$((existing_seq + 1))"
+      fi
+    fi
+  fi
   printf '%s\n' "$((base + 1))" > "$counter_file" 2>/dev/null || true
   echo "$((base + 1))"
 }
