@@ -249,3 +249,74 @@ func TestManifestRegionBottomNonEmptyLines8(t *testing.T) {
 		t.Fatal("expected non-empty result for N=8 with 6 lines")
 	}
 }
+
+func TestManifestRegionAfterLastPromptMarker(t *testing.T) {
+	content := "hello\n› prompt\nbody line\nend"
+	input := manifestDetectionInput{screen: content}
+	got := manifestRegion(input, "after_last_prompt_marker")
+	if !strings.Contains(got, "body line") {
+		t.Fatalf("after_last_prompt_marker = %q, want content after the › line", got)
+	}
+	if strings.Contains(got, "prompt") {
+		t.Fatalf("after_last_prompt_marker = %q, must not include the prompt line", got)
+	}
+}
+
+func TestManifestRegionAfterLastPromptMarkerNoMarker(t *testing.T) {
+	content := "hello\nworld"
+	input := manifestDetectionInput{screen: content}
+	got := manifestRegion(input, "after_last_prompt_marker")
+	if got != content {
+		t.Fatalf("no-marker case = %q, want whole buffer", got)
+	}
+}
+
+func TestManifestRegionAfterLastHorizontalRule(t *testing.T) {
+	content := "top\n───────────\nbottom"
+	input := manifestDetectionInput{screen: content}
+	got := manifestRegion(input, "after_last_horizontal_rule")
+	if !strings.Contains(got, "bottom") {
+		t.Fatalf("after_last_horizontal_rule = %q, want content after the rule", got)
+	}
+	if strings.Contains(got, "top") {
+		t.Fatalf("after_last_horizontal_rule = %q, must not include pre-rule content", got)
+	}
+}
+
+func TestManifestRegionPromptBoxBody(t *testing.T) {
+	content := "──────────\n❯ input\n──────────"
+	input := manifestDetectionInput{screen: content}
+	got := manifestRegion(input, "prompt_box_body")
+	if !strings.Contains(got, "input") {
+		t.Fatalf("prompt_box_body = %q, want content inside the box", got)
+	}
+}
+
+func TestManifestRegionPromptBoxBodyMissing(t *testing.T) {
+	content := "plain text\nno box here"
+	input := manifestDetectionInput{screen: content}
+	got := manifestRegion(input, "prompt_box_body")
+	if got != "" {
+		t.Fatalf("prompt_box_body = %q, want empty when no box", got)
+	}
+}
+
+func TestManifestRegionOscProgress(t *testing.T) {
+	input := manifestDetectionInput{oscProgress: "spin"}
+	if got := manifestRegion(input, "osc_progress"); got != "spin" {
+		t.Fatalf("osc_progress = %q, want spin", got)
+	}
+}
+
+func TestValidateManifestRegionAcceptsNewRegions(t *testing.T) {
+	for _, region := range []string{
+		"after_last_prompt_marker",
+		"after_last_horizontal_rule",
+		"prompt_box_body",
+		"osc_progress",
+	} {
+		if err := validateManifestRegion(region); err != nil {
+			t.Errorf("validateManifestRegion(%q) = %v, want nil", region, err)
+		}
+	}
+}

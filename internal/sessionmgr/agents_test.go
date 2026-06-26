@@ -40,6 +40,25 @@ func TestDetectAgentNameMatchesKnownAgents(t *testing.T) {
 		{"node", ""},
 		{"zsh", ""},
 		{"", ""},
+
+		// herdr catalog agents (discovery entries).
+		{"amp", "amp"},
+		{"cline", "cline"},
+		{"devin", "devin"},
+		{"gemini", "gemini"},
+		{"hermes", "hermes"},
+		{"hermes-agent", "hermes"},
+		{"kilo", "kilo"},
+		{"kilocode", "kilo"},
+		{"kimi", "kimi"},
+		{"kiro-cli", "kiro"},
+		{"qodercli", "qodercli"},
+		{"qoderclicn", "qodercli"},
+
+		// arch-suffixed variants.
+		{"amp-aarch64", "amp"},
+		{"kiro-cli-x86_64", "kiro"},
+		{"qodercli-darwin-arm64", "qodercli"},
 	}
 	for _, tc := range cases {
 		if got := detectAgentName(tc.command); got != tc.want {

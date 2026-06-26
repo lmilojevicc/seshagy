@@ -97,8 +97,9 @@ type compiledGate struct {
 }
 
 type manifestDetectionInput struct {
-	screen   string
-	oscTitle string
+	screen      string
+	oscTitle    string
+	oscProgress string
 }
 
 type manifestDetectionResult struct {
@@ -496,7 +497,8 @@ func gateHasAnyMatcher(gate manifestGate) bool {
 
 func validateManifestRegion(region string) error {
 	switch region {
-	case "whole_recent", "osc_title":
+	case "whole_recent", "osc_title", "osc_progress",
+		"after_last_prompt_marker", "after_last_horizontal_rule", "prompt_box_body":
 		return nil
 	}
 	if _, ok := manifestRegionCount(region, "bottom_lines"); ok {

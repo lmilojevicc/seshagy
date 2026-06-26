@@ -32,6 +32,18 @@ var agentProcessNames = map[string]string{
 	"factory":      "droid",
 	"grok":         "grok",
 	"copilot":      "copilot",
+	"amp":          "amp",
+	"cline":        "cline",
+	"devin":        "devin",
+	"gemini":       "gemini",
+	"hermes":       "hermes",
+	"hermes-agent": "hermes",
+	"kilo":         "kilo",
+	"kilocode":     "kilo",
+	"kimi":         "kimi",
+	"kiro-cli":     "kiro",
+	"qodercli":     "qodercli",
+	"qoderclicn":   "qodercli",
 }
 
 const agentFreshnessWindow = 60 * time.Second
