@@ -17,6 +17,10 @@ import (
 func newTestModel(t *testing.T) Model {
 	t.Helper()
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	// Tests mock tmux via SetTmuxHooksForTest; force TMUX + the tmux backend so
+	// those seams are exercised and InMultiplexer() is true regardless of the
+	// real environment.
+	t.Setenv("TMUX", "/tmp/fake-tmux-sock,12345,0")
 	m := New()
 	// Tests mock tmux via SetTmuxHooksForTest; force the tmux backend so those
 	// seams are exercised even when tests run outside tmux.
