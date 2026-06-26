@@ -8,7 +8,8 @@ import (
 type SourceMode int
 
 type LoadOptions struct {
-	FDCommand string
+	FDCommand        string
+	ManifestFallback bool
 }
 
 // LoadResult is the outcome of a source load. Warning carries non-fatal source
@@ -41,6 +42,9 @@ func LoadWithOptions(ctx context.Context, mode SourceMode, opts LoadOptions) (Lo
 		return LoadResult{Items: items}, err
 	case ModeAgents:
 		items, err := ListAgents(ctx, "")
+		if err == nil && opts.ManifestFallback {
+			ApplyManifestFallback(ctx, items)
+		}
 		return LoadResult{Items: items}, err
 	case ModeCurrentAgents:
 		session, err := CurrentTmuxSession(ctx)
@@ -48,6 +52,9 @@ func LoadWithOptions(ctx context.Context, mode SourceMode, opts LoadOptions) (Lo
 			return LoadResult{}, err
 		}
 		items, err := ListAgents(ctx, session)
+		if err == nil && opts.ManifestFallback {
+			ApplyManifestFallback(ctx, items)
+		}
 		return LoadResult{Items: items}, err
 	case ModeAll:
 		fallthrough
@@ -72,6 +79,9 @@ func LoadWithOptions(ctx context.Context, mode SourceMode, opts LoadOptions) (Lo
 		agents, err := ListAgents(ctx, "")
 		if err != nil {
 			warnings = append(warnings, err.Error())
+		}
+		if err == nil && opts.ManifestFallback {
+			ApplyManifestFallback(ctx, agents)
 		}
 		out = append(out, agents...)
 		return LoadResult{Items: out, Warning: strings.Join(warnings, "; ")}, nil

@@ -35,6 +35,7 @@ type Config struct {
 	Icons       IconsConfig       `toml:"icons"       json:"icons"`
 	TypeFirst   TypeFirstConfig   `toml:"type_first"  json:"type_first"`
 	Setup       SetupConfig       `toml:"setup"       json:"setup"`
+	Agents      AgentsConfig      `toml:"agents"      json:"agents"`
 }
 
 type SourcesConfig struct {
@@ -104,6 +105,24 @@ type TypeFirstConfig struct {
 
 type SetupConfig struct {
 	TypeFirstPromptSeen bool `toml:"type_first_prompt_seen" json:"type_first_prompt_seen"`
+}
+
+// AgentsConfig holds agent-detection options. ManifestFallback enables the
+// capture-pane screen-rule backstop for hook-less agents (opencode, cursor,
+// antigravity, grok). It defaults to true so detection works out of the box.
+// AGENTS.md describes manifest_fallback as opt-in; that wording predates the
+// default-on decision and will be reconciled in a future docs pass.
+type AgentsConfig struct {
+	ManifestFallback *bool `toml:"manifest_fallback,omitempty" json:"manifest_fallback,omitempty"`
+}
+
+// ManifestFallback reports whether the capture-pane manifest backstop is
+// enabled. Defaults to true (nil pointer).
+func (c Config) ManifestFallback() bool {
+	if c.Agents.ManifestFallback == nil {
+		return true
+	}
+	return *c.Agents.ManifestFallback
 }
 
 func Default() Config {
@@ -326,7 +345,8 @@ func (c Config) DefaultSource() sessionmgr.SourceMode {
 func (c Config) LoadOptions() sessionmgr.LoadOptions {
 	c.Normalize()
 	return sessionmgr.LoadOptions{
-		FDCommand: c.Directories.FDCommand,
+		FDCommand:        c.Directories.FDCommand,
+		ManifestFallback: c.ManifestFallback(),
 	}
 }
 

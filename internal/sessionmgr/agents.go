@@ -143,26 +143,31 @@ func ParseAgents(raw []byte, sessionFilter string) []Item {
 		// Resolve state from @seshagy_agent_* metadata. Falls back to idle when
 		// hooks are absent or the report is stale.
 		agentState := AgentIdle
+		agentUpdated := time.Time{}
 		if len(parts) > 10 {
 			rawState := parts[8] // @seshagy_agent_state
 			updated := parts[9]  // @seshagy_agent_updated
 			seqStr := parts[10]  // @seshagy_agent_seq
 			if rawState != "" && isStateFresh(updated, seqStr) {
 				agentState = NormalizeAgentState(rawState)
+				if t, err := time.Parse(time.RFC3339Nano, updated); err == nil {
+					agentUpdated = t
+				}
 			}
 		}
 
 		items = append(items, Item{
-			Kind:       KindAgent,
-			Name:       agentName,
-			AgentName:  agentName,
-			AgentState: agentState,
-			PaneID:     parts[0],
-			Session:    parts[1],
-			Window:     parts[2],
-			Pane:       parts[3],
-			Path:       parts[4],
-			Location:   fmt.Sprintf("%s:%s.%s", parts[1], parts[2], parts[3]),
+			Kind:         KindAgent,
+			Name:         agentName,
+			AgentName:    agentName,
+			AgentState:   agentState,
+			AgentUpdated: agentUpdated,
+			PaneID:       parts[0],
+			Session:      parts[1],
+			Window:       parts[2],
+			Pane:         parts[3],
+			Path:         parts[4],
+			Location:     fmt.Sprintf("%s:%s.%s", parts[1], parts[2], parts[3]),
 		})
 	}
 	return ApplyAgentLabels(items)
