@@ -11,6 +11,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	appconfig "github.com/lmilojevicc/seshagy/internal/config"
+	"github.com/lmilojevicc/seshagy/internal/integrations"
 	"github.com/lmilojevicc/seshagy/internal/sessionmgr"
 )
 
@@ -163,8 +164,12 @@ func (m Model) handleActionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.openInputModePrompt(true)
 		m.status = "change input mode"
 		return m, nil
-	case "?", "h", "alt+h":
+	case "?":
 		m.showHelp = !m.showHelp
+		return m, nil
+	case "h":
+		m.openInstallMenu(false)
+		m.status = "install menu"
 		return m, nil
 	case "a", "ctrl+a":
 		return m.switchSource(sessionmgr.ModeAll)
@@ -287,6 +292,25 @@ func (m *Model) openInputModePrompt(manual bool) {
 	}
 }
 
+func (m *Model) openInstallMenu(firstRun bool) {
+	m.installMenu.active = true
+	m.installMenu.cursor = 0
+	names := integrations.Available()
+	if m.installMenu.statuses == nil {
+		m.installMenu.statuses = make(map[string]string, len(names))
+	}
+	for _, n := range names {
+		if m.installMenu.statuses[n] == "" {
+			m.installMenu.statuses[n] = "idle"
+		}
+	}
+	if firstRun {
+		m.installMenu.message = "first run — choose integrations to install"
+	} else {
+		m.installMenu.message = ""
+	}
+}
+
 func (m Model) handleSetupKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c", "q":
@@ -318,6 +342,66 @@ func (m Model) cancelInputModePrompt() (tea.Model, tea.Cmd) {
 	m.setup.manual = false
 	m.status = "input mode change cancelled"
 	return m, nil
+}
+
+func (m Model) handleInstallMenuKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	names := integrations.Available()
+	switch msg.String() {
+	case "ctrl+c", "q":
+		return m, tea.Quit
+	case "esc":
+		return m.closeInstallMenu()
+	case "up", "k":
+		m.installMenu.cursor = wrapCursorUp(m.installMenu.cursor, len(names))
+		return m, nil
+	case "down", "j":
+		m.installMenu.cursor = wrapCursorDown(m.installMenu.cursor, len(names))
+		return m, nil
+	case "enter", "i":
+		if len(names) == 0 {
+			return m, nil
+		}
+		name := names[m.installMenu.cursor]
+		m.installMenu.statuses[name] = "installing"
+		m.installMenu.message = "installing " + name + "…"
+		return m, installIntegrationCmd(name, "install")
+	case "u":
+		if len(names) == 0 {
+			return m, nil
+		}
+		name := names[m.installMenu.cursor]
+		m.installMenu.statuses[name] = "uninstalling"
+		m.installMenu.message = "uninstalling " + name + "…"
+		return m, installIntegrationCmd(name, "uninstall")
+	case "a":
+		cmds := make([]tea.Cmd, 0, len(names))
+		for _, n := range names {
+			m.installMenu.statuses[n] = "installing"
+			cmds = append(cmds, installIntegrationCmd(n, "install"))
+		}
+		m.installMenu.message = "installing all…"
+		return m, tea.Batch(cmds...)
+	}
+	return m, nil
+}
+
+func (m Model) closeInstallMenu() (tea.Model, tea.Cmd) {
+	m.installMenu.active = false
+	m.installMenu.message = ""
+	if !m.config.Setup.InstallMenuSeen {
+		cfg := m.config
+		cfg.Setup.InstallMenuSeen = true
+		if err := appconfig.Save(cfg); err != nil {
+			m.err = err
+			m.status = err.Error()
+			return m, nil
+		}
+		m.config = cfg
+	}
+	m.status = "install menu closed"
+	var refresh tea.Cmd
+	m, refresh = m.beginRefresh(m.source, true)
+	return m, refresh
 }
 
 func (m Model) applyTypeFirstSetup(enabled bool) (tea.Model, tea.Cmd) {

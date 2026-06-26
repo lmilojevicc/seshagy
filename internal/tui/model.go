@@ -57,7 +57,18 @@ type Model struct {
 	refreshGen      map[sessionmgr.SourceMode]uint64
 	inflightRefresh map[sessionmgr.SourceMode]uint64
 
-	setup setupPrompt
+	setup          setupPrompt
+	installMenu    installMenuState
+	pendingInstall bool
+}
+
+// installMenuState holds the state of the agent-integration install menu
+// overlay (first-run popup + manual `h` reopen).
+type installMenuState struct {
+	active   bool
+	cursor   int
+	statuses map[string]string
+	message  string
 }
 
 // setupPrompt holds the state of the first-launch / manual input-mode prompt.
@@ -154,6 +165,7 @@ func (m Model) Init() tea.Cmd {
 	return tea.Batch(
 		refreshCmd(m.source, m.inflightRefresh[m.source], m.config.LoadOptions()),
 		startupSetupCmd(m.config),
+		startupInstallMenuCmd(m.config),
 		tickCmd(),
 	)
 }

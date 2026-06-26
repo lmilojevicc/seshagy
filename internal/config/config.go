@@ -105,6 +105,7 @@ type TypeFirstConfig struct {
 
 type SetupConfig struct {
 	TypeFirstPromptSeen bool `toml:"type_first_prompt_seen" json:"type_first_prompt_seen"`
+	InstallMenuSeen     bool `toml:"install_menu_seen"      json:"install_menu_seen"`
 }
 
 // AgentsConfig holds agent-detection options. ManifestFallback enables the

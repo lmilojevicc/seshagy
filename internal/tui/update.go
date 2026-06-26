@@ -20,6 +20,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.setup.active {
 			return m, tea.Tick(interval, func(t time.Time) tea.Msg { return tickMsg(t) })
 		}
+		if m.installMenu.active {
+			return m, tea.Tick(interval, func(t time.Time) tea.Msg { return tickMsg(t) })
+		}
 		if m.cacheFresh(m.source) {
 			return m, tea.Tick(interval, func(t time.Time) tea.Msg { return tickMsg(t) })
 		}
@@ -39,6 +42,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.openInputModePrompt(false)
 			m.status = "choose startup input mode"
 			return m, nil
+		}
+		return m, nil
+	case installMenuMsg:
+		if msg.show {
+			if m.setup.active {
+				m.pendingInstall = true
+				return m, nil
+			}
+			m.openInstallMenu(true)
+			return m, nil
+		}
+		return m, nil
+	case installResultMsg:
+		if msg.err != nil {
+			m.installMenu.statuses[msg.name] = "failed"
+			m.installMenu.message = msg.name + " " + msg.action + " failed: " + msg.err.Error()
+		} else {
+			if msg.action == "install" {
+				m.installMenu.statuses[msg.name] = "installed"
+			} else {
+				m.installMenu.statuses[msg.name] = "uninstalled"
+			}
+			m.installMenu.message = msg.name + " " + msg.action + " ok"
 		}
 		return m, nil
 	case refreshMsg:
@@ -105,7 +131,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, createSessionCmd(msg.path)
 	case tea.KeyMsg:
 		if m.setup.active {
-			return m.handleSetupKey(msg)
+			model, cmd := m.handleSetupKey(msg)
+			if mm, ok := model.(Model); ok && !mm.setup.active && mm.pendingInstall {
+				mm.pendingInstall = false
+				mm.openInstallMenu(true)
+				return mm, nil
+			}
+			return model, cmd
+		}
+		if m.installMenu.active {
+			return m.handleInstallMenuKey(msg)
 		}
 		return m.handleKey(msg)
 	}

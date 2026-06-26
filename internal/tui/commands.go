@@ -9,6 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	appconfig "github.com/lmilojevicc/seshagy/internal/config"
+	"github.com/lmilojevicc/seshagy/internal/integrations"
 	"github.com/lmilojevicc/seshagy/internal/sessionmgr"
 )
 
@@ -49,6 +50,33 @@ func startupSetupCmd(cfg appconfig.Config) tea.Cmd {
 			return setupMsg{}
 		}
 		return setupMsg{prompt: true}
+	}
+}
+
+type installMenuMsg struct {
+	show bool
+}
+
+type installResultMsg struct {
+	name   string
+	action string
+	err    error
+}
+
+func startupInstallMenuCmd(cfg appconfig.Config) tea.Cmd {
+	return func() tea.Msg {
+		return installMenuMsg{show: !cfg.Setup.InstallMenuSeen}
+	}
+}
+
+func installIntegrationCmd(name, action string) tea.Cmd {
+	return func() tea.Msg {
+		if action == "uninstall" {
+			_, err := integrations.Uninstall(name)
+			return installResultMsg{name: name, action: action, err: err}
+		}
+		_, err := integrations.Install(name)
+		return installResultMsg{name: name, action: action, err: err}
 	}
 }
 

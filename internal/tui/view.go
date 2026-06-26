@@ -7,6 +7,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/lmilojevicc/seshagy/internal/integrations"
 	"github.com/lmilojevicc/seshagy/internal/sessionmgr"
 )
 
@@ -31,6 +32,9 @@ func (m Model) View() string {
 	s := m.styles
 	if m.setup.active {
 		return s.app.Width(m.width).Height(m.height).Render(m.renderSetupPrompt(m.height))
+	}
+	if m.installMenu.active {
+		return s.app.Width(m.width).Height(m.height).Render(m.renderInstallMenu(m.height))
 	}
 	header := m.renderTabs()
 	footer := m.renderFooter()
@@ -86,6 +90,60 @@ func (m Model) renderSetupPrompt(height int) string {
 		helpParts = append(helpParts, s.key.Render("esc")+" cancel")
 	}
 	helpParts = append(helpParts, s.key.Render("q")+" quit")
+	lines = append(lines, "", strings.Join(helpParts, s.muted.Render(" · ")))
+	content := trimHeight(strings.Join(lines, "\n"), innerH)
+	box := s.paneFocus.Width(width - 2).Height(innerH).Render(content)
+	return lipgloss.Place(m.width, height, lipgloss.Center, lipgloss.Center, box)
+}
+
+func (m Model) renderInstallMenu(height int) string {
+	s := m.styles
+	width := max(54, min(88, m.width-4))
+	innerW := max(44, width-4)
+	names := integrations.Available()
+	innerH := max(11, len(names)+7)
+
+	lines := []string{
+		s.title.Render("Install agent integrations"),
+		s.muted.Render("Hooks/plugins report state to seshagy in real time."),
+		"",
+	}
+	for i, name := range names {
+		cursor := "  "
+		if i == m.installMenu.cursor {
+			cursor = s.bar.Render("▌") + " "
+		}
+		status := m.installMenu.statuses[name]
+		if status == "" {
+			status = "idle"
+		}
+		var glyph string
+		switch status {
+		case "installing", "uninstalling":
+			glyph = s.warning.Render("…")
+		case "installed":
+			glyph = s.success.Render("✓")
+		case "failed":
+			glyph = s.danger.Render("✗")
+		default:
+			glyph = s.muted.Render("○")
+		}
+		line := cursor + name + "  " + glyph
+		if i == m.installMenu.cursor {
+			line = s.selectedBG.Render(pad(line, innerW))
+		}
+		lines = append(lines, line)
+	}
+	if msg := m.installMenu.message; msg != "" {
+		lines = append(lines, "", s.muted.Render(msg))
+	}
+	helpParts := []string{
+		s.key.Render("enter") + " install",
+		s.key.Render("u") + " uninstall",
+		s.key.Render("a") + " all",
+		s.key.Render("esc") + " close",
+		s.key.Render("q") + " quit",
+	}
 	lines = append(lines, "", strings.Join(helpParts, s.muted.Render(" · ")))
 	content := trimHeight(strings.Join(lines, "\n"), innerH)
 	box := s.paneFocus.Width(width - 2).Height(innerH).Render(content)
@@ -528,6 +586,7 @@ func (m Model) renderFooter() string {
 			}
 			helpParts = append(helpParts,
 				s.key.Render("m")+" mode",
+				s.key.Render("h")+" install",
 				s.key.Render("r")+" refresh",
 				s.key.Render("R")+" rename",
 				s.key.Render("x")+" kill",
