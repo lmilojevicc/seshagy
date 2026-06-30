@@ -179,6 +179,9 @@ func (herdrBackend) ListAgents(
 	if err != nil {
 		return nil, err
 	}
+	// Resolve workspace ids to labels once so the trailing location text and
+	// the detail panel show the human-facing workspace name, not an opaque id.
+	workspaceLabels := herdrWorkspaceLabels(ctx)
 	items := make([]Item, 0, len(agents))
 	for _, a := range agents {
 		if sessionFilter != "" && a.WorkspaceID != sessionFilter {
@@ -200,6 +203,10 @@ func (herdrBackend) ListAgents(
 		if path == "" {
 			path = ptrStr(a.Cwd)
 		}
+		location := workspaceLabels[a.WorkspaceID]
+		if location == "" {
+			location = a.WorkspaceID
+		}
 		items = append(items, Item{
 			Kind:             KindAgent,
 			Name:             name,
@@ -211,11 +218,31 @@ func (herdrBackend) ListAgents(
 			Window:           a.TabID,
 			Pane:             a.PaneID,
 			Path:             path,
-			Location:         a.PaneID,
+			Location:         location,
 		})
 	}
 	// Do NOT apply local aliases under herdr — herdr labels are authoritative.
 	return items, nil
+}
+
+// herdrWorkspaceLabels fetches `herdr workspace list` and returns a map of
+// workspace_id → label. Labels fall back to the workspace id in ListAgents when
+// missing. Errors are swallowed (best-effort label resolution; the caller keeps
+// working with ids if the lookup fails).
+func herdrWorkspaceLabels(ctx context.Context) map[string]string {
+	out, err := herdrOutput(ctx, "workspace", "list")
+	if err != nil {
+		return nil
+	}
+	workspaces, err := parseHerdrWorkspaces(out)
+	if err != nil {
+		return nil
+	}
+	labels := make(map[string]string, len(workspaces))
+	for _, w := range workspaces {
+		labels[w.WorkspaceID] = w.Label
+	}
+	return labels
 }
 
 // CaptureAgentPane reads recent pane output. herdr's "recent" source is

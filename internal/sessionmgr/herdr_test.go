@@ -404,6 +404,14 @@ func TestHerdrBackendListSessions(t *testing.T) {
 func TestHerdrBackendListAgents(t *testing.T) {
 	rec := &herdrCmdRecorder{
 		outputF: func(args []string) ([]byte, error) {
+			// ListAgents resolves workspace ids → labels via `workspace list`
+			// before calling `agent list`.
+			if args[0] == "workspace" && args[1] == "list" {
+				return []byte(`{"result":{"type":"workspace_list","workspaces":[` +
+					`{"workspace_id":"w1","label":"proj","cwd":"/proj","focused":true},` +
+					`{"workspace_id":"w2","label":"","cwd":"/other","focused":false}` +
+					`]}}`), nil
+			}
 			return []byte(`{"result":{"type":"agent_list","agents":[` +
 				`{"terminal_id":"t1","name":"my-claude","agent":"claude","agent_status":"working","workspace_id":"w1","tab_id":"w1:t1","pane_id":"w1:p1","focused":true,"foreground_cwd":"/proj/src","cwd":"/proj","revision":1},` +
 				`{"terminal_id":"t2","agent":"codex","agent_status":"unknown","workspace_id":"w2","tab_id":"w2:t1","pane_id":"w2:p1","focused":false,"cwd":"/other","revision":2}` +
@@ -430,19 +438,29 @@ func TestHerdrBackendListAgents(t *testing.T) {
 		items[0].PaneID != "w1:p1" || items[0].Path != "/proj/src" {
 		t.Fatalf("items[0] fields = %+v", items[0])
 	}
-	if items[0].Location != "w1:p1" {
-		t.Fatalf("Location = %q", items[0].Location)
+	// Location shows the workspace label (not the opaque pane id).
+	if items[0].Location != "proj" {
+		t.Fatalf("items[0].Location = %q, want proj", items[0].Location)
 	}
-	// a2: no name/display_agent → Name falls back to agent label
+	// a2: no workspace label → falls back to the workspace id.
 	if items[1].Name != "codex" || items[1].AgentName != "codex" ||
 		items[1].AgentState != AgentUnknown {
 		t.Fatalf("items[1] = %+v", items[1])
+	}
+	if items[1].Location != "w2" {
+		t.Fatalf("items[1].Location = %q, want w2 (id fallback)", items[1].Location)
 	}
 }
 
 func TestHerdrBackendListAgentsWorkspaceFilter(t *testing.T) {
 	rec := &herdrCmdRecorder{
 		outputF: func(args []string) ([]byte, error) {
+			if args[0] == "workspace" && args[1] == "list" {
+				return []byte(`{"result":{"type":"workspace_list","workspaces":[` +
+					`{"workspace_id":"w1","label":"proj"},` +
+					`{"workspace_id":"w2","label":"other"}` +
+					`]}}`), nil
+			}
 			return []byte(`{"result":{"type":"agent_list","agents":[` +
 				`{"agent":"claude","agent_status":"working","workspace_id":"w1","tab_id":"w1:t1","pane_id":"w1:p1","focused":true},` +
 				`{"agent":"codex","agent_status":"idle","workspace_id":"w2","tab_id":"w2:t1","pane_id":"w2:p1","focused":false}` +
@@ -461,12 +479,19 @@ func TestHerdrBackendListAgentsWorkspaceFilter(t *testing.T) {
 		t.Fatalf("filtered items = %+v, want 1 claude agent", items)
 	}
 	// Verify agent list was called WITHOUT --workspace (filtered in-memory).
-	if len(rec.calls) != 1 {
-		t.Fatalf("calls = %d, want 1", len(rec.calls))
+	// ListAgents issues 2 calls: workspace list (label resolution) + agent list.
+	var agentListCall []string
+	for _, c := range rec.calls {
+		if len(c) >= 2 && c[0] == "agent" && c[1] == "list" {
+			agentListCall = c
+		}
 	}
-	for _, a := range rec.calls[0] {
+	if agentListCall == nil {
+		t.Fatalf("no agent list call in %v", rec.calls)
+	}
+	for _, a := range agentListCall {
 		if a == "--workspace" {
-			t.Fatalf("agent list should not pass --workspace; args = %v", rec.calls[0])
+			t.Fatalf("agent list should not pass --workspace; args = %v", agentListCall)
 		}
 	}
 }
