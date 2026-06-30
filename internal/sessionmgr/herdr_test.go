@@ -211,6 +211,140 @@ func TestParseHerdrPaneInfo(t *testing.T) {
 	}
 }
 
+func TestParseHerdrAgents(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		wantLen int
+		want0   agentInfo
+	}{
+		{
+			name: "wrapped response",
+			input: `{"id":"r1","result":{"type":"agent_list","agents":[` +
+				`{"terminal_id":"t1","name":"my-renamed","agent":"claude","agent_status":"working","workspace_id":"w1","tab_id":"w1:t1","pane_id":"w1:p1","focused":true,"foreground_cwd":"/proj/src","screen_detection_skipped":false,"revision":5},` +
+				`{"terminal_id":"t2","agent":"codex","agent_status":"unknown","workspace_id":"w2","tab_id":"w2:t1","pane_id":"w2:p1","focused":false,"revision":6}` +
+				`]}}`,
+			wantLen: 2,
+			want0: agentInfo{
+				TerminalID:  "t1",
+				AgentStatus: "working",
+				WorkspaceID: "w1",
+				TabID:       "w1:t1",
+				PaneID:      "w1:p1",
+				Focused:     true,
+				Revision:    5,
+			},
+		},
+		{
+			name:    "direct payload",
+			input:   `{"type":"agent_list","agents":[{"agent":"pi","agent_status":"idle","workspace_id":"w3","pane_id":"w3:p1"}]}`,
+			wantLen: 1,
+			want0: agentInfo{
+				AgentStatus: "idle",
+				WorkspaceID: "w3",
+				PaneID:      "w3:p1",
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parseHerdrAgents([]byte(tc.input))
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if len(got) != tc.wantLen {
+				t.Fatalf("len = %d, want %d", len(got), tc.wantLen)
+			}
+			if got[0].AgentStatus != tc.want0.AgentStatus ||
+				got[0].WorkspaceID != tc.want0.WorkspaceID ||
+				got[0].PaneID != tc.want0.PaneID {
+				t.Fatalf("got[0] = %+v, want %+v", got[0], tc.want0)
+			}
+		})
+	}
+}
+
+func TestParseHerdrWorkspaceCreated(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantID    string
+		wantLabel string
+		wantErr   bool
+	}{
+		{
+			name: "workspace_created",
+			input: `{"id":"r1","result":{"type":"workspace_created","workspace":` +
+				`{"workspace_id":"w9","label":"myproj","cwd":"/home/me/myproj","focused":true},"tab":{},"root_pane":{}}}`,
+			wantID:    "w9",
+			wantLabel: "myproj",
+		},
+		{
+			name:    "no workspace",
+			input:   `{"result":{"type":"workspace_list","workspaces":[]}}`,
+			wantErr: true,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ws, err := parseHerdrWorkspaceCreated([]byte(tc.input))
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got %+v", ws)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if ws.WorkspaceID != tc.wantID {
+				t.Fatalf("workspace_id = %q, want %q", ws.WorkspaceID, tc.wantID)
+			}
+			if ws.Label != tc.wantLabel {
+				t.Fatalf("label = %q, want %q", ws.Label, tc.wantLabel)
+			}
+		})
+	}
+}
+
+func TestHerdrBackendCreateSessionFromDir(t *testing.T) {
+	rec := &herdrCmdRecorder{
+		outputF: func(args []string) ([]byte, error) {
+			if args[0] == "workspace" && args[1] == "create" {
+				return []byte(`{"result":{"type":"workspace_created","workspace":` +
+					`{"workspace_id":"w42","label":"myproj","cwd":"/tmp/myproj","focused":true}}}`), nil
+			}
+			return []byte(`{"result":{"type":"workspace_list","workspaces":[]}}`), nil
+		},
+	}
+	setHerdrHooksForTest(t, rec.outputFn, rec.runFn)
+
+	mux := NewHerdrBackend()
+	item, reused, err := mux.CreateSessionFromDir(context.Background(), "/tmp/myproj")
+	if err != nil {
+		t.Fatalf("CreateSessionFromDir error: %v", err)
+	}
+	if reused {
+		t.Fatal("reused = true, want false (new workspace)")
+	}
+	if item.Target != "w42" {
+		t.Fatalf("Target = %q, want w42", item.Target)
+	}
+	if item.Name != "myproj" {
+		t.Fatalf("Name = %q, want myproj", item.Name)
+	}
+	// Verify create args do NOT include --json.
+	for _, call := range rec.calls {
+		if call[0] == "workspace" && call[1] == "create" {
+			for _, a := range call {
+				if a == "--json" {
+					t.Fatalf("create args contain --json: %v", call)
+				}
+			}
+		}
+	}
+}
+
 func TestMapHerdrStatusToAgentState(t *testing.T) {
 	tests := []struct {
 		input string
@@ -270,10 +404,9 @@ func TestHerdrBackendListSessions(t *testing.T) {
 func TestHerdrBackendListAgents(t *testing.T) {
 	rec := &herdrCmdRecorder{
 		outputF: func(args []string) ([]byte, error) {
-			return []byte(`{"result":{"type":"pane_list","panes":[` +
-				`{"pane_id":"w1:p1","workspace_id":"w1","tab_id":"w1:t1","agent":"claude","display_agent":"Claude","agent_status":"working","cwd":"/proj","foreground_cwd":"/proj/src","focused":true},` +
-				`{"pane_id":"w1:p2","workspace_id":"w1","tab_id":"w1:t1","agent_status":"unknown","cwd":"/proj","focused":false},` +
-				`{"pane_id":"w1:p3","workspace_id":"w1","tab_id":"w1:t1","agent":"codex","agent_status":"unknown","cwd":"/proj","focused":false}` +
+			return []byte(`{"result":{"type":"agent_list","agents":[` +
+				`{"terminal_id":"t1","name":"my-claude","agent":"claude","agent_status":"working","workspace_id":"w1","tab_id":"w1:t1","pane_id":"w1:p1","focused":true,"foreground_cwd":"/proj/src","cwd":"/proj","revision":1},` +
+				`{"terminal_id":"t2","agent":"codex","agent_status":"unknown","workspace_id":"w2","tab_id":"w2:t1","pane_id":"w2:p1","focused":false,"cwd":"/other","revision":2}` +
 				`]}}`), nil
 		},
 	}
@@ -284,12 +417,12 @@ func TestHerdrBackendListAgents(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListAgents error: %v", err)
 	}
-	// p2 has no agent/display_agent → filtered out; p1 and p3 remain.
+	// agent list already filters non-agent panes; both entries are agents.
 	if len(items) != 2 {
-		t.Fatalf("len = %d, want 2 (non-agent pane should be filtered)", len(items))
+		t.Fatalf("len = %d, want 2", len(items))
 	}
-	// p1: agent=claude, display_agent=Claude, status=working
-	if items[0].AgentName != "claude" || items[0].Name != "Claude" ||
+	// a1: name=my-claude (user rename) takes priority over agent/display_agent
+	if items[0].Name != "my-claude" || items[0].AgentName != "claude" ||
 		items[0].AgentState != AgentWorking {
 		t.Fatalf("items[0] = %+v", items[0])
 	}
@@ -300,10 +433,41 @@ func TestHerdrBackendListAgents(t *testing.T) {
 	if items[0].Location != "w1:p1" {
 		t.Fatalf("Location = %q", items[0].Location)
 	}
-	// p3: agent=codex, no display_agent → Name falls back to agent
-	if items[1].AgentName != "codex" || items[1].Name != "codex" ||
+	// a2: no name/display_agent → Name falls back to agent label
+	if items[1].Name != "codex" || items[1].AgentName != "codex" ||
 		items[1].AgentState != AgentUnknown {
 		t.Fatalf("items[1] = %+v", items[1])
+	}
+}
+
+func TestHerdrBackendListAgentsWorkspaceFilter(t *testing.T) {
+	rec := &herdrCmdRecorder{
+		outputF: func(args []string) ([]byte, error) {
+			return []byte(`{"result":{"type":"agent_list","agents":[` +
+				`{"agent":"claude","agent_status":"working","workspace_id":"w1","tab_id":"w1:t1","pane_id":"w1:p1","focused":true},` +
+				`{"agent":"codex","agent_status":"idle","workspace_id":"w2","tab_id":"w2:t1","pane_id":"w2:p1","focused":false}` +
+				`]}}`), nil
+		},
+	}
+	setHerdrHooksForTest(t, rec.outputFn, rec.runFn)
+
+	mux := NewHerdrBackend()
+	// Filter to w1 only — should return 1 agent.
+	items, err := mux.ListAgents(context.Background(), "w1")
+	if err != nil {
+		t.Fatalf("ListAgents error: %v", err)
+	}
+	if len(items) != 1 || items[0].AgentName != "claude" {
+		t.Fatalf("filtered items = %+v, want 1 claude agent", items)
+	}
+	// Verify agent list was called WITHOUT --workspace (filtered in-memory).
+	if len(rec.calls) != 1 {
+		t.Fatalf("calls = %d, want 1", len(rec.calls))
+	}
+	for _, a := range rec.calls[0] {
+		if a == "--workspace" {
+			t.Fatalf("agent list should not pass --workspace; args = %v", rec.calls[0])
+		}
 	}
 }
 

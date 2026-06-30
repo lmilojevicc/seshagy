@@ -12,7 +12,7 @@ import (
 // version-sensitive, so nothing here parses separators.
 
 // paneInfo mirrors the PaneInfo fields seshagy needs from
-// `herdr pane list/get/current --json`.
+// `herdr pane list/get/current` (JSON is always emitted to stdout).
 type paneInfo struct {
 	PaneID        string `json:"pane_id"`
 	TerminalID    string `json:"terminal_id"`
@@ -28,7 +28,7 @@ type paneInfo struct {
 }
 
 // workspaceInfo mirrors the WorkspaceInfo fields seshagy needs from
-// `herdr workspace list --json`.
+// `herdr workspace list` (JSON is always emitted to stdout).
 type workspaceInfo struct {
 	WorkspaceID string `json:"workspace_id"`
 	Label       string `json:"label"`
@@ -37,7 +37,7 @@ type workspaceInfo struct {
 }
 
 // tabInfo mirrors the TabInfo fields seshagy needs from
-// `herdr tab list --json`.
+// `herdr tab list` (JSON is always emitted to stdout).
 type tabInfo struct {
 	TabID       string `json:"tab_id"`
 	WorkspaceID string `json:"workspace_id"`
@@ -55,6 +55,7 @@ type herdrResult struct {
 	Panes      []paneInfo      `json:"panes"`
 	Pane       *paneInfo       `json:"pane"`
 	Workspace  *workspaceInfo  `json:"workspace"`
+	Agents     []agentInfo     `json:"agents"`
 }
 
 // herdrResponse is the full wrapped envelope with a top-level "result" object.
@@ -82,7 +83,7 @@ func unwrapResult(raw []byte) (herdrResult, error) {
 	return direct, nil
 }
 
-// parseHerdrWorkspaces parses `herdr workspace list/create --json` output.
+// parseHerdrWorkspaces parses `herdr workspace list` output (JSON on stdout).
 func parseHerdrWorkspaces(raw []byte) ([]workspaceInfo, error) {
 	res, err := unwrapResult(raw)
 	if err != nil {
@@ -95,7 +96,7 @@ func parseHerdrWorkspaces(raw []byte) ([]workspaceInfo, error) {
 	return res.Workspaces, nil
 }
 
-// parseHerdrPanes parses `herdr pane list --json` output.
+// parseHerdrPanes parses `herdr pane list` output (JSON on stdout).
 func parseHerdrPanes(raw []byte) ([]paneInfo, error) {
 	res, err := unwrapResult(raw)
 	if err != nil {
@@ -104,7 +105,7 @@ func parseHerdrPanes(raw []byte) ([]paneInfo, error) {
 	return res.Panes, nil
 }
 
-// parseHerdrPaneInfo parses `herdr pane get/current --json` output (single pane).
+// parseHerdrPaneInfo parses `herdr pane get/current` output (single pane, JSON on stdout).
 func parseHerdrPaneInfo(raw []byte) (*paneInfo, error) {
 	res, err := unwrapResult(raw)
 	if err != nil {
@@ -122,6 +123,57 @@ func parseHerdrPaneInfo(raw []byte) (*paneInfo, error) {
 		}
 	}
 	return nil, fmt.Errorf("no pane info in herdr response")
+}
+
+// agentInfo mirrors the AgentInfo fields seshagy needs from `herdr agent list`.
+// Option<String> fields in the herdr source are omitted from JSON when None;
+// pointer types here decode missing keys to nil.
+type agentInfo struct {
+	TerminalID             string  `json:"terminal_id"`
+	Name                   *string `json:"name"`
+	Agent                  *string `json:"agent"`
+	AgentStatus            string  `json:"agent_status"`
+	WorkspaceID            string  `json:"workspace_id"`
+	TabID                  string  `json:"tab_id"`
+	PaneID                 string  `json:"pane_id"`
+	Focused                bool    `json:"focused"`
+	DisplayAgent           *string `json:"display_agent"`
+	Title                  *string `json:"title"`
+	CustomStatus           *string `json:"custom_status"`
+	ScreenDetectionSkipped bool    `json:"screen_detection_skipped"`
+	Cwd                    *string `json:"cwd"`
+	ForegroundCwd          *string `json:"foreground_cwd"`
+	Revision               uint64  `json:"revision"`
+}
+
+// ptrStr safely dereferences a *string, returning "" for nil.
+func ptrStr(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
+// parseHerdrAgents parses `herdr agent list` output (JSON on stdout).
+func parseHerdrAgents(raw []byte) ([]agentInfo, error) {
+	res, err := unwrapResult(raw)
+	if err != nil {
+		return nil, err
+	}
+	return res.Agents, nil
+}
+
+// parseHerdrWorkspaceCreated parses the `herdr workspace create` response,
+// which embeds a single workspace under result.workspace.
+func parseHerdrWorkspaceCreated(raw []byte) (workspaceInfo, error) {
+	res, err := unwrapResult(raw)
+	if err != nil {
+		return workspaceInfo{}, err
+	}
+	if res.Workspace != nil {
+		return *res.Workspace, nil
+	}
+	return workspaceInfo{}, fmt.Errorf("no workspace in herdr create response")
 }
 
 // mapHerdrStatusToAgentState maps a herdr agent_status wire value to the

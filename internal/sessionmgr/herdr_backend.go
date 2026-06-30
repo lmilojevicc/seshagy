@@ -29,7 +29,7 @@ func (herdrBackend) CurrentSession(ctx context.Context) (string, error) {
 	if id := os.Getenv("HERDR_WORKSPACE_ID"); id != "" {
 		return id, nil
 	}
-	out, _ := herdrOutput(ctx, "pane", "current", "--json") // graceful: no CLI → no current session
+	out, _ := herdrOutput(ctx, "pane", "current") // graceful: no CLI → no current session
 	pane, _ := parseHerdrPaneInfo(out)
 	if pane == nil {
 		return "", nil
@@ -38,7 +38,7 @@ func (herdrBackend) CurrentSession(ctx context.Context) (string, error) {
 }
 
 func (herdrBackend) ListSessions(ctx context.Context) ([]Item, error) {
-	out, err := herdrOutput(ctx, "workspace", "list", "--json")
+	out, err := herdrOutput(ctx, "workspace", "list")
 	if err != nil {
 		return nil, fmt.Errorf("herdr workspace list: %w", err)
 	}
@@ -104,17 +104,11 @@ func (b herdrBackend) CreateSessionFromDir(
 		"--label",
 		label,
 		"--focus",
-		"--json",
 	)
 	if err != nil {
 		return Item{}, false, fmt.Errorf("herdr workspace create: %w", err)
 	}
-	workspaces, _ := parseHerdrWorkspaces(out) // create succeeded; parse failure → best-effort
-	if len(workspaces) == 0 {
-		// Create succeeded but no JSON body — return a best-effort item.
-		return Item{Kind: KindSession, Name: label, Target: label}, false, nil
-	}
-	ws := workspaces[0]
+	ws, _ := parseHerdrWorkspaceCreated(out) // create succeeded; parse failure → best-effort
 	name := ws.Label
 	if name == "" {
 		name = label
@@ -150,7 +144,6 @@ func (b herdrBackend) CaptureSession(
 		"list",
 		"--workspace",
 		target,
-		"--json",
 	) // graceful degradation
 	panes, _ := parseHerdrPanes(out)
 	if len(panes) == 0 {
@@ -175,48 +168,50 @@ func (herdrBackend) ListAgents(
 	ctx context.Context,
 	sessionFilter string,
 ) ([]Item, error) {
-	args := []string{"pane", "list", "--json"}
-	if sessionFilter != "" {
-		args = append(args, "--workspace", sessionFilter)
-	}
-	out, err := herdrOutput(ctx, args...)
+	// `herdr agent list` returns only agent panes (no plain shells) and takes
+	// no flags. Workspace filtering is done in-memory since the CLI does not
+	// accept a --workspace flag for this command.
+	out, err := herdrOutput(ctx, "agent", "list")
 	if err != nil {
-		return nil, fmt.Errorf("herdr pane list: %w", err)
+		return nil, fmt.Errorf("herdr agent list: %w", err)
 	}
-	panes, err := parseHerdrPanes(out)
+	agents, err := parseHerdrAgents(out)
 	if err != nil {
 		return nil, err
 	}
-	items := make([]Item, 0, len(panes))
-	for _, p := range panes {
-		// Only panes with a recognized agent are agents. PaneInfo.agent is
-		// omitted for plain shells; display_agent is the friendly label.
-		if p.Agent == "" && p.DisplayAgent == "" {
+	items := make([]Item, 0, len(agents))
+	for _, a := range agents {
+		if sessionFilter != "" && a.WorkspaceID != sessionFilter {
 			continue
 		}
-		name := p.DisplayAgent
+		agentLabel := ptrStr(a.Agent)
+		// Name priority: user rename > display_agent > agent > literal.
+		name := ptrStr(a.Name)
 		if name == "" {
-			name = p.Agent
+			name = ptrStr(a.DisplayAgent)
 		}
 		if name == "" {
-			continue
+			name = agentLabel
 		}
-		path := p.ForegroundCwd
+		if name == "" {
+			name = "agent"
+		}
+		path := ptrStr(a.ForegroundCwd)
 		if path == "" {
-			path = p.Cwd
+			path = ptrStr(a.Cwd)
 		}
 		items = append(items, Item{
 			Kind:             KindAgent,
 			Name:             name,
-			AgentName:        p.Agent,
-			AgentDisplayName: p.DisplayAgent,
-			AgentState:       mapHerdrStatusToAgentState(p.AgentStatus),
-			PaneID:           p.PaneID,
-			Session:          p.WorkspaceID,
-			Window:           p.TabID,
-			Pane:             p.PaneID,
+			AgentName:        agentLabel,
+			AgentDisplayName: ptrStr(a.DisplayAgent),
+			AgentState:       mapHerdrStatusToAgentState(a.AgentStatus),
+			PaneID:           a.PaneID,
+			Session:          a.WorkspaceID,
+			Window:           a.TabID,
+			Pane:             a.PaneID,
 			Path:             path,
-			Location:         p.PaneID,
+			Location:         a.PaneID,
 		})
 	}
 	// Do NOT apply local aliases under herdr — herdr labels are authoritative.
@@ -274,7 +269,7 @@ func (herdrBackend) ResolvePaneByCwd(
 	if resolved, err := filepath.EvalSymlinks(cwd); err == nil {
 		cwd = resolved
 	}
-	out, err := herdrOutput(ctx, "pane", "list", "--json")
+	out, err := herdrOutput(ctx, "pane", "list")
 	if err != nil {
 		return "", err
 	}
