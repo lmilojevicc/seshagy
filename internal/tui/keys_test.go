@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"os/exec"
 	"strings"
 	"testing"
 
@@ -454,6 +455,119 @@ func TestRenameSessionFlowSetsAndUsesTarget(t *testing.T) {
 
 // TestAgentsScopeStatusTmuxByteIdentical is the regression guard for the 'o'
 // toggle agents-scope status under tmux terms.
+// TestRenameAgentFlowThreadsPaneID proves the agent-rename path threads the
+// pane id from startRename through the enter-commit into RenameAgent. Without
+// this, herdr (which renames by pane id) gets an empty target and fails.
+func TestRenameAgentFlowThreadsPaneID(t *testing.T) {
+	var gotItem sessionmgr.Item
+	var gotDisplay string
+	fake := &captureRenameMux{
+		onRename: func(it sessionmgr.Item, display string) error {
+			gotItem = it
+			gotDisplay = display
+			return nil
+		},
+	}
+
+	m := newTestModel(t)
+	m.mux = fake
+	m.items = []sessionmgr.Item{{
+		Kind:      sessionmgr.KindAgent,
+		Name:      "pi",
+		AgentName: "pi",
+		PaneID:    "w1:p3",
+		Session:   "w1",
+	}}
+	m.cursor = 0
+
+	model, _ := m.startRename()
+	got := model.(Model)
+	if got.renameTarget != "w1:p3" {
+		t.Fatalf("startRename() renameTarget = %q, want w1:p3", got.renameTarget)
+	}
+
+	got.renameInput.SetValue("frontend")
+	_, cmd := got.handleKey(enterMsg())
+	if cmd != nil {
+		_ = cmd() // drive RenameAgent on the fake mux
+	}
+
+	if gotItem.PaneID != "w1:p3" {
+		t.Fatalf("RenameAgent PaneID = %q, want w1:p3", gotItem.PaneID)
+	}
+	if gotDisplay != "frontend" {
+		t.Fatalf("RenameAgent display = %q, want frontend", gotDisplay)
+	}
+}
+
+type captureRenameMux struct {
+	onRename func(sessionmgr.Item, string) error
+}
+
+func (c *captureRenameMux) Kind() sessionmgr.BackendKind { return sessionmgr.BackendHerdr }
+
+func (c *captureRenameMux) Terms() sessionmgr.Terms                          { return sessionmgr.HerdrTerms() }
+func (c *captureRenameMux) InMultiplexer() bool                              { return true }
+func (c *captureRenameMux) InMultiplexerPopup(context.Context) (bool, error) { return false, nil }
+func (c *captureRenameMux) CurrentSession(context.Context) (string, error)   { return "", nil }
+func (c *captureRenameMux) ListSessions(context.Context) ([]sessionmgr.Item, error) {
+	return nil, nil
+}
+
+func (c *captureRenameMux) HasSession(context.Context, string) (bool, error) {
+	return false, nil
+}
+
+func (c *captureRenameMux) CreateSessionFromDir(
+	context.Context,
+	string,
+) (sessionmgr.Item, bool, error) {
+	return sessionmgr.Item{}, false, nil
+}
+func (c *captureRenameMux) KillSession(context.Context, string) error           { return nil }
+func (c *captureRenameMux) RenameSession(context.Context, string, string) error { return nil }
+func (c *captureRenameMux) CaptureSession(context.Context, string, int) (string, error) {
+	return "", nil
+}
+func (c *captureRenameMux) AttachOrSwitchCommand(sessionmgr.Item) *exec.Cmd { return nil }
+func (c *captureRenameMux) ListAgents(context.Context, string) ([]sessionmgr.Item, error) {
+	return nil, nil
+}
+
+func (c *captureRenameMux) CaptureAgentPane(context.Context, string, int) (string, error) {
+	return "", nil
+}
+func (c *captureRenameMux) FocusAgentCommand(sessionmgr.Item) *exec.Cmd { return nil }
+
+func (c *captureRenameMux) RenameAgent(
+	_ context.Context,
+	it sessionmgr.Item,
+	display string,
+) error {
+	return c.onRename(it, display)
+}
+
+func (c *captureRenameMux) ResolvePane(_ context.Context, pane string) (string, error) {
+	return pane, nil
+}
+
+func (c *captureRenameMux) ResolvePaneByCwd(context.Context, string) (string, error) {
+	return "", nil
+}
+
+func (c *captureRenameMux) ReportAgent(context.Context, sessionmgr.AgentReport) (bool, error) {
+	return false, nil
+}
+
+func (c *captureRenameMux) ReleaseAgent(context.Context, sessionmgr.AgentRelease) (bool, error) {
+	return false, nil
+}
+
+func (c *captureRenameMux) MarkAgentVisited(context.Context, string) (bool, error) {
+	return false, nil
+}
+func (c *captureRenameMux) MarkActiveDoneAgentsIdle(context.Context, []sessionmgr.Item) {}
+
 func TestAgentsScopeStatusTmuxByteIdentical(t *testing.T) {
 	m := newTestModel(t)
 	m.source = sessionmgr.ModeAgents

@@ -64,7 +64,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.renameSession = ""
 			m.renameKind = ""
 			if newName == "" && kind == sessionmgr.KindAgent {
-				return m, renameAgentCmd(m.mux, oldName, session, "")
+				return m, renameAgentCmd(m.mux, target, oldName, session, "")
 			}
 			if newName == "" || oldName == "" || newName == oldName {
 				m.status = "rename cancelled"
@@ -74,7 +74,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			case sessionmgr.KindSession:
 				return m, renameCmd(m.mux, target, oldName, newName)
 			case sessionmgr.KindAgent:
-				return m, renameAgentCmd(m.mux, oldName, session, newName)
+				return m, renameAgentCmd(m.mux, target, oldName, session, newName)
 			default:
 				m.status = "rename only applies to " + m.terms.SessionPlural + " and agents"
 				return m, nil
@@ -519,6 +519,7 @@ func (m Model) startRename() (tea.Model, tea.Cmd) {
 		m.renameKind = item.Kind
 		m.renameFrom = item.AgentName
 		m.renameSession = item.Session
+		m.renameTarget = item.ActionTarget() // herdr rename targets the pane id
 		m.renameInput.SetValue(item.DisplayName())
 		m.renameInput.Focus()
 		m.status = "renaming agent " + item.AgentName

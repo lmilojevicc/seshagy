@@ -179,11 +179,19 @@ func renameCmd(mux sessionmgr.Multiplexer, target, displayName, newName string) 
 	}
 }
 
-func renameAgentCmd(mux sessionmgr.Multiplexer, agentType, session, displayName string) tea.Cmd {
+func renameAgentCmd(
+	mux sessionmgr.Multiplexer,
+	paneID, agentType, session, displayName string,
+) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		item := sessionmgr.Item{Kind: sessionmgr.KindAgent, AgentName: agentType, Session: session}
+		item := sessionmgr.Item{
+			Kind:      sessionmgr.KindAgent,
+			PaneID:    paneID,
+			AgentName: agentType,
+			Session:   session,
+		}
 		err := mux.RenameAgent(ctx, item, displayName)
 		verb := "renamed agent"
 		if displayName == "" {
