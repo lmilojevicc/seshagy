@@ -434,6 +434,13 @@ func TestHerdrBackendListAgents(t *testing.T) {
 		items[0].AgentState != AgentWorking {
 		t.Fatalf("items[0] = %+v", items[0])
 	}
+	// The rename must land in AgentDisplayName so DisplayName() renders it.
+	if items[0].AgentDisplayName != "my-claude" {
+		t.Fatalf("items[0].AgentDisplayName = %q, want my-claude", items[0].AgentDisplayName)
+	}
+	if got := items[0].DisplayName(); got != "my-claude" {
+		t.Fatalf("items[0].DisplayName() = %q, want my-claude", got)
+	}
 	if items[0].Session != "w1" || items[0].Window != "w1:t1" ||
 		items[0].PaneID != "w1:p1" || items[0].Path != "/proj/src" {
 		t.Fatalf("items[0] fields = %+v", items[0])

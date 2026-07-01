@@ -188,11 +188,14 @@ func (herdrBackend) ListAgents(
 			continue
 		}
 		agentLabel := ptrStr(a.Agent)
-		// Name priority: user rename > display_agent > agent > literal.
-		name := ptrStr(a.Name)
-		if name == "" {
-			name = ptrStr(a.DisplayAgent)
+		// Display name priority: user rename (name) > presentation override
+		// (display_agent). Route into AgentDisplayName so DisplayName() renders
+		// the rename; AgentName stays the detected agent type.
+		display := ptrStr(a.Name)
+		if display == "" {
+			display = ptrStr(a.DisplayAgent)
 		}
+		name := display
 		if name == "" {
 			name = agentLabel
 		}
@@ -211,7 +214,7 @@ func (herdrBackend) ListAgents(
 			Kind:             KindAgent,
 			Name:             name,
 			AgentName:        agentLabel,
-			AgentDisplayName: ptrStr(a.DisplayAgent),
+			AgentDisplayName: display,
 			AgentState:       mapHerdrStatusToAgentState(a.AgentStatus),
 			PaneID:           a.PaneID,
 			Session:          a.WorkspaceID,
