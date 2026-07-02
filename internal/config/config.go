@@ -73,6 +73,7 @@ type IconsConfig struct {
 	Enabled        *bool             `toml:"enabled,omitempty"          json:"enabled,omitempty"`
 	ASCII          bool              `toml:"ascii,omitempty"            json:"ascii,omitempty"`
 	Session        IconConfig        `toml:"session"                    json:"session"`
+	Workspace      IconConfig        `toml:"workspace"                  json:"workspace"`
 	Zoxide         IconConfig        `toml:"zoxide"                     json:"zoxide"`
 	FD             IconConfig        `toml:"fd"                         json:"fd"`
 	TmuxState      TmuxStatesConfig  `toml:"tmux_state"                 json:"tmux_state"`
@@ -160,6 +161,7 @@ func Default() Config {
 			TmuxState:  defaultTmuxStatesConfig(),
 			AgentState: defaultAgentStatesConfig(),
 			Session:    IconConfig{Icon: sessionmgr.IconSession + " ", Label: "S", Color: "10"},
+			Workspace:  IconConfig{Icon: sessionmgr.IconWorkspace + " ", Label: "W", Color: "10"},
 			Zoxide:     IconConfig{Icon: sessionmgr.IconZoxide + " ", Label: "Z", Color: "14"},
 			FD:         IconConfig{Icon: sessionmgr.IconFD + " ", Label: "F", Color: "11"},
 		},
@@ -238,6 +240,7 @@ func (c *Config) Normalize() {
 	c.Icons.Enabled = nil
 	c.Icons.ASCII = false
 	normalizeKindIcon(&c.Icons.Session, defaults.Icons.Session, sessionmgr.IconSession)
+	normalizeKindIcon(&c.Icons.Workspace, defaults.Icons.Workspace, sessionmgr.IconWorkspace)
 	normalizeKindIcon(&c.Icons.Zoxide, defaults.Icons.Zoxide, sessionmgr.IconZoxide)
 	normalizeKindIcon(&c.Icons.FD, defaults.Icons.FD, sessionmgr.IconFD)
 	normalizeTmuxStatesConfig(&c.Icons.TmuxState, defaults.Icons.TmuxState)
@@ -300,6 +303,11 @@ func (c Config) IconSet() sessionmgr.IconSet {
 			Icon:  c.Icons.Session.Icon,
 			ASCII: c.Icons.Session.Label,
 			Color: c.Icons.Session.Color,
+		},
+		Workspace: sessionmgr.IconStyle{
+			Icon:  c.Icons.Workspace.Icon,
+			ASCII: c.Icons.Workspace.Label,
+			Color: c.Icons.Workspace.Color,
 		},
 		Zoxide: sessionmgr.IconStyle{
 			Icon:  c.Icons.Zoxide.Icon,
@@ -449,19 +457,12 @@ func normalizeKindIcon(
 	icon *IconConfig,
 	defaults IconConfig,
 	bareIcon string,
-	legacyIcons ...string,
 ) {
 	if strings.TrimSpace(icon.Icon) == "" {
 		icon.Icon = defaults.Icon
 	}
 	if icon.Icon == bareIcon {
 		icon.Icon = defaults.Icon
-	}
-	for _, legacy := range legacyIcons {
-		if icon.Icon == legacy {
-			icon.Icon = defaults.Icon
-			break
-		}
 	}
 	if legacy := strings.TrimSpace(icon.ASCII); legacy != "" &&
 		(strings.TrimSpace(icon.Label) == "" || icon.Label == defaults.Label) {

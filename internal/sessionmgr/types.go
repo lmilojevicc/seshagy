@@ -3,9 +3,10 @@ package sessionmgr
 import "time"
 
 const (
-	IconSession = ""
-	IconZoxide  = "󰉖"
-	IconFD      = "󰥩"
+	IconSession   = "󰙀"
+	IconZoxide    = "󰉖"
+	IconFD        = "󰥩"
+	IconWorkspace = "󰙀" // same glyph as session; separate name for herdr config
 )
 
 type Kind string

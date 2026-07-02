@@ -624,3 +624,21 @@ func TestExists(t *testing.T) {
 		t.Fatal("Exists() = false, want true after save")
 	}
 }
+
+func TestWorkspaceIconDefaults(t *testing.T) {
+	cfg := Default()
+	icons := cfg.IconSet()
+	if icons.Workspace.Icon != sessionmgr.IconWorkspace+" " {
+		t.Fatalf("workspace icon = %q, want %q", icons.Workspace.Icon, sessionmgr.IconWorkspace+" ")
+	}
+	// Session icon must now match workspace glyph.
+	if icons.Session.Icon != icons.Workspace.Icon {
+		t.Fatalf("session icon = %q, workspace icon = %q", icons.Session.Icon, icons.Workspace.Icon)
+	}
+	// Override via config.
+	cfg.Icons.Workspace = IconConfig{Icon: "X ", Label: "x", Color: "9"}
+	overridden := cfg.IconSet()
+	if overridden.Workspace.Icon != "X " || overridden.Workspace.Color != "9" {
+		t.Fatalf("overridden workspace = %+v", overridden.Workspace)
+	}
+}

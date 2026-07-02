@@ -20,6 +20,7 @@ type IconSet struct {
 	AgentStateMode string
 	AgentStates    AgentStateStyles
 	Session        IconStyle
+	Workspace      IconStyle
 	Zoxide         IconStyle
 	FD             IconStyle
 }
@@ -46,11 +47,12 @@ type IconStyle struct {
 
 func DefaultIconSet() IconSet {
 	return IconSet{
-		Enabled: true,
-		ASCII:   false,
-		Session: IconStyle{Icon: IconSession + " ", ASCII: "S", Color: "10"},
-		Zoxide:  IconStyle{Icon: IconZoxide + " ", ASCII: "Z", Color: "14"},
-		FD:      IconStyle{Icon: IconFD + " ", ASCII: "F", Color: "11"},
+		Enabled:   true,
+		ASCII:     false,
+		Session:   IconStyle{Icon: IconSession + " ", ASCII: "S", Color: "10"},
+		Workspace: IconStyle{Icon: IconWorkspace + " ", ASCII: "W", Color: "10"},
+		Zoxide:    IconStyle{Icon: IconZoxide + " ", ASCII: "Z", Color: "14"},
+		FD:        IconStyle{Icon: IconFD + " ", ASCII: "F", Color: "11"},
 	}
 }
 
