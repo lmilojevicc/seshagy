@@ -467,13 +467,7 @@ func (m Model) activateSelected() (tea.Model, tea.Cmd) {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 		_, _ = m.mux.MarkAgentVisited(ctx, item.PaneID)
-		m.status = fmt.Sprintf(
-			"focusing %s on %s:%s.%s",
-			item.DisplayName(),
-			item.Session,
-			item.Window,
-			item.Pane,
-		)
+		m.status = fmt.Sprintf("focusing %s on %s", item.DisplayName(), item.Location)
 		return m, focusAgentCmd(m.mux, item)
 	case sessionmgr.KindZoxide, sessionmgr.KindFD:
 		m.status = "creating " + m.terms.SessionNoun + " from " + item.Path

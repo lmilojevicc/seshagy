@@ -489,15 +489,21 @@ func (m Model) detailLines(item sessionmgr.Item) []string {
 				agentStateText(item.AgentState),
 			)
 		}
-		return []string{
+		lines := []string{
 			s.title.Render(item.DisplayName()),
 			s.muted.Render("agent · " + item.AgentName),
 			"",
 			kv(s, "state", stateLabel),
 			kv(s, "location", item.Location),
-			kv(s, m.terms.SessionNoun, item.Session),
-			kv(s, "path", sessionmgr.ContractHome(item.Path)),
 		}
+		// Under herdr, item.Session is an opaque workspace id and the location
+		// line already shows the resolved workspace label — skip the redundant
+		// id-leaking row. Under tmux the session name is still useful context.
+		if m.terms.BackendName != "herdr" {
+			lines = append(lines, kv(s, m.terms.SessionNoun, item.Session))
+		}
+		lines = append(lines, kv(s, "path", sessionmgr.ContractHome(item.Path)))
+		return lines
 	default:
 		return []string{s.title.Render(item.DisplayName())}
 	}
