@@ -7,6 +7,9 @@
 # command is explicitly guarded with || true or checked. The script always
 # exits 0 (except when invoked via the codex PermissionRequest command string
 # which appends '; exit 1' OUTSIDE this script).
+
+# herdr owns agent detection; seshagy hooks are no-ops under herdr.
+[ "${HERDR_ENV:-}" = "1" ] && exit 0
 agent="${1:-}"
 state="${2:-idle}"
 message="${3:-}"

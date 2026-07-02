@@ -32,3 +32,23 @@ func (m SourceMode) Names() ModeNames {
 	}
 	return modeNames[ModeAll]
 }
+
+// DisplayNames returns the human-facing labels adapted to the active
+// multiplexer vocabulary. ConfigToken is always taken from Names() so config
+// and JSON tokens stay stable regardless of backend.
+func (m SourceMode) DisplayNames(terms Terms) ModeNames {
+	n := m.Names()
+	if terms.SessionPlural == "" || terms.SessionPlural == "sessions" {
+		return n // tmux/neutral: identical to config labels
+	}
+	switch m {
+	case ModeSessions:
+		n.Tab = terms.SessionTitle + "s"
+		n.Title = terms.SessionTitle + "s"
+		n.List = terms.SessionPlural
+	case ModeCurrentAgents:
+		n.Title = "Current Agents"
+		n.List = "current " + terms.SessionNoun + " agents"
+	}
+	return n
+}

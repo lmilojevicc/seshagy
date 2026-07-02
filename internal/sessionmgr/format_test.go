@@ -30,6 +30,25 @@ func TestIconSetForTmuxState(t *testing.T) {
 	}
 }
 
+func TestIconSetForUnknownAgentState(t *testing.T) {
+	// ForAgentState backfills only Icon and ASCII from defaults; Color comes
+	// from the configured IconSet (tested via config projection in config_test).
+	style := IconSet{}.ForAgentState(AgentUnknown)
+	if style.Icon != "?" || style.ASCII != "unknown" {
+		t.Fatalf("default unknown state style = %#v, want icon ?, label unknown", style)
+	}
+
+	line := FormatLineWithIcons(Item{
+		Kind:       KindAgent,
+		AgentName:  "pi",
+		AgentState: AgentUnknown,
+	}, IconSet{})
+	clean := StripANSI(line)
+	if !strings.HasPrefix(clean, "? pi") {
+		t.Fatalf("unknown agent line = %q, want ? prefix", clean)
+	}
+}
+
 func TestParseActionLineWithIcons(t *testing.T) {
 	icons := DefaultIconSet()
 	tests := []struct {

@@ -10,10 +10,16 @@ Run one command to get a keyboard-first view where you can:
 - see coding-agent panes, their current state, and where they are running.
 
 It is intentionally tmux-native. Agent state is reported through the
-`@seshagy_agent_*` pane-option namespace (deliberately separate from herdr's
-`@agent_*` so both tools coexist). Near-instant detection comes from installed
-hook/plugin integrations; a capture-pane screen-rule backstop (hot-updated from
-[herdr](https://herdr.dev/docs/agents)) covers agents without usable hooks.
+`@seshagy_agent_*` pane-option namespace (tmux backend only). Near-instant
+detection comes from installed hook/plugin integrations; a capture-pane
+screen-rule backstop (hot-updated from [herdr](https://herdr.dev/docs/agents))
+covers agents without usable hooks.
+
+seshagy also supports [herdr](https://herdr.dev) as a multiplexer: when run
+inside herdr (`$HERDR_ENV=1`), it auto-detects herdr and speaks herdr's
+vocabulary (workspaces/tabs/panes) instead of tmux's (sessions/windows/panes).
+Under herdr, agent state is read-only from herdr's `agent_status` — seshagy
+writes no state, since herdr owns detection.
 
 ## Quick start
 
@@ -54,7 +60,9 @@ Typical first run:
 
 Required:
 
-- `tmux`
+- `tmux` **or** [herdr](https://herdr.dev) — seshagy auto-detects which
+  multiplexer it is running in (`$HERDR_ENV=1` → herdr; else `$TMUX` → tmux;
+  else no backend). All session/agent operations are available under either.
 
 Optional, but useful:
 
@@ -63,18 +71,39 @@ Optional, but useful:
 - `yazi` for choosing a directory interactively
 - `eza` for richer directory previews
 
+## Multiplexer support
+
+seshagy supports two multiplexer backends with a shared vocabulary:
+
+| concept           | tmux    | herdr     |
+| ----------------- | ------- | --------- |
+| project container | session | workspace |
+| layout group      | window  | tab       |
+| terminal          | pane    | pane      |
+
+Backend is selected automatically from the environment — there is no config
+key to set. The TUI and CLI adapt their terminology to the active backend
+(sessions/windows under tmux; workspaces/tabs under herdr).
+
+**Agent state under herdr is read-only.** herdr owns agent detection and
+exposes it via the `agent_status` field (`idle`/`working`/`blocked`/`done`/
+`unknown`). seshagy reads this directly; it does **not** call
+`herdr pane report-agent`, run the capture-pane manifest backstop, or write
+`@seshagy_agent_*` options under herdr. The state-reporting hooks (shell,
+Pi extension, OpenCode plugin) early-exit when `$HERDR_ENV=1` is set.
+
 Builds from source require Go 1.26, matching `go.mod`. Shell-hook integrations
 may use `bash` and `python3`; the OpenCode plugin runs on Bun/Node.
 
 ## What seshagy manages
 
-| Area | What you can do |
-| --- | --- |
-| tmux sessions | list, attach outside tmux, switch-client inside tmux, rename, kill, and preview sessions |
-| project directories | create/switch tmux sessions from `zoxide` or a configurable `fd` command |
-| agent panes | list, filter, focus, or kill detected agent panes |
-| current session agents | narrow the agent view to the current tmux session (`o`) |
-| input flow | use classic action keys or type-first filtering with a prefix key |
+| Area                   | What you can do                                                                          |
+| ---------------------- | ---------------------------------------------------------------------------------------- |
+| tmux sessions          | list, attach outside tmux, switch-client inside tmux, rename, kill, and preview sessions |
+| project directories    | create/switch tmux sessions from `zoxide` or a configurable `fd` command                 |
+| agent panes            | list, filter, focus, or kill detected agent panes                                        |
+| current session agents | narrow the agent view to the current tmux session (`o`)                                  |
+| input flow             | use classic action keys or type-first filtering with a prefix key                        |
 
 When a directory becomes a session, the session name is derived from the
 basename: `.config` becomes `dot_config`, and unsupported characters collapse to
@@ -84,12 +113,12 @@ basename: `.config` becomes `dot_config`, and unsupported characters collapse to
 
 seshagy detects four states per agent pane:
 
-| State | Meaning |
-| --- | --- |
-| `idle` | not working, or a `done` pane that has been visited |
-| `working` | agent actively running a turn |
-| `blocked` | asking permission or asking the user a question |
-| `done` | finished a turn, pane not yet visited (clears to `idle` on focus) |
+| State     | Meaning                                                           |
+| --------- | ----------------------------------------------------------------- |
+| `idle`    | not working, or a `done` pane that has been visited               |
+| `working` | agent actively running a turn                                     |
+| `blocked` | asking permission or asking the user a question                   |
+| `done`    | finished a turn, pane not yet visited (clears to `idle` on focus) |
 
 Detection uses a layered authority model mirroring
 [herdr](https://herdr.dev/docs/agents):
@@ -124,35 +153,36 @@ Bundled manifests ship as an offline fallback. On launch, seshagy fetches the
 latest manifests from the [herdr public
 catalog](https://herdr.dev/agent-detection/) (async, non-blocking) and caches
 them locally. Precedence: local override (`$XDG_CONFIG_HOME/seshagy/agent-detection/<id>.toml`)
+
 > cached remote > bundled embed. Remote manifests are version-guarded against
-downgrade and compile-validated before caching. This keeps screen rules current
-without a seshagy release.
+> downgrade and compile-validated before caching. This keeps screen rules current
+> without a seshagy release.
 
 ### Supported agents
 
 Discovered via process-name matching plus a process-tree descendant walk (for
 node-wrapped CLIs that report as `node`):
 
-| Agent | Process name(s) | Detection |
-| --- | --- | --- |
-| Pi | `pi` | lifecycle (extension) |
-| OpenCode | `opencode` | lifecycle (plugin) |
-| Claude Code | `claude` | partial hooks + screen |
-| Codex | `codex` | partial hooks + screen |
-| Factory Droid | `droid`, `factory` | partial hooks + screen |
-| Cursor Agent | `cursor-agent`, `cursor` | screen only |
-| Antigravity | `agy`, `antigravity` | screen only |
-| Grok Build | `grok` | screen only |
-| GitHub Copilot CLI | `copilot` | screen only |
-| Amp | `amp` | screen only |
-| Cline | `cline` | screen only |
-| Devin | `devin` | screen only |
-| Gemini | `gemini` | screen only |
-| Hermes | `hermes`, `hermes-agent` | screen only |
-| Kilo Code | `kilo`, `kilocode` | screen only |
-| Kimi Code | `kimi` | screen only |
-| Kiro | `kiro-cli` | screen only |
-| Qoder CLI | `qodercli`, `qoderclicn` | screen only |
+| Agent              | Process name(s)          | Detection              |
+| ------------------ | ------------------------ | ---------------------- |
+| Pi                 | `pi`                     | lifecycle (extension)  |
+| OpenCode           | `opencode`               | lifecycle (plugin)     |
+| Claude Code        | `claude`                 | partial hooks + screen |
+| Codex              | `codex`                  | partial hooks + screen |
+| Factory Droid      | `droid`, `factory`       | partial hooks + screen |
+| Cursor Agent       | `cursor-agent`, `cursor` | screen only            |
+| Antigravity        | `agy`, `antigravity`     | screen only            |
+| Grok Build         | `grok`                   | screen only            |
+| GitHub Copilot CLI | `copilot`                | screen only            |
+| Amp                | `amp`                    | screen only            |
+| Cline              | `cline`                  | screen only            |
+| Devin              | `devin`                  | screen only            |
+| Gemini             | `gemini`                 | screen only            |
+| Hermes             | `hermes`, `hermes-agent` | screen only            |
+| Kilo Code          | `kilo`, `kilocode`       | screen only            |
+| Kimi Code          | `kimi`                   | screen only            |
+| Kiro               | `kiro-cli`               | screen only            |
+| Qoder CLI          | `qodercli`, `qoderclicn` | screen only            |
 
 Architecture-suffixed binary names (e.g. `codex-aarch64-a`) are matched via a
 prefix fallback.
@@ -180,27 +210,27 @@ auto-discovered `plugin/` directory under its config dir.
 
 ## TUI keys
 
-| Key | Action |
-| --- | --- |
-| `enter` | attach/switch to a session, create/switch from a directory, or focus an agent pane |
-| `j`/`k`, arrows | move selection |
-| `1`..`5` | select source by configured order |
-| `a` | all sources |
-| `t` | tmux sessions |
-| `o` | toggle agents scope (current session vs all) |
-| `z` | zoxide directories |
-| `f` | fd directories |
-| `/` | filter visible rows |
-| `backspace` | clear filter when not editing |
-| `r` | refresh |
-| `R` | rename selected session |
-| `x` | kill selected session or agent pane |
-| `y` | open `yazi`, then create/switch from its exit directory |
-| `h` | open the integration install menu |
-| `m` | change classic/type-first input mode |
-| `p` | toggle preview pane |
-| `?` | toggle help |
-| `q` / `esc` / `ctrl-c` | quit |
+| Key                    | Action                                                                             |
+| ---------------------- | ---------------------------------------------------------------------------------- |
+| `enter`                | attach/switch to a session, create/switch from a directory, or focus an agent pane |
+| `j`/`k`, arrows        | move selection                                                                     |
+| `1`..`5`               | select source by configured order                                                  |
+| `a`                    | all sources                                                                        |
+| `t`                    | tmux sessions                                                                      |
+| `o`                    | toggle agents scope (current session vs all)                                       |
+| `z`                    | zoxide directories                                                                 |
+| `f`                    | fd directories                                                                     |
+| `/`                    | filter visible rows                                                                |
+| `backspace`            | clear filter when not editing                                                      |
+| `r`                    | refresh                                                                            |
+| `R`                    | rename selected session                                                            |
+| `x`                    | kill selected session or agent pane                                                |
+| `y`                    | open `yazi`, then create/switch from its exit directory                            |
+| `h`                    | open the integration install menu                                                  |
+| `m`                    | change classic/type-first input mode                                               |
+| `p`                    | toggle preview pane                                                                |
+| `?`                    | toggle help                                                                        |
+| `q` / `esc` / `ctrl-c` | quit                                                                               |
 
 In type-first mode, typing edits the filter immediately. Most action keys then
 require the configured prefix first (`ctrl+x` by default). `enter` and movement
@@ -315,20 +345,20 @@ catalog_url = ""           # defaults to the herdr public catalog when empty
 - a hex color (`"#cba6f7"`),
 - or `"default"` to inherit the terminal foreground (used by `active_tab` by default).
 
-| Key | Used for |
-| --- | --- |
-| `focused_border` | border on the focused pane |
-| `active_tab` | selected source tab label |
-| `inactive_tab` | unselected source tabs |
-| `border` | pane borders |
-| `title` | pane titles and headings |
-| `accent` | emphasis text and the top accent bar |
-| `key` | key names in help/footer |
-| `muted` | subtitles and secondary text |
-| `success` | success status messages |
-| `info` | informational status messages |
-| `warning` | warning status messages |
-| `danger` | error/danger status messages |
+| Key              | Used for                             |
+| ---------------- | ------------------------------------ |
+| `focused_border` | border on the focused pane           |
+| `active_tab`     | selected source tab label            |
+| `inactive_tab`   | unselected source tabs               |
+| `border`         | pane borders                         |
+| `title`          | pane titles and headings             |
+| `accent`         | emphasis text and the top accent bar |
+| `key`            | key names in help/footer             |
+| `muted`          | subtitles and secondary text         |
+| `success`        | success status messages              |
+| `info`           | informational status messages        |
+| `warning`        | warning status messages              |
+| `danger`         | error/danger status messages         |
 
 Example:
 
@@ -376,30 +406,30 @@ these settings.
 Each source kind can be customized under `[icons.session]`, `[icons.zoxide]`,
 `[icons.fd]`:
 
-| Key | Purpose |
-| --- | --- |
-| `icon` | glyph shown in `icons` mode (include trailing space if desired) |
-| `label` | text shown in `text` mode |
-| `color` | ANSI index or hex color for that icon |
+| Key     | Purpose                                                         |
+| ------- | --------------------------------------------------------------- |
+| `icon`  | glyph shown in `icons` mode (include trailing space if desired) |
+| `label` | text shown in `text` mode                                       |
+| `color` | ANSI index or hex color for that icon                           |
 
 Agent state appearance is customized per state under
 `[icons.agent_state.working]`, `[icons.agent_state.blocked]`,
 `[icons.agent_state.done]`, and `[icons.agent_state.idle]`:
 
-| Key | Purpose |
-| --- | --- |
-| `icon` | glyph shown when `agent_state_mode` resolves to icons |
-| `label` | text shown when `agent_state_mode` resolves to text (wrapped in `[…]` in list rows) |
+| Key     | Purpose                                                                                |
+| ------- | -------------------------------------------------------------------------------------- |
+| `icon`  | glyph shown when `agent_state_mode` resolves to icons                                  |
+| `label` | text shown when `agent_state_mode` resolves to text (wrapped in `[…]` in list rows)    |
 | `color` | optional ANSI index or hex color; when empty, the TUI uses theme colors for that state |
 
 Default state glyphs and labels:
 
-| State | `icon` | `label` |
-| --- | --- | --- |
-| working | `▶` | `working` |
-| blocked | `◆` | `blocked` |
-| done | `✓` | `done` |
-| idle | `◌` | `idle` |
+| State   | `icon` | `label`   |
+| ------- | ------ | --------- |
+| working | `▶`    | `working` |
+| blocked | `◆`    | `blocked` |
+| done    | `✓`    | `done`    |
+| idle    | `◌`    | `idle`    |
 
 Example (defaults from `seshagy config init`):
 
@@ -427,7 +457,7 @@ colors and icons there. `seshagy config show` prints the resolved config.
 
 ## Limits and expectations
 
-- tmux is required for session and agent operations.
+- a multiplexer is required for session and agent operations: tmux (`$TMUX`) or herdr (`$HERDR_ENV=1`). Without one, seshagy shows directory sources only.
 - Hook/plugin integrations report state through the `@seshagy_agent_*`
   namespace. Agents without integrations are still discovered (process name +
   descendant walk) and classified by the capture-pane screen-rule backstop when

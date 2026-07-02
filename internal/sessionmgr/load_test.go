@@ -51,6 +51,7 @@ func installBrokenZoxideOnPath(t *testing.T) {
 func TestLoadWithOptionsModeAllPartialWhenFDFails(t *testing.T) {
 	sessionLine := "dev\x1f100\x1f120\x1f/tmp/dev\x1f1\x1f2"
 	installModeAllStrictFakeTmux(t, sessionLine)
+	t.Setenv("TMUX", "/tmp/fake-tmux-sock,12345,0")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -78,6 +79,7 @@ func TestLoadWithOptionsModeAllPartialWhenZoxideFails(t *testing.T) {
 	sessionLine := "dev\x1f100\x1f120\x1f/tmp/dev\x1f1\x1f2"
 	installModeAllStrictFakeTmux(t, sessionLine)
 	installBrokenZoxideOnPath(t)
+	t.Setenv("TMUX", "/tmp/fake-tmux-sock,12345,0")
 	fdDir := t.TempDir()
 
 	result, err := LoadWithOptions(
@@ -117,6 +119,7 @@ func TestLoadWithOptionsModeDispatch(t *testing.T) {
 	sessionLine := "dev\x1f100\x1f120\x1f/tmp/dev\x1f1\x1f2"
 	fdDir := t.TempDir()
 	installModeAllStrictFakeTmux(t, sessionLine)
+	t.Setenv("TMUX", "/tmp/fake-tmux-sock,12345,0")
 
 	ctx := context.Background()
 	fdOpts := LoadOptions{FDCommand: "printf '%s\\n' " + fdDir}

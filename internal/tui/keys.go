@@ -56,13 +56,15 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			oldName := m.renameFrom
 			kind := m.renameKind
 			session := m.renameSession
+			target := m.renameTarget
 			m.inputMode = modeNormal
 			m.renameInput.Blur()
 			m.renameFrom = ""
+			m.renameTarget = ""
 			m.renameSession = ""
 			m.renameKind = ""
 			if newName == "" && kind == sessionmgr.KindAgent {
-				return m, renameAgentLabelCmd(oldName, session, "")
+				return m, renameAgentCmd(m.mux, target, oldName, session, "")
 			}
 			if newName == "" || oldName == "" || newName == oldName {
 				m.status = "rename cancelled"
@@ -70,11 +72,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			switch kind {
 			case sessionmgr.KindSession:
-				return m, renameCmd(oldName, newName)
+				return m, renameCmd(m.mux, target, oldName, newName)
 			case sessionmgr.KindAgent:
-				return m, renameAgentLabelCmd(oldName, session, newName)
+				return m, renameAgentCmd(m.mux, target, oldName, session, newName)
 			default:
-				m.status = "rename only applies to sessions and agents"
+				m.status = "rename only applies to " + m.terms.SessionPlural + " and agents"
 				return m, nil
 			}
 		case "ctrl+c":
@@ -137,11 +139,11 @@ func (m Model) handleActionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.agentsCurrentOnly = !m.agentsCurrentOnly
 		switch {
 		case m.agentsCurrentOnly && m.currentSession == "":
-			m.status = "agents: not in a tmux session"
+			m.status = "agents: not in a " + m.terms.BackendName + " " + m.terms.SessionNoun
 		case m.agentsCurrentOnly:
-			m.status = "agents: " + m.currentSession
+			m.status = "agents: " + m.currentSessionLabel()
 		default:
-			m.status = "agents: all sessions"
+			m.status = "agents: all " + m.terms.SessionPlural
 		}
 		m.clampCursor()
 		return m, m.previewForSelection()
@@ -437,7 +439,7 @@ func (m Model) switchSource(source sessionmgr.SourceMode) (tea.Model, tea.Cmd) {
 	} else {
 		m.items = nil
 		m.loading = true
-		m.status = "loading " + source.Names().List
+		m.status = "loading " + source.DisplayNames(m.terms).List
 	}
 	var refresh tea.Cmd
 	m, refresh = m.beginRefresh(source, false)
@@ -453,7 +455,7 @@ func (m Model) activateSelected() (tea.Model, tea.Cmd) {
 	switch item.Kind {
 	case sessionmgr.KindSession:
 		m.status = "attaching " + item.Name
-		return m, attachCmd(item.Name)
+		return m, attachCmd(m.mux, item)
 	case sessionmgr.KindAgent:
 		if item.Session == "" || item.Window == "" || item.PaneID == "" {
 			m.status = "cannot focus agent (missing pane info)"
@@ -464,18 +466,12 @@ func (m Model) activateSelected() (tea.Model, tea.Cmd) {
 		// so the flip must persist first. Errors are non-fatal.
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		_, _ = sessionmgr.MarkAgentVisited(ctx, item.PaneID)
-		m.status = fmt.Sprintf(
-			"focusing %s on %s:%s.%s",
-			item.DisplayName(),
-			item.Session,
-			item.Window,
-			item.Pane,
-		)
-		return m, focusAgentCmd(item.Session, item.Window, item.PaneID)
+		_, _ = m.mux.MarkAgentVisited(ctx, item.PaneID)
+		m.status = fmt.Sprintf("focusing %s on %s", item.DisplayName(), item.Location)
+		return m, focusAgentCmd(m.mux, item)
 	case sessionmgr.KindZoxide, sessionmgr.KindFD:
-		m.status = "creating session from " + item.Path
-		return m, createSessionCmd(item.Path)
+		m.status = "creating " + m.terms.SessionNoun + " from " + item.Path
+		return m, createSessionCmd(m.mux, item.Path)
 	default:
 		return m, nil
 	}
@@ -489,10 +485,10 @@ func (m Model) deleteSelected() (tea.Model, tea.Cmd) {
 	}
 	switch item.Kind {
 	case sessionmgr.KindSession:
-		m.status = "killing session " + item.Name
-		return m, deleteSessionCmd(item.Name)
+		m.status = m.terms.KillVerb + " " + m.terms.SessionNoun + " " + item.Name
+		return m, deleteSessionCmd(m.mux, item)
 	default:
-		m.status = "delete only applies to sessions"
+		m.status = "delete only applies to " + m.terms.SessionPlural
 		return m, nil
 	}
 }
@@ -508,6 +504,7 @@ func (m Model) startRename() (tea.Model, tea.Cmd) {
 		m.inputMode = modeRename
 		m.renameKind = item.Kind
 		m.renameFrom = item.Name
+		m.renameTarget = item.ActionTarget()
 		m.renameInput.Focus()
 		m.status = "renaming " + item.Name
 		return m, textinput.Blink
@@ -516,12 +513,13 @@ func (m Model) startRename() (tea.Model, tea.Cmd) {
 		m.renameKind = item.Kind
 		m.renameFrom = item.AgentName
 		m.renameSession = item.Session
+		m.renameTarget = item.ActionTarget() // herdr rename targets the pane id
 		m.renameInput.SetValue(item.DisplayName())
 		m.renameInput.Focus()
 		m.status = "renaming agent " + item.AgentName
 		return m, textinput.Blink
 	default:
-		m.status = "rename only applies to sessions and agents"
+		m.status = "rename only applies to " + m.terms.SessionPlural + " and agents"
 		return m, nil
 	}
 }
@@ -529,14 +527,14 @@ func (m Model) startRename() (tea.Model, tea.Cmd) {
 func (m Model) startYazi() (tea.Model, tea.Cmd) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	inPopup, err := checkTmuxPopup(ctx)
+	inPopup, err := m.checkPopup(ctx)
 	if err != nil {
-		m.status = fmt.Sprintf("checking tmux popup: %v", err)
+		m.status = fmt.Sprintf("checking %s popup: %v", m.terms.BackendName, err)
 		m.err = err
 		return m, nil
 	}
 	if inPopup {
-		err := fmt.Errorf("cannot open yazi inside a tmux popup")
+		err := fmt.Errorf("cannot open yazi inside a %s popup", m.terms.BackendName)
 		m.status = err.Error()
 		m.err = err
 		return m, nil

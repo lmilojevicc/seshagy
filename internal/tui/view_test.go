@@ -17,7 +17,17 @@ import (
 func newTestModel(t *testing.T) Model {
 	t.Helper()
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	return New()
+	// Tests mock tmux via SetTmuxHooksForTest; force TMUX + the tmux backend so
+	// those seams are exercised and InMultiplexer() is true regardless of the
+	// real environment.
+	t.Setenv("TMUX", "/tmp/fake-tmux-sock,12345,0")
+	m := New()
+	// Tests mock tmux via SetTmuxHooksForTest; force the tmux backend so those
+	// seams are exercised even when tests run outside tmux.
+	m.mux = sessionmgr.NewTmuxBackend()
+	m.terms = m.mux.Terms()
+	m.checkPopup = m.mux.InMultiplexerPopup
+	return m
 }
 
 func TestViewRendersDashboardChromeAndRows(t *testing.T) {
@@ -333,7 +343,7 @@ func TestConfiguredSourceOrderAndDefault(t *testing.T) {
 func TestRefreshUsesConfiguredFDCommand(t *testing.T) {
 	m := newTestModel(t)
 	m.config.Directories.FDCommand = `printf '%s\n' /tmp/seshagy-tui-fd`
-	msg, ok := refreshCmd(sessionmgr.ModeFD, 1, m.config.LoadOptions())().(refreshMsg)
+	msg, ok := refreshCmd(sessionmgr.NewTmuxBackend(), sessionmgr.ModeFD, 1, m.config.LoadOptions())().(refreshMsg)
 	if !ok || msg.err != nil {
 		t.Fatalf("refreshCmd = %#v, ok=%v", msg, ok)
 	}
@@ -518,9 +528,7 @@ func TestTypeFirstAllowsArrowNavigationWithoutPrefix(t *testing.T) {
 
 func TestYaziBlockedInsideTmuxPopup(t *testing.T) {
 	m := newTestModel(t)
-	old := checkTmuxPopup
-	checkTmuxPopup = func(context.Context) (bool, error) { return true, nil }
-	t.Cleanup(func() { checkTmuxPopup = old })
+	m.checkPopup = func(context.Context) (bool, error) { return true, nil }
 
 	model, cmd := m.startYazi()
 	m = model.(Model)
@@ -1080,5 +1088,89 @@ func TestConfiguredThemeColorsApply(t *testing.T) {
 			"default active tab should use terminal foreground, got %T",
 			s.tabActive.GetForeground(),
 		)
+	}
+}
+
+// TestTmuxTermsByteIdenticalStrings is the regression guard: under tmux terms,
+// every parameterized string must match the pre-Phase-5 literal exactly.
+func TestTmuxTermsByteIdenticalStrings(t *testing.T) {
+	m := newTestModel(t)
+	m.width = 120
+	m.height = 32
+
+	// Footer: ✓ tmux
+	footer := m.renderFooter()
+	if !strings.Contains(sessionmgr.StripANSI(footer), "✓ tmux") {
+		t.Fatalf("footer missing '✓ tmux' under tmux terms\n%s", footer)
+	}
+
+	// Session detail: "tmux session" and "windows" key
+	m.items = []sessionmgr.Item{{
+		Kind:    sessionmgr.KindSession,
+		Name:    "demo",
+		Path:    "/tmp/demo",
+		Windows: 3,
+	}}
+	m.cursor = 0
+	detail := m.renderDetailPane(60, 10)
+	clean := sessionmgr.StripANSI(detail)
+	if !strings.Contains(clean, "tmux session") {
+		t.Fatalf("session detail missing 'tmux session'\n%s", clean)
+	}
+	if !strings.Contains(clean, "windows") {
+		t.Fatalf("session detail missing 'windows' key\n%s", clean)
+	}
+
+	// Directory detail: "create/switch tmux session"
+	m.items = []sessionmgr.Item{{Kind: sessionmgr.KindFD, Path: "/tmp/foo"}}
+	m.cursor = 0
+	detail = m.renderDetailPane(60, 10)
+	clean = sessionmgr.StripANSI(detail)
+	if !strings.Contains(clean, "create/switch tmux session") {
+		t.Fatalf("dir detail missing 'create/switch tmux session'\n%s", clean)
+	}
+
+	// Agent detail: "session" key
+	m.items = []sessionmgr.Item{
+		{Kind: sessionmgr.KindAgent, Name: "pi", PaneID: "%1", Session: "demo"},
+	}
+	m.cursor = 0
+	detail = m.renderDetailPane(60, 10)
+	clean = sessionmgr.StripANSI(detail)
+	if !strings.Contains(clean, "session") {
+		t.Fatalf("agent detail missing 'session' key\n%s", clean)
+	}
+}
+
+// TestHerdrTermsRenderedStrings verifies the herdr vocabulary appears when the
+// model uses herdr terms.
+func TestHerdrTermsRenderedStrings(t *testing.T) {
+	m := newTestModel(t)
+	m.terms = sessionmgr.HerdrTerms()
+	m.width = 120
+	m.height = 32
+
+	// Footer: ✓ herdr
+	footer := m.renderFooter()
+	if !strings.Contains(sessionmgr.StripANSI(footer), "✓ herdr") {
+		t.Fatalf("footer missing '✓ herdr'\n%s", footer)
+	}
+
+	// Session detail: "herdr workspace" and "tabs" key
+	m.items = []sessionmgr.Item{{
+		Kind:    sessionmgr.KindSession,
+		Name:    "proj",
+		Target:  "w1",
+		Path:    "/tmp/proj",
+		Windows: 2,
+	}}
+	m.cursor = 0
+	detail := m.renderDetailPane(60, 10)
+	clean := sessionmgr.StripANSI(detail)
+	if !strings.Contains(clean, "herdr workspace") {
+		t.Fatalf("session detail missing 'herdr workspace'\n%s", clean)
+	}
+	if !strings.Contains(clean, "tabs") {
+		t.Fatalf("session detail missing 'tabs' key\n%s", clean)
 	}
 }

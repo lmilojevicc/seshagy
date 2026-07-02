@@ -77,7 +77,12 @@ func TestUpdateAttachDoneMsgRecordsError(t *testing.T) {
 func TestUpdateCreateDoneMsgSuccessSchedulesAttach(t *testing.T) {
 	m := New()
 
-	model, cmd := m.Update(createDoneMsg{name: "demo", created: true})
+	model, cmd := m.Update(
+		createDoneMsg{
+			item:    sessionmgr.Item{Kind: sessionmgr.KindSession, Name: "demo", Target: "demo"},
+			created: true,
+		},
+	)
 	got := model.(Model)
 	if got.status != "created session demo" {
 		t.Fatalf("status = %q", got.status)
@@ -86,7 +91,16 @@ func TestUpdateCreateDoneMsgSuccessSchedulesAttach(t *testing.T) {
 		t.Fatal("expected attach command after create")
 	}
 
-	model, cmd = m.Update(createDoneMsg{name: "existing", created: false})
+	model, cmd = m.Update(
+		createDoneMsg{
+			item: sessionmgr.Item{
+				Kind:   sessionmgr.KindSession,
+				Name:   "existing",
+				Target: "existing",
+			},
+			created: false,
+		},
+	)
 	got = model.(Model)
 	if got.status != "using session existing" {
 		t.Fatalf("status = %q", got.status)
@@ -158,7 +172,7 @@ func TestUpdateYaziDoneMsgSchedulesCreateSession(t *testing.T) {
 		return nil
 	})
 
-	m := New()
+	m := newTestModel(t)
 	model, cmd := m.Update(yaziDoneMsg{path: dir})
 	got := model.(Model)
 	if got.err != nil || got.status != "" {

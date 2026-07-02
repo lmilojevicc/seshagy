@@ -511,9 +511,11 @@ func validateManifestRegion(region string) error {
 }
 
 // detectManifest classifies the captured screen against the agent's rules.
-// No-match returns AgentIdle (the 4-state model has no unknown state). A
-// skip_state_update guard match returns SkipStateUpdate=true so the caller
-// keeps the prior state. Highest-priority matching rule wins.
+// No-match returns AgentIdle; the screen manifest classifier never emits
+// AgentUnknown itself, even though the AgentState enum includes it for external
+// sources such as herdr agent_status. A skip_state_update guard match returns
+// SkipStateUpdate=true so the caller keeps the prior state. Highest-priority
+// matching rule wins.
 func detectManifest(agentName string, input manifestDetectionInput) manifestDetectionResult {
 	manifest, ok := manifestForAgent(agentName)
 	if !ok || manifest == nil {
