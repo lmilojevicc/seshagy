@@ -609,3 +609,38 @@ func TestAgentsScopeStatusHerdrTerms(t *testing.T) {
 		t.Fatalf("status = %q, want \"agents: all workspaces\"", m.status)
 	}
 }
+
+// TestAgentsScopeStatusHerdrShowsWorkspaceLabel proves the 'o' status shows
+// the resolved workspace label (from agent item Location), not the raw opaque
+// workspace id like "wB".
+func TestAgentsScopeStatusHerdrShowsWorkspaceLabel(t *testing.T) {
+	m := newTestModel(t)
+	m.terms = sessionmgr.HerdrTerms()
+	m.source = sessionmgr.ModeAgents
+	m.items = []sessionmgr.Item{{
+		Kind:      sessionmgr.KindAgent,
+		Name:      "pi",
+		AgentName: "pi",
+		Session:   "wB",       // opaque herdr workspace id
+		Location:  "frontend", // resolved workspace label
+	}}
+	m.currentSession = "wB"
+	m.agentsCurrentOnly = false
+
+	model, _ := m.handleActionKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("o")})
+	m = model.(Model)
+	if m.status != "agents: frontend" {
+		t.Fatalf("status = %q, want \"agents: frontend\" (label, not id)", m.status)
+	}
+	// Falls back to the raw id when no matching agent item is loaded.
+	m2 := newTestModel(t)
+	m2.terms = sessionmgr.HerdrTerms()
+	m2.source = sessionmgr.ModeAgents
+	m2.currentSession = "wB"
+	m2.agentsCurrentOnly = false
+	model2, _ := m2.handleActionKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("o")})
+	m2 = model2.(Model)
+	if m2.status != "agents: wB" {
+		t.Fatalf("fallback status = %q, want \"agents: wB\"", m2.status)
+	}
+}

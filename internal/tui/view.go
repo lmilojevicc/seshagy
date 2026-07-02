@@ -312,7 +312,7 @@ func (m Model) renderListPane(width, height int) string {
 			if m.currentSession == "" {
 				scope = "current " + m.terms.SessionNoun
 			} else {
-				scope = m.currentSession
+				scope = m.currentSessionLabel()
 			}
 		}
 		title = fmt.Sprintf("Agents (%d · %s)", len(items), scope)

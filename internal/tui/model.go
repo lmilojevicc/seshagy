@@ -276,6 +276,24 @@ func (m Model) selectedKey() string {
 	return item.Key()
 }
 
+// currentSessionLabel returns a human-facing label for the current session id.
+// Under herdr the id is opaque (e.g. "wB"); agent items in the same session
+// carry the resolved workspace label in Location, so we look it up from the
+// loaded items and fall back to the raw id when nothing better is available.
+// Under tmux the id IS the name, so this returns it unchanged.
+func (m Model) currentSessionLabel() string {
+	if m.currentSession == "" {
+		return ""
+	}
+	for _, item := range m.items {
+		if item.Kind == sessionmgr.KindAgent && item.Session == m.currentSession &&
+			item.Location != "" {
+			return item.Location
+		}
+	}
+	return m.currentSession
+}
+
 func (m Model) previewForSelection() tea.Cmd {
 	if !m.showPreview {
 		return nil

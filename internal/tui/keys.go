@@ -141,7 +141,7 @@ func (m Model) handleActionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case m.agentsCurrentOnly && m.currentSession == "":
 			m.status = "agents: not in a " + m.terms.BackendName + " " + m.terms.SessionNoun
 		case m.agentsCurrentOnly:
-			m.status = "agents: " + m.currentSession
+			m.status = "agents: " + m.currentSessionLabel()
 		default:
 			m.status = "agents: all " + m.terms.SessionPlural
 		}
