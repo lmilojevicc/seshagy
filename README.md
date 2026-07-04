@@ -1,25 +1,26 @@
 # seshagy
 
-`seshagy` is an agent-aware tmux dashboard for jumping between project
-sessions, discovered directories, and coding-agent panes.
+`seshagy` is an agent-aware terminal dashboard for jumping between project
+sessions, discovered directories, and coding-agent panes. It supports two
+multiplexers — [tmux](https://github.com/tmux/tmux) and
+[herdr](https://herdr.dev) — and auto-detects which one it is running in.
 
 Run one command to get a keyboard-first view where you can:
 
-- jump to existing tmux sessions,
-- create or switch sessions from directories found by `zoxide` and `fd`, and
+- jump to existing tmux sessions or herdr workspaces,
+- create or switch sessions/workspaces from directories found by `zoxide` and `fd`, and
 - see coding-agent panes, their current state, and where they are running.
 
-It is intentionally tmux-native. Agent state is reported through the
-`@seshagy_agent_*` pane-option namespace (tmux backend only). Near-instant
-detection comes from installed hook/plugin integrations; a capture-pane
-screen-rule backstop (hot-updated from [herdr](https://herdr.dev/docs/agents))
-covers agents without usable hooks.
+Under tmux, agent state is reported through the `@seshagy_agent_*`
+pane-option namespace (tmux backend only). Near-instant detection comes from
+installed hook/plugin integrations; a capture-pane screen-rule backstop
+(hot-updated from [herdr](https://herdr.dev/docs/agents)) covers agents
+without usable hooks.
 
-seshagy also supports [herdr](https://herdr.dev) as a multiplexer: when run
-inside herdr (`$HERDR_ENV=1`), it auto-detects herdr and speaks herdr's
-vocabulary (workspaces/tabs/panes) instead of tmux's (sessions/windows/panes).
-Under herdr, agent state is read-only from herdr's `agent_status` — seshagy
-writes no state, since herdr owns detection.
+Under herdr (`$HERDR_ENV=1`), seshagy speaks herdr's vocabulary
+(workspaces/tabs/panes) instead of tmux's (sessions/windows/panes). Agent
+state is read-only from herdr's `agent_status` — seshagy writes no state,
+since herdr owns detection.
 
 ## Quick start
 
@@ -46,12 +47,12 @@ seshagy
 
 Typical first run:
 
-1. Start tmux or run `seshagy` from inside an existing tmux client.
+1. Start tmux (or herdr), or run `seshagy` from inside an existing client.
 2. The install menu pops up on first launch — choose which agent integrations
    to install, or press `esc` to skip.
 3. Press `z` or `f` to browse project directories from `zoxide` or `fd`.
-4. Press `enter` on a directory to create/switch to a tmux session for it.
-5. Press `a`/`t`/`z`/`f` to switch sources (all / tmux sessions / zoxide /
+4. Press `enter` on a directory to create/switch to a session or workspace for it.
+5. Press `a`/`t`/`z`/`f` to switch sources (all / sessions-workspaces / zoxide /
    fd directories); on the Agents source, `enter` focuses an agent pane (and
    clears `done` → `idle`).
 6. Press `h` to reopen the install menu at any time.
@@ -99,10 +100,10 @@ may use `bash` and `python3`; the OpenCode plugin runs on Bun/Node.
 
 | Area                   | What you can do                                                                          |
 | ---------------------- | ---------------------------------------------------------------------------------------- |
-| tmux sessions          | list, attach outside tmux, switch-client inside tmux, rename, kill, and preview sessions |
-| project directories    | create/switch tmux sessions from `zoxide` or a configurable `fd` command                 |
+| tmux sessions / herdr workspaces | list, attach/focus, rename, kill, and preview                                  |
+| project directories    | create/switch sessions or workspaces from `zoxide` or a configurable `fd` command        |
 | agent panes            | list, filter, focus, or kill detected agent panes                                        |
-| current session agents | narrow the agent view to the current tmux session (`o`)                                  |
+| current session agents | narrow the agent view to the current session/workspace (`o`)                             |
 | input flow             | use classic action keys or type-first filtering with a prefix key                        |
 
 When a directory becomes a session, the session name is derived from the
