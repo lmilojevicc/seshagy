@@ -30,6 +30,7 @@ function seq(): string {
 }
 
 function run(args: string[]) {
+	if (process.env.HERDR_ENV === "1") return; // herdr owns agent state
 	const child = spawn(BIN, args, { stdio: "ignore", detached: true });
 	child.on("error", () => {});
 	child.unref?.();

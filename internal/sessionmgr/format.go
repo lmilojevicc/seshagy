@@ -20,6 +20,7 @@ type IconSet struct {
 	AgentStateMode string
 	AgentStates    AgentStateStyles
 	Session        IconStyle
+	Workspace      IconStyle
 	Zoxide         IconStyle
 	FD             IconStyle
 }
@@ -34,6 +35,7 @@ type AgentStateStyles struct {
 	Working IconStyle
 	Blocked IconStyle
 	Done    IconStyle
+	Unknown IconStyle
 }
 
 type IconStyle struct {
@@ -45,11 +47,12 @@ type IconStyle struct {
 
 func DefaultIconSet() IconSet {
 	return IconSet{
-		Enabled: true,
-		ASCII:   false,
-		Session: IconStyle{Icon: IconSession + " ", ASCII: "S", Color: "10"},
-		Zoxide:  IconStyle{Icon: IconZoxide + " ", ASCII: "Z", Color: "14"},
-		FD:      IconStyle{Icon: IconFD + " ", ASCII: "F", Color: "11"},
+		Enabled:   true,
+		ASCII:     false,
+		Session:   IconStyle{Icon: IconSession + " ", ASCII: "S", Color: "10"},
+		Workspace: IconStyle{Icon: IconWorkspace + " ", ASCII: "W", Color: "10"},
+		Zoxide:    IconStyle{Icon: IconZoxide + " ", ASCII: "Z", Color: "14"},
+		FD:        IconStyle{Icon: IconFD + " ", ASCII: "F", Color: "11"},
 	}
 }
 
@@ -116,6 +119,8 @@ func (set IconSet) rawAgentState(state AgentState) IconStyle {
 		return set.AgentStates.Blocked
 	case AgentDone:
 		return set.AgentStates.Done
+	case AgentUnknown:
+		return set.AgentStates.Unknown
 	case AgentIdle:
 		return set.AgentStates.Idle
 	default:
@@ -131,6 +136,8 @@ func defaultAgentStateStyle(state AgentState) IconStyle {
 		return IconStyle{Icon: "◐", ASCII: "blocked", Color: "11"}
 	case AgentDone:
 		return IconStyle{Icon: "◉", ASCII: "done", Color: "14"}
+	case AgentUnknown:
+		return IconStyle{Icon: "?", ASCII: "unknown", Color: "8"}
 	case AgentIdle:
 		return IconStyle{Icon: "○", ASCII: "idle", Color: "8"}
 	default:

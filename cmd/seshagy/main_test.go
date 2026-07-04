@@ -29,6 +29,9 @@ func cliTestEnv(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", configDir)
 	t.Setenv("XDG_STATE_HOME", stateDir)
+	// CLI tests mock tmux via SetTmuxHooksForTest; force TMUX so Detect() picks
+	// the tmux backend regardless of the real environment.
+	t.Setenv("TMUX", "/tmp/fake-tmux-sock,12345,0")
 }
 
 func manifestTestDirs(t *testing.T) {

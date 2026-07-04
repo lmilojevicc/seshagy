@@ -13,16 +13,21 @@ import (
 	"github.com/lmilojevicc/seshagy/internal/sessionmgr"
 )
 
-func refreshCmd(source sessionmgr.SourceMode, gen uint64, opts sessionmgr.LoadOptions) tea.Cmd {
+func refreshCmd(
+	mux sessionmgr.Multiplexer,
+	source sessionmgr.SourceMode,
+	gen uint64,
+	opts sessionmgr.LoadOptions,
+) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 		defer cancel()
-		result, err := sessionmgr.LoadWithOptions(ctx, source, opts)
+		result, err := sessionmgr.LoadWithBackend(ctx, mux, source, opts)
 		// Backstop: flip done→idle for agent panes the user has navigated to
 		// directly in tmux (bypassing seshagy's Enter-focus path). Runs only in
 		// agents mode and only issues a tmux call when a done agent exists.
 		if source == sessionmgr.ModeAgents && err == nil {
-			sessionmgr.MarkActiveDoneAgentsIdle(ctx, result.Items)
+			mux.MarkActiveDoneAgentsIdle(ctx, result.Items)
 		}
 		msg := refreshMsg{
 			source:  source,
@@ -31,12 +36,12 @@ func refreshCmd(source sessionmgr.SourceMode, gen uint64, opts sessionmgr.LoadOp
 			warning: result.Warning,
 			err:     err,
 		}
-		// Resolve the current tmux session once per agent refresh so the
-		// current-session scope filter (toggled with 'o') can match without a
-		// per-render tmux call. Runs in this background goroutine; a missing
-		// session (not in tmux) leaves currentSession empty.
+		// Resolve the current multiplexer session once per agent refresh so
+		// the current-session scope filter (toggled with 'o') can match
+		// without a per-render call. Runs in this background goroutine; a
+		// missing session (not in tmux/herdr) leaves currentSession empty.
 		if source == sessionmgr.ModeAgents {
-			if session, err := sessionmgr.CurrentTmuxSession(ctx); err == nil {
+			if session, err := mux.CurrentSession(ctx); err == nil {
 				msg.currentSession = session
 			}
 		}
@@ -98,7 +103,7 @@ func installIntegrationCmd(name, action string) tea.Cmd {
 	}
 }
 
-func previewCmd(item sessionmgr.Item) tea.Cmd {
+func previewCmd(mux sessionmgr.Multiplexer, item sessionmgr.Item) tea.Cmd {
 	key := item.Key()
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -109,10 +114,10 @@ func previewCmd(item sessionmgr.Item) tea.Cmd {
 		)
 		switch item.Kind {
 		case sessionmgr.KindSession:
-			preview, err = sessionmgr.CaptureSession(ctx, item.Name, 160)
+			preview, err = mux.CaptureSession(ctx, item.ActionTarget(), 160)
 		case sessionmgr.KindAgent:
 			if item.PaneID != "" {
-				preview, err = sessionmgr.CaptureAgentPane(ctx, item.PaneID, 160)
+				preview, err = mux.CaptureAgentPane(ctx, item.PaneID, 160)
 			}
 		case sessionmgr.KindZoxide, sessionmgr.KindFD:
 			preview, err = sessionmgr.ListDirectoryPreview(ctx, item.Path, 160)
@@ -128,50 +133,66 @@ func attachExecCallback(err error) tea.Msg {
 	return attachDoneMsg{err: err}
 }
 
-func attachCmd(name string) tea.Cmd {
-	return tea.ExecProcess(sessionmgr.AttachOrSwitchCommand(name), attachExecCallback)
+func attachCmd(mux sessionmgr.Multiplexer, item sessionmgr.Item) tea.Cmd {
+	return tea.ExecProcess(mux.AttachOrSwitchCommand(item), attachExecCallback)
 }
 
 // focusAgentCmd focuses an agent pane in the user's already-attached session.
 // It runs switch-window + select-pane via tea.ExecProcess, mirroring attachCmd
 // (the TUI exits so the user lands on the focused pane).
-func focusAgentCmd(session, window, paneID string) tea.Cmd {
+func focusAgentCmd(mux sessionmgr.Multiplexer, item sessionmgr.Item) tea.Cmd {
 	return tea.ExecProcess(
-		sessionmgr.FocusAgentCommand(session, window, paneID),
+		mux.FocusAgentCommand(item),
 		attachExecCallback,
 	)
 }
 
-func createSessionCmd(dir string) tea.Cmd {
+func createSessionCmd(mux sessionmgr.Multiplexer, dir string) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		name, created, err := sessionmgr.CreateSessionFromDir(ctx, dir)
-		return createDoneMsg{name: name, created: created, err: err}
+		item, created, err := mux.CreateSessionFromDir(ctx, dir)
+		return createDoneMsg{item: item, created: created, err: err}
 	}
 }
 
-func deleteSessionCmd(name string) tea.Cmd {
+func deleteSessionCmd(mux sessionmgr.Multiplexer, item sessionmgr.Item) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		err := sessionmgr.KillSession(ctx, name)
-		return actionDoneMsg{status: "killed session " + name, err: err}
+		err := mux.KillSession(ctx, item.ActionTarget())
+		verbPast := mux.Terms().KillVerbPast
+		noun := mux.Terms().SessionNoun
+		return actionDoneMsg{status: verbPast + " " + noun + " " + item.Name, err: err}
 	}
 }
 
-func renameCmd(oldName, newName string) tea.Cmd {
+func renameCmd(mux sessionmgr.Multiplexer, target, displayName, newName string) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		err := sessionmgr.RenameSession(ctx, oldName, newName)
-		return actionDoneMsg{status: fmt.Sprintf("renamed %s to %s", oldName, newName), err: err}
+		err := mux.RenameSession(ctx, target, newName)
+		return actionDoneMsg{
+			status: fmt.Sprintf("renamed %s to %s", displayName, newName),
+			err:    err,
+		}
 	}
 }
 
-func renameAgentLabelCmd(agentType, session, displayName string) tea.Cmd {
+func renameAgentCmd(
+	mux sessionmgr.Multiplexer,
+	paneID, agentType, session, displayName string,
+) tea.Cmd {
 	return func() tea.Msg {
-		err := sessionmgr.SaveAgentLabel(agentType, session, displayName)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		item := sessionmgr.Item{
+			Kind:      sessionmgr.KindAgent,
+			PaneID:    paneID,
+			AgentName: agentType,
+			Session:   session,
+		}
+		err := mux.RenameAgent(ctx, item, displayName)
 		verb := "renamed agent"
 		if displayName == "" {
 			verb = "cleared agent alias"

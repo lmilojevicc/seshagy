@@ -43,7 +43,12 @@ func TestPrintItemsJSONEnvelope(t *testing.T) {
 	writeFDTestConfig(t, fdDir)
 
 	out, err := captureStdout(t, func() error {
-		return printItems(context.Background(), sessionmgr.ModeFD, true)
+		return printItems(
+			context.Background(),
+			sessionmgr.NewTmuxBackend(),
+			sessionmgr.ModeFD,
+			true,
+		)
 	})
 	if err != nil {
 		t.Fatalf("printItems() error = %v", err)
@@ -91,7 +96,7 @@ func TestDeleteItemSessionJSONEnvelope(t *testing.T) {
 	})
 
 	out, err := captureStdout(t, func() error {
-		return deleteItem(context.Background(), line, true)
+		return deleteItem(context.Background(), sessionmgr.NewTmuxBackend(), line, true)
 	})
 	if err != nil {
 		t.Fatalf("deleteItem() error = %v", err)
@@ -124,7 +129,12 @@ func TestPrintItemsTextOutput(t *testing.T) {
 	writeFDTestConfig(t, fdDir)
 
 	out, err := captureStdout(t, func() error {
-		return printItems(context.Background(), sessionmgr.ModeFD, false)
+		return printItems(
+			context.Background(),
+			sessionmgr.NewTmuxBackend(),
+			sessionmgr.ModeFD,
+			false,
+		)
 	})
 	if err != nil {
 		t.Fatalf("printItems() error = %v", err)
@@ -157,7 +167,7 @@ func TestPrintItemsWritesWarningToStderr(t *testing.T) {
 	cancel()
 
 	stderr, err := captureStderr(t, func() error {
-		return printItems(ctx, sessionmgr.ModeAll, false)
+		return printItems(ctx, sessionmgr.NewTmuxBackend(), sessionmgr.ModeAll, false)
 	})
 	if err != nil {
 		t.Fatalf("printItems() error = %v", err)
@@ -246,7 +256,7 @@ func TestDeleteItemSessionNonJSON(t *testing.T) {
 	})
 
 	out, err := captureStdout(t, func() error {
-		return deleteItem(context.Background(), line, false)
+		return deleteItem(context.Background(), sessionmgr.NewTmuxBackend(), line, false)
 	})
 	if err != nil {
 		t.Fatalf("deleteItem() error = %v", err)
@@ -269,7 +279,7 @@ func TestDeleteItemNonDeletableKind(t *testing.T) {
 		sessionmgr.Item{Kind: sessionmgr.KindZoxide, Path: "/tmp/demo"},
 		cfg.IconSet(),
 	)
-	err = deleteItem(context.Background(), line, false)
+	err = deleteItem(context.Background(), sessionmgr.NewTmuxBackend(), line, false)
 	if err == nil || !strings.Contains(err.Error(), "cannot be deleted") {
 		t.Fatalf("deleteItem() error = %v, want cannot be deleted", err)
 	}
@@ -343,7 +353,12 @@ func TestRunDeleteItemViaCLI(t *testing.T) {
 
 func TestDeleteItemUnrecognizedLine(t *testing.T) {
 	manifestTestDirs(t)
-	err := deleteItem(context.Background(), "not a valid item line", false)
+	err := deleteItem(
+		context.Background(),
+		sessionmgr.NewTmuxBackend(),
+		"not a valid item line",
+		false,
+	)
 	if err == nil || !strings.Contains(err.Error(), "unrecognized item line") {
 		t.Fatalf("deleteItem() error = %v, want unrecognized item line", err)
 	}
@@ -378,7 +393,7 @@ func TestDeleteItemKillFailure(t *testing.T) {
 				}
 				return fmt.Errorf("unexpected tmux call: %v", args)
 			})
-			err := deleteItem(context.Background(), tt.line, false)
+			err := deleteItem(context.Background(), sessionmgr.NewTmuxBackend(), tt.line, false)
 			if err == nil {
 				t.Fatalf("deleteItem() expected error for %s failure", tt.wantCmd)
 			}

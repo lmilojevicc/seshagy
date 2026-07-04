@@ -23,7 +23,9 @@ func TestAttachExecCallbackMapsErrors(t *testing.T) {
 }
 
 func TestAttachCmdReturnsExecProcess(t *testing.T) {
-	if attachCmd("demo") == nil {
+	mux := sessionmgr.NewTmuxBackend()
+	item := sessionmgr.Item{Kind: sessionmgr.KindSession, Name: "demo", Target: "demo"}
+	if attachCmd(mux, item) == nil {
 		t.Fatal("attachCmd() returned nil")
 	}
 }
@@ -50,7 +52,7 @@ func TestCreateDeleteRenameCommandsUseTmuxHooks(t *testing.T) {
 		return nil
 	})
 
-	createMsg := createSessionCmd(dir)().(createDoneMsg)
+	createMsg := createSessionCmd(sessionmgr.NewTmuxBackend(), dir)().(createDoneMsg)
 	if createMsg.err != nil || !createMsg.created {
 		t.Fatalf("createSessionCmd() = %#v", createMsg)
 	}
@@ -62,7 +64,7 @@ func TestCreateDeleteRenameCommandsUseTmuxHooks(t *testing.T) {
 		t.Fatalf("new-session args = %v", newSessionArgs)
 	}
 
-	deleteMsg := deleteSessionCmd("demo")().(actionDoneMsg)
+	deleteMsg := deleteSessionCmd(sessionmgr.NewTmuxBackend(), sessionmgr.Item{Kind: sessionmgr.KindSession, Name: "demo", Target: "demo"})().(actionDoneMsg)
 	if deleteMsg.err != nil || deleteMsg.status != "killed session demo" {
 		t.Fatalf("deleteSessionCmd() = %#v", deleteMsg)
 	}
@@ -70,7 +72,7 @@ func TestCreateDeleteRenameCommandsUseTmuxHooks(t *testing.T) {
 		t.Fatalf("kill-session target = %q, want demo", killedSession)
 	}
 
-	renameMsg := renameCmd("old", "new")().(actionDoneMsg)
+	renameMsg := renameCmd(sessionmgr.NewTmuxBackend(), "old", "old", "new")().(actionDoneMsg)
 	if renameMsg.err != nil || renamedOld != "old" || renamedNew != "new" {
 		t.Fatalf("renameCmd() = %#v old=%q new=%q", renameMsg, renamedOld, renamedNew)
 	}
@@ -92,15 +94,15 @@ func TestCreateSessionCmdReusesExistingWithoutNewSession(t *testing.T) {
 		return nil
 	})
 
-	createMsg := createSessionCmd(dir)().(createDoneMsg)
+	createMsg := createSessionCmd(sessionmgr.NewTmuxBackend(), dir)().(createDoneMsg)
 	if createMsg.err != nil {
 		t.Fatalf("createSessionCmd() err = %v", createMsg.err)
 	}
 	if createMsg.created {
 		t.Fatalf("createSessionCmd() created = true, want false when session exists")
 	}
-	if createMsg.name != "work" {
-		t.Fatalf("createSessionCmd() name = %q, want work", createMsg.name)
+	if createMsg.item.Name != "work" {
+		t.Fatalf("createSessionCmd() name = %q, want work", createMsg.item.Name)
 	}
 	if newSessionCalled {
 		t.Fatal("new-session should not run when reusing an existing session")
@@ -122,7 +124,7 @@ func TestCreateSessionCmdReturnsNewSessionError(t *testing.T) {
 		return nil
 	})
 
-	createMsg := createSessionCmd(dir)().(createDoneMsg)
+	createMsg := createSessionCmd(sessionmgr.NewTmuxBackend(), dir)().(createDoneMsg)
 	if !errors.Is(createMsg.err, createErr) {
 		t.Fatalf("createSessionCmd() err = %v, want %v", createMsg.err, createErr)
 	}
@@ -140,7 +142,7 @@ func TestRenameCmdReturnsTmuxError(t *testing.T) {
 		return nil
 	})
 
-	renameMsg := renameCmd("old", "new")().(actionDoneMsg)
+	renameMsg := renameCmd(sessionmgr.NewTmuxBackend(), "old", "old", "new")().(actionDoneMsg)
 	if !errors.Is(renameMsg.err, renameErr) {
 		t.Fatalf("renameCmd() err = %v, want %v", renameMsg.err, renameErr)
 	}
@@ -155,7 +157,7 @@ func TestPreviewCmdDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	dirPreview := previewCmd(sessionmgr.Item{
+	dirPreview := previewCmd(sessionmgr.NewTmuxBackend(), sessionmgr.Item{
 		Kind: sessionmgr.KindFD,
 		Path: dir,
 	})().(previewMsg)
@@ -174,7 +176,7 @@ func TestPreviewCmdAgentRoutesToCaptureAgentPane(t *testing.T) {
 		return nil, nil
 	}, nil)
 
-	msg := previewCmd(sessionmgr.Item{
+	msg := previewCmd(sessionmgr.NewTmuxBackend(), sessionmgr.Item{
 		Kind:   sessionmgr.KindAgent,
 		PaneID: "%7",
 	})().(previewMsg)
@@ -190,7 +192,7 @@ func TestPreviewCmdAgentRoutesToCaptureAgentPane(t *testing.T) {
 }
 
 func TestPreviewCmdAgentEmptyPaneIDFallsBack(t *testing.T) {
-	msg := previewCmd(sessionmgr.Item{
+	msg := previewCmd(sessionmgr.NewTmuxBackend(), sessionmgr.Item{
 		Kind:   sessionmgr.KindAgent,
 		PaneID: "",
 	})().(previewMsg)
@@ -229,7 +231,7 @@ func TestRefreshCmdLoadsItems(t *testing.T) {
 		return nil, nil
 	}, nil)
 
-	msg := refreshCmd(sessionmgr.ModeSessions, 1, cfg.LoadOptions())().(refreshMsg)
+	msg := refreshCmd(sessionmgr.NewTmuxBackend(), sessionmgr.ModeSessions, 1, cfg.LoadOptions())().(refreshMsg)
 	if msg.err != nil || len(msg.items) != 1 || msg.items[0].Name != "demo" {
 		t.Fatalf("refreshCmd() = %#v", msg)
 	}

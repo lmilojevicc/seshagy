@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-This is a Go CLI/TUI project for `seshagy`, an agent-aware tmux dashboard. The command entry point is `cmd/seshagy/`. Core packages live under `internal/`: `config` for TOML config, `sessionmgr` for tmux sessions and agent pane metadata + detection engine, `integrations` for hook/plugin installs, and `tui` for Bubble Tea UI state/rendering. Tests sit beside code as `*_test.go` files.
+This is a Go CLI/TUI project for `seshagy`, an agent-aware terminal dashboard that supports both tmux and [herdr](https://herdr.dev) as multiplexer backends. The command entry point is `cmd/seshagy/`. Core packages live under `internal/`: `config` for TOML config, `sessionmgr` for the `Multiplexer` backend abstraction (tmux/herdr/noop), tmux sessions and agent pane metadata + detection engine, `integrations` for hook/plugin installs, and `tui` for Bubble Tea UI state/rendering. Tests sit beside code as `*_test.go` files. The active backend is auto-detected from the environment (`$HERDR_ENV=1` → herdr wins; else `$TMUX` → tmux; else noop).
 
 ### Agent detection subsystem
 
@@ -11,7 +11,10 @@ The agent-state-detection subsystem lives in `internal/sessionmgr/`:
 - `agents.go` — pane scan format (`@seshagy_agent_*` fields), `ParseAgents`, `detectAgent`/`detectAgentName` (process-name table + arch-suffix + descendant walk for node-based agents), `NormalizeAgentState`, `isStateFresh`.
 - `agents_report.go` — `ReportAgent`/`ReleaseAgent` (seq strict-`>` + per-pane flock + tombstone release), `MarkAgentVisited`/`MarkActiveDoneAgentsIdle` (done→idle-on-visit), `ResolvePaneByCwd` (cwd→pane unique-match for the OpenCode plugin).
 - `agents_capture.go` — `CaptureAgentPane`, `ApplyManifestFallback` (the capture-pane screen-rule backstop; Tier A/B authority gate via `integrations.LifecycleAuthorityFor`).
-- `manifest.go` — manifest TOML schema, compiler, classifier (`detectManifest`), regex normalization, gate matcher. 4-state enum (idle/working/blocked/done — no `unknown`).
+- `manifest.go` — manifest TOML schema, compiler, classifier (`detectManifest`), regex normalization, gate matcher. The manifest classifier itself emits only idle/working/blocked/done; the broader `AgentState` enum adds `unknown` for herdr's `agent_status` wire value (undetected).
+- `mux.go` — `Multiplexer` interface, `Terms` (terminology), `BackendKind`, `Detect`/`DetectFromEnv` (env-based backend selection: herdr wins over tmux).
+- `tmux_backend.go` / `herdr_backend.go` / `noop_backend.go` — backend implementations. Under herdr, agent-state writes (`ReportAgent`/`ReleaseAgent`/`MarkAgentVisited`/`MarkActiveDoneAgentsIdle`) and the capture-pane manifest backstop are no-ops — herdr owns detection.
+- `herdr_parse.go` — JSON parsers for herdr CLI output (workspace/pane/agent payloads); ids are treated as opaque strings.
 - `manifest_regions.go` — region slice helpers (whole_recent, osc_title, bottom_lines(N), bottom_non_empty_lines(N), after_last_prompt_marker, after_last_horizontal_rule, prompt_box_body, osc_progress).
 - `manifest_update.go` — launch-time async fetch of manifests from the herdr public catalog; local-override > cached-remote > bundled precedence; version-guarded; HTTPS-only.
 - `proctree.go` — process-tree descendant walk (node-agent discovery).
@@ -35,7 +38,7 @@ Integrations live in `internal/integrations/`:
 - `make build`: builds the local `./seshagy` binary from `./cmd/seshagy`.
 - `go run ./cmd/seshagy`: runs the TUI from the checkout.
 
-Go 1.26 is in `go.mod`. Runtime behavior expects `tmux`; optional tools include `zoxide`, `fd`, `yazi`, and `eza`.
+Go 1.26 is in `go.mod`. Runtime behavior expects a multiplexer (`tmux` or `herdr`); optional tools include `zoxide`, `fd`, `yazi`, and `eza`.
 
 ## Coding Style & Naming Conventions
 
@@ -47,7 +50,7 @@ Add focused table-driven tests near the package being changed. Use names like `T
 
 ## Agent-state invariants
 
-- **Namespace:** only `@seshagy_agent_*`. Never `@agent_*` (herdr) — both coexist.
+- **Namespace:** only `@seshagy_agent_*` under tmux. Never `@agent_*` — that namespace belongs to the separate `gentle-agent-state` / `tmux-agent-state` project, NOT to herdr. (herdr exposes agent state via its own CLI/socket API and the `agent_status` field, not tmux user options.) Under herdr (`HERDR_ENV=1`), seshagy writes NO agent state at all — herdr owns detection; the `@seshagy_agent_*` writes, capture-pane manifest backstop, and state-reporting hooks are all tmux-only and suppress under herdr.
 - **Stale-can't-resurrect:** every state write goes through `@seshagy_agent_seq` strict-`>` + flock + tombstone release. `MarkAgentVisited` does NOT advance the seq.
 - **No pane scraping except the capture-pane manifest backstop** (the `manifest_fallback` sanctioned exception, default-on, hot-updated from herdr).
 - **Authority model:** lifecycle agents (pi/opencode) suppress manifest when hooks are fresh; partial-hook agents (codex/claude/droid) and hook-less agents always run the manifest classifier. Manifest overwrites state only on a positive rule match; no-match preserves the existing state.

@@ -22,10 +22,13 @@ func TestNormalizeAgentStateMapping(t *testing.T) {
 		{"done", AgentDone},
 		{"completed", AgentDone},
 		{"finished", AgentDone},
+		{"unknown", AgentUnknown},
+		{" UNKNOWN ", AgentUnknown},
 		{"idle", AgentIdle},
 		{"ready", AgentIdle},
 		{"", AgentIdle},
 		{"bogus", AgentIdle},
+		{"frobnicate", AgentIdle},
 		{"aborted", AgentIdle},
 		{"error", AgentIdle},
 	}

@@ -29,10 +29,28 @@ const (
 	ModeCurrentAgents
 )
 
+// LoadWithOptions is a compatibility wrapper that detects the active
+// multiplexer from the environment and delegates to LoadWithBackend. Existing
+// callers under $TMUX keep identical behaviour.
 func LoadWithOptions(ctx context.Context, mode SourceMode, opts LoadOptions) (LoadResult, error) {
+	return LoadWithBackend(ctx, Detect(), mode, opts)
+}
+
+// LoadWithBackend dispatches item loading across sources, routing the
+// multiplexer-backed modes (sessions, agents) through the supplied backend.
+// Directory modes (zoxide, fd) are backend-independent. The capture-pane
+// manifest fallback runs only for the tmux backend, since herdr owns agent
+// state detection under herdr.
+func LoadWithBackend(
+	ctx context.Context,
+	mux Multiplexer,
+	mode SourceMode,
+	opts LoadOptions,
+) (LoadResult, error) {
+	runManifest := mux.Kind() == BackendTmux && opts.ManifestFallback
 	switch mode {
 	case ModeSessions:
-		items, err := ListSessions(ctx)
+		items, err := mux.ListSessions(ctx)
 		return LoadResult{Items: items}, err
 	case ModeZoxide:
 		items, err := ListZoxideDirs(ctx)
@@ -41,18 +59,18 @@ func LoadWithOptions(ctx context.Context, mode SourceMode, opts LoadOptions) (Lo
 		items, err := ListFDirsWithCommand(ctx, opts.FDCommand)
 		return LoadResult{Items: items}, err
 	case ModeAgents:
-		items, err := ListAgents(ctx, "")
-		if err == nil && opts.ManifestFallback {
+		items, err := mux.ListAgents(ctx, "")
+		if err == nil && runManifest {
 			ApplyManifestFallback(ctx, items)
 		}
 		return LoadResult{Items: items}, err
 	case ModeCurrentAgents:
-		session, err := CurrentTmuxSession(ctx)
+		session, err := mux.CurrentSession(ctx)
 		if err != nil {
 			return LoadResult{}, err
 		}
-		items, err := ListAgents(ctx, session)
-		if err == nil && opts.ManifestFallback {
+		items, err := mux.ListAgents(ctx, session)
+		if err == nil && runManifest {
 			ApplyManifestFallback(ctx, items)
 		}
 		return LoadResult{Items: items}, err
@@ -61,7 +79,7 @@ func LoadWithOptions(ctx context.Context, mode SourceMode, opts LoadOptions) (Lo
 	default:
 		var out []Item
 		var warnings []string
-		sessions, err := ListSessions(ctx)
+		sessions, err := mux.ListSessions(ctx)
 		if err != nil {
 			return LoadResult{}, err
 		}
@@ -76,11 +94,11 @@ func LoadWithOptions(ctx context.Context, mode SourceMode, opts LoadOptions) (Lo
 		out = append(out, sessions...)
 		out = append(out, zoxide...)
 		out = append(out, fd...)
-		agents, err := ListAgents(ctx, "")
+		agents, err := mux.ListAgents(ctx, "")
 		if err != nil {
 			warnings = append(warnings, err.Error())
 		}
-		if err == nil && opts.ManifestFallback {
+		if err == nil && runManifest {
 			ApplyManifestFallback(ctx, agents)
 		}
 		out = append(out, agents...)

@@ -35,6 +35,7 @@ func run(args []string) error {
 	if len(args) == 0 {
 		return tui.Run()
 	}
+	mux := sessionmgr.Detect()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	switch args[0] {
@@ -54,26 +55,27 @@ func run(args []string) error {
 	case "config":
 		return runConfig(args[1:])
 	case "--get-sessions":
-		return runGetItems(ctx, args[1:], sessionmgr.ModeSessions, "--get-sessions")
+		return runGetItems(ctx, mux, args[1:], sessionmgr.ModeSessions, "--get-sessions")
 	case "--get-zoxide":
-		return runGetItems(ctx, args[1:], sessionmgr.ModeZoxide, "--get-zoxide")
+		return runGetItems(ctx, mux, args[1:], sessionmgr.ModeZoxide, "--get-zoxide")
 	case "--get-fd":
-		return runGetItems(ctx, args[1:], sessionmgr.ModeFD, "--get-fd")
+		return runGetItems(ctx, mux, args[1:], sessionmgr.ModeFD, "--get-fd")
 	case "--get-agents":
-		return runGetItems(ctx, args[1:], sessionmgr.ModeAgents, "--get-agents")
+		return runGetItems(ctx, mux, args[1:], sessionmgr.ModeAgents, "--get-agents")
 	case "--get-current-session-agents":
 		return runGetItems(
 			ctx,
+			mux,
 			args[1:],
 			sessionmgr.ModeCurrentAgents,
 			"--get-current-session-agents",
 		)
 	case "--get-all":
-		return runGetItems(ctx, args[1:], sessionmgr.ModeAll, "--get-all")
+		return runGetItems(ctx, mux, args[1:], sessionmgr.ModeAll, "--get-all")
 	case "--report-agent":
-		return runReportAgent(ctx, args[1:])
+		return runReportAgent(ctx, mux, args[1:])
 	case "--release-agent":
-		return runReleaseAgent(ctx, args[1:])
+		return runReleaseAgent(ctx, mux, args[1:])
 	case "integration":
 		return runIntegration(ctx, args[1:])
 	case "--delete-item":
@@ -81,7 +83,7 @@ func run(args []string) error {
 		if line == "" {
 			return errors.New("--delete-item requires a rendered item line")
 		}
-		return deleteItem(ctx, line, jsonOutput)
+		return deleteItem(ctx, mux, line, jsonOutput)
 	default:
 		return unknownCommandError(args)
 	}
@@ -100,6 +102,7 @@ func unknownCommandError(args []string) error {
 
 func runGetItems(
 	ctx context.Context,
+	mux sessionmgr.Multiplexer,
 	args []string,
 	mode sessionmgr.SourceMode,
 	flag string,
@@ -108,23 +111,27 @@ func runGetItems(
 	if len(rest) > 0 {
 		return errors.New(modeUsage(flag))
 	}
-	return printItems(ctx, mode, jsonOutput)
+	return printItems(ctx, mux, mode, jsonOutput)
 }
 
 // resolvePaneTarget resolves a pane from --pane (wins) or --cwd. When only --cwd
 // is given, ResolvePaneByCwd maps it to a unique pane via pane_current_path
 // (refuses on 0 or >1 matches, returning "" for a silent no-op).
-func resolvePaneTarget(ctx context.Context, pane, cwd string) (string, error) {
+func resolvePaneTarget(
+	ctx context.Context,
+	mux sessionmgr.Multiplexer,
+	pane, cwd string,
+) (string, error) {
 	if pane == "" && cwd == "" {
 		return "", errors.New("requires --pane or --cwd")
 	}
 	if pane != "" {
-		return sessionmgr.ResolvePane(ctx, pane)
+		return mux.ResolvePane(ctx, pane)
 	}
-	return sessionmgr.ResolvePaneByCwd(ctx, cwd)
+	return mux.ResolvePaneByCwd(ctx, cwd)
 }
 
-func runReportAgent(ctx context.Context, args []string) error {
+func runReportAgent(ctx context.Context, mux sessionmgr.Multiplexer, args []string) error {
 	fs := flag.NewFlagSet("--report-agent", flag.ContinueOnError)
 	pane := fs.String("pane", "", "target pane id (e.g. %5)")
 	cwd := fs.String("cwd", "", "target by working directory (alternative to --pane)")
@@ -141,14 +148,14 @@ func runReportAgent(ctx context.Context, args []string) error {
 	if *state == "" || *source == "" {
 		return errors.New("--report-agent requires --state, --source")
 	}
-	resolved, err := resolvePaneTarget(ctx, *pane, *cwd)
+	resolved, err := resolvePaneTarget(ctx, mux, *pane, *cwd)
 	if err != nil {
 		return err
 	}
 	if resolved == "" {
 		return nil // no unique cwd match — silent no-op
 	}
-	applied, err := sessionmgr.ReportAgent(ctx, sessionmgr.AgentReport{
+	applied, err := mux.ReportAgent(ctx, sessionmgr.AgentReport{
 		Pane:      resolved,
 		Name:      *agent,
 		State:     sessionmgr.NormalizeAgentState(*state),
@@ -165,13 +172,15 @@ func runReportAgent(ctx context.Context, args []string) error {
 	}
 	if applied {
 		fmt.Printf("reported %s %s on %s\n", *agent, *state, resolved)
+	} else if mux.Kind() == sessionmgr.BackendHerdr {
+		fmt.Printf("report ignored (herdr owns agent state)\n")
 	} else {
 		fmt.Printf("stale report ignored (seq %d)\n", *seq)
 	}
 	return nil
 }
 
-func runReleaseAgent(ctx context.Context, args []string) error {
+func runReleaseAgent(ctx context.Context, mux sessionmgr.Multiplexer, args []string) error {
 	fs := flag.NewFlagSet("--release-agent", flag.ContinueOnError)
 	pane := fs.String("pane", "", "target pane id (e.g. %5)")
 	cwd := fs.String("cwd", "", "target by working directory (alternative to --pane)")
@@ -184,14 +193,14 @@ func runReleaseAgent(ctx context.Context, args []string) error {
 	if *source == "" {
 		return errors.New("--release-agent requires --source")
 	}
-	resolved, err := resolvePaneTarget(ctx, *pane, *cwd)
+	resolved, err := resolvePaneTarget(ctx, mux, *pane, *cwd)
 	if err != nil {
 		return err
 	}
 	if resolved == "" {
 		return nil // no unique cwd match — silent no-op
 	}
-	applied, err := sessionmgr.ReleaseAgent(ctx, sessionmgr.AgentRelease{
+	applied, err := mux.ReleaseAgent(ctx, sessionmgr.AgentRelease{
 		Pane:   resolved,
 		Source: *source,
 		Seq:    *seq,
@@ -204,6 +213,8 @@ func runReleaseAgent(ctx context.Context, args []string) error {
 	}
 	if applied {
 		fmt.Printf("released agent state on %s\n", resolved)
+	} else if mux.Kind() == sessionmgr.BackendHerdr {
+		fmt.Printf("release ignored (herdr owns agent state)\n")
 	} else {
 		fmt.Printf("stale release ignored (seq %d)\n", *seq)
 	}
@@ -307,12 +318,17 @@ func runConfig(args []string) error {
 	}
 }
 
-func printItems(ctx context.Context, mode sessionmgr.SourceMode, jsonOutput bool) error {
+func printItems(
+	ctx context.Context,
+	mux sessionmgr.Multiplexer,
+	mode sessionmgr.SourceMode,
+	jsonOutput bool,
+) error {
 	cfg, err := appconfig.Load()
 	if err != nil {
 		return err
 	}
-	result, err := sessionmgr.LoadWithOptions(ctx, mode, cfg.LoadOptions())
+	result, err := sessionmgr.LoadWithBackend(ctx, mux, mode, cfg.LoadOptions())
 	if err != nil {
 		return err
 	}
@@ -331,7 +347,12 @@ func printItems(ctx context.Context, mode sessionmgr.SourceMode, jsonOutput bool
 	return nil
 }
 
-func deleteItem(ctx context.Context, raw string, jsonOutput bool) error {
+func deleteItem(
+	ctx context.Context,
+	mux sessionmgr.Multiplexer,
+	raw string,
+	jsonOutput bool,
+) error {
 	cfg, err := appconfig.Load()
 	if err != nil {
 		return err
@@ -342,7 +363,7 @@ func deleteItem(ctx context.Context, raw string, jsonOutput bool) error {
 	}
 	switch item.Kind {
 	case sessionmgr.KindSession:
-		if err := sessionmgr.KillSession(ctx, item.Name); err != nil {
+		if err := mux.KillSession(ctx, item.ActionTarget()); err != nil {
 			return err
 		}
 		if jsonOutput {
@@ -359,12 +380,12 @@ func deleteItem(ctx context.Context, raw string, jsonOutput bool) error {
 }
 
 func helpText() string {
-	return `seshagy — minimal tmux session manager
+	return `seshagy — minimal terminal session manager
 
 Usage:
   seshagy                         open the Bubble Tea dashboard
   seshagy --get-all [--json]      print sessions, zoxide dirs, fd dirs
-  seshagy --get-sessions [--json] print tmux sessions
+  seshagy --get-sessions [--json] print tmux sessions / herdr workspaces
   seshagy --get-zoxide [--json]   print zoxide directories
   seshagy --get-fd [--json]       print fd directories
   seshagy --get-agents [--json]   print agent panes (all sessions)
@@ -382,7 +403,8 @@ Scripting:
   Responses include schema_version and ok; errors also print JSON on stdout.
   Human text output is unchanged when --json is omitted.
   seshagy --report-agent --pane %N --state <state> --source <src> --seq <n>
-                                  report agent state to a tmux pane
+                                  report agent state to a tmux pane (tmux only;
+                                  no-op under herdr since herdr owns state)
                                   (--cwd <dir> may replace --pane; resolved by
                                   working directory when unique)
   seshagy --release-agent --pane %N --source <src> --seq <n>

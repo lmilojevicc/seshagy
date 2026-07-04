@@ -73,6 +73,7 @@ type IconsConfig struct {
 	Enabled        *bool             `toml:"enabled,omitempty"          json:"enabled,omitempty"`
 	ASCII          bool              `toml:"ascii,omitempty"            json:"ascii,omitempty"`
 	Session        IconConfig        `toml:"session"                    json:"session"`
+	Workspace      IconConfig        `toml:"workspace"                  json:"workspace"`
 	Zoxide         IconConfig        `toml:"zoxide"                     json:"zoxide"`
 	FD             IconConfig        `toml:"fd"                         json:"fd"`
 	TmuxState      TmuxStatesConfig  `toml:"tmux_state"                 json:"tmux_state"`
@@ -89,6 +90,7 @@ type AgentStatesConfig struct {
 	Working IconConfig `toml:"working" json:"working"`
 	Blocked IconConfig `toml:"blocked" json:"blocked"`
 	Done    IconConfig `toml:"done"    json:"done"`
+	Unknown IconConfig `toml:"unknown" json:"unknown"`
 }
 
 type IconConfig struct {
@@ -159,6 +161,7 @@ func Default() Config {
 			TmuxState:  defaultTmuxStatesConfig(),
 			AgentState: defaultAgentStatesConfig(),
 			Session:    IconConfig{Icon: sessionmgr.IconSession + " ", Label: "S", Color: "10"},
+			Workspace:  IconConfig{Icon: sessionmgr.IconWorkspace + " ", Label: "W", Color: "10"},
 			Zoxide:     IconConfig{Icon: sessionmgr.IconZoxide + " ", Label: "Z", Color: "14"},
 			FD:         IconConfig{Icon: sessionmgr.IconFD + " ", Label: "F", Color: "11"},
 		},
@@ -237,6 +240,7 @@ func (c *Config) Normalize() {
 	c.Icons.Enabled = nil
 	c.Icons.ASCII = false
 	normalizeKindIcon(&c.Icons.Session, defaults.Icons.Session, sessionmgr.IconSession)
+	normalizeKindIcon(&c.Icons.Workspace, defaults.Icons.Workspace, sessionmgr.IconWorkspace)
 	normalizeKindIcon(&c.Icons.Zoxide, defaults.Icons.Zoxide, sessionmgr.IconZoxide)
 	normalizeKindIcon(&c.Icons.FD, defaults.Icons.FD, sessionmgr.IconFD)
 	normalizeTmuxStatesConfig(&c.Icons.TmuxState, defaults.Icons.TmuxState)
@@ -299,6 +303,11 @@ func (c Config) IconSet() sessionmgr.IconSet {
 			Icon:  c.Icons.Session.Icon,
 			ASCII: c.Icons.Session.Label,
 			Color: c.Icons.Session.Color,
+		},
+		Workspace: sessionmgr.IconStyle{
+			Icon:  c.Icons.Workspace.Icon,
+			ASCII: c.Icons.Workspace.Label,
+			Color: c.Icons.Workspace.Color,
 		},
 		Zoxide: sessionmgr.IconStyle{
 			Icon:  c.Icons.Zoxide.Icon,
@@ -448,19 +457,12 @@ func normalizeKindIcon(
 	icon *IconConfig,
 	defaults IconConfig,
 	bareIcon string,
-	legacyIcons ...string,
 ) {
 	if strings.TrimSpace(icon.Icon) == "" {
 		icon.Icon = defaults.Icon
 	}
 	if icon.Icon == bareIcon {
 		icon.Icon = defaults.Icon
-	}
-	for _, legacy := range legacyIcons {
-		if icon.Icon == legacy {
-			icon.Icon = defaults.Icon
-			break
-		}
 	}
 	if legacy := strings.TrimSpace(icon.ASCII); legacy != "" &&
 		(strings.TrimSpace(icon.Label) == "" || icon.Label == defaults.Label) {
@@ -534,6 +536,7 @@ func defaultAgentStatesConfig() AgentStatesConfig {
 		Working: IconConfig{Icon: "●", Label: "working", Color: "10"},
 		Blocked: IconConfig{Icon: "◐", Label: "blocked", Color: "11"},
 		Done:    IconConfig{Icon: "◉", Label: "done", Color: "14"},
+		Unknown: IconConfig{Icon: "?", Label: "unknown", Color: "8"},
 		Idle:    IconConfig{Icon: "○", Label: "idle", Color: "8"},
 	}
 }
@@ -543,6 +546,7 @@ func normalizeAgentStatesConfig(states *AgentStatesConfig, defaults AgentStatesC
 	normalizeAgentStateIcon(&states.Working, defaults.Working)
 	normalizeAgentStateIcon(&states.Blocked, defaults.Blocked)
 	normalizeAgentStateIcon(&states.Done, defaults.Done)
+	normalizeAgentStateIcon(&states.Unknown, defaults.Unknown)
 }
 
 func normalizeAgentStateIcon(state *IconConfig, defaults IconConfig) {
@@ -575,6 +579,11 @@ func projectAgentStateStyles(states AgentStatesConfig) sessionmgr.AgentStateStyl
 			Icon:  states.Done.Icon,
 			ASCII: states.Done.Label,
 			Color: states.Done.Color,
+		},
+		Unknown: sessionmgr.IconStyle{
+			Icon:  states.Unknown.Icon,
+			ASCII: states.Unknown.Label,
+			Color: states.Unknown.Color,
 		},
 	}
 }

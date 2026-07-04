@@ -222,6 +222,38 @@ mode = "icons"
 	}
 }
 
+func TestLoadOlderConfigFillsUnknownAgentStateDefault(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	path := Path()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	data := []byte(`
+[icons]
+mode = "icons"
+
+[icons.agent_state.idle]
+icon = "○"
+label = "idle"
+color = "8"
+`)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("write old config: %v", err)
+	}
+	loaded, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if got := loaded.Icons.AgentState.Unknown; got != (IconConfig{Icon: "?", Label: "unknown", Color: "8"}) {
+		t.Fatalf("loaded unknown agent state = %#v, want default", got)
+	}
+	style := loaded.IconSet().ForAgentState(sessionmgr.AgentUnknown)
+	if style.Icon != "?" || style.ASCII != "unknown" || style.Color != "8" {
+		t.Fatalf("projected unknown state = %#v, want icon ?, label unknown, color 8", style)
+	}
+}
+
 func TestNormalizeStateDisplayMode(t *testing.T) {
 	tests := map[string]string{
 		"":         StateDisplayModeInherit,
@@ -590,5 +622,23 @@ func TestExists(t *testing.T) {
 	}
 	if !Exists() {
 		t.Fatal("Exists() = false, want true after save")
+	}
+}
+
+func TestWorkspaceIconDefaults(t *testing.T) {
+	cfg := Default()
+	icons := cfg.IconSet()
+	if icons.Workspace.Icon != sessionmgr.IconWorkspace+" " {
+		t.Fatalf("workspace icon = %q, want %q", icons.Workspace.Icon, sessionmgr.IconWorkspace+" ")
+	}
+	// Session icon must now match workspace glyph.
+	if icons.Session.Icon != icons.Workspace.Icon {
+		t.Fatalf("session icon = %q, workspace icon = %q", icons.Session.Icon, icons.Workspace.Icon)
+	}
+	// Override via config.
+	cfg.Icons.Workspace = IconConfig{Icon: "X ", Label: "x", Color: "9"}
+	overridden := cfg.IconSet()
+	if overridden.Workspace.Icon != "X " || overridden.Workspace.Color != "9" {
+		t.Fatalf("overridden workspace = %+v", overridden.Workspace)
 	}
 }

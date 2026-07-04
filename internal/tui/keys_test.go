@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"os/exec"
 	"strings"
 	"testing"
 
@@ -320,9 +321,7 @@ func TestHandleActionKeyModePrompt(t *testing.T) {
 
 func TestStartYaziBlockedInsidePopup(t *testing.T) {
 	m := newTestModel(t)
-	old := checkTmuxPopup
-	checkTmuxPopup = func(context.Context) (bool, error) { return true, nil }
-	t.Cleanup(func() { checkTmuxPopup = old })
+	m.checkPopup = func(context.Context) (bool, error) { return true, nil }
 
 	model, cmd := m.startYazi()
 	got := model.(Model)
@@ -336,9 +335,7 @@ func TestStartYaziBlockedInsidePopup(t *testing.T) {
 
 func TestStartYaziOutsidePopup(t *testing.T) {
 	m := newTestModel(t)
-	old := checkTmuxPopup
-	checkTmuxPopup = func(context.Context) (bool, error) { return false, nil }
-	t.Cleanup(func() { checkTmuxPopup = old })
+	m.checkPopup = func(context.Context) (bool, error) { return false, nil }
 
 	model, cmd := m.startYazi()
 	got := model.(Model)
@@ -409,5 +406,241 @@ func TestHandleKeySearchModeTypingAndQuit(t *testing.T) {
 	_, cmd = got.handleKey(keyMsg("ctrl+c"))
 	if cmd == nil {
 		t.Fatal("expected quit command from search mode")
+	}
+}
+
+func TestRenameSessionFlowSetsAndUsesTarget(t *testing.T) {
+	var renamedTarget, renamedNew string
+	sessionmgr.SetTmuxHooksForTest(t, func(_ context.Context, args ...string) ([]byte, error) {
+		return nil, nil
+	}, func(_ context.Context, args ...string) error {
+		if len(args) >= 4 && args[0] == "rename-session" {
+			renamedTarget = strings.TrimPrefix(args[2], "=")
+			renamedNew = args[3]
+		}
+		return nil
+	})
+
+	m := newTestModel(t)
+	m.items = []sessionmgr.Item{
+		{Kind: sessionmgr.KindSession, Name: "myproj", Target: "myproj"},
+	}
+	m.cursor = 0
+
+	// startRename must populate renameTarget from the selected item's ActionTarget.
+	model, _ := m.startRename()
+	got := model.(Model)
+	if got.renameTarget != "myproj" {
+		t.Fatalf("startRename() renameTarget = %q, want myproj", got.renameTarget)
+	}
+	if got.inputMode != modeRename {
+		t.Fatalf("startRename() inputMode = %v, want modeRename", got.inputMode)
+	}
+
+	// Enter the new name and commit; the target must reach the backend.
+	got.renameInput.SetValue("newname")
+	_, cmd := got.handleKey(enterMsg())
+	if cmd == nil {
+		t.Fatal("expected rename command from enter")
+	}
+	_ = cmd() // drive the tmux rename-session call
+
+	if renamedTarget != "myproj" {
+		t.Fatalf("rename-session target = %q, want myproj", renamedTarget)
+	}
+	if renamedNew != "newname" {
+		t.Fatalf("rename-session newName = %q, want newname", renamedNew)
+	}
+}
+
+// TestAgentsScopeStatusTmuxByteIdentical is the regression guard for the 'o'
+// toggle agents-scope status under tmux terms.
+// TestRenameAgentFlowThreadsPaneID proves the agent-rename path threads the
+// pane id from startRename through the enter-commit into RenameAgent. Without
+// this, herdr (which renames by pane id) gets an empty target and fails.
+func TestRenameAgentFlowThreadsPaneID(t *testing.T) {
+	var gotItem sessionmgr.Item
+	var gotDisplay string
+	fake := &captureRenameMux{
+		onRename: func(it sessionmgr.Item, display string) error {
+			gotItem = it
+			gotDisplay = display
+			return nil
+		},
+	}
+
+	m := newTestModel(t)
+	m.mux = fake
+	m.items = []sessionmgr.Item{{
+		Kind:      sessionmgr.KindAgent,
+		Name:      "pi",
+		AgentName: "pi",
+		PaneID:    "w1:p3",
+		Session:   "w1",
+	}}
+	m.cursor = 0
+
+	model, _ := m.startRename()
+	got := model.(Model)
+	if got.renameTarget != "w1:p3" {
+		t.Fatalf("startRename() renameTarget = %q, want w1:p3", got.renameTarget)
+	}
+
+	got.renameInput.SetValue("frontend")
+	_, cmd := got.handleKey(enterMsg())
+	if cmd != nil {
+		_ = cmd() // drive RenameAgent on the fake mux
+	}
+
+	if gotItem.PaneID != "w1:p3" {
+		t.Fatalf("RenameAgent PaneID = %q, want w1:p3", gotItem.PaneID)
+	}
+	if gotDisplay != "frontend" {
+		t.Fatalf("RenameAgent display = %q, want frontend", gotDisplay)
+	}
+}
+
+type captureRenameMux struct {
+	onRename func(sessionmgr.Item, string) error
+}
+
+func (c *captureRenameMux) Kind() sessionmgr.BackendKind { return sessionmgr.BackendHerdr }
+
+func (c *captureRenameMux) Terms() sessionmgr.Terms                          { return sessionmgr.HerdrTerms() }
+func (c *captureRenameMux) InMultiplexer() bool                              { return true }
+func (c *captureRenameMux) InMultiplexerPopup(context.Context) (bool, error) { return false, nil }
+func (c *captureRenameMux) CurrentSession(context.Context) (string, error)   { return "", nil }
+func (c *captureRenameMux) ListSessions(context.Context) ([]sessionmgr.Item, error) {
+	return nil, nil
+}
+
+func (c *captureRenameMux) HasSession(context.Context, string) (bool, error) {
+	return false, nil
+}
+
+func (c *captureRenameMux) CreateSessionFromDir(
+	context.Context,
+	string,
+) (sessionmgr.Item, bool, error) {
+	return sessionmgr.Item{}, false, nil
+}
+func (c *captureRenameMux) KillSession(context.Context, string) error           { return nil }
+func (c *captureRenameMux) RenameSession(context.Context, string, string) error { return nil }
+func (c *captureRenameMux) CaptureSession(context.Context, string, int) (string, error) {
+	return "", nil
+}
+func (c *captureRenameMux) AttachOrSwitchCommand(sessionmgr.Item) *exec.Cmd { return nil }
+func (c *captureRenameMux) ListAgents(context.Context, string) ([]sessionmgr.Item, error) {
+	return nil, nil
+}
+
+func (c *captureRenameMux) CaptureAgentPane(context.Context, string, int) (string, error) {
+	return "", nil
+}
+func (c *captureRenameMux) FocusAgentCommand(sessionmgr.Item) *exec.Cmd { return nil }
+
+func (c *captureRenameMux) RenameAgent(
+	_ context.Context,
+	it sessionmgr.Item,
+	display string,
+) error {
+	return c.onRename(it, display)
+}
+
+func (c *captureRenameMux) ResolvePane(_ context.Context, pane string) (string, error) {
+	return pane, nil
+}
+
+func (c *captureRenameMux) ResolvePaneByCwd(context.Context, string) (string, error) {
+	return "", nil
+}
+
+func (c *captureRenameMux) ReportAgent(context.Context, sessionmgr.AgentReport) (bool, error) {
+	return false, nil
+}
+
+func (c *captureRenameMux) ReleaseAgent(context.Context, sessionmgr.AgentRelease) (bool, error) {
+	return false, nil
+}
+
+func (c *captureRenameMux) MarkAgentVisited(context.Context, string) (bool, error) {
+	return false, nil
+}
+func (c *captureRenameMux) MarkActiveDoneAgentsIdle(context.Context, []sessionmgr.Item) {}
+
+func TestAgentsScopeStatusTmuxByteIdentical(t *testing.T) {
+	m := newTestModel(t)
+	m.source = sessionmgr.ModeAgents
+
+	// Not in a session → toggle to current-only → "agents: not in a tmux session"
+	m.agentsCurrentOnly = false
+	m.currentSession = ""
+	model, _ := m.handleActionKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("o")})
+	m = model.(Model)
+	if m.status != "agents: not in a tmux session" {
+		t.Fatalf("status = %q, want \"agents: not in a tmux session\"", m.status)
+	}
+
+	// Toggle to all → "agents: all sessions"
+	model, _ = m.handleActionKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("o")})
+	m = model.(Model)
+	if m.status != "agents: all sessions" {
+		t.Fatalf("status = %q, want \"agents: all sessions\"", m.status)
+	}
+}
+
+// TestAgentsScopeStatusHerdrTerms verifies herdr vocabulary in agents scope.
+func TestAgentsScopeStatusHerdrTerms(t *testing.T) {
+	m := newTestModel(t)
+	m.terms = sessionmgr.HerdrTerms()
+	m.source = sessionmgr.ModeAgents
+
+	m.agentsCurrentOnly = false
+	m.currentSession = ""
+	model, _ := m.handleActionKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("o")})
+	m = model.(Model)
+	if m.status != "agents: not in a herdr workspace" {
+		t.Fatalf("status = %q, want \"agents: not in a herdr workspace\"", m.status)
+	}
+
+	model, _ = m.handleActionKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("o")})
+	m = model.(Model)
+	if m.status != "agents: all workspaces" {
+		t.Fatalf("status = %q, want \"agents: all workspaces\"", m.status)
+	}
+}
+
+// TestAgentsScopeStatusHerdrShowsWorkspaceLabel proves the 'o' status shows
+// the resolved workspace label (from agent item Location), not the raw opaque
+// workspace id like "wB".
+func TestAgentsScopeStatusHerdrShowsWorkspaceLabel(t *testing.T) {
+	m := newTestModel(t)
+	m.terms = sessionmgr.HerdrTerms()
+	m.source = sessionmgr.ModeAgents
+	m.items = []sessionmgr.Item{{
+		Kind:      sessionmgr.KindAgent,
+		Name:      "pi",
+		AgentName: "pi",
+		Session:   "wB",       // opaque herdr workspace id
+		Location:  "frontend", // resolved workspace label
+	}}
+	m.currentSession = "wB"
+	m.agentsCurrentOnly = false
+
+	model, _ := m.handleActionKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("o")})
+	m = model.(Model)
+	if m.status != "agents: frontend" {
+		t.Fatalf("status = %q, want \"agents: frontend\" (label, not id)", m.status)
+	}
+	// Falls back to the raw id when no matching agent item is loaded.
+	m2 := newTestModel(t)
+	m2.terms = sessionmgr.HerdrTerms()
+	m2.source = sessionmgr.ModeAgents
+	m2.currentSession = "wB"
+	m2.agentsCurrentOnly = false
+	model2, _ := m2.handleActionKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("o")})
+	m2 = model2.(Model)
+	if m2.status != "agents: wB" {
+		t.Fatalf("fallback status = %q, want \"agents: wB\"", m2.status)
 	}
 }

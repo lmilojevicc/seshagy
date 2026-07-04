@@ -107,14 +107,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.created {
 			verb = "created"
 		}
-		m.status = fmt.Sprintf("%s session %s", verb, msg.name)
-		return m, attachCmd(msg.name)
+		m.status = fmt.Sprintf("%s %s %s", verb, m.terms.SessionNoun, msg.item.Name)
+		return m, attachCmd(m.mux, msg.item)
 	case attachDoneMsg:
 		if msg.err != nil {
 			m.status = msg.err.Error()
 			m.err = msg.err
 		} else {
-			m.status = "returned from tmux"
+			m.status = "returned from " + m.terms.BackendName
 		}
 		m = m.invalidateAllCaches()
 		var refresh tea.Cmd
@@ -145,7 +145,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.status = "yazi closed without a directory"
 			return m, nil
 		}
-		return m, createSessionCmd(msg.path)
+		return m, createSessionCmd(m.mux, msg.path)
 	case tea.KeyMsg:
 		if m.setup.active {
 			model, cmd := m.handleSetupKey(msg)
