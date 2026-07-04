@@ -502,6 +502,11 @@ func (m Model) detailLines(item sessionmgr.Item) []string {
 		if m.terms.BackendName != "herdr" {
 			lines = append(lines, kv(s, m.terms.SessionNoun, item.Session))
 		}
+		// Under herdr, show which tab the agent lives in (resolved label, not
+		// the opaque tab id stored in Window).
+		if item.TabLabel != "" {
+			lines = append(lines, kv(s, m.terms.WindowNoun, item.TabLabel))
+		}
 		lines = append(lines, kv(s, "path", sessionmgr.ContractHome(item.Path)))
 		return lines
 	default:

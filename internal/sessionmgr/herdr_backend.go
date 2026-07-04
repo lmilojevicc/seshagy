@@ -46,6 +46,13 @@ func (herdrBackend) ListSessions(ctx context.Context) ([]Item, error) {
 	if err != nil {
 		return nil, err
 	}
+	// A single `herdr tab list` (no args) returns every tab across all
+	// workspaces — group it by workspace_id to populate tab counts without a
+	// per-workspace round-trip per refresh.
+	tabCounts := map[string]int{}
+	for _, t := range herdrTabs(ctx) {
+		tabCounts[t.WorkspaceID]++
+	}
 	items := make([]Item, 0, len(workspaces))
 	for _, ws := range workspaces {
 		name := ws.Label
@@ -58,8 +65,7 @@ func (herdrBackend) ListSessions(ctx context.Context) ([]Item, error) {
 			Target:   ws.WorkspaceID,
 			Path:     ws.Cwd,
 			Attached: ws.Focused,
-			// Windows (tab count) left at 0 — counting requires a per-workspace
-			// tab list call which is not cheap for a list refresh.
+			Windows:  tabCounts[ws.WorkspaceID],
 		})
 	}
 	return items, nil
@@ -179,9 +185,11 @@ func (herdrBackend) ListAgents(
 	if err != nil {
 		return nil, err
 	}
-	// Resolve workspace ids to labels once so the trailing location text and
-	// the detail panel show the human-facing workspace name, not an opaque id.
+	// Resolve workspace ids → labels and tab ids → labels once, via two cheap
+	// global CLI calls (`workspace list`, `tab list`), so the trailing location
+	// text and the detail panel show human-facing names, not opaque ids.
 	workspaceLabels := herdrWorkspaceLabels(ctx)
+	tabLabels := herdrTabLabels(ctx)
 	items := make([]Item, 0, len(agents))
 	for _, a := range agents {
 		if sessionFilter != "" && a.WorkspaceID != sessionFilter {
@@ -222,6 +230,7 @@ func (herdrBackend) ListAgents(
 			Pane:             a.PaneID,
 			Path:             path,
 			Location:         location,
+			TabLabel:         tabLabels[a.TabID],
 		})
 	}
 	// Do NOT apply local aliases under herdr — herdr labels are authoritative.
@@ -244,6 +253,32 @@ func herdrWorkspaceLabels(ctx context.Context) map[string]string {
 	labels := make(map[string]string, len(workspaces))
 	for _, w := range workspaces {
 		labels[w.WorkspaceID] = w.Label
+	}
+	return labels
+}
+
+// herdrTabs fetches `herdr tab list` (all workspaces, single call) and returns
+// the slice of tabs. Errors are swallowed (best-effort; callers keep working
+// with zero counts / empty labels if the lookup fails).
+func herdrTabs(ctx context.Context) []tabInfo {
+	out, err := herdrOutput(ctx, "tab", "list")
+	if err != nil {
+		return nil
+	}
+	tabs, err := parseHerdrTabs(out)
+	if err != nil {
+		return nil
+	}
+	return tabs
+}
+
+// herdrTabLabels returns a tab_id → label map for resolving opaque tab ids in
+// agent detail. Falls back to empty (caller then omits the line).
+func herdrTabLabels(ctx context.Context) map[string]string {
+	tabs := herdrTabs(ctx)
+	labels := make(map[string]string, len(tabs))
+	for _, t := range tabs {
+		labels[t.TabID] = t.Label
 	}
 	return labels
 }

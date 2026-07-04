@@ -154,6 +154,15 @@ func ptrStr(s *string) string {
 	return *s
 }
 
+// parseHerdrTabs parses `herdr tab list` output (JSON on stdout).
+func parseHerdrTabs(raw []byte) ([]tabInfo, error) {
+	res, err := unwrapResult(raw)
+	if err != nil {
+		return nil, err
+	}
+	return res.Tabs, nil
+}
+
 // parseHerdrAgents parses `herdr agent list` output (JSON on stdout).
 func parseHerdrAgents(raw []byte) ([]agentInfo, error) {
 	res, err := unwrapResult(raw)

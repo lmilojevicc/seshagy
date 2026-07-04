@@ -1174,3 +1174,30 @@ func TestHerdrTermsRenderedStrings(t *testing.T) {
 		t.Fatalf("session detail missing 'tabs' key\n%s", clean)
 	}
 }
+
+// TestHerdrAgentDetailShowsTabLabel verifies the agent detail panel shows the
+// resolved tab label (not the opaque tab id) under herdr.
+func TestHerdrAgentDetailShowsTabLabel(t *testing.T) {
+	m := newTestModel(t)
+	m.terms = sessionmgr.HerdrTerms()
+	m.items = []sessionmgr.Item{{
+		Kind:      sessionmgr.KindAgent,
+		Name:      "pi",
+		AgentName: "pi",
+		Session:   "w1",
+		Window:    "w1:t2",
+		PaneID:    "w1:p1",
+		Location:  "proj",
+		TabLabel:  "logs",
+	}}
+	m.cursor = 0
+	detail := m.renderDetailPane(60, 12)
+	clean := sessionmgr.StripANSI(detail)
+	if !strings.Contains(clean, "tab") || !strings.Contains(clean, "logs") {
+		t.Fatalf("agent detail missing tab label 'logs'\n%s", clean)
+	}
+	// The opaque tab id must NOT leak.
+	if strings.Contains(clean, "w1:t2") {
+		t.Fatalf("agent detail leaks opaque tab id\n%s", clean)
+	}
+}

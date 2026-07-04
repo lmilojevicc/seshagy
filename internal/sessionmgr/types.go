@@ -46,6 +46,7 @@ type Item struct {
 	Window   string
 	Pane     string
 	Location string
+	TabLabel string
 
 	AgentName        string
 	AgentDisplayName string
