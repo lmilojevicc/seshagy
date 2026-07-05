@@ -24,6 +24,7 @@ type ItemJSON struct {
 	Window   string `json:"window,omitempty"`
 	Pane     string `json:"pane,omitempty"`
 	Location string `json:"location,omitempty"`
+	TabLabel string `json:"tab_label,omitempty"`
 
 	AgentName        string `json:"agent_name,omitempty"`
 	AgentDisplayName string `json:"agent_display_name,omitempty"`
@@ -56,6 +57,7 @@ func ItemToJSON(item Item, icons IconSet) ItemJSON {
 		Window:           item.Window,
 		Pane:             item.Pane,
 		Location:         item.Location,
+		TabLabel:         item.TabLabel,
 		AgentName:        item.AgentName,
 		AgentDisplayName: item.AgentDisplayName,
 		AgentState:       string(item.AgentState),
