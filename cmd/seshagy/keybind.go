@@ -70,6 +70,125 @@ func tmuxBindLine(key string, mode tmuxLaunchMode) string {
 	}
 }
 
+const (
+	herdrBindMarkerBegin = "# >>> seshagy keybind >>>"
+	herdrBindMarkerEnd   = "# <<< seshagy keybind <<<"
+)
+
+// herdrBindBlock returns the TOML [[keys.command]] block (with markers) that
+// wires prefix+<key> to launch seshagy via the focus-kill launcher script.
+// The type is always "pane" — herdr only supports "pane" and "shell" for
+// keybind commands; "pane" opens a temporary pane that closes on command exit.
+// seshagy-focus-kill extends that to also dismiss on focus-loss.
+func herdrBindBlock(key string) string {
+	return fmt.Sprintf(
+		`%s
+[[keys.command]]
+  key = "prefix+%s"
+  type = "pane"
+  command = "seshagy-focus-kill seshagy"
+  description = "seshagy session manager"
+%s`,
+		herdrBindMarkerBegin, key, herdrBindMarkerEnd,
+	)
+}
+
+func herdrConfigPath() (string, error) {
+	if p := os.Getenv("HERDR_CONFIG_PATH"); p != "" {
+		return p, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	xdgRoot := os.Getenv("XDG_CONFIG_HOME")
+	if xdgRoot == "" {
+		xdgRoot = filepath.Join(home, ".config")
+	}
+	return filepath.Join(xdgRoot, "herdr", "config.toml"), nil
+}
+
+func installHerdrKeybind(key string) error {
+	path, err := herdrConfigPath()
+	if err != nil {
+		return fmt.Errorf("locate herdr config: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("create herdr config dir: %w", err)
+	}
+	existing, _ := os.ReadFile(path)
+	content := string(existing)
+	block := herdrBindBlock(key)
+
+	if idx := strings.Index(content, herdrBindMarkerBegin); idx >= 0 {
+		end := strings.Index(content[idx:], herdrBindMarkerEnd)
+		if end < 0 {
+			return errors.New("malformed seshagy keybind block: missing end marker; fix manually")
+		}
+		lineStart := idx
+		for lineStart > 0 && content[lineStart-1] != '\n' {
+			lineStart--
+		}
+		lineEnd := idx + end + len(herdrBindMarkerEnd)
+		if lineEnd < len(content) && content[lineEnd] == '\n' {
+			lineEnd++
+		}
+		content = content[:lineStart] + block + "\n" + content[lineEnd:]
+	} else {
+		if !strings.HasSuffix(content, "\n") && content != "" {
+			content += "\n"
+		}
+		content += "\n" + block + "\n"
+	}
+
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		return fmt.Errorf("write herdr config: %w", err)
+	}
+	fmt.Printf("installed herdr keybind: prefix+%s → seshagy (in %s)\n", key, path)
+	fmt.Println("reload with: herdr server reload-config")
+	return nil
+}
+
+func uninstallHerdrKeybind() error {
+	path, err := herdrConfigPath()
+	if err != nil {
+		return fmt.Errorf("locate herdr config: %w", err)
+	}
+	existing, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			fmt.Println("no herdr config found; nothing to uninstall")
+			return nil
+		}
+		return fmt.Errorf("read herdr config: %w", err)
+	}
+	content := string(existing)
+	idx := strings.Index(content, herdrBindMarkerBegin)
+	if idx < 0 {
+		fmt.Println("no seshagy keybind found; nothing to uninstall")
+		return nil
+	}
+	end := strings.Index(content[idx:], herdrBindMarkerEnd)
+	if end < 0 {
+		return errors.New("malformed seshagy keybind block: missing end marker; fix manually")
+	}
+	lineStart := idx
+	for lineStart > 0 && content[lineStart-1] != '\n' {
+		lineStart--
+	}
+	lineEnd := idx + end + len(herdrBindMarkerEnd)
+	if lineEnd < len(content) && content[lineEnd] == '\n' {
+		lineEnd++
+	}
+	content = content[:lineStart] + content[lineEnd:]
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		return fmt.Errorf("write herdr config: %w", err)
+	}
+	fmt.Printf("uninstalled seshagy keybind from %s\n", path)
+	fmt.Println("reload with: herdr server reload-config")
+	return nil
+}
+
 func tmuxConfigPath() (string, error) {
 	// 1. Explicit path override via env var.
 	if p := os.Getenv("TMUX_CONF_PATH"); p != "" {
@@ -142,8 +261,13 @@ func runKeybind(args []string) error {
 		switch name {
 		case "tmux":
 			return installTmuxKeybind(key, mode)
+		case "herdr":
+			return installHerdrKeybind(key)
 		default:
-			return fmt.Errorf("unknown keybind target: %q (only \"tmux\" is supported)", name)
+			return fmt.Errorf(
+				"unknown keybind target: %q (only \"tmux\" and \"herdr\" are supported)",
+				name,
+			)
 		}
 	case "uninstall":
 		rest := args[1:]
@@ -153,8 +277,13 @@ func runKeybind(args []string) error {
 		switch rest[0] {
 		case "tmux":
 			return uninstallTmuxKeybind()
+		case "herdr":
+			return uninstallHerdrKeybind()
 		default:
-			return fmt.Errorf("unknown keybind target: %q (only \"tmux\" is supported)", rest[0])
+			return fmt.Errorf(
+				"unknown keybind target: %q (only \"tmux\" and \"herdr\" are supported)",
+				rest[0],
+			)
 		}
 	default:
 		return fmt.Errorf("unknown keybind command: %q", args[0])

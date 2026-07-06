@@ -402,8 +402,13 @@ Usage:
                                   bind prefix+<key> (default: s) to launch
                                   seshagy as an ephemeral tmux window/popup
                                   (default mode: popup)
+  seshagy keybind install herdr [--key <key>]
+                                  bind prefix+<key> (default: s) to launch
+                                  seshagy as an ephemeral herdr pane
   seshagy keybind uninstall tmux
                                   remove the seshagy tmux keybinding
+  seshagy keybind uninstall herdr
+                                  remove the seshagy herdr keybinding
   seshagy --version [--json]
 
 Scripting:
