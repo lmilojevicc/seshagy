@@ -24,19 +24,24 @@ since herdr owns detection.
 
 ## Quick start
 
-Install from GitHub:
+**Homebrew** (once the tap is set up):
+
+```sh
+brew tap lmilojevicc/tap && brew install seshagy
+```
+
+**go install**:
 
 ```sh
 go install github.com/lmilojevicc/seshagy/cmd/seshagy@latest
 ```
 
-Or from a local checkout:
+**From source**:
 
 ```sh
 git clone https://github.com/lmilojevicc/seshagy.git
 cd seshagy
-go install ./cmd/seshagy
-# or: make install
+make build       # produces ./seshagy
 ```
 
 Open the dashboard:
@@ -71,9 +76,10 @@ The script auto-detects the active multiplexer from the environment
 ### tmux
 
 Install the keybinding idempotently (default key `s`). seshagy writes to the
-config tmux actually reads, in this order: `$TMUX_CONF_PATH` if set; else the
-existing XDG config (`$XDG_CONFIG_HOME/tmux/tmux.conf` or `~/.config/tmux/tmux.conf`);
-else `~/.tmux.conf`.
+config tmux actually reads, in this order: `$TMUX_CONF_PATH` if set; else
+`$TMUX_CONFIG_DIR/tmux.conf`; else the existing XDG config
+(`$XDG_CONFIG_HOME/tmux/tmux.conf` or `~/.config/tmux/tmux.conf`); else
+`~/.tmux.conf`.
 
 ```sh
 seshagy keybind install tmux            # prefix + s, popup (default)
@@ -126,9 +132,9 @@ To wire it manually instead, add this block to your herdr config:
     description = "seshagy session manager"
 ```
 
-The seshagy binary must be on `PATH` (`brew install seshagy` / `go install` /
-mise / Nix). See [herdr.dev/plugins](https://herdr.dev/plugins/) for the
-marketplace listing.
+The seshagy binary must be on `PATH` (Homebrew or `go install`; see
+[Quick start](#quick-start)). See [herdr.dev/plugins](https://herdr.dev/plugins/)
+for the marketplace listing.
 
 ## Requirements
 
@@ -171,13 +177,13 @@ may use `bash` and `python3`; the OpenCode plugin runs on Bun/Node.
 
 ## What seshagy manages
 
-| Area                   | What you can do                                                                          |
-| ---------------------- | ---------------------------------------------------------------------------------------- |
-| tmux sessions / herdr workspaces | list, attach/focus, rename, kill, and preview                                  |
-| project directories    | create/switch sessions or workspaces from `zoxide` or a configurable `fd` command        |
-| agent panes            | list, filter, focus, or kill detected agent panes                                        |
-| current session agents | narrow the agent view to the current session/workspace (`o`)                             |
-| input flow             | use classic action keys or type-first filtering with a prefix key                        |
+| Area                             | What you can do                                                                   |
+| -------------------------------- | --------------------------------------------------------------------------------- |
+| tmux sessions / herdr workspaces | list, attach/focus, rename, kill, and preview                                     |
+| project directories              | create/switch sessions or workspaces from `zoxide` or a configurable `fd` command |
+| agent panes                      | list, filter, focus, or kill detected agent panes                                 |
+| current session agents           | narrow the agent view to the current session/workspace (`o`)                      |
+| input flow                       | use classic action keys or type-first filtering with a prefix key                 |
 
 When a directory becomes a session, the session name is derived from the
 basename: `.config` becomes `dot_config`, and unsupported characters collapse to
@@ -397,7 +403,7 @@ Common settings:
 ```toml
 [sources]
 default = "all"
-order = ["all", "sessions", "agents", "current-agents", "zoxide", "fd"]
+order = ["all", "sessions", "zoxide", "fd", "agents"]
 
 [directories]
 fd_command = 'fd -H -a -d 2 -t d -E .Trash . "$HOME"'
@@ -410,6 +416,11 @@ prefix = "ctrl+x"
 manifest_fallback = true   # capture-pane screen-rule backstop (default on)
 catalog_url = ""           # defaults to the herdr public catalog when empty
 ```
+
+The default `order` lists tabs left→right (`agents` last). `current-agents` is
+not a tab; it is a CLI-only scope (`--get-current-session-agents`), reachable in
+the TUI via the `o` key (toggles the agents source between the current session
+and all).
 
 ### Theme colors
 
@@ -498,32 +509,38 @@ Agent state appearance is customized per state under
 
 Default state glyphs and labels:
 
-| State   | `icon` | `label`   |
-| ------- | ------ | --------- |
-| working | `▶`    | `working` |
-| blocked | `◆`    | `blocked` |
-| done    | `✓`    | `done`    |
-| idle    | `◌`    | `idle`    |
+| State   | `icon` | `label`   | `color` |
+| ------- | ------ | --------- | ------- |
+| working | `●`    | `working` | `10`    |
+| blocked | `◐`    | `blocked` | `11`    |
+| done    | `◉`    | `done`    | `14`    |
+| idle    | `○`    | `idle`    | `8`     |
+| unknown | `?`    | `unknown` | `8`     |
 
-Example (defaults from `seshagy config init`):
+Example `[icons.agent_state]` (defaults from `seshagy config init`):
 
 ```toml
-[icons]
-mode = "icons"
-agent_state_mode = "inherit"
-
-  [icons.session]
-    icon = " "
-    label = "S"
-    color = "10"
-
-  [icons.agent_state.working]
-    icon = "▶"
-    label = "working"
-
-  [icons.agent_state.blocked]
-    icon = "◆"
-    label = "blocked"
+  [icons.agent_state]
+    [icons.agent_state.idle]
+      icon = "○"
+      label = "idle"
+      color = "8"
+    [icons.agent_state.working]
+      icon = "●"
+      label = "working"
+      color = "10"
+    [icons.agent_state.blocked]
+      icon = "◐"
+      label = "blocked"
+      color = "11"
+    [icons.agent_state.done]
+      icon = "◉"
+      label = "done"
+      color = "14"
+    [icons.agent_state.unknown]
+      icon = "?"
+      label = "unknown"
+      color = "8"
 ```
 
 Run `seshagy config init` to write the full default `config.toml`, then edit
@@ -533,9 +550,10 @@ colors and icons there. `seshagy config show` prints the resolved config.
 
 - a multiplexer is required for session and agent operations: tmux (`$TMUX`) or herdr (`$HERDR_ENV=1`). Without one, seshagy shows directory sources only.
 - Hook/plugin integrations report state through the `@seshagy_agent_*`
-  namespace. Agents without integrations are still discovered (process name +
-  descendant walk) and classified by the capture-pane screen-rule backstop when
-  `[agents] manifest_fallback` is enabled (default).
+  namespace **under tmux**; under herdr these hooks early-exit and herdr owns
+  state detection. Agents without integrations are still discovered (process
+  name + descendant walk) and classified by the capture-pane screen-rule
+  backstop when `[agents] manifest_fallback` is enabled (default).
 - The screen-rule backstop captures pane content; this is the sanctioned
   `manifest_fallback` exception to the "no pane scraping" rule.
 - Directory results depend on your `zoxide` database and configured `fd` command.
