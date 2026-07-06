@@ -49,6 +49,7 @@ func TestDetectFromEnvPriority(t *testing.T) {
 
 func TestDetectDefaultUsesRealEnv(t *testing.T) {
 	t.Setenv("TMUX", "/tmp/tmux-1000/default,123,0")
+	t.Setenv("HERDR_ENV", "")
 	if got := Detect().Kind(); got != BackendTmux {
 		t.Fatalf("Detect() kind = %v, want %v", got, BackendTmux)
 	}

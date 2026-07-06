@@ -32,6 +32,7 @@ func cliTestEnv(t *testing.T) {
 	// CLI tests mock tmux via SetTmuxHooksForTest; force TMUX so Detect() picks
 	// the tmux backend regardless of the real environment.
 	t.Setenv("TMUX", "/tmp/fake-tmux-sock,12345,0")
+	t.Setenv("HERDR_ENV", "")
 }
 
 func manifestTestDirs(t *testing.T) {

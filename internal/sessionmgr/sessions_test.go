@@ -236,12 +236,14 @@ func TestRenameSession(t *testing.T) {
 
 func TestAttachOrSwitchCommandUsesTmuxContext(t *testing.T) {
 	t.Setenv("TMUX", "")
+	t.Setenv("HERDR_ENV", "")
 	cmd := AttachOrSwitchCommand("demo")
 	if len(cmd.Args) < 3 || cmd.Args[0] != "tmux" || cmd.Args[1] != "attach-session" {
 		t.Fatalf("outside tmux command = %#v", cmd.Args)
 	}
 
 	t.Setenv("TMUX", "/tmp/tmux-123/default,1,0")
+	t.Setenv("HERDR_ENV", "")
 	cmd = AttachOrSwitchCommand("demo")
 	if len(cmd.Args) < 3 || cmd.Args[1] != "switch-client" {
 		t.Fatalf("inside tmux command = %#v", cmd.Args)
@@ -250,6 +252,7 @@ func TestAttachOrSwitchCommandUsesTmuxContext(t *testing.T) {
 
 func TestFocusAgentCommandSwitchesClientInTmux(t *testing.T) {
 	t.Setenv("TMUX", "/tmp/tmux-123/default,1,0")
+	t.Setenv("HERDR_ENV", "")
 	cmd := FocusAgentCommand("work", "1", "%5")
 	if len(cmd.Args) < 3 || cmd.Args[0] != "sh" || cmd.Args[1] != "-c" {
 		t.Fatalf("command = %#v, want sh -c", cmd.Args)
@@ -268,6 +271,7 @@ func TestFocusAgentCommandSwitchesClientInTmux(t *testing.T) {
 
 func TestFocusAgentCommandNoSwitchClientOutsideTmux(t *testing.T) {
 	t.Setenv("TMUX", "")
+	t.Setenv("HERDR_ENV", "")
 	cmd := FocusAgentCommand("work", "1", "%5")
 	script := cmd.Args[2]
 	if strings.Contains(script, "switch-client") {
