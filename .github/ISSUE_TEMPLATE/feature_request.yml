@@ -1,47 +1,35 @@
 name: Feature request
 description: Suggest a new capability or an enhancement to seshagy.
 title: "[Feature]: "
-labels: ["enhancement", "triage"]
+labels: ["enhancement"]
 body:
   - type: markdown
     attributes:
       value: |
         Thanks for taking the time to suggest an improvement to seshagy!
 
-        Before you start, please **search [existing issues](https://github.com/lmilojevicc/seshagy/issues) and [discussions](https://github.com/lmilojevicc/seshagy/discussions)** to avoid duplicates.
+        Before you start, please [search existing issues](https://github.com/lmilojevicc/seshagy/issues) and [discussions](https://github.com/lmilojevicc/seshagy/discussions) to avoid duplicates.
 
-        A quick note on scope: seshagy is intentionally **tmux-native** and does **not** scrape pane text. Agent features rely on explicit `@agent_*` tmux metadata reported by agent hooks/plugins, so please make sure your idea fits that model.
-
-  - type: dropdown
-    id: area
-    attributes:
-      label: Area
-      description: Which part of seshagy does this relate to?
-      options:
-        - TUI / dashboard
-        - tmux sessions
-        - Directory sources (zoxide/fd/yazi)
-        - Agent tracking / detection
-        - Hook integrations (new agent or change)
-        - Configuration / theming / icons
-        - CLI helpers
-        - Other
-    validations:
-      required: true
+        A quick note on scope: seshagy supports both **tmux** and **herdr** as
+        multiplexer backends, and agent state is reported by integrations into
+        the `@seshagy_agent_*` namespace (under tmux). Under herdr, agent state
+        is read-only from herdr's own `agent_status`. Keep this model in mind
+        when proposing agent-related features.
 
   - type: textarea
     id: problem
     attributes:
-      label: Problem / motivation
-      description: What are you trying to do, and why is the current behavior insufficient?
+      label: The problem
+      description: What are you trying to do, and what is the pain point with how seshagy works today?
+      placeholder: I'm trying to …, but seshagy currently …
     validations:
       required: true
 
   - type: textarea
-    id: proposal
+    id: solution
     attributes:
-      label: Proposed solution
-      description: What would you like to happen?
+      label: The proposed solution
+      description: What would you like seshagy to do instead? Be as specific as you can.
     validations:
       required: true
 
@@ -49,20 +37,7 @@ body:
     id: alternatives
     attributes:
       label: Alternatives considered
-      description: Any alternative approaches or workarounds you've thought about.
-    validations:
-      required: false
-
-  - type: textarea
-    id: agent-integration
-    attributes:
-      label: If requesting a new agent integration
-      description: |
-        seshagy depends on hook-reported `@agent_*` metadata, so please include:
-        - The agent's name
-        - Its CLI command
-        - Whether it has a hook/plugin system
-        - Links to its hook/plugin docs
+      description: Any other approaches or workarounds you have thought about.
     validations:
       required: false
 
@@ -73,13 +48,3 @@ body:
       description: Mockups, screenshots, links, or anything else that helps.
     validations:
       required: false
-
-  - type: checkboxes
-    id: checks
-    attributes:
-      label: Before submitting
-      options:
-        - label: I searched existing issues and discussions for a similar request.
-          required: true
-        - label: This fits seshagy's tmux-native, hook-based model (no pane scraping).
-          required: false

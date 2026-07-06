@@ -46,6 +46,18 @@ body:
       required: true
 
   - type: dropdown
+    id: multiplexer
+    attributes:
+      label: Multiplexer
+      description: Which multiplexer backend were you running in? seshagy auto-detects this from the environment ($HERDR_ENV=1 → herdr; else $TMUX → tmux; else no backend).
+      options:
+        - tmux
+        - herdr
+        - neither / no backend
+    validations:
+      required: true
+
+  - type: dropdown
     id: install-method
     attributes:
       label: How did you install seshagy?
