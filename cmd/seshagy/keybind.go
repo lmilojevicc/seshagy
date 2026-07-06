@@ -19,11 +19,14 @@ const (
 )
 
 func tmuxBindLine(key string) string {
-	// Invoke via a login shell so the user's PATH (e.g. ~/go/bin, brew, cargo)
-	// is loaded — tmux's run-shell otherwise uses a minimal PATH that can't
-	// resolve seshagy-focus-kill.
+	// Launch seshagy in a tmux display-popup (floating, ephemeral). The popup
+	// closes automatically when seshagy exits, and because seshagy switches the
+	// tmux client to the chosen session via switch-client, the popup tears down
+	// the moment a selection is made — no focus-kill wrapper needed. We invoke
+	// via a login shell so the user's PATH (~/go/bin, brew, etc.) is loaded;
+	// run-shell otherwise runs with a minimal PATH that can't find seshagy.
 	return fmt.Sprintf(
-		"bind-key %s run-shell '$SHELL -lc \"seshagy-focus-kill seshagy\"'",
+		"bind-key %s display-popup -E -w 80%% -h 80%% '$SHELL -lc seshagy'",
 		key,
 	)
 }
