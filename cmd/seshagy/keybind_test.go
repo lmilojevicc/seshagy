@@ -120,6 +120,7 @@ func TestInstallTmuxKeybindPrefersExistingXDGConfig(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("TMUX_CONF_PATH", "")
+	t.Setenv("TMUX_CONFIG_DIR", "")
 	t.Setenv("XDG_CONFIG_HOME", "")
 	// Create the XDG config so it's picked up over ~/.tmux.conf.
 	xdgDir := filepath.Join(home, ".config", "tmux")
@@ -151,6 +152,7 @@ func TestInstallTmuxKeybindFallsBackToLegacyPath(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("TMUX_CONF_PATH", "")
+	t.Setenv("TMUX_CONFIG_DIR", "")
 	t.Setenv("XDG_CONFIG_HOME", "")
 
 	if err := installTmuxKeybind("s"); err != nil {
@@ -163,11 +165,34 @@ func TestInstallTmuxKeybindFallsBackToLegacyPath(t *testing.T) {
 	}
 }
 
+// TestInstallTmuxKeybindHonorsTMUX_CONFIG_DIR verifies that when TMUX_CONFIG_DIR
+// is set and its tmux.conf exists, that path wins (tmux 3.3+ reads this env).
+func TestInstallTmuxKeybindHonorsTMUX_CONFIG_DIR(t *testing.T) {
+	confDir := t.TempDir()
+	t.Setenv("TMUX_CONFIG_DIR", confDir)
+	t.Setenv("TMUX_CONF_PATH", "")
+	t.Setenv("XDG_CONFIG_HOME", "")
+	conf := filepath.Join(confDir, "tmux.conf")
+	if err := os.WriteFile(conf, []byte(""), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := installTmuxKeybind("s"); err != nil {
+		t.Fatalf("install: %v", err)
+	}
+	got := readConfig(t, conf)
+	if !strings.Contains(got, tmuxBindMarkerBegin) {
+		t.Fatalf("TMUX_CONFIG_DIR tmux.conf missing marker\n%s", got)
+	}
+}
+
 // TestInstallTmuxKeybindHonorsXDGConfig_HOME verifies that when XDG_CONFIG_HOME
-// is set and the tmux config exists there, that path wins.
+// is set (and TMUX_CONFIG_DIR is not) and the tmux config exists there, that
+// path wins.
 func TestInstallTmuxKeybindHonorsXDGConfig_HOME(t *testing.T) {
 	xdgRoot := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", xdgRoot)
+	t.Setenv("TMUX_CONFIG_DIR", "")
 	t.Setenv("TMUX_CONF_PATH", "")
 	tmuxDir := filepath.Join(xdgRoot, "tmux")
 	if err := os.MkdirAll(tmuxDir, 0o755); err != nil {

@@ -26,7 +26,7 @@ func tmuxBindLine(key string) string {
 }
 
 func tmuxConfigPath() (string, error) {
-	// 1. Explicit override via env var.
+	// 1. Explicit path override via env var.
 	if p := os.Getenv("TMUX_CONF_PATH"); p != "" {
 		return p, nil
 	}
@@ -34,14 +34,18 @@ func tmuxConfigPath() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	// 2. Existing XDG config (tmux 3.2+ reads $XDG_CONFIG_HOME/tmux/tmux.conf,
-	//    defaulting to ~/.config/tmux/tmux.conf). Write where the user already
-	//    keeps their config rather than forcing ~/.tmux.conf.
-	xdgRoot := os.Getenv("XDG_CONFIG_HOME")
-	if xdgRoot == "" {
-		xdgRoot = filepath.Join(home, ".config")
+	// 2. tmux 3.3+ honors $TMUX_CONFIG_DIR for the config directory; otherwise
+	//    it falls back to $XDG_CONFIG_HOME/tmux (default ~/.config/tmux). Use
+	//    the same resolution so we write where tmux actually reads.
+	confDir := os.Getenv("TMUX_CONFIG_DIR")
+	if confDir == "" {
+		xdgRoot := os.Getenv("XDG_CONFIG_HOME")
+		if xdgRoot == "" {
+			xdgRoot = filepath.Join(home, ".config")
+		}
+		confDir = filepath.Join(xdgRoot, "tmux")
 	}
-	xdgConf := filepath.Join(xdgRoot, "tmux", "tmux.conf")
+	xdgConf := filepath.Join(confDir, "tmux.conf")
 	if _, err := os.Stat(xdgConf); err == nil {
 		return xdgConf, nil
 	}
@@ -129,7 +133,7 @@ func installTmuxKeybind(key string) error {
 		return fmt.Errorf("write tmux config: %w", err)
 	}
 	fmt.Printf("installed tmux keybind: prefix + %s → seshagy (in %s)\n", key, path)
-	fmt.Println("reload with: tmux source-file ~/.tmux.conf")
+	fmt.Printf("reload with: tmux source-file %s\n", path)
 	return nil
 }
 
@@ -169,6 +173,6 @@ func uninstallTmuxKeybind() error {
 		return fmt.Errorf("write tmux config: %w", err)
 	}
 	fmt.Printf("uninstalled seshagy keybind from %s\n", path)
-	fmt.Println("reload with: tmux source-file ~/.tmux.conf")
+	fmt.Printf("reload with: tmux source-file %s\n", path)
 	return nil
 }
