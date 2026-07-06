@@ -57,6 +57,63 @@ Typical first run:
    clears `done` → `idle`).
 6. Press `h` to reopen the install menu at any time.
 
+## Launch with a keybinding
+
+seshagy ships a launcher script, `seshagy-focus-kill`, that opens the dashboard
+in an ephemeral overlay (herdr) or dedicated window (tmux) and dismisses it
+the moment you switch away — so you get a one-keystroke in / one-keystroke out
+jump launcher, without leftover panes.
+
+The script auto-detects the active multiplexer from the environment
+(`HERDR_ENV=1` → herdr; `$TMUX` → tmux) and is bundled with every release and
+`go install` / `make install`.
+
+### tmux
+
+Install the keybinding idempotently (default key `s`). seshagy writes to the
+config tmux actually reads, in this order: `$TMUX_CONF_PATH` if set; else the
+existing XDG config (`$XDG_CONFIG_HOME/tmux/tmux.conf` or `~/.config/tmux/tmux.conf`);
+else `~/.tmux.conf`.
+
+```sh
+seshagy keybind install tmux            # prefix + s, popup (default)
+seshagy keybind install tmux --key f    # custom key
+seshagy keybind install tmux --mode window        # new full window
+seshagy keybind install tmux --mode pane          # split, unzoomed
+seshagy keybind install tmux --mode pane-zoomed   # split + zoomed
+tmux source-file ~/.config/tmux/tmux.conf   # reload (path may differ)
+```
+
+Remove it with `seshagy keybind uninstall tmux`.
+
+All four modes launch `seshagy-focus-kill seshagy` inside a real tmux pane
+(`display-popup` / `new-window` / `split-window`) so seshagy gets a controlling
+TTY — the focus-kill wrapper then dismisses the pane the moment you switch to
+another session/workspace. To wire a mode manually instead, add the matching
+line to your tmux config:
+
+```tmux
+bind-key s display-popup -E -w 80% -h 80% 'seshagy-focus-kill seshagy'
+bind-key s new-window  -c '#{pane_current_path}' 'seshagy-focus-kill seshagy'
+bind-key s split-window -c '#{pane_current_path}' 'seshagy-focus-kill seshagy'
+bind-key s split-window -Z -c '#{pane_current_path}' 'seshagy-focus-kill seshagy'
+```
+
+### herdr
+
+Install the seshagy herdr plugin to get the overlay action + keybinding wiring
+(see [herdr.dev/plugins](https://herdr.dev/plugins/) for the marketplace
+listing). The binary must already be on `PATH` (`brew install` / `go install` /
+mise / Nix); the plugin only connects the keybinding:
+
+```sh
+brew install seshagy        # or: go install ./cmd/seshagy
+herdr plugin install lmilojevicc/seshagy
+```
+
+Under the hood the plugin runs `seshagy-focus-kill seshagy` as an overlay pane
+— the same wrapper script as the tmux path.
+
 ## Requirements
 
 Required:

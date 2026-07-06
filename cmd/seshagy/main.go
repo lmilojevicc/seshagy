@@ -78,6 +78,8 @@ func run(args []string) error {
 		return runReleaseAgent(ctx, mux, args[1:])
 	case "integration":
 		return runIntegration(ctx, args[1:])
+	case "keybind":
+		return runKeybind(args[1:])
 	case "--delete-item":
 		line, jsonOutput := parseDeleteItemArgs(args[1:])
 		if line == "" {
@@ -396,6 +398,12 @@ Usage:
   seshagy config path [--json]    print config file path
   seshagy config show [--json]    print effective config
   seshagy config init [--force] [--json]
+  seshagy keybind install tmux [--key <key>] [--mode popup|window|pane|pane-zoomed]
+                                  bind prefix+<key> (default: s) to launch
+                                  seshagy as an ephemeral tmux window/popup
+                                  (default mode: popup)
+  seshagy keybind uninstall tmux
+                                  remove the seshagy tmux keybinding
   seshagy --version [--json]
 
 Scripting:

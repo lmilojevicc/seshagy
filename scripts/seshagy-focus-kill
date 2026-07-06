@@ -1,0 +1,158 @@
+#!/usr/bin/env bash
+# seshagy-focus-kill — run seshagy (or any command) in an ephemeral overlay/
+# dedicated window and dismiss it when focus leaves.
+#
+# Bundled with seshagy. Used by the herdr plugin (`[[panes]] placement="overlay"`)
+# and the documented tmux keybinding:
+#     bind-key s run-shell 'seshagy-focus-kill seshagy'
+#
+# Auto-detects the active multiplexer:
+#   - HERDR_ENV=1 → herdr overlay pane; dismissed when focus leaves the pane,
+#     tab, or workspace.
+#   - $TMUX set   → tmux pane; dismissed when the window loses focus or the
+#     session loses its client.
+#
+# Override the poll interval with SESHAGY_FOCUS_KILL_POLL (default 0.15s).
+set -eo pipefail
+
+# Pre-flight: locate the seshagy binary up front so we fail with a clear
+# message instead of a silent tmux 'returned 1'. We do NOT use `set -u` because
+# the multiplexer-env guards below use ${VAR:?msg} which prints a useful error
+# and exits non-zero on its own.
+if ! command -v seshagy >/dev/null 2>&1; then
+  echo "seshagy-focus-kill: 'seshagy' not found on PATH." >&2
+  echo "  install it with: go install github.com/lmilojevicc/seshagy/cmd/seshagy@latest" >&2
+  echo "  (or: brew install seshagy / mise install seshagy)" >&2
+  exit 1
+fi
+
+if [[ $# -lt 1 ]]; then
+  echo "usage: seshagy-focus-kill <command> [args...]" >&2
+  exit 1
+fi
+
+poll_interval="${SESHAGY_FOCUS_KILL_POLL:-0.15}"
+child=""
+
+cleanup() {
+  [[ -n "$child" ]] && kill "$child" 2>/dev/null || true
+}
+trap cleanup INT TERM
+
+# ---------------------------------------------------------------------------
+# herdr backend
+# ---------------------------------------------------------------------------
+run_herdr() {
+  local my_pane my_workspace
+  my_pane="${HERDR_PANE_ID:?HERDR_PANE_ID is not set (run inside a Herdr pane)}"
+  my_workspace="${HERDR_WORKSPACE_ID:?HERDR_WORKSPACE_ID is not set (run inside a Herdr pane)}"
+
+  local current_workspace
+  current_focused_workspace() {
+    herdr workspace list 2>/dev/null \
+      | jq -r '.result.workspaces[] | select(.focused) | .workspace_id' 2>/dev/null \
+      | head -1 \
+      || true
+  }
+
+  is_overlay_focused() {
+    herdr pane get "$my_pane" 2>/dev/null \
+      | jq -e '.result.pane.focused == true' >/dev/null 2>&1
+  }
+
+  should_dismiss() {
+    if ! is_overlay_focused; then
+      return 0
+    fi
+    current_workspace="$(current_focused_workspace)"
+    if [[ -n "$current_workspace" && "$current_workspace" != "$my_workspace" ]]; then
+      return 0
+    fi
+    return 1
+  }
+
+  "$@" &
+  child=$!
+  while kill -0 "$child" 2>/dev/null; do
+    if should_dismiss; then
+      cleanup
+      wait "$child" 2>/dev/null || true
+      exit 0
+    fi
+    sleep "$poll_interval"
+  done
+  wait "$child"
+}
+
+# ---------------------------------------------------------------------------
+# tmux backend
+# ---------------------------------------------------------------------------
+run_tmux() {
+  local my_pane my_session
+  my_pane="${TMUX_PANE:?TMUX_PANE is not set (run inside a tmux pane)}"
+  my_session="$(tmux display-message -p -t "$my_pane" '#{session_name}')"
+
+  tmux set-option -g @seshagy_focus_kill_pid "$$"
+
+  pane_exists() {
+    tmux display-message -p -t "$my_pane" '#{pane_id}' >/dev/null 2>&1
+  }
+
+  window_is_active() {
+    [[ "$(tmux display-message -p -t "$my_pane" '#{window_active}')" == "1" ]]
+  }
+
+  session_has_client() {
+    tmux list-clients -F '#{client_session}' 2>/dev/null \
+      | grep -qxF "$my_session"
+  }
+
+  should_dismiss() {
+    if ! pane_exists; then
+      return 0
+    fi
+    if ! window_is_active; then
+      return 0
+    fi
+    if ! session_has_client; then
+      return 0
+    fi
+    return 1
+  }
+
+  "$@" &
+  child=$!
+
+  tmux_cleanup() {
+    [[ -n "$child" ]] && kill "$child" 2>/dev/null || true
+    tmux kill-pane -t "$my_pane" 2>/dev/null || true
+    local current
+    current="$(tmux show-options -gv @seshagy_focus_kill_pid 2>/dev/null || true)"
+    if [[ "$current" == "$$" ]]; then
+      tmux set-option -gu @seshagy_focus_kill_pid 2>/dev/null || true
+    fi
+  }
+  trap tmux_cleanup EXIT
+
+  while kill -0 "$child" 2>/dev/null; do
+    if should_dismiss; then
+      tmux_cleanup
+      wait "$child" 2>/dev/null || true
+      exit 0
+    fi
+    sleep "$poll_interval"
+  done
+  wait "$child"
+}
+
+# ---------------------------------------------------------------------------
+# Dispatch
+# ---------------------------------------------------------------------------
+if [[ "${HERDR_ENV:-}" == "1" ]]; then
+  run_herdr "$@"
+elif [[ -n "${TMUX:-}" ]]; then
+  run_tmux "$@"
+else
+  echo "seshagy-focus-kill: not inside herdr (HERDR_ENV=1) or tmux (\$TMUX)." >&2
+  exit 1
+fi
