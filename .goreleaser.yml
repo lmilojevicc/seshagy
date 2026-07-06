@@ -63,3 +63,23 @@ release:
   draft: false
   prerelease: auto
   name_template: "{{.Tag}}"
+
+brews:
+  - name: seshagy
+    homepage: https://github.com/lmilojevicc/seshagy
+    description: "Agent-aware terminal dashboard for tmux and herdr"
+    directory: Formula
+    install: |
+      bin.install "seshagy"
+      bin.install "scripts/seshagy-focus-kill" => "seshagy-focus-kill"
+    caveats: |
+      The seshagy-focus-kill launcher is installed alongside the binary.
+      Wire a one-key launcher with: seshagy keybind install tmux (or: herdr)
+      Requires tmux or herdr on PATH.
+    repository:
+      owner: lmilojevicc
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    commit_author:
+      name: goreleaserbot
+      email: "104729643+lmilojevicc@users.noreply.github.com"
