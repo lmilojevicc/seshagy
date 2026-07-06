@@ -59,18 +59,21 @@ Typical first run:
 
 ## Launch with a keybinding
 
-seshagy ships a launcher script, `seshagy-focus-kill`, used by the herdr plugin
-to open the dashboard in an ephemeral overlay and dismiss it the moment you
-switch away. The script auto-detects the active multiplexer from the
-environment (`HERDR_ENV=1` → herdr; `$TMUX` → tmux) and is bundled with every
-release and `go install` / `make install`.
+seshagy ships a launcher script, `seshagy-focus-kill`, that opens the dashboard
+in an ephemeral overlay (herdr) or dedicated window (tmux) and dismisses it
+the moment you switch away — so you get a one-keystroke in / one-keystroke out
+jump launcher, without leftover panes.
+
+The script auto-detects the active multiplexer from the environment
+(`HERDR_ENV=1` → herdr; `$TMUX` → tmux) and is bundled with every release and
+`go install` / `make install`.
 
 ### tmux
 
 Install the keybinding idempotently (default key `s`). seshagy writes to the
 config tmux actually reads, in this order: `$TMUX_CONF_PATH` if set; else the
-existing XDG config (`$TMUX_CONFIG_DIR/tmux.conf`, `$XDG_CONFIG_HOME/tmux/tmux.conf`,
-or `~/.config/tmux/tmux.conf`); else `~/.tmux.conf`.
+existing XDG config (`$XDG_CONFIG_HOME/tmux/tmux.conf` or `~/.config/tmux/tmux.conf`);
+else `~/.tmux.conf`.
 
 ```sh
 seshagy keybind install tmux            # prefix + s
@@ -80,17 +83,11 @@ tmux source-file ~/.config/tmux/tmux.conf   # reload (path may differ)
 
 Remove it with `seshagy keybind uninstall tmux`.
 
-The binding uses tmux's `display-popup` (tmux 3.2+) — a floating, ephemeral
-overlay that gives seshagy a real TTY and auto-closes the instant seshagy
-exits, so no wrapper script is needed on the tmux side. To wire it manually
-instead, add this line to your tmux config:
+To wire it manually instead, add this line to `~/.tmux.conf`:
 
 ```tmux
-bind-key s display-popup -E -w 80% -h 80% '$SHELL -lc seshagy'
+bind-key s run-shell '$SHELL -lc "seshagy-focus-kill seshagy"'
 ```
-
-(`$SHELL -lc` loads your login PATH so tmux can find `seshagy` in `~/go/bin`,
-Homebrew, etc.)
 
 ### herdr
 
@@ -105,8 +102,7 @@ herdr plugin install lmilojevicc/seshagy
 ```
 
 Under the hood the plugin runs `seshagy-focus-kill seshagy` as an overlay pane
-— herdr's overlays don't auto-close on exit the way tmux's `display-popup` does,
-so the wrapper script handles dismissal.
+— the same wrapper script as the tmux path.
 
 ## Requirements
 

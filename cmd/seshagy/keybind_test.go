@@ -37,8 +37,8 @@ func TestInstallTmuxKeybindFreshConfig(t *testing.T) {
 	if !strings.Contains(got, tmuxBindMarkerBegin) || !strings.Contains(got, tmuxBindMarkerEnd) {
 		t.Fatalf("missing markers\n%s", got)
 	}
-	if !strings.Contains(got, "bind-key s display-popup") ||
-		!strings.Contains(got, "seshagy") {
+	if !strings.Contains(got, "bind-key s run-shell") ||
+		!strings.Contains(got, "seshagy-focus-kill seshagy") {
 		t.Fatalf("missing bind line\n%s", got)
 	}
 }
