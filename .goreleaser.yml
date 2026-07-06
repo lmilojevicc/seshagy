@@ -28,6 +28,7 @@ archives:
       - LICENSE*
       - README*
       - scripts/seshagy-focus-kill
+      - scripts/herdr-plugin-entry.sh
 
 checksum:
   name_template: checksums.txt
