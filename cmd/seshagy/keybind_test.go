@@ -112,3 +112,77 @@ func TestUninstallTmuxKeybindWhenAbsentIsNoop(t *testing.T) {
 		t.Fatalf("content changed on noop uninstall\n%s", got)
 	}
 }
+
+// TestInstallTmuxKeybindPrefersExistingXDGConfig verifies that when
+// ~/.config/tmux/tmux.conf already exists and TMUX_CONF_PATH is unset, the
+// binding lands in the XDG location (where tmux 3.2+ actually reads).
+func TestInstallTmuxKeybindPrefersExistingXDGConfig(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("TMUX_CONF_PATH", "")
+	t.Setenv("XDG_CONFIG_HOME", "")
+	// Create the XDG config so it's picked up over ~/.tmux.conf.
+	xdgDir := filepath.Join(home, ".config", "tmux")
+	if err := os.MkdirAll(xdgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	xdgConf := filepath.Join(xdgDir, "tmux.conf")
+	if err := os.WriteFile(xdgConf, []byte("set -g mouse on\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := installTmuxKeybind("s"); err != nil {
+		t.Fatalf("install: %v", err)
+	}
+	// Binding must be in the XDG file.
+	xdgGot := readConfig(t, xdgConf)
+	if !strings.Contains(xdgGot, tmuxBindMarkerBegin) {
+		t.Fatalf("XDG config missing marker\n%s", xdgGot)
+	}
+	// ~/.tmux.conf must NOT have been created.
+	if _, err := os.Stat(filepath.Join(home, ".tmux.conf")); err == nil {
+		t.Fatal("~/.tmux.conf was created; should have preferred the XDG path")
+	}
+}
+
+// TestInstallTmuxKeybindFallsBackToLegacyPath verifies that when no env var is
+// set and no XDG config exists, the legacy ~/.tmux.conf is created.
+func TestInstallTmuxKeybindFallsBackToLegacyPath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("TMUX_CONF_PATH", "")
+	t.Setenv("XDG_CONFIG_HOME", "")
+
+	if err := installTmuxKeybind("s"); err != nil {
+		t.Fatalf("install: %v", err)
+	}
+	legacy := filepath.Join(home, ".tmux.conf")
+	got := readConfig(t, legacy)
+	if !strings.Contains(got, tmuxBindMarkerBegin) {
+		t.Fatalf("legacy config missing marker\n%s", got)
+	}
+}
+
+// TestInstallTmuxKeybindHonorsXDGConfig_HOME verifies that when XDG_CONFIG_HOME
+// is set and the tmux config exists there, that path wins.
+func TestInstallTmuxKeybindHonorsXDGConfig_HOME(t *testing.T) {
+	xdgRoot := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", xdgRoot)
+	t.Setenv("TMUX_CONF_PATH", "")
+	tmuxDir := filepath.Join(xdgRoot, "tmux")
+	if err := os.MkdirAll(tmuxDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	xdgConf := filepath.Join(tmuxDir, "tmux.conf")
+	if err := os.WriteFile(xdgConf, []byte(""), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := installTmuxKeybind("s"); err != nil {
+		t.Fatalf("install: %v", err)
+	}
+	got := readConfig(t, xdgConf)
+	if !strings.Contains(got, tmuxBindMarkerBegin) {
+		t.Fatalf("XDG_CONFIG_HOME tmux.conf missing marker\n%s", got)
+	}
+}

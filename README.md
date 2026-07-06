@@ -70,12 +70,15 @@ The script auto-detects the active multiplexer from the environment
 
 ### tmux
 
-Install the keybinding into `~tmux.conf` idempotently (default key `s`):
+Install the keybinding idempotently (default key `s`). seshagy writes to the
+config tmux actually reads, in this order: `$TMUX_CONF_PATH` if set; else the
+existing XDG config (`$XDG_CONFIG_HOME/tmux/tmux.conf` or `~/.config/tmux/tmux.conf`);
+else `~/.tmux.conf`.
 
 ```sh
 seshagy keybind install tmux            # prefix + s
 seshagy keybind install tmux --key f    # prefix + f
-tmux source-file ~/.tmux.conf           # reload
+tmux source-file ~/.config/tmux/tmux.conf   # reload (path may differ)
 ```
 
 Remove it with `seshagy keybind uninstall tmux`.

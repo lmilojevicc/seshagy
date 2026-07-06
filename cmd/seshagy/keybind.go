@@ -26,6 +26,7 @@ func tmuxBindLine(key string) string {
 }
 
 func tmuxConfigPath() (string, error) {
+	// 1. Explicit override via env var.
 	if p := os.Getenv("TMUX_CONF_PATH"); p != "" {
 		return p, nil
 	}
@@ -33,6 +34,18 @@ func tmuxConfigPath() (string, error) {
 	if err != nil {
 		return "", err
 	}
+	// 2. Existing XDG config (tmux 3.2+ reads $XDG_CONFIG_HOME/tmux/tmux.conf,
+	//    defaulting to ~/.config/tmux/tmux.conf). Write where the user already
+	//    keeps their config rather than forcing ~/.tmux.conf.
+	xdgRoot := os.Getenv("XDG_CONFIG_HOME")
+	if xdgRoot == "" {
+		xdgRoot = filepath.Join(home, ".config")
+	}
+	xdgConf := filepath.Join(xdgRoot, "tmux", "tmux.conf")
+	if _, err := os.Stat(xdgConf); err == nil {
+		return xdgConf, nil
+	}
+	// 3. Legacy default.
 	return filepath.Join(home, ".tmux.conf"), nil
 }
 
