@@ -76,17 +76,27 @@ existing XDG config (`$XDG_CONFIG_HOME/tmux/tmux.conf` or `~/.config/tmux/tmux.c
 else `~/.tmux.conf`.
 
 ```sh
-seshagy keybind install tmux            # prefix + s
-seshagy keybind install tmux --key f    # prefix + f
+seshagy keybind install tmux            # prefix + s, popup (default)
+seshagy keybind install tmux --key f    # custom key
+seshagy keybind install tmux --mode window        # new full window
+seshagy keybind install tmux --mode pane          # split, unzoomed
+seshagy keybind install tmux --mode pane-zoomed   # split + zoomed
 tmux source-file ~/.config/tmux/tmux.conf   # reload (path may differ)
 ```
 
 Remove it with `seshagy keybind uninstall tmux`.
 
-To wire it manually instead, add this line to `~/.tmux.conf`:
+All four modes launch `seshagy-focus-kill seshagy` inside a real tmux pane
+(`display-popup` / `new-window` / `split-window`) so seshagy gets a controlling
+TTY — the focus-kill wrapper then dismisses the pane the moment you switch to
+another session/workspace. To wire a mode manually instead, add the matching
+line to your tmux config:
 
 ```tmux
-bind-key s run-shell '$SHELL -lc "seshagy-focus-kill seshagy"'
+bind-key s display-popup -E -w 80% -h 80% 'seshagy-focus-kill seshagy'
+bind-key s new-window  -c '#{pane_current_path}' 'seshagy-focus-kill seshagy'
+bind-key s split-window -c '#{pane_current_path}' 'seshagy-focus-kill seshagy'
+bind-key s split-window -Z -c '#{pane_current_path}' 'seshagy-focus-kill seshagy'
 ```
 
 ### herdr

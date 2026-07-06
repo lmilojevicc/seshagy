@@ -30,14 +30,14 @@ func TestInstallTmuxKeybindFreshConfig(t *testing.T) {
 	path := writeTempConfig(t, "")
 	t.Setenv("TMUX_CONF_PATH", path)
 
-	if err := installTmuxKeybind("s"); err != nil {
+	if err := installTmuxKeybind("s", tmuxModePopup); err != nil {
 		t.Fatalf("install: %v", err)
 	}
 	got := readConfig(t, path)
 	if !strings.Contains(got, tmuxBindMarkerBegin) || !strings.Contains(got, tmuxBindMarkerEnd) {
 		t.Fatalf("missing markers\n%s", got)
 	}
-	if !strings.Contains(got, "bind-key s run-shell") ||
+	if !strings.Contains(got, "bind-key s display-popup") ||
 		!strings.Contains(got, "seshagy-focus-kill seshagy") {
 		t.Fatalf("missing bind line\n%s", got)
 	}
@@ -47,7 +47,7 @@ func TestInstallTmuxKeybindAppendsToExistingContent(t *testing.T) {
 	path := writeTempConfig(t, "set -g mouse on\n")
 	t.Setenv("TMUX_CONF_PATH", path)
 
-	if err := installTmuxKeybind("s"); err != nil {
+	if err := installTmuxKeybind("s", tmuxModePopup); err != nil {
 		t.Fatalf("install: %v", err)
 	}
 	got := readConfig(t, path)
@@ -63,10 +63,10 @@ func TestInstallTmuxKeybindIsIdempotentAndReplacesKey(t *testing.T) {
 	path := writeTempConfig(t, "")
 	t.Setenv("TMUX_CONF_PATH", path)
 
-	if err := installTmuxKeybind("s"); err != nil {
+	if err := installTmuxKeybind("s", tmuxModePopup); err != nil {
 		t.Fatal(err)
 	}
-	if err := installTmuxKeybind("f"); err != nil {
+	if err := installTmuxKeybind("f", tmuxModePopup); err != nil {
 		t.Fatal(err)
 	}
 	got := readConfig(t, path)
@@ -86,7 +86,7 @@ func TestUninstallTmuxKeybindRemovesBlock(t *testing.T) {
 	path := writeTempConfig(t, "set -g mouse on\n")
 	t.Setenv("TMUX_CONF_PATH", path)
 
-	if err := installTmuxKeybind("s"); err != nil {
+	if err := installTmuxKeybind("s", tmuxModePopup); err != nil {
 		t.Fatal(err)
 	}
 	if err := uninstallTmuxKeybind(); err != nil {
@@ -133,7 +133,7 @@ func TestInstallTmuxKeybindPrefersExistingXDGConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := installTmuxKeybind("s"); err != nil {
+	if err := installTmuxKeybind("s", tmuxModePopup); err != nil {
 		t.Fatalf("install: %v", err)
 	}
 	// Binding must be in the XDG file.
@@ -156,7 +156,7 @@ func TestInstallTmuxKeybindFallsBackToLegacyPath(t *testing.T) {
 	t.Setenv("TMUX_CONFIG_DIR", "")
 	t.Setenv("XDG_CONFIG_HOME", "")
 
-	if err := installTmuxKeybind("s"); err != nil {
+	if err := installTmuxKeybind("s", tmuxModePopup); err != nil {
 		t.Fatalf("install: %v", err)
 	}
 	legacy := filepath.Join(home, ".tmux.conf")
@@ -178,7 +178,7 @@ func TestInstallTmuxKeybindHonorsTMUX_CONFIG_DIR(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := installTmuxKeybind("s"); err != nil {
+	if err := installTmuxKeybind("s", tmuxModePopup); err != nil {
 		t.Fatalf("install: %v", err)
 	}
 	got := readConfig(t, conf)
@@ -204,11 +204,64 @@ func TestInstallTmuxKeybindHonorsXDGConfig_HOME(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := installTmuxKeybind("s"); err != nil {
+	if err := installTmuxKeybind("s", tmuxModePopup); err != nil {
 		t.Fatalf("install: %v", err)
 	}
 	got := readConfig(t, xdgConf)
 	if !strings.Contains(got, tmuxBindMarkerBegin) {
 		t.Fatalf("XDG_CONFIG_HOME tmux.conf missing marker\n%s", got)
+	}
+}
+
+func TestTmuxBindLineModes(t *testing.T) {
+	cases := []struct {
+		mode     tmuxLaunchMode
+		contains string
+	}{
+		{tmuxModePopup, "display-popup -E -w 80% -h 80%"},
+		{tmuxModeWindow, "new-window -c"},
+		{tmuxModePane, "split-window -c"},
+		{tmuxModeZoomed, "split-window -Z -c"},
+	}
+	for _, tc := range cases {
+		t.Run(string(tc.mode), func(t *testing.T) {
+			line := tmuxBindLine("s", tc.mode)
+			if !strings.Contains(line, tc.contains) {
+				t.Fatalf("mode %s: line %q missing %q", tc.mode, line, tc.contains)
+			}
+			// Every mode must invoke seshagy-focus-kill (the dismissal wrapper).
+			if !strings.Contains(line, "seshagy-focus-kill seshagy") {
+				t.Fatalf("mode %s: missing focus-kill wrapper in %q", tc.mode, line)
+			}
+			// No mode should use run-shell (it has no controlling TTY — that
+			// was the original bug).
+			if strings.Contains(line, "run-shell") {
+				t.Fatalf("mode %s: must not use run-shell (no TTY): %q", tc.mode, line)
+			}
+		})
+	}
+}
+
+func TestParseTmuxLaunchModeRejectsUnknown(t *testing.T) {
+	if _, err := parseTmuxLaunchMode("frobnicate"); err == nil {
+		t.Fatal("expected error for unknown mode")
+	}
+	// Default empty string maps to popup.
+	m, err := parseTmuxLaunchMode("")
+	if err != nil || m != tmuxModePopup {
+		t.Fatalf("empty mode = %v err=%v, want popup", m, err)
+	}
+}
+
+func TestInstallTmuxKeybindWritesSelectedMode(t *testing.T) {
+	path := writeTempConfig(t, "")
+	t.Setenv("TMUX_CONF_PATH", path)
+
+	if err := installTmuxKeybind("s", tmuxModeWindow); err != nil {
+		t.Fatalf("install window: %v", err)
+	}
+	got := readConfig(t, path)
+	if !strings.Contains(got, "new-window") || strings.Contains(got, "display-popup") {
+		t.Fatalf("window mode not written\n%s", got)
 	}
 }

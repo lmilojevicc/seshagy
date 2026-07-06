@@ -11,21 +11,63 @@ import (
 // defaultTmuxKey is the default key seshagy binds in tmux.
 const defaultTmuxKey = "s"
 
-// tmuxBindLine is the binding the launcher script expects. Wrapped in a marker
-// block so reinstall/uninstall can find and replace it idempotently.
+// tmuxLaunchMode picks the pane primitive that hosts seshagy. All four give
+// seshagy a real controlling TTY (unlike run-shell) and rely on
+// seshagy-focus-kill for dismissal when the user switches focus.
+type tmuxLaunchMode string
+
+const (
+	tmuxModePopup  tmuxLaunchMode = "popup"       // floating overlay (display-popup)
+	tmuxModeWindow tmuxLaunchMode = "window"      // new full window (new-window)
+	tmuxModePane   tmuxLaunchMode = "pane"        // split-window, unzoomed
+	tmuxModeZoomed tmuxLaunchMode = "pane-zoomed" // split-window, then zoom
+)
+
+func parseTmuxLaunchMode(s string) (tmuxLaunchMode, error) {
+	switch s {
+	case "", string(tmuxModePopup):
+		return tmuxModePopup, nil
+	case string(tmuxModeWindow):
+		return tmuxModeWindow, nil
+	case string(tmuxModePane):
+		return tmuxModePane, nil
+	case string(tmuxModeZoomed):
+		return tmuxModeZoomed, nil
+	default:
+		return "", fmt.Errorf(
+			"unknown launch mode %q (want popup|window|pane|pane-zoomed)", s,
+		)
+	}
+}
+
+// tmuxBindLine is the binding for the chosen launch mode. Wrapped in a marker
+// block so reinstall/uninstall can find and replace it idempotently. Each mode
+// runs seshagy-focus-kill inside a primitive that provides a real TTY (the
+// focus-kill wrapper then dismisses the pane when focus leaves).
 const (
 	tmuxBindMarkerBegin = "# >>> seshagy keybind >>>"
 	tmuxBindMarkerEnd   = "# <<< seshagy keybind <<<"
 )
 
-func tmuxBindLine(key string) string {
-	// Invoke via a login shell so the user's PATH (e.g. ~/go/bin, brew, cargo)
-	// is loaded — tmux's run-shell otherwise uses a minimal PATH that can't
-	// resolve seshagy-focus-kill.
-	return fmt.Sprintf(
-		"bind-key %s run-shell '$SHELL -lc \"seshagy-focus-kill seshagy\"'",
-		key,
-	)
+func tmuxBindLine(key string, mode tmuxLaunchMode) string {
+	// seshagy-focus-kill is found on PATH because new-window/split-window/
+	// display-popup inherit the tmux server's PATH (unlike run-shell, which
+	// uses a minimal PATH and was the source of the original launch failure).
+	cmd := "'seshagy-focus-kill seshagy'"
+	switch mode {
+	case tmuxModePopup:
+		return fmt.Sprintf("bind-key %s display-popup -E -w 80%% -h 80%% %s", key, cmd)
+	case tmuxModeWindow:
+		return fmt.Sprintf("bind-key %s new-window -c '#{pane_current_path}' %s", key, cmd)
+	case tmuxModeZoomed:
+		// Split + zoom so seshagy fills the window; unzoom is automatic when the
+		// pane is killed by focus-kill.
+		return fmt.Sprintf("bind-key %s split-window -Z -c '#{pane_current_path}' %s", key, cmd)
+	case tmuxModePane:
+		return fmt.Sprintf("bind-key %s split-window -c '#{pane_current_path}' %s", key, cmd)
+	default:
+		return fmt.Sprintf("bind-key %s display-popup -E -w 80%% -h 80%% %s", key, cmd)
+	}
 }
 
 func tmuxConfigPath() (string, error) {
@@ -59,25 +101,47 @@ func tmuxConfigPath() (string, error) {
 // runKeybind dispatches `seshagy keybind <cmd>`.
 func runKeybind(args []string) error {
 	if len(args) == 0 {
-		return errors.New(joinUsage("keybind", "install <name> [--key <key>] | uninstall <name>"))
+		return errors.New(
+			joinUsage(
+				"keybind",
+				"install <name> [--key <key>] [--mode popup|window|pane|pane-zoomed] | uninstall <name>",
+			),
+		)
 	}
 	switch args[0] {
 	case "install":
 		rest := args[1:]
 		if len(rest) == 0 || rest[0] == "" {
-			return errors.New(joinUsage("keybind", "install", "<name>", "[--key <key>]"))
+			return errors.New(
+				joinUsage("keybind", "install", "<name>", "[--key <key>]", "[--mode <mode>]"),
+			)
 		}
 		name := rest[0]
 		key := defaultTmuxKey
+		mode := tmuxModePopup
 		for i := 1; i < len(rest); i++ {
-			if rest[i] == "--key" && i+1 < len(rest) {
+			switch rest[i] {
+			case "--key":
+				if i+1 >= len(rest) {
+					return errors.New("--key requires a value")
+				}
 				key = rest[i+1]
+				i++
+			case "--mode":
+				if i+1 >= len(rest) {
+					return errors.New("--mode requires a value")
+				}
+				m, err := parseTmuxLaunchMode(rest[i+1])
+				if err != nil {
+					return err
+				}
+				mode = m
 				i++
 			}
 		}
 		switch name {
 		case "tmux":
-			return installTmuxKeybind(key)
+			return installTmuxKeybind(key, mode)
 		default:
 			return fmt.Errorf("unknown keybind target: %q (only \"tmux\" is supported)", name)
 		}
@@ -97,7 +161,7 @@ func runKeybind(args []string) error {
 	}
 }
 
-func installTmuxKeybind(key string) error {
+func installTmuxKeybind(key string, mode tmuxLaunchMode) error {
 	path, err := tmuxConfigPath()
 	if err != nil {
 		return fmt.Errorf("locate tmux config: %w", err)
@@ -120,11 +184,14 @@ func installTmuxKeybind(key string) error {
 		if lineEnd < len(content) && content[lineEnd] == '\n' {
 			lineEnd++
 		}
-		block := tmuxBindMarkerBegin + "\n" + tmuxBindLine(key) + "\n" + tmuxBindMarkerEnd + "\n"
+		block := tmuxBindMarkerBegin + "\n" + tmuxBindLine(
+			key,
+			mode,
+		) + "\n" + tmuxBindMarkerEnd + "\n"
 		content = content[:lineStart] + block + content[lineEnd:]
 	} else {
 		block := "\n" + tmuxBindMarkerBegin + "\n" + tmuxBindLine(
-			key,
+			key, mode,
 		) + "\n" + tmuxBindMarkerEnd + "\n"
 		if !strings.HasSuffix(content, "\n") && content != "" {
 			content += "\n"

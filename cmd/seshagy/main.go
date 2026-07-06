@@ -398,9 +398,10 @@ Usage:
   seshagy config path [--json]    print config file path
   seshagy config show [--json]    print effective config
   seshagy config init [--force] [--json]
-  seshagy keybind install tmux [--key <key>]
+  seshagy keybind install tmux [--key <key>] [--mode popup|window|pane|pane-zoomed]
                                   bind prefix+<key> (default: s) to launch
-                                  seshagy as an ephemeral tmux window
+                                  seshagy as an ephemeral tmux window/popup
+                                  (default mode: popup)
   seshagy keybind uninstall tmux
                                   remove the seshagy tmux keybinding
   seshagy --version [--json]
@@ -421,11 +422,6 @@ Scripting:
                                   install an agent hook/extension
   seshagy integration uninstall <name>
                                   remove an agent hook/extension
-  seshagy keybind install tmux [--key <key>]
-                                  bind prefix+<key> (default: s) to launch seshagy
-                                  as an ephemeral tmux window (writes ~/.tmux.conf)
-  seshagy keybind uninstall tmux
-                                  remove the seshagy tmux keybinding
 
 TUI keys:
   enter attach/create/focus   q quit   / filter   r refresh   R rename
