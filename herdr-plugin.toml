@@ -1,0 +1,15 @@
+id = "seshagy"
+name = "seshagy"
+version = "0.5.3"
+min_herdr_version = "0.7.0"
+description = "Agent-aware terminal dashboard for tmux and herdr."
+platforms = ["linux", "macos"]
+
+# Opens seshagy as a floating overlay pane. The gating script checks if the
+# seshagy binary is installed before launching; if missing, it prints
+# installation instructions instead of failing with a cryptic error.
+[[panes]]
+id = "seshagy"
+title = "seshagy"
+placement = "overlay"
+command = ["bash", "scripts/herdr-plugin-entry.sh"]
