@@ -19,8 +19,11 @@ const (
 )
 
 func tmuxBindLine(key string) string {
+	// Invoke via a login shell so the user's PATH (e.g. ~/go/bin, brew, cargo)
+	// is loaded — tmux's run-shell otherwise uses a minimal PATH that can't
+	// resolve seshagy-focus-kill.
 	return fmt.Sprintf(
-		"bind-key %s run-shell 'seshagy-focus-kill seshagy'",
+		"bind-key %s run-shell '$SHELL -lc \"seshagy-focus-kill seshagy\"'",
 		key,
 	)
 }

@@ -13,7 +13,18 @@
 #     session loses its client.
 #
 # Override the poll interval with SESHAGY_FOCUS_KILL_POLL (default 0.15s).
-set -euo pipefail
+set -eo pipefail
+
+# Pre-flight: locate the seshagy binary up front so we fail with a clear
+# message instead of a silent tmux 'returned 1'. We do NOT use `set -u` because
+# the multiplexer-env guards below use ${VAR:?msg} which prints a useful error
+# and exits non-zero on its own.
+if ! command -v seshagy >/dev/null 2>&1; then
+  echo "seshagy-focus-kill: 'seshagy' not found on PATH." >&2
+  echo "  install it with: go install github.com/lmilojevicc/seshagy/cmd/seshagy@latest" >&2
+  echo "  (or: brew install seshagy / mise install seshagy)" >&2
+  exit 1
+fi
 
 if [[ $# -lt 1 ]]; then
   echo "usage: seshagy-focus-kill <command> [args...]" >&2

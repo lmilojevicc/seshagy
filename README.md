@@ -86,7 +86,7 @@ Remove it with `seshagy keybind uninstall tmux`.
 To wire it manually instead, add this line to `~/.tmux.conf`:
 
 ```tmux
-bind-key s run-shell 'seshagy-focus-kill seshagy'
+bind-key s run-shell '$SHELL -lc "seshagy-focus-kill seshagy"'
 ```
 
 ### herdr
