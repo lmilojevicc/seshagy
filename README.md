@@ -101,18 +101,34 @@ bind-key s split-window -Z -c '#{pane_current_path}' 'seshagy-focus-kill seshagy
 
 ### herdr
 
-Install the seshagy herdr plugin to get the overlay action + keybinding wiring
-(see [herdr.dev/plugins](https://herdr.dev/plugins/) for the marketplace
-listing). The binary must already be on `PATH` (`brew install` / `go install` /
-mise / Nix); the plugin only connects the keybinding:
+Install the keybinding idempotently into the herdr config
+(`~/.config/herdr/config.toml`, or `$HERDR_CONFIG_PATH` / `$XDG_CONFIG_HOME` if
+set). The keybind opens `seshagy-focus-kill seshagy` as a temporary pane that
+herdr closes when the command exits; the wrapper extends that to also dismiss
+on focus-loss:
 
 ```sh
-brew install seshagy        # or: go install ./cmd/seshagy
-herdr plugin install lmilojevicc/seshagy
+seshagy keybind install herdr            # prefix+s
+seshagy keybind install herdr --key f    # prefix+f
+herdr server reload-config               # reload
 ```
 
-Under the hood the plugin runs `seshagy-focus-kill seshagy` as an overlay pane
-— the same wrapper script as the tmux path.
+Remove it with `seshagy keybind uninstall herdr`.
+
+To wire it manually instead, add this block to your herdr config:
+
+```toml
+[keys]
+  [[keys.command]]
+    key = "prefix+s"
+    type = "pane"
+    command = "seshagy-focus-kill seshagy"
+    description = "seshagy session manager"
+```
+
+The seshagy binary must be on `PATH` (`brew install seshagy` / `go install` /
+mise / Nix). See [herdr.dev/plugins](https://herdr.dev/plugins/) for the
+marketplace listing.
 
 ## Requirements
 

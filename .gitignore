@@ -1,3 +1,5 @@
 /seshagy
 /dist/
 *.test
+.pi-subagents/
+.pi-subagents/

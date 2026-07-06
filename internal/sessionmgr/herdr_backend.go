@@ -290,7 +290,7 @@ func (herdrBackend) CaptureAgentPane(
 	paneID string,
 	lines int,
 ) (string, error) {
-	args := []string{"pane", "read", paneID, "--source", "recent"}
+	args := []string{"pane", "read", paneID, "--source", "recent", "--ansi"}
 	if lines > 0 {
 		args = append(args, "--lines", fmt.Sprintf("%d", lines))
 	}

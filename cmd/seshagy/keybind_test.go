@@ -265,3 +265,146 @@ func TestInstallTmuxKeybindWritesSelectedMode(t *testing.T) {
 		t.Fatalf("window mode not written\n%s", got)
 	}
 }
+
+// --- herdr keybind tests ---
+
+func writeTempHerdrConfig(t *testing.T, content string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestInstallHerdrKeybindFreshConfig(t *testing.T) {
+	path := writeTempHerdrConfig(t, "")
+	t.Setenv("HERDR_CONFIG_PATH", path)
+
+	if err := installHerdrKeybind("s"); err != nil {
+		t.Fatalf("install: %v", err)
+	}
+	got := readConfig(t, path)
+	if !strings.Contains(got, herdrBindMarkerBegin) || !strings.Contains(got, herdrBindMarkerEnd) {
+		t.Fatalf("missing markers\n%s", got)
+	}
+	if !strings.Contains(got, `key = "prefix+s"`) {
+		t.Fatalf("missing key line\n%s", got)
+	}
+	if !strings.Contains(got, `type = "pane"`) {
+		t.Fatalf("missing type line\n%s", got)
+	}
+	if !strings.Contains(got, "seshagy-focus-kill seshagy") {
+		t.Fatalf("missing command\n%s", got)
+	}
+}
+
+func TestInstallHerdrKeybindAppendsToExistingKeys(t *testing.T) {
+	existing := `[keys]
+
+  [[keys.command]]
+    key = "ctrl+h"
+    type = "plugin_action"
+    command = "herdr-splits.nav-left"
+`
+	path := writeTempHerdrConfig(t, existing)
+	t.Setenv("HERDR_CONFIG_PATH", path)
+
+	if err := installHerdrKeybind("s"); err != nil {
+		t.Fatalf("install: %v", err)
+	}
+	got := readConfig(t, path)
+	// Existing key entry must be untouched.
+	if !strings.Contains(got, `herdr-splits.nav-left`) {
+		t.Fatalf("existing key entry clobbered\n%s", got)
+	}
+	// Our block must be appended.
+	if !strings.Contains(got, herdrBindMarkerBegin) {
+		t.Fatalf("missing marker\n%s", got)
+	}
+	if !strings.Contains(got, `prefix+s`) {
+		t.Fatalf("missing our key\n%s", got)
+	}
+	// Exactly one seshagy marker block.
+	if c := strings.Count(got, herdrBindMarkerBegin); c != 1 {
+		t.Fatalf("marker blocks = %d, want 1\n%s", c, got)
+	}
+}
+
+func TestInstallHerdrKeybindIsIdempotentAndReplacesKey(t *testing.T) {
+	path := writeTempHerdrConfig(t, "")
+	t.Setenv("HERDR_CONFIG_PATH", path)
+
+	if err := installHerdrKeybind("s"); err != nil {
+		t.Fatal(err)
+	}
+	if err := installHerdrKeybind("f"); err != nil {
+		t.Fatal(err)
+	}
+	got := readConfig(t, path)
+	if c := strings.Count(got, herdrBindMarkerBegin); c != 1 {
+		t.Fatalf("marker blocks = %d, want 1\n%s", c, got)
+	}
+	if strings.Contains(got, `prefix+s`) {
+		t.Fatalf("old key prefix+s not replaced\n%s", got)
+	}
+	if !strings.Contains(got, `prefix+f`) {
+		t.Fatalf("new key prefix+f missing\n%s", got)
+	}
+}
+
+func TestUninstallHerdrKeybindRemovesBlock(t *testing.T) {
+	existing := `[keys]
+
+  [[keys.command]]
+    key = "ctrl+h"
+    command = "herdr-splits.nav-left"
+`
+	path := writeTempHerdrConfig(t, existing)
+	t.Setenv("HERDR_CONFIG_PATH", path)
+
+	if err := installHerdrKeybind("s"); err != nil {
+		t.Fatal(err)
+	}
+	if err := uninstallHerdrKeybind(); err != nil {
+		t.Fatal(err)
+	}
+	got := readConfig(t, path)
+	if strings.Contains(got, herdrBindMarkerBegin) {
+		t.Fatalf("marker still present after uninstall\n%s", got)
+	}
+	if !strings.Contains(got, "herdr-splits.nav-left") {
+		t.Fatalf("uninstall clobbered unrelated content\n%s", got)
+	}
+}
+
+func TestUninstallHerdrKeybindWhenAbsentIsNoop(t *testing.T) {
+	existing := `[keys]
+  [[keys.command]]
+    key = "ctrl+h"
+    command = "other"
+`
+	path := writeTempHerdrConfig(t, existing)
+	t.Setenv("HERDR_CONFIG_PATH", path)
+
+	if err := uninstallHerdrKeybind(); err != nil {
+		t.Fatalf("noop uninstall should not error: %v", err)
+	}
+	got := readConfig(t, path)
+	if !strings.Contains(got, "other") {
+		t.Fatalf("content changed on noop uninstall\n%s", got)
+	}
+}
+
+func TestHerdrConfigPathHonorsHERDR_CONFIG_PATH(t *testing.T) {
+	path := writeTempHerdrConfig(t, "")
+	t.Setenv("HERDR_CONFIG_PATH", path)
+
+	got, err := herdrConfigPath()
+	if err != nil {
+		t.Fatalf("herdrConfigPath error: %v", err)
+	}
+	if got != path {
+		t.Fatalf("herdrConfigPath = %q, want %q", got, path)
+	}
+}

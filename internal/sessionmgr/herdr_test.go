@@ -665,8 +665,10 @@ func TestHerdrResolvePaneByCwd(t *testing.T) {
 }
 
 func TestHerdrBackendCaptureAgentPane(t *testing.T) {
+	var capturedArgs []string
 	setHerdrHooksForTest(t, func(_ context.Context, args ...string) ([]byte, error) {
 		if args[0] == "pane" && args[1] == "read" {
+			capturedArgs = args
 			return []byte("line1\nline2\nline3"), nil
 		}
 		return nil, errors.New("unexpected call")
@@ -679,6 +681,17 @@ func TestHerdrBackendCaptureAgentPane(t *testing.T) {
 	}
 	if out != "line1\nline2\nline3" {
 		t.Fatalf("CaptureAgentPane = %q", out)
+	}
+	// Must request ANSI format so previews are colored (not stripped).
+	foundAnsi := false
+	for _, a := range capturedArgs {
+		if a == "--ansi" {
+			foundAnsi = true
+			break
+		}
+	}
+	if !foundAnsi {
+		t.Fatalf("CaptureAgentPane args missing --ansi: %v", capturedArgs)
 	}
 }
 

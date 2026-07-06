@@ -10,6 +10,7 @@ import (
 func TestInTmuxPopup(t *testing.T) {
 	t.Run("detects pane mismatch", func(t *testing.T) {
 		t.Setenv("TMUX", "/tmp/tmux-123")
+		t.Setenv("HERDR_ENV", "")
 		t.Setenv("TMUX_PANE", "%0")
 		SetTmuxHooksForTest(t, func(_ context.Context, args ...string) ([]byte, error) {
 			if len(args) >= 3 && args[0] == "display-message" && args[2] == "#{pane_id}" {
@@ -26,6 +27,7 @@ func TestInTmuxPopup(t *testing.T) {
 
 	t.Run("outside tmux", func(t *testing.T) {
 		t.Setenv("TMUX", "")
+		t.Setenv("HERDR_ENV", "")
 		inPopup, err := InTmuxPopup(context.Background())
 		if err != nil || inPopup {
 			t.Fatalf("InTmuxPopup() = (%v, %v), want (false, nil)", inPopup, err)
@@ -34,6 +36,7 @@ func TestInTmuxPopup(t *testing.T) {
 
 	t.Run("propagates display-message error", func(t *testing.T) {
 		t.Setenv("TMUX", "/tmp/tmux-123")
+		t.Setenv("HERDR_ENV", "")
 		SetTmuxHooksForTest(t, func(_ context.Context, args ...string) ([]byte, error) {
 			if len(args) >= 3 && args[0] == "display-message" {
 				return nil, fmt.Errorf("tmux unavailable")

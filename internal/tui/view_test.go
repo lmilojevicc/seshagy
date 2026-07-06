@@ -21,6 +21,7 @@ func newTestModel(t *testing.T) Model {
 	// those seams are exercised and InMultiplexer() is true regardless of the
 	// real environment.
 	t.Setenv("TMUX", "/tmp/fake-tmux-sock,12345,0")
+	t.Setenv("HERDR_ENV", "")
 	m := New()
 	// Tests mock tmux via SetTmuxHooksForTest; force the tmux backend so those
 	// seams are exercised even when tests run outside tmux.
@@ -310,6 +311,8 @@ func TestDefaultSourceNumberKeys(t *testing.T) {
 }
 
 func TestConfiguredSourceOrderAndDefault(t *testing.T) {
+	t.Setenv("TMUX", "/tmp/fake-tmux-sock,12345,0")
+	t.Setenv("HERDR_ENV", "")
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
 	cfg := appconfig.Default()

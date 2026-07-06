@@ -39,6 +39,8 @@ func TestUpdateRefreshMsgForCurrentSource(t *testing.T) {
 }
 
 func TestUpdateAttachDoneMsgRefreshesAndSetsStatus(t *testing.T) {
+	t.Setenv("TMUX", "/tmp/fake-tmux-sock,12345,0")
+	t.Setenv("HERDR_ENV", "")
 	m := New()
 	m.cache = map[sessionmgr.SourceMode]modeCache{
 		sessionmgr.ModeSessions: {items: testUpdateItems("cached"), fetchedAt: time.Now()},
@@ -75,6 +77,8 @@ func TestUpdateAttachDoneMsgRecordsError(t *testing.T) {
 }
 
 func TestUpdateCreateDoneMsgSuccessSchedulesAttach(t *testing.T) {
+	t.Setenv("TMUX", "/tmp/fake-tmux-sock,12345,0")
+	t.Setenv("HERDR_ENV", "")
 	m := New()
 
 	model, cmd := m.Update(
