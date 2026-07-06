@@ -27,6 +27,7 @@ archives:
     files:
       - LICENSE*
       - README*
+      - scripts/seshagy-focus-kill
 
 checksum:
   name_template: checksums.txt
