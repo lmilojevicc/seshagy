@@ -44,7 +44,8 @@ type Config struct {
 
 // TUIConfig holds TUI-only rendering toggles.
 type TUIConfig struct {
-	InputStyle string `toml:"input_style" json:"input_style"`
+	InputStyle    string `toml:"input_style"    json:"input_style"`
+	DimBackground *bool  `toml:"dim_background" json:"dim_background"`
 }
 
 type SourcesConfig struct {
@@ -175,9 +176,11 @@ func Default() Config {
 			FD:         IconConfig{Icon: sessionmgr.IconFD + " ", Label: "F", Color: "11"},
 		},
 		TypeFirst: TypeFirstConfig{Enabled: false, Prefix: DefaultPrefix},
-		TUI:       TUIConfig{InputStyle: InputStylePopup},
+		TUI:       TUIConfig{InputStyle: InputStylePopup, DimBackground: ptrBool(true)},
 	}
 }
+
+func ptrBool(b bool) *bool { return &b }
 
 func Path() string {
 	return filepath.Join(xdg.ConfigHome(), appDirName, configFileName)
@@ -259,6 +262,9 @@ func (c *Config) Normalize() {
 		c.TypeFirst.Prefix = DefaultPrefix
 	}
 	c.TUI.InputStyle = normalizeInputStyle(c.TUI.InputStyle)
+	if c.TUI.DimBackground == nil {
+		c.TUI.DimBackground = ptrBool(true)
+	}
 }
 
 func normalizeThemeColors(colors *ThemeColorsConfig, defaults ThemeColorsConfig) {

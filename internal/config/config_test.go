@@ -345,6 +345,53 @@ func TestInputStyleRoundTripCmdline(t *testing.T) {
 	}
 }
 
+func TestDimBackgroundDefaultTrueWhenMissing(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	path := Path()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	data := []byte("\n[sources]\ndefault = \"sessions\"\n")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	loaded, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if loaded.TUI.DimBackground == nil || !*loaded.TUI.DimBackground {
+		t.Fatalf("dim_background without [tui] = %v, want true", loaded.TUI.DimBackground)
+	}
+	if cfg := Default(); cfg.TUI.DimBackground == nil || !*cfg.TUI.DimBackground {
+		t.Fatalf("default dim_background = %v, want true", cfg.TUI.DimBackground)
+	}
+}
+
+func TestDimBackgroundRoundTripFalse(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	cfg := Default()
+	falseVal := false
+	cfg.TUI.DimBackground = &falseVal
+	if err := Save(cfg); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	data, err := os.ReadFile(Path())
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	if !strings.Contains(string(data), `dim_background = false`) {
+		t.Fatalf("saved config missing dim_background = false: %s", data)
+	}
+	loaded, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if loaded.TUI.DimBackground == nil || *loaded.TUI.DimBackground {
+		t.Fatalf("loaded dim_background = %v, want false", loaded.TUI.DimBackground)
+	}
+}
+
 func TestInputStyleMissingSectionDefaultsPopup(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)

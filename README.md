@@ -414,7 +414,8 @@ manifest_fallback = true   # capture-pane screen-rule backstop (default on)
 catalog_url = ""           # defaults to the herdr public catalog when empty
 
 [tui]
-input_style = "popup"   # "popup" (centered floating box, default) or "cmdline" (bottom-line bar like Vim /)
+input_style = "popup"        # popup | cmdline
+dim_background = true         # dim the list behind the popup (popup mode only)
 ```
 
 The default `order` lists tabs left→right (`agents` last). `current-agents` is

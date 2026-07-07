@@ -52,17 +52,21 @@ func (m Model) View() string {
 	}
 	// Search/rename input floats as a centered popup over a dimmed copy of
 	// the normal frame. Each bg line is independently grayed so the dim
-	// survives the per-line ANSI-aware splice in overlay.
-	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("242"))
-	frameLines := strings.Split(frame, "\n")
-	for i, ln := range frameLines {
-		frameLines[i] = dim.Render(ansi.Strip(ln))
+	// survives the per-line ANSI-aware splice in overlay. Dimming can be
+	// disabled via [tui].dim_background = false.
+	bg := frame
+	if m.config.TUI.DimBackground != nil && *m.config.TUI.DimBackground {
+		dim := lipgloss.NewStyle().Foreground(lipgloss.Color("242"))
+		frameLines := strings.Split(frame, "\n")
+		for i, ln := range frameLines {
+			frameLines[i] = dim.Render(ansi.Strip(ln))
+		}
+		bg = strings.Join(frameLines, "\n")
 	}
-	dimmed := strings.Join(frameLines, "\n")
 	popup := m.renderInputPopup()
 	x := max(0, (m.width-lipgloss.Width(popup))/2)
 	y := max(0, (m.height-lipgloss.Height(popup))/2)
-	return overlay(dimmed, popup, x, y)
+	return overlay(bg, popup, x, y)
 }
 
 // inputPopupActive reports whether the search/rename text input is currently
