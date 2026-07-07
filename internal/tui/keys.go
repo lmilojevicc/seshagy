@@ -507,6 +507,7 @@ func (m Model) startRename() (tea.Model, tea.Cmd) {
 		m.renameKind = item.Kind
 		m.renameFrom = item.Name
 		m.renameTarget = item.ActionTarget()
+		m.renameInput.SetValue("")
 		m.renameInput.Focus()
 		m.status = "renaming " + item.Name
 		return m, textinput.Blink
