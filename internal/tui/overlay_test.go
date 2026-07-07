@@ -6,6 +6,9 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+
+	appconfig "github.com/lmilojevicc/seshagy/internal/config"
+	"github.com/lmilojevicc/seshagy/internal/sessionmgr"
 )
 
 func TestOverlayPlacesForegroundAndPreservesDimmedBackground(t *testing.T) {
@@ -92,5 +95,73 @@ func TestInputPopupActiveGuardsSize(t *testing.T) {
 	m.width, m.height = 120, 32
 	if m.inputPopupActive() {
 		t.Error("normal mode must never be popup-active")
+	}
+}
+
+func TestInputPopupInactiveForCmdline(t *testing.T) {
+	m := newTestModel(t)
+	m.config.TUI.InputStyle = appconfig.InputStyleCmdline
+	m.width, m.height = 120, 32
+	for _, mode := range []inputMode{modeSearch, modeRename, modeNormal} {
+		m.inputMode = mode
+		if m.inputPopupActive() {
+			t.Errorf("cmdline input_style should never show the popup (mode %v)", mode)
+		}
+	}
+}
+
+func TestFooterCmdlineShowsTextInputOnLine1(t *testing.T) {
+	m := newTestModel(t)
+	m.config.TUI.InputStyle = appconfig.InputStyleCmdline
+	m.width = 80
+	m.height = 32
+
+	// Search mode: line 1 is the textinput (prompt "/ " + value), not the
+	// status line. The status style adds 1-col padding, so trim before checking.
+	m.inputMode = modeSearch
+	m.searchInput.SetValue("my-project")
+	footer := sessionmgr.StripANSI(m.renderFooter())
+	lines := strings.Split(footer, "\n")
+	if len(lines) != 2 {
+		t.Fatalf("footer lines = %d, want 2\n%s", len(lines), footer)
+	}
+	if trimmed := strings.TrimSpace(lines[0]); !strings.HasPrefix(trimmed, "/ my-project") {
+		t.Fatalf("cmdline search line 1 = %q, want to start with / my-project", trimmed)
+	}
+	if strings.Contains(lines[0], "ready") {
+		t.Fatalf("cmdline line 1 should not contain status text: %q", lines[0])
+	}
+
+	// Rename mode: line 1 starts with the old name + " -> ".
+	m.inputMode = modeRename
+	m.renameFrom = "old-name"
+	m.renameInput.SetValue("new-name")
+	footer = sessionmgr.StripANSI(m.renderFooter())
+	lines = strings.Split(footer, "\n")
+	if !strings.Contains(lines[0], "old-name -> ") || !strings.Contains(lines[0], "new-name") {
+		t.Fatalf("cmdline rename line 1 = %q, want old-name -> new-name", lines[0])
+	}
+
+	// No footer line should exceed the safe width.
+	for i, line := range lines {
+		if w := lipgloss.Width(line); w > safeWidth(m.width) {
+			t.Fatalf("cmdline footer line %d width = %d, want at most %d", i, w, safeWidth(m.width))
+		}
+	}
+}
+
+func TestFooterPopupStyleStillComposesStatus(t *testing.T) {
+	m := newTestModel(t)
+	// Default (popup) config: small terminal falls back to the inline field on
+	// the right of the status line, so line 1 holds both the status source info
+	// and the search input.
+	m.config.TUI.InputStyle = appconfig.InputStylePopup
+	m.width, m.height = 40, 4
+	m.inputMode = modeSearch
+	m.searchInput.SetValue("test")
+	footer := sessionmgr.StripANSI(m.renderFooter())
+	lines := strings.Split(footer, "\n")
+	if !strings.Contains(lines[0], "all") || !strings.Contains(lines[0], "/ test") {
+		t.Fatalf("popup small-terminal line 1 should hold status + search input: %q", lines[0])
 	}
 }
