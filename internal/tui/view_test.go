@@ -821,16 +821,37 @@ func TestFooterHelpShowsSourceAndModeKeys(t *testing.T) {
 	// Wide enough that the full footer help renders without clampText
 	// truncation, so end-of-list keys like "x kill" stay visible.
 	m.width = 160
+
+	// Default All tab: universal keys plus the sessions/all-only keys; the
+	// agents-only keys are omitted.
 	out := sessionmgr.StripANSI(m.renderFooter())
-	if !strings.Contains(out, "m mode") {
-		t.Fatalf("footer should mention mode key\n%s", out)
-	}
-	for _, want := range []string{"m mode", "r refresh", "o this session agents"} {
+	for _, want := range []string{"m mode", "r refresh", "R rename", "x kill", "y yazi", "p preview"} {
 		if !strings.Contains(out, want) {
-			t.Fatalf("footer should mention key %q\n%s", want, out)
+			t.Fatalf("All-tab footer should mention %q\n%s", want, out)
+		}
+	}
+	for _, unwanted := range []string{"o this session", "s filter state"} {
+		if strings.Contains(out, unwanted) {
+			t.Fatalf("All-tab footer should not mention %q\n%s", unwanted, out)
 		}
 	}
 
+	// Agents tab swaps in the agents-only keys and drops the sessions-only ones.
+	m.source = sessionmgr.ModeAgents
+	out = sessionmgr.StripANSI(m.renderFooter())
+	for _, want := range []string{"o this session", "s filter state", "R rename", "m mode", "r refresh"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("Agents-tab footer should mention %q\n%s", want, out)
+		}
+	}
+	for _, unwanted := range []string{"x kill", "y yazi"} {
+		if strings.Contains(out, unwanted) {
+			t.Fatalf("Agents-tab footer should not mention %q\n%s", unwanted, out)
+		}
+	}
+
+	// Type-first help is independent of the active tab.
+	m.source = sessionmgr.ModeAll
 	m.config.TypeFirst.Enabled = true
 	m.config.TypeFirst.Prefix = appconfig.DefaultPrefix
 	out = sessionmgr.StripANSI(m.renderFooter())

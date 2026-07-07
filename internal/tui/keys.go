@@ -147,6 +147,18 @@ func (m Model) handleActionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.clampCursor()
 		return m, m.previewForSelection()
+	case "s":
+		if m.source != sessionmgr.ModeAgents {
+			return m, nil
+		}
+		m.agentsStateFilter = nextAgentStateFilter(m.agentsStateFilter)
+		if m.agentsStateFilter == "" {
+			m.status = "agents: all states"
+		} else {
+			m.status = "agents: " + string(m.agentsStateFilter)
+		}
+		m.clampCursor()
+		return m, m.previewForSelection()
 	case "/":
 		m.inputMode = modeSearch
 		m.query = ""
@@ -559,4 +571,28 @@ func (m Model) startYazi() (tea.Model, tea.Cmd) {
 		data, _ := os.ReadFile(path)
 		return yaziDoneMsg{path: strings.TrimSpace(string(data))}
 	})
+}
+
+// agentStateFilterOrder is the full cycle order for the 's' Agents-tab state
+// filter, including the leading "" (no filter / all states) so the wrap lands
+// back on all states rather than skipping it.
+var agentStateFilterOrder = []sessionmgr.AgentState{
+	"", // all states
+	sessionmgr.AgentWorking,
+	sessionmgr.AgentBlocked,
+	sessionmgr.AgentIdle,
+	sessionmgr.AgentDone,
+	sessionmgr.AgentUnknown,
+}
+
+// nextAgentStateFilter advances the 's' state filter through its cycle:
+// "" (all) -> working -> blocked -> idle -> done -> unknown -> "" (all).
+func nextAgentStateFilter(cur sessionmgr.AgentState) sessionmgr.AgentState {
+	for i, st := range agentStateFilterOrder {
+		if st == cur {
+			return agentStateFilterOrder[(i+1)%len(agentStateFilterOrder)]
+		}
+	}
+	// Unrecognized value -> reset to all states.
+	return agentStateFilterOrder[0]
 }

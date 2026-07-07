@@ -380,6 +380,9 @@ func (m Model) renderListPane(width, height int) string {
 			}
 		}
 		title = fmt.Sprintf("Agents (%d · %s)", len(items), scope)
+		if m.agentsStateFilter != "" {
+			title += " · state: " + string(m.agentsStateFilter)
+		}
 	}
 	lines := []string{s.title.Render(clampText(title, innerW))}
 	if m.loading {
@@ -680,18 +683,24 @@ func (m Model) renderFooter() string {
 				s.key.Render("q") + " quit",
 				s.key.Render("enter") + " attach/create/focus",
 				s.key.Render("/") + " filter",
-				s.key.Render("o") + " this session agents",
+				s.key.Render("r") + " refresh",
+				s.key.Render("p") + " preview",
+				s.key.Render("m") + " mode",
+				s.key.Render("h") + " install",
 			}
-			helpParts = append(
-				helpParts,
-				s.key.Render("m")+" mode",
-				s.key.Render("h")+" install",
-				s.key.Render("r")+" refresh",
-				s.key.Render("R")+" rename",
-				s.key.Render("x")+" kill",
-				s.key.Render("y")+" yazi",
-				s.key.Render("p")+" preview",
-			)
+			if m.source == sessionmgr.ModeAgents {
+				helpParts = append(helpParts,
+					s.key.Render("o")+" this session",
+					s.key.Render("s")+" filter state",
+					s.key.Render("R")+" rename",
+				)
+			} else {
+				helpParts = append(helpParts,
+					s.key.Render("R")+" rename",
+					s.key.Render("x")+" kill",
+					s.key.Render("y")+" yazi",
+				)
+			}
 			help = strings.Join(helpParts, s.muted.Render(" · "))
 		}
 	} else {
