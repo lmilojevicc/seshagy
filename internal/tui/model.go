@@ -57,6 +57,7 @@ type Model struct {
 
 	agentsCurrentOnly bool
 	currentSession    string
+	agentsStateFilter sessionmgr.AgentState
 
 	cache           map[sessionmgr.SourceMode]modeCache
 	refreshGen      map[sessionmgr.SourceMode]uint64
@@ -250,13 +251,17 @@ func (m Model) visibleItems() []sessionmgr.Item {
 	// session.
 	scope := m.source == sessionmgr.ModeAgents && m.agentsCurrentOnly &&
 		m.currentSession != ""
-	if m.query == "" && !scope {
+	stateFilter := m.source == sessionmgr.ModeAgents && m.agentsStateFilter != ""
+	if m.query == "" && !scope && !stateFilter {
 		return m.items
 	}
 	query := strings.ToLower(m.query)
 	out := make([]sessionmgr.Item, 0, len(m.items))
 	for _, item := range m.items {
 		if scope && item.Session != m.currentSession {
+			continue
+		}
+		if stateFilter && item.AgentState != m.agentsStateFilter {
 			continue
 		}
 		if query != "" {
