@@ -5,9 +5,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
+	appconfig "github.com/lmilojevicc/seshagy/internal/config"
 	"github.com/lmilojevicc/seshagy/internal/integrations"
 	"github.com/lmilojevicc/seshagy/internal/sessionmgr"
 )
@@ -66,7 +68,11 @@ func (m Model) View() string {
 // inputPopupActive reports whether the search/rename text input is currently
 // shown as a floating popup rather than inline in the footer. Below a small
 // terminal size the popup is suppressed and the legacy inline field is used.
+// Cmdline input style always renders in the footer instead.
 func (m Model) inputPopupActive() bool {
+	if m.config.TUI.InputStyle == appconfig.InputStyleCmdline {
+		return false
+	}
 	return (m.inputMode == modeSearch || m.inputMode == modeRename) &&
 		m.width >= 34 && m.height >= 5
 }
@@ -711,7 +717,27 @@ func (m Model) renderFooter() string {
 	// the terminal width to avoid terminal auto-wrap at the right edge.
 	footerW := safeWidth(m.width)
 	contentW := max(1, footerW-2)
-	line1 := composeLine(left, input, contentW, inputStyle)
+	var line1 string
+	// Cmdline input style: the first footer line becomes the text input itself
+	// (prompt + value + cursor), like Vim's / search bar, instead of the status
+	// line. Line 2 (help) is unchanged.
+	if (m.inputMode == modeSearch || m.inputMode == modeRename) &&
+		m.config.TUI.InputStyle == appconfig.InputStyleCmdline {
+		var ti textinput.Model
+		switch m.inputMode {
+		case modeSearch:
+			ti = m.searchInput
+		case modeRename:
+			ti = m.renameInput
+			ti.Prompt = clampText(m.renameFrom, contentW/2) + " -> "
+		}
+		if w := contentW - lipgloss.Width(ti.Prompt); w > 0 {
+			ti.Width = w
+		}
+		line1 = clampText(ti.View(), contentW)
+	} else {
+		line1 = composeLine(left, input, contentW, inputStyle)
+	}
 	line2 := clampText(help, contentW)
 	return s.status.Width(footerW).Render(line1 + "\n" + line2)
 }

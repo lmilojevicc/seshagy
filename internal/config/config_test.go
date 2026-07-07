@@ -286,6 +286,85 @@ func TestNormalizeStateDisplayMode(t *testing.T) {
 	}
 }
 
+func TestNormalizeInputStyle(t *testing.T) {
+	tests := map[string]string{
+		"":            InputStylePopup,
+		"popup":       InputStylePopup,
+		"floating":    InputStylePopup,
+		"float":       InputStylePopup,
+		"box":         InputStylePopup,
+		"centered":    InputStylePopup,
+		"cmdline":     InputStyleCmdline,
+		"cmd-line":    InputStyleCmdline,
+		"commandline": InputStyleCmdline,
+		"inline":      InputStyleCmdline,
+		"bar":         InputStyleCmdline,
+		"bottom":      InputStyleCmdline,
+		"unknown":     InputStylePopup,
+	}
+	for in, want := range tests {
+		if got := normalizeInputStyle(in); got != want {
+			t.Fatalf("normalizeInputStyle(%q) = %q, want %q", in, got, want)
+		}
+	}
+	if got := normalizeInputStyle(" CMDLINE "); got != InputStyleCmdline {
+		t.Fatalf("normalizeInputStyle(%q) = %q, want %q", " CMDLINE ", got, InputStyleCmdline)
+	}
+}
+
+func TestInputStyleDefaultIsPopup(t *testing.T) {
+	cfg := Default()
+	if cfg.TUI.InputStyle != InputStylePopup {
+		t.Fatalf("default input_style = %q, want %q", cfg.TUI.InputStyle, InputStylePopup)
+	}
+}
+
+func TestInputStyleRoundTripCmdline(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	cfg := Default()
+	cfg.TUI.InputStyle = InputStyleCmdline
+	if err := Save(cfg); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	data, err := os.ReadFile(Path())
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	if !strings.Contains(string(data), `[tui]`) {
+		t.Fatalf("saved config missing [tui] section: %s", data)
+	}
+	if !strings.Contains(string(data), `input_style = "cmdline"`) {
+		t.Fatalf("saved config missing input_style cmdline: %s", data)
+	}
+	loaded, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if loaded.TUI.InputStyle != InputStyleCmdline {
+		t.Fatalf("loaded input_style = %q, want cmdline", loaded.TUI.InputStyle)
+	}
+}
+
+func TestInputStyleMissingSectionDefaultsPopup(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	path := Path()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	data := []byte("\n[sources]\ndefault = \"sessions\"\n")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	loaded, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if loaded.TUI.InputStyle != InputStylePopup {
+		t.Fatalf("input_style without [tui] = %q, want popup", loaded.TUI.InputStyle)
+	}
+}
+
 func TestIconSetTmuxStateProjection(t *testing.T) {
 	cfg := Default()
 	icons := cfg.IconSet()

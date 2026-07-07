@@ -26,6 +26,9 @@ const (
 	StateDisplayModeIcons   = "icons"
 	StateDisplayModeText    = "text"
 	StateDisplayModeNone    = "none"
+
+	InputStylePopup   = "popup"
+	InputStyleCmdline = "cmdline"
 )
 
 type Config struct {
@@ -36,6 +39,12 @@ type Config struct {
 	TypeFirst   TypeFirstConfig   `toml:"type_first"  json:"type_first"`
 	Setup       SetupConfig       `toml:"setup"       json:"setup"`
 	Agents      AgentsConfig      `toml:"agents"      json:"agents"`
+	TUI         TUIConfig         `toml:"tui"         json:"tui"`
+}
+
+// TUIConfig holds TUI-only rendering toggles.
+type TUIConfig struct {
+	InputStyle string `toml:"input_style" json:"input_style"`
 }
 
 type SourcesConfig struct {
@@ -166,6 +175,7 @@ func Default() Config {
 			FD:         IconConfig{Icon: sessionmgr.IconFD + " ", Label: "F", Color: "11"},
 		},
 		TypeFirst: TypeFirstConfig{Enabled: false, Prefix: DefaultPrefix},
+		TUI:       TUIConfig{InputStyle: InputStylePopup},
 	}
 }
 
@@ -248,6 +258,7 @@ func (c *Config) Normalize() {
 	if strings.TrimSpace(c.TypeFirst.Prefix) == "" {
 		c.TypeFirst.Prefix = DefaultPrefix
 	}
+	c.TUI.InputStyle = normalizeInputStyle(c.TUI.InputStyle)
 }
 
 func normalizeThemeColors(colors *ThemeColorsConfig, defaults ThemeColorsConfig) {
@@ -477,6 +488,17 @@ func normalizeKindIcon(
 	icon.ASCII = ""
 	if strings.TrimSpace(icon.Color) == "" {
 		icon.Color = defaults.Color
+	}
+}
+
+func normalizeInputStyle(style string) string {
+	switch strings.ToLower(strings.TrimSpace(style)) {
+	case "", "popup", "floating", "float", "box", "centered":
+		return InputStylePopup
+	case "cmdline", "cmd-line", "commandline", "inline", "bar", "bottom":
+		return InputStyleCmdline
+	default:
+		return InputStylePopup
 	}
 }
 
