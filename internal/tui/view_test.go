@@ -818,14 +818,16 @@ func TestFooterKeepsStatusOnOneLine(t *testing.T) {
 
 func TestFooterHelpShowsSourceAndModeKeys(t *testing.T) {
 	m := newTestModel(t)
-	m.width = 120
+	// Wide enough that the full footer help renders without clampText
+	// truncation, so end-of-list keys like "x kill" stay visible.
+	m.width = 160
 	out := sessionmgr.StripANSI(m.renderFooter())
 	if !strings.Contains(out, "m mode") {
 		t.Fatalf("footer should mention mode key\n%s", out)
 	}
-	for _, want := range []string{"m mode", "r refresh"} {
+	for _, want := range []string{"m mode", "r refresh", "o this session agents"} {
 		if !strings.Contains(out, want) {
-			t.Fatalf("footer should mention source key %q\n%s", want, out)
+			t.Fatalf("footer should mention key %q\n%s", want, out)
 		}
 	}
 

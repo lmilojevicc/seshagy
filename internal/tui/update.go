@@ -14,8 +14,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.searchInput.Width = max(20, msg.Width/3)
-		m.renameInput.Width = max(20, msg.Width/3)
+		m.searchInput.Width = max(20, msg.Width/2)
+		m.renameInput.Width = max(20, msg.Width/2)
 		return m, m.previewForSelection()
 	case tickMsg:
 		interval := tickIntervalFor(m.source)

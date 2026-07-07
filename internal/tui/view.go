@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/lmilojevicc/seshagy/internal/integrations"
 	"github.com/lmilojevicc/seshagy/internal/sessionmgr"
@@ -43,7 +44,70 @@ func (m Model) View() string {
 		bodyH = 1
 	}
 	body := m.renderBody(bodyH)
-	return joinFrame(header, body, footer, m.width, m.height)
+	frame := joinFrame(header, body, footer, m.width, m.height)
+	if !m.inputPopupActive() {
+		return frame
+	}
+	// Search/rename input floats as a centered popup over a dimmed copy of
+	// the normal frame. Each bg line is independently grayed so the dim
+	// survives the per-line ANSI-aware splice in overlay.
+	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("242"))
+	frameLines := strings.Split(frame, "\n")
+	for i, ln := range frameLines {
+		frameLines[i] = dim.Render(ansi.Strip(ln))
+	}
+	dimmed := strings.Join(frameLines, "\n")
+	popup := m.renderInputPopup()
+	x := max(0, (m.width-lipgloss.Width(popup))/2)
+	y := max(0, (m.height-lipgloss.Height(popup))/2)
+	return overlay(dimmed, popup, x, y)
+}
+
+// inputPopupActive reports whether the search/rename text input is currently
+// shown as a floating popup rather than inline in the footer. Below a small
+// terminal size the popup is suppressed and the legacy inline field is used.
+func (m Model) inputPopupActive() bool {
+	return (m.inputMode == modeSearch || m.inputMode == modeRename) &&
+		m.width >= 34 && m.height >= 5
+}
+
+// renderInputPopup renders the bordered centered popup that hosts the
+// search or rename text input plus a one-line help row.
+func (m Model) renderInputPopup() string {
+	s := m.styles
+	boxW := min(60, m.width-4)
+	if boxW < 30 {
+		boxW = 30
+	}
+	// paneFocus carries a rounded border (2 cols) + 0,1 padding (2 cols).
+	contentW := boxW - 4
+	if contentW < 1 {
+		contentW = 1
+	}
+	var title, inputView, help string
+	switch m.inputMode {
+	case modeSearch:
+		title = "search"
+		si := m.searchInput
+		if si.Width > contentW {
+			si.Width = contentW
+		}
+		inputView = si.View()
+		help = "enter to filter · esc to cancel"
+	case modeRename:
+		title = "rename"
+		ri := m.renameInput
+		ri.Prompt = clampText(m.renameFrom, contentW/2) + " -> "
+		if ri.Width > contentW {
+			ri.Width = contentW
+		}
+		inputView = ri.View()
+		help = "enter to rename · esc to cancel"
+	}
+	content := s.title.Render(title) + "\n" +
+		inputView + "\n" +
+		clampText(s.muted.Render(help), contentW)
+	return s.paneFocus.Width(boxW).Render(content)
 }
 
 func (m Model) renderSetupPrompt(height int) string {
@@ -557,9 +621,15 @@ func isTailPreviewKind(kind sessionmgr.Kind) bool {
 
 func (m Model) renderFooter() string {
 	s := m.styles
+	// When the search/rename popup owns the input, the footer shows the normal
+	// status line instead of the inline text field.
+	mode := m.inputMode
+	if (mode == modeSearch || mode == modeRename) && m.inputPopupActive() {
+		mode = modeNormal
+	}
 	var input string
 	inputStyle := s.muted
-	switch m.inputMode {
+	switch mode {
 	case modeSearch:
 		input = m.searchInput.View()
 	case modeRename:
@@ -610,8 +680,10 @@ func (m Model) renderFooter() string {
 				s.key.Render("q") + " quit",
 				s.key.Render("enter") + " attach/create/focus",
 				s.key.Render("/") + " filter",
+				s.key.Render("o") + " this session agents",
 			}
-			helpParts = append(helpParts,
+			helpParts = append(
+				helpParts,
 				s.key.Render("m")+" mode",
 				s.key.Render("h")+" install",
 				s.key.Render("r")+" refresh",
