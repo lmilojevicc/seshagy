@@ -820,7 +820,7 @@ func TestFooterHelpShowsSourceAndModeKeys(t *testing.T) {
 	m := newTestModel(t)
 	// Wide enough that the full footer help renders without clampText
 	// truncation, so end-of-list keys like "x kill" stay visible.
-	m.width = 160
+	m.width = 180
 
 	// Default All tab: universal keys plus the sessions/all-only keys; the
 	// agents-only keys are omitted.

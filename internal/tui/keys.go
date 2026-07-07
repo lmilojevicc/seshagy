@@ -118,6 +118,10 @@ func (m Model) handleActionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "end":
 		m.cursor = max(0, len(m.visibleItems())-1)
 		return m, m.previewForSelection()
+	case "tab":
+		return m.switchSource(m.nextSource(+1))
+	case "shift+tab":
+		return m.switchSource(m.nextSource(-1))
 	case "enter":
 		return m.activateSelected()
 	case "r", "ctrl+r":
@@ -213,6 +217,34 @@ func (m Model) sourceForNumberKey(key string) (sessionmgr.SourceMode, bool) {
 	return order[idx], true
 }
 
+// nextSource returns the source mode offset by delta from the current source
+// (e.g. +1 next tab, -1 previous tab), wrapping around the configured tab
+// order. When the current source is not part of the tab order (e.g. a
+// CLI-only mode) or the order is empty, the first tab (or the current source
+// when there are no tabs) is returned.
+func (m Model) nextSource(delta int) sessionmgr.SourceMode {
+	order := m.config.SourceOrder()
+	if len(order) == 0 {
+		return m.source
+	}
+	idx := -1
+	for i, mode := range order {
+		if mode == m.source {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return order[0]
+	}
+	n := len(order)
+	next := (idx + delta) % n
+	if next < 0 {
+		next += n
+	}
+	return order[next]
+}
+
 func (m Model) handleTypeFirstKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if msg.String() == "ctrl+c" {
 		return m, tea.Quit
@@ -256,7 +288,17 @@ func isPrintableKey(msg tea.KeyMsg) bool {
 
 func isUnprefixedNavigationKey(msg tea.KeyMsg) bool {
 	switch msg.String() {
-	case "enter", "up", "down", "pgup", "ctrl+u", "pgdown", "ctrl+d", "home", "end":
+	case "enter",
+		"up",
+		"down",
+		"pgup",
+		"ctrl+u",
+		"pgdown",
+		"ctrl+d",
+		"home",
+		"end",
+		"tab",
+		"shift+tab":
 		return true
 	default:
 		return false

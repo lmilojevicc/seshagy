@@ -644,3 +644,69 @@ func TestAgentsScopeStatusHerdrShowsWorkspaceLabel(t *testing.T) {
 		t.Fatalf("fallback status = %q, want \"agents: wB\"", m2.status)
 	}
 }
+
+func TestTabCyclesSourceSections(t *testing.T) {
+	order := []sessionmgr.SourceMode{
+		sessionmgr.ModeAll,
+		sessionmgr.ModeSessions,
+		sessionmgr.ModeZoxide,
+		sessionmgr.ModeFD,
+		sessionmgr.ModeAgents,
+	}
+
+	m := newTestModel(t)
+	if got := m.config.SourceOrder(); len(got) != len(order) {
+		t.Fatalf("SourceOrder len = %d, want %d", len(got), len(order))
+	}
+	m.source = sessionmgr.ModeAll
+	m.cursor = 3 // non-zero so the cursor-reset assertion below is load-bearing
+
+	// Tab walks the full order forward and wraps back to the first tab.
+	for i := 1; i <= len(order); i++ {
+		want := order[i%len(order)]
+		model, _ := m.handleActionKey(tea.KeyMsg{Type: tea.KeyTab})
+		m = model.(Model)
+		if m.source != want {
+			t.Fatalf("tab #%d: source = %v, want %v", i, m.source, want)
+		}
+		if m.cursor != 0 {
+			t.Fatalf("tab #%d: cursor = %d, want 0 (reset on switch)", i, m.cursor)
+		}
+	}
+
+	// Shift+Tab from the first tab wraps to the last tab.
+	model, _ := m.handleActionKey(tea.KeyMsg{Type: tea.KeyShiftTab})
+	m = model.(Model)
+	if m.source != order[len(order)-1] {
+		t.Fatalf("shift+tab from first: source = %v, want %v", m.source, order[len(order)-1])
+	}
+
+	// Shift+Tab walks the order backward one more step.
+	model, _ = m.handleActionKey(tea.KeyMsg{Type: tea.KeyShiftTab})
+	m = model.(Model)
+	if m.source != order[len(order)-2] {
+		t.Fatalf("shift+tab backward: source = %v, want %v", m.source, order[len(order)-2])
+	}
+}
+
+func TestTabCyclesSectionsInTypeFirstMode(t *testing.T) {
+	m := newTestModel(t)
+	m.config.TypeFirst.Enabled = true
+	m.config.TypeFirst.Prefix = appconfig.DefaultPrefix
+	m.source = sessionmgr.ModeAll
+
+	// Tab is navigation, so it routes through handleActionKey even in type-first
+	// mode without the prefix armed.
+	model, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+	m = model.(Model)
+	if m.source != sessionmgr.ModeSessions {
+		t.Fatalf("type-first tab: source = %v, want %v", m.source, sessionmgr.ModeSessions)
+	}
+	if m.prefixArmed || m.query != "" {
+		t.Fatalf(
+			"type-first tab: prefixArmed=%v query=%q, want no filter side effects",
+			m.prefixArmed,
+			m.query,
+		)
+	}
+}

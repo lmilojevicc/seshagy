@@ -690,6 +690,7 @@ func (m Model) renderFooter() string {
 		} else {
 			helpParts := []string{
 				s.key.Render("?") + " help",
+				s.key.Render("tab/⇧+tab") + " sections",
 				s.key.Render("q") + " quit",
 				s.key.Render("enter") + " attach/create/focus",
 				s.key.Render("/") + " filter",
