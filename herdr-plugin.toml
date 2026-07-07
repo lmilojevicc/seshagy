@@ -1,6 +1,6 @@
 id = "seshagy"
 name = "seshagy"
-version = "0.5.3"
+version = "0.6.0"
 min_herdr_version = "0.7.0"
 description = "Agent-aware terminal dashboard for tmux and herdr."
 platforms = ["linux", "macos"]
