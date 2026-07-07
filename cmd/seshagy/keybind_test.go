@@ -38,7 +38,7 @@ func TestInstallTmuxKeybindFreshConfig(t *testing.T) {
 		t.Fatalf("missing markers\n%s", got)
 	}
 	if !strings.Contains(got, "bind-key s display-popup") ||
-		!strings.Contains(got, "seshagy-focus-kill seshagy") {
+		!strings.Contains(got, "seshagy --ephemeral") {
 		t.Fatalf("missing bind line\n%s", got)
 	}
 }
@@ -229,9 +229,9 @@ func TestTmuxBindLineModes(t *testing.T) {
 			if !strings.Contains(line, tc.contains) {
 				t.Fatalf("mode %s: line %q missing %q", tc.mode, line, tc.contains)
 			}
-			// Every mode must invoke seshagy-focus-kill (the dismissal wrapper).
-			if !strings.Contains(line, "seshagy-focus-kill seshagy") {
-				t.Fatalf("mode %s: missing focus-kill wrapper in %q", tc.mode, line)
+			// Every mode must invoke seshagy --ephemeral (built-in dismissal).
+			if !strings.Contains(line, "seshagy --ephemeral") {
+				t.Fatalf("mode %s: missing --ephemeral in %q", tc.mode, line)
 			}
 			// No mode should use run-shell (it has no controlling TTY — that
 			// was the original bug).
@@ -294,7 +294,7 @@ func TestInstallHerdrKeybindFreshConfig(t *testing.T) {
 	if !strings.Contains(got, `type = "pane"`) {
 		t.Fatalf("missing type line\n%s", got)
 	}
-	if !strings.Contains(got, "seshagy-focus-kill seshagy") {
+	if !strings.Contains(got, "seshagy --ephemeral") {
 		t.Fatalf("missing command\n%s", got)
 	}
 }

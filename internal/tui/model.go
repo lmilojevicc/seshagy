@@ -64,6 +64,13 @@ type Model struct {
 
 	checkPopup func(context.Context) (bool, error)
 
+	// ephemeral enables the focus-loss dismissal poll (--ephemeral). The
+	// herdr pane/workspace ids are resolved once and cached so discovery
+	// (via the focused pane) only runs before the first focus change.
+	ephemeral        bool
+	herdrPaneID      string
+	herdrWorkspaceID string
+
 	setup          setupPrompt
 	installMenu    installMenuState
 	pendingInstall bool
@@ -126,7 +133,16 @@ type setupMsg struct {
 	err    error
 }
 
-func New() Model {
+// Option configures a Model at construction time.
+type Option func(*Model)
+
+// WithEphemeral enables the focus-loss dismissal poll so the dashboard exits
+// when its hosting pane/window/session loses focus (--ephemeral).
+func WithEphemeral(b bool) Option {
+	return func(m *Model) { m.ephemeral = b }
+}
+
+func New(opts ...Option) Model {
 	cfg, cfgErr := appconfig.Load()
 	mux := sessionmgr.Detect()
 	search := textinput.New()
@@ -160,24 +176,31 @@ func New() Model {
 		m.err = cfgErr
 		m.status = cfgErr.Error()
 	}
+	for _, opt := range opts {
+		opt(&m)
+	}
 	return m
 }
 
-func Run() error {
-	m := New()
+func Run(opts ...Option) error {
+	m := New(opts...)
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	_, err := p.Run()
 	return err
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(
+	cmds := []tea.Cmd{
 		refreshCmd(m.mux, m.source, m.inflightRefresh[m.source], m.config.LoadOptions()),
 		startupSetupCmd(m.config),
 		startupInstallMenuCmd(m.config),
 		refreshCatalogsCmd(m.config),
 		tickCmd(),
-	)
+	}
+	if m.ephemeral {
+		cmds = append(cmds, ephemeralTickCmd())
+	}
+	return tea.Batch(cmds...)
 }
 
 func (m *Model) clampCursor() {

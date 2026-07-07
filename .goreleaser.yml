@@ -27,7 +27,6 @@ archives:
     files:
       - LICENSE*
       - README*
-      - scripts/seshagy-focus-kill
       - scripts/herdr-plugin-entry.sh
 
 checksum:
@@ -72,9 +71,8 @@ brews:
     directory: Formula
     install: |
       bin.install "seshagy"
-      bin.install "scripts/seshagy-focus-kill" => "seshagy-focus-kill"
     caveats: |
-      The seshagy-focus-kill launcher is installed alongside the binary.
+      Built-in --ephemeral focus-loss dismissal replaces the former launcher.
       Wire a one-key launcher with: seshagy keybind install tmux (or: herdr)
       Requires tmux or herdr on PATH.
     repository:

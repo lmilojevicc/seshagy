@@ -32,8 +32,22 @@ func main() {
 }
 
 func run(args []string) error {
+	// --ephemeral is a TUI-only flag (enables the focus-loss dismissal poll).
+	// Strip it before dispatch so it does not fall through to
+	// unknownCommandError; with a subcommand it is silently ignored, matching
+	// how --json is stripped.
+	ephemeral := false
+	filtered := make([]string, 0, len(args))
+	for _, a := range args {
+		if a == "--ephemeral" {
+			ephemeral = true
+			continue
+		}
+		filtered = append(filtered, a)
+	}
+	args = filtered
 	if len(args) == 0 {
-		return tui.Run()
+		return tui.Run(tui.WithEphemeral(ephemeral))
 	}
 	mux := sessionmgr.Detect()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -386,6 +400,8 @@ func helpText() string {
 
 Usage:
   seshagy                         open the Bubble Tea dashboard
+  seshagy --ephemeral             open the dashboard and exit on focus-loss
+                                  (used by the tmux/herdr keybind launchers)
   seshagy --get-all [--json]      print sessions, zoxide dirs, fd dirs
   seshagy --get-sessions [--json] print tmux sessions / herdr workspaces
   seshagy --get-zoxide [--json]   print zoxide directories

@@ -64,14 +64,11 @@ Typical first run:
 
 ## Launch with a keybinding
 
-seshagy ships a launcher script, `seshagy-focus-kill`, that opens the dashboard
-in an ephemeral overlay (herdr) or dedicated window (tmux) and dismisses it
-the moment you switch away — so you get a one-keystroke in / one-keystroke out
-jump launcher, without leftover panes.
-
-The script auto-detects the active multiplexer from the environment
-(`HERDR_ENV=1` → herdr; `$TMUX` → tmux) and is bundled with every release and
-`go install` / `make install`.
+seshagy has a built-in `--ephemeral` mode that opens the dashboard in an
+ephemeral overlay (herdr) or dedicated window (tmux) and dismisses it the
+moment you switch away — so you get a one-keystroke in / one-keystroke out jump
+launcher, without leftover panes. It auto-detects the active multiplexer from
+the environment (`HERDR_ENV=1` → herdr; `$TMUX` → tmux).
 
 ### tmux
 
@@ -92,25 +89,25 @@ tmux source-file ~/.config/tmux/tmux.conf   # reload (path may differ)
 
 Remove it with `seshagy keybind uninstall tmux`.
 
-All four modes launch `seshagy-focus-kill seshagy` inside a real tmux pane
+All four modes launch `seshagy --ephemeral` inside a real tmux pane
 (`display-popup` / `new-window` / `split-window`) so seshagy gets a controlling
-TTY — the focus-kill wrapper then dismisses the pane the moment you switch to
+TTY — `--ephemeral` then dismisses the pane the moment you switch to
 another session/workspace. To wire a mode manually instead, add the matching
 line to your tmux config:
 
 ```tmux
-bind-key s display-popup -E -w 80% -h 80% 'seshagy-focus-kill seshagy'
-bind-key s new-window  -c '#{pane_current_path}' 'seshagy-focus-kill seshagy'
-bind-key s split-window -c '#{pane_current_path}' 'seshagy-focus-kill seshagy'
-bind-key s split-window -Z -c '#{pane_current_path}' 'seshagy-focus-kill seshagy'
+bind-key s display-popup -E -w 80% -h 80% 'seshagy --ephemeral'
+bind-key s new-window  -c '#{pane_current_path}' 'seshagy --ephemeral'
+bind-key s split-window -c '#{pane_current_path}' 'seshagy --ephemeral'
+bind-key s split-window -Z -c '#{pane_current_path}' 'seshagy --ephemeral'
 ```
 
 ### herdr
 
 Install the keybinding idempotently into the herdr config
 (`~/.config/herdr/config.toml`, or `$HERDR_CONFIG_PATH` / `$XDG_CONFIG_HOME` if
-set). The keybind opens `seshagy-focus-kill seshagy` as a temporary pane that
-herdr closes when the command exits; the wrapper extends that to also dismiss
+set). The keybind opens `seshagy --ephemeral` as a temporary pane that
+herdr closes when the command exits; `--ephemeral` extends that to also dismiss
 on focus-loss:
 
 ```sh
@@ -128,7 +125,7 @@ To wire it manually instead, add this block to your herdr config:
   [[keys.command]]
     key = "prefix+s"
     type = "pane"
-    command = "seshagy-focus-kill seshagy"
+    command = "seshagy --ephemeral"
     description = "seshagy session manager"
 ```
 

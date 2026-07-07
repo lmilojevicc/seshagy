@@ -19,7 +19,7 @@ if ! command -v seshagy >/dev/null 2>&1; then
   exit 1
 fi
 
-# Under herdr, the overlay auto-restores focus when the command exits,
-# so seshagy-focus-kill is unnecessary here — seshagy exits after session
-# switch and the overlay closes cleanly.
-exec seshagy
+# Launch seshagy with built-in --ephemeral focus-loss dismissal: the overlay
+# closes on command exit, and --ephemeral additionally dismisses when focus
+# leaves the pane/workspace mid-session.
+exec seshagy --ephemeral
