@@ -12,8 +12,8 @@ import (
 const defaultTmuxKey = "s"
 
 // tmuxLaunchMode picks the pane primitive that hosts seshagy. All four give
-// seshagy a real controlling TTY (unlike run-shell) and rely on
-// seshagy-focus-kill for dismissal when the user switches focus.
+// seshagy a real controlling TTY (unlike run-shell) and rely on the built-in
+// --ephemeral flag to dismiss when the user switches focus.
 type tmuxLaunchMode string
 
 const (
@@ -42,18 +42,18 @@ func parseTmuxLaunchMode(s string) (tmuxLaunchMode, error) {
 
 // tmuxBindLine is the binding for the chosen launch mode. Wrapped in a marker
 // block so reinstall/uninstall can find and replace it idempotently. Each mode
-// runs seshagy-focus-kill inside a primitive that provides a real TTY (the
-// focus-kill wrapper then dismisses the pane when focus leaves).
+// runs seshagy --ephemeral inside a primitive that provides a real TTY (the
+// flag then dismisses the pane when focus leaves).
 const (
 	tmuxBindMarkerBegin = "# >>> seshagy keybind >>>"
 	tmuxBindMarkerEnd   = "# <<< seshagy keybind <<<"
 )
 
 func tmuxBindLine(key string, mode tmuxLaunchMode) string {
-	// seshagy-focus-kill is found on PATH because new-window/split-window/
+	// seshagy is found on PATH because new-window/split-window/
 	// display-popup inherit the tmux server's PATH (unlike run-shell, which
 	// uses a minimal PATH and was the source of the original launch failure).
-	cmd := "'seshagy-focus-kill seshagy'"
+	cmd := "'seshagy --ephemeral'"
 	switch mode {
 	case tmuxModePopup:
 		return fmt.Sprintf("bind-key %s display-popup -E -w 80%% -h 80%% %s", key, cmd)
@@ -61,7 +61,7 @@ func tmuxBindLine(key string, mode tmuxLaunchMode) string {
 		return fmt.Sprintf("bind-key %s new-window -c '#{pane_current_path}' %s", key, cmd)
 	case tmuxModeZoomed:
 		// Split + zoom so seshagy fills the window; unzoom is automatic when the
-		// pane is killed by focus-kill.
+		// pane exits on focus-loss (--ephemeral).
 		return fmt.Sprintf("bind-key %s split-window -Z -c '#{pane_current_path}' %s", key, cmd)
 	case tmuxModePane:
 		return fmt.Sprintf("bind-key %s split-window -c '#{pane_current_path}' %s", key, cmd)
@@ -76,17 +76,17 @@ const (
 )
 
 // herdrBindBlock returns the TOML [[keys.command]] block (with markers) that
-// wires prefix+<key> to launch seshagy via the focus-kill launcher script.
+// wires prefix+<key> to launch seshagy with its built-in focus-loss dismissal.
 // The type is always "pane" — herdr only supports "pane" and "shell" for
 // keybind commands; "pane" opens a temporary pane that closes on command exit.
-// seshagy-focus-kill extends that to also dismiss on focus-loss.
+// The --ephemeral flag extends that to also dismiss on focus-loss.
 func herdrBindBlock(key string) string {
 	return fmt.Sprintf(
 		`%s
 [[keys.command]]
   key = "prefix+%s"
   type = "pane"
-  command = "seshagy-focus-kill seshagy"
+  command = "seshagy --ephemeral"
   description = "seshagy session manager"
 %s`,
 		herdrBindMarkerBegin, key, herdrBindMarkerEnd,

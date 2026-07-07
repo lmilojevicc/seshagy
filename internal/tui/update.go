@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -8,6 +9,19 @@ import (
 
 	"github.com/lmilojevicc/seshagy/internal/sessionmgr"
 )
+
+// ephemeralTickMsg drives the --ephemeral focus-loss poll. It uses a faster
+// cadence (150ms) than the regular data-refresh tick (1-5s) so dismissal feels
+// instant when the user switches focus away from the dashboard.
+type ephemeralTickMsg time.Time
+
+const ephemeralTickInterval = 150 * time.Millisecond
+
+func ephemeralTickCmd() tea.Cmd {
+	return tea.Tick(ephemeralTickInterval, func(t time.Time) tea.Msg {
+		return ephemeralTickMsg(t)
+	})
+}
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -34,6 +48,34 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmd,
 			tea.Tick(interval, func(t time.Time) tea.Msg { return tickMsg(t) }),
 		)
+	case ephemeralTickMsg:
+		if !m.ephemeral {
+			return m, nil
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		switch m.mux.Kind() {
+		case sessionmgr.BackendNone:
+			// No multiplexer: focus-loss is undefined; no-op the poll.
+			return m, ephemeralTickCmd()
+		case sessionmgr.BackendHerdr:
+			if m.herdrPaneID == "" || m.herdrWorkspaceID == "" {
+				if paneID, wsID, ok := sessionmgr.ResolveHerdrEphemeralTarget(ctx); ok {
+					m.herdrPaneID = paneID
+					m.herdrWorkspaceID = wsID
+				}
+			}
+			if m.herdrPaneID != "" &&
+				sessionmgr.HerdrFocusLost(ctx, m.herdrPaneID, m.herdrWorkspaceID) {
+				return m, tea.Quit
+			}
+			return m, ephemeralTickCmd()
+		default: // BackendTmux
+			if sessionmgr.TmuxFocusLost(ctx, "", "") {
+				return m, tea.Quit
+			}
+			return m, ephemeralTickCmd()
+		}
 	case setupMsg:
 		if msg.err != nil {
 			m.err = msg.err
