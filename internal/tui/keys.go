@@ -149,9 +149,11 @@ func (m Model) handleActionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.previewForSelection()
 	case "/":
 		m.inputMode = modeSearch
-		m.searchInput.SetValue(m.query)
+		m.query = ""
+		m.searchInput.SetValue("")
 		m.searchInput.Focus()
-		return m, textinput.Blink
+		m.clampCursor()
+		return m, tea.Batch(textinput.Blink, m.previewForSelection())
 	case "backspace":
 		if m.query != "" {
 			m.query = ""
