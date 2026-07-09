@@ -73,7 +73,10 @@ Supported agents include: **Pi, OpenCode, Claude Code, Codex, Cursor Agent, Anti
 | 🔵 **done**    | Agent finished a turn but you haven't checked on it yet. |
 | ⚪ **idle**    | Agent is sleeping or waiting for a prompt.               |
 
-_How does it work?_ seshagy uses near-instant shell hooks and plugins where available (like for Pi and OpenCode), and falls back to a smart, hot-updating screen-rule classifier to detect agent states without slowing down your machine.
+_How does it work?_ `seshagy` supports both `tmux` and `herdr` backends with different behaviors:
+
+- Under **tmux**, it runs its own custom herdr-like detection.
+- Under **herdr**, it defers completely to the native agent detection provided directly by herdr.
 
 ---
 
