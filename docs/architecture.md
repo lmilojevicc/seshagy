@@ -40,7 +40,7 @@ basename: `.config` becomes `dot_config`, and unsupported characters collapse to
 
 ## Agent state detection
 
-seshagy detects four states per agent pane:
+Under `tmux`, `seshagy` uses its own custom detection engine (combining shell hooks/plugins and a capture-pane manifest fallback screen-scraper) to detect four states per agent pane:
 
 | State     | Meaning                                                           |
 | --------- | ----------------------------------------------------------------- |
@@ -49,7 +49,9 @@ seshagy detects four states per agent pane:
 | `blocked` | asking permission or asking the user a question                   |
 | `done`    | finished a turn, pane not yet visited (clears to `idle` on focus) |
 
-Detection uses a layered authority model mirroring
+Under `herdr`, `seshagy` uses NO custom detection at all. It suppresses its screen scraper and state writes, deferring entirely to `herdr`'s native CLI/socket API for agent state.
+
+For `tmux`, the custom detection engine uses a layered authority model mirroring
 [herdr](https://herdr.dev/docs/agents):
 
 **Tier A — lifecycle authority (hooks/plugins own state).** Pi and OpenCode
@@ -76,9 +78,9 @@ The screen-rule backstop captures the last 30 pane lines via
 strict: it is only set when a rule explicitly matches a known permission or
 question UI. No match leaves the existing state unchanged.
 
-### Manifest hot-update
+### Manifest hot-update (tmux only)
 
-Bundled manifests ship as an offline fallback. On launch, seshagy fetches the
+For the tmux detection engine, bundled manifests ship as an offline fallback. On launch, seshagy fetches the
 latest manifests from the [herdr public
 catalog](https://herdr.dev/agent-detection/) (async, non-blocking) and caches
 them locally. Precedence: local override (`$XDG_CONFIG_HOME/seshagy/agent-detection/<id>.toml`)

@@ -26,7 +26,7 @@ Scripts should check the exit code and the `ok` field.
 and so on). Use `line_plain` for ANSI-free text suitable for parsing; `line`
 keeps TUI styling for display.
 
-Agent metadata helpers (used by the installed integrations to report state):
+Agent metadata helpers (used by the installed integrations to report state under `tmux`; these commands are no-ops when `$HERDR_ENV=1` is set since `herdr` handles detection natively):
 
 ```sh
 seshagy --report-agent \

@@ -104,7 +104,7 @@ enabled = false
 prefix = "ctrl+x"
 
 [agents]
-manifest_fallback = true   # capture-pane screen-rule backstop (default on)
+manifest_fallback = true   # tmux only: capture-pane screen-rule backstop (default on)
 catalog_url = ""           # defaults to the herdr public catalog when empty
 
 [tui]
