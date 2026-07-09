@@ -1,572 +1,171 @@
-# seshagy
+<div align="center">
 
-`seshagy` is an agent-aware terminal dashboard for jumping between project
-sessions, discovered directories, and coding-agent panes. It supports two
-multiplexers — [tmux](https://github.com/tmux/tmux) and
-[herdr](https://herdr.dev) — and auto-detects which one it is running in.
+# Seshagy
 
-Run one command to get a keyboard-first view where you can:
+![cover](.github/assets/cover.gif)
 
-- jump to existing tmux sessions or herdr workspaces,
-- create or switch sessions/workspaces from directories found by `zoxide` and `fd`, and
-- see coding-agent panes, their current state, and where they are running.
+_The agent-aware terminal dashboard for modern developer workflows._
 
-Under tmux, agent state is reported through the `@seshagy_agent_*`
-pane-option namespace (tmux backend only). Near-instant detection comes from
-installed hook/plugin integrations; a capture-pane screen-rule backstop
-(hot-updated from [herdr](https://herdr.dev/docs/agents)) covers agents
-without usable hooks.
+</div>
 
-Under herdr (`$HERDR_ENV=1`), seshagy speaks herdr's vocabulary
-(workspaces/tabs/panes) instead of tmux's (sessions/windows/panes). Agent
-state is read-only from herdr's `agent_status` — seshagy writes no state,
-since herdr owns detection.
+Navigating the terminal shouldn't break your flow, and managing AI coding agents shouldn't require playing hide-and-seek with your panes.
 
-## Quick start
+`seshagy` is a lightning-fast dashboard that bridges the gap between your project directories, active multiplexer sessions, and terminal-based coding agents. It gives you a bird's-eye view of your entire workspace, letting you jump exactly where you need to be with a single keystroke.
 
-**Homebrew** (once the tap is set up):
+## ✨ Why use seshagy?
+
+- **Navigate at the speed of thought:** Stop typing `cd` and `tmux attach`. Instantly jump to existing sessions or spin up new ones from your most used directories (powered by `zoxide` and `fd`).
+- **Never lose track of your AI agents:** Running Pi, Claude Code, Codex, or Opencode in the background? `seshagy` automatically tracks their states across all panes. Instantly see if an agent is _working_, _blocked_ (needs your input), _done_, or _idle_ — without hunting for windows.
+- **Zero friction, zero clutter:** Designed to be invisible until you need it. Pop it open with a keybind, find your destination, and hit enter. The dashboard instantly vanishes.
+- **Universal multiplexer support:** Native, auto-detecting support for both **tmux** and **herdr**. It just works.
+
+## 🚀 Quick Start
+
+### 1. Install
+
+**Homebrew:**
 
 ```sh
 brew tap lmilojevicc/tap && brew install seshagy
 ```
 
-**go install**:
+**Go:**
 
 ```sh
 go install github.com/lmilojevicc/seshagy/cmd/seshagy@latest
 ```
 
-**From source**:
+### 2. The Recommended Setup (Day-to-Day Use)
+
+For the best experience, `seshagy` is meant to be a one-keystroke pop-up that gets out of your way as soon as you jump to a session.
+
+We highly recommend installing the keybind via `seshagy install keybind` for day-to-day use. This wires up an ephemeral overlay (or popup window) to your multiplexer that auto-dismisses when you make a selection:
 
 ```sh
-git clone https://github.com/lmilojevicc/seshagy.git
-cd seshagy
-make build       # produces ./seshagy
+seshagy install keybind
 ```
 
-Open the dashboard:
+_(Note: You can also run `seshagy keybind install tmux` or `seshagy keybind install herdr` if you need to specify your multiplexer or custom keys manually)._
+
+### 3. Basic Usage
+
+Open the dashboard anytime by running `seshagy` (or pressing your new keybind!).
+
+- Press `z` or `f` to browse project directories from `zoxide` or `fd`.
+- Press `enter` on a directory to create or switch to a session/workspace for it.
+- Press `a` (all) / `t` (sessions) / `z` (zoxide) / `f` (fd) to filter sources.
+- Press `h` to open the agent integration install menu.
+
+---
+
+## 🤖 Agent Tracking
+
+`seshagy` acts as a mission control for your terminal AI tools. It knows when your agents need attention and when they are busy crunching tokens.
+
+Supported agents include: **Pi, OpenCode, Claude Code, Codex, Cursor Agent, Antigravity, Grok Build, Cline, Devin**, and more.
+
+### State Indicators
+
+| State          | Meaning                                                  |
+| -------------- | -------------------------------------------------------- |
+| 🟢 **working** | Agent is actively generating code or running commands.   |
+| 🔴 **blocked** | Agent is asking for permission or user input. Needs you! |
+| 🔵 **done**    | Agent finished a turn but you haven't checked on it yet. |
+| ⚪ **idle**    | Agent is sleeping or waiting for a prompt.               |
+
+_How does it work?_ seshagy uses near-instant shell hooks and plugins where available (like for Pi and OpenCode), and falls back to a smart, hot-updating screen-rule classifier to detect agent states without slowing down your machine.
+
+---
+
+## ⌨️ TUI Keybindings
+
+| Key                | Action                                        |
+| ------------------ | --------------------------------------------- |
+| `enter`            | Jump to session/directory or focus agent pane |
+| `j`/`k`, `↓`/`↑`   | Navigate list                                 |
+| `a`, `t`, `z`, `f` | Filter by: All / Sessions / Zoxide / fd       |
+| `o`                | Toggle agent scope (current session vs all)   |
+| `/`                | Filter list by typing                         |
+| `R`                | Rename selected session                       |
+| `x`                | Kill selected session or pane                 |
+| `h`                | Open agent integration install menu           |
+| `p`                | Toggle preview pane                           |
+| `q` / `esc`        | Quit                                          |
+
+---
+
+## ⚙️ Requirements & Integrations
+
+- **Multiplexer:** [tmux](https://github.com/tmux/tmux) or [herdr](https://herdr.dev). seshagy auto-detects your environment!
+- **Optional (but highly recommended):**
+  - `zoxide` (for frecency-ranked directory history)
+  - `fd` (for blazing-fast directory discovery)
+  - `yazi` (for interactive directory picking)
+  - `eza` (for richer previews)
+
+---
+
+## 🛠 Configuration & Customization
+
+seshagy is highly customizable to match your workflow and aesthetic.
+
+Configuration lives in `~/.config/seshagy/config.toml` (or your `$XDG_CONFIG_HOME`). Initialize the default config file with:
 
 ```sh
-seshagy
-```
-
-Typical first run:
-
-1. Start tmux (or herdr), or run `seshagy` from inside an existing client.
-2. The install menu pops up on first launch — choose which agent integrations
-   to install, or press `esc` to skip.
-3. Press `z` or `f` to browse project directories from `zoxide` or `fd`.
-4. Press `enter` on a directory to create/switch to a session or workspace for it.
-5. Press `a`/`t`/`z`/`f` to switch sources (all / sessions-workspaces / zoxide /
-   fd directories); on the Agents source, `enter` focuses an agent pane (and
-   clears `done` → `idle`).
-6. Press `h` to reopen the install menu at any time.
-
-## Launch with a keybinding
-
-seshagy has a built-in `--ephemeral` mode that opens the dashboard in an
-ephemeral overlay (herdr) or dedicated window (tmux) and dismisses it the
-moment you switch away — so you get a one-keystroke in / one-keystroke out jump
-launcher, without leftover panes. It auto-detects the active multiplexer from
-the environment (`HERDR_ENV=1` → herdr; `$TMUX` → tmux).
-
-### tmux
-
-Install the keybinding idempotently (default key `s`). seshagy writes to the
-config tmux actually reads, in this order: `$TMUX_CONF_PATH` if set; else
-`$TMUX_CONFIG_DIR/tmux.conf`; else the existing XDG config
-(`$XDG_CONFIG_HOME/tmux/tmux.conf` or `~/.config/tmux/tmux.conf`); else
-`~/.tmux.conf`.
-
-```sh
-seshagy keybind install tmux            # prefix + s, popup (default)
-seshagy keybind install tmux --key f    # custom key
-seshagy keybind install tmux --mode window        # new full window
-seshagy keybind install tmux --mode pane          # split, unzoomed
-seshagy keybind install tmux --mode pane-zoomed   # split + zoomed
-tmux source-file ~/.config/tmux/tmux.conf   # reload (path may differ)
-```
-
-Remove it with `seshagy keybind uninstall tmux`.
-
-All four modes launch `seshagy --ephemeral` inside a real tmux pane
-(`display-popup` / `new-window` / `split-window`) so seshagy gets a controlling
-TTY — `--ephemeral` then dismisses the pane the moment you switch to
-another session/workspace. To wire a mode manually instead, add the matching
-line to your tmux config:
-
-```tmux
-bind-key s display-popup -E -w 80% -h 80% 'seshagy --ephemeral'
-bind-key s new-window  -c '#{pane_current_path}' 'seshagy --ephemeral'
-bind-key s split-window -c '#{pane_current_path}' 'seshagy --ephemeral'
-bind-key s split-window -Z -c '#{pane_current_path}' 'seshagy --ephemeral'
-```
-
-### herdr
-
-Install the keybinding idempotently into the herdr config
-(`~/.config/herdr/config.toml`, or `$HERDR_CONFIG_PATH` / `$XDG_CONFIG_HOME` if
-set). The keybind opens `seshagy --ephemeral` as a temporary pane that
-herdr closes when the command exits; `--ephemeral` extends that to also dismiss
-on focus-loss:
-
-```sh
-seshagy keybind install herdr            # prefix+s
-seshagy keybind install herdr --key f    # prefix+f
-herdr server reload-config               # reload
-```
-
-Remove it with `seshagy keybind uninstall herdr`.
-
-To wire it manually instead, add this block to your herdr config:
-
-```toml
-[keys]
-  [[keys.command]]
-    key = "prefix+s"
-    type = "pane"
-    command = "seshagy --ephemeral"
-    description = "seshagy session manager"
-```
-
-The seshagy binary must be on `PATH` (Homebrew or `go install`; see
-[Quick start](#quick-start)). See [herdr.dev/plugins](https://herdr.dev/plugins/)
-for the marketplace listing.
-
-## Requirements
-
-Required:
-
-- `tmux` **or** [herdr](https://herdr.dev) — seshagy auto-detects which
-  multiplexer it is running in (`$HERDR_ENV=1` → herdr; else `$TMUX` → tmux;
-  else no backend). All session/agent operations are available under either.
-
-Optional, but useful:
-
-- `zoxide` for frecency-ranked directory history
-- `fd` for filesystem directory discovery
-- `yazi` for choosing a directory interactively
-- `eza` for richer directory previews
-
-## Multiplexer support
-
-seshagy supports two multiplexer backends with a shared vocabulary:
-
-| concept           | tmux    | herdr     |
-| ----------------- | ------- | --------- |
-| project container | session | workspace |
-| layout group      | window  | tab       |
-| terminal          | pane    | pane      |
-
-Backend is selected automatically from the environment — there is no config
-key to set. The TUI and CLI adapt their terminology to the active backend
-(sessions/windows under tmux; workspaces/tabs under herdr).
-
-**Agent state under herdr is read-only.** herdr owns agent detection and
-exposes it via the `agent_status` field (`idle`/`working`/`blocked`/`done`/
-`unknown`). seshagy reads this directly; it does **not** call
-`herdr pane report-agent`, run the capture-pane manifest backstop, or write
-`@seshagy_agent_*` options under herdr. The state-reporting hooks (shell,
-Pi extension, OpenCode plugin) early-exit when `$HERDR_ENV=1` is set.
-
-Builds from source require Go 1.26, matching `go.mod`. Shell-hook integrations
-may use `bash` and `python3`; the OpenCode plugin runs on Bun/Node.
-
-## What seshagy manages
-
-| Area                             | What you can do                                                                   |
-| -------------------------------- | --------------------------------------------------------------------------------- |
-| tmux sessions / herdr workspaces | list, attach/focus, rename, kill, and preview                                     |
-| project directories              | create/switch sessions or workspaces from `zoxide` or a configurable `fd` command |
-| agent panes                      | list, filter, focus, or kill detected agent panes                                 |
-| current session agents           | narrow the agent view to the current session/workspace (`o`)                      |
-| input flow                       | use classic action keys or type-first filtering with a prefix key                 |
-
-When a directory becomes a session, the session name is derived from the
-basename: `.config` becomes `dot_config`, and unsupported characters collapse to
-`_` (`foo.bar` becomes `foo_bar`).
-
-## Agent state detection
-
-seshagy detects four states per agent pane:
-
-| State     | Meaning                                                           |
-| --------- | ----------------------------------------------------------------- |
-| `idle`    | not working, or a `done` pane that has been visited               |
-| `working` | agent actively running a turn                                     |
-| `blocked` | asking permission or asking the user a question                   |
-| `done`    | finished a turn, pane not yet visited (clears to `idle` on focus) |
-
-Detection uses a layered authority model mirroring
-[herdr](https://herdr.dev/docs/agents):
-
-**Tier A — lifecycle authority (hooks/plugins own state).** Pi and OpenCode
-emit the full lifecycle (idle/working/blocked/done) through their
-integrations. When the integration is installed and actively reporting,
-seshagy uses those reports and suppresses the screen-rule backstop for that
-pane. Near-instant, event-driven (~0ms).
-
-**Tier B — partial hooks + screen rules (screen owns state).** Claude Code,
-Codex, and Factory Droid have shell hooks, but their hooks miss approval-result
-and ESC-interrupt transitions. For these agents seshagy **always** runs the
-capture-pane screen-rule classifier in parallel with the hooks; on a positive
-rule match, the screen result overwrites the hook state (so a stale `working`
-after ESC is corrected to `idle` within one poll). Hooks still provide
-near-instant `working`/`done` signals between screen captures.
-
-**Tier C — screen rules only.** Cursor Agent CLI, Antigravity, Grok Build, and
-the other discovered agents have no usable hooks. Their state comes entirely
-from the capture-pane classifier (~1s poll cadence in the Agents source).
-
-The screen-rule backstop captures the last 30 pane lines via
-`tmux capture-pane` and matches them against per-agent TOML rules (regions,
-`contains`/`regex`/`line_regex`, nested `all`/`any`/`not` gates). `blocked` is
-strict: it is only set when a rule explicitly matches a known permission or
-question UI. No match leaves the existing state unchanged.
-
-### Manifest hot-update
-
-Bundled manifests ship as an offline fallback. On launch, seshagy fetches the
-latest manifests from the [herdr public
-catalog](https://herdr.dev/agent-detection/) (async, non-blocking) and caches
-them locally. Precedence: local override (`$XDG_CONFIG_HOME/seshagy/agent-detection/<id>.toml`)
-
-> cached remote > bundled embed. Remote manifests are version-guarded against
-> downgrade and compile-validated before caching. This keeps screen rules current
-> without a seshagy release.
-
-### Supported agents
-
-Discovered via process-name matching plus a process-tree descendant walk (for
-node-wrapped CLIs that report as `node`):
-
-| Agent              | Process name(s)          | Detection              |
-| ------------------ | ------------------------ | ---------------------- |
-| Pi                 | `pi`                     | lifecycle (extension)  |
-| OpenCode           | `opencode`               | lifecycle (plugin)     |
-| Claude Code        | `claude`                 | partial hooks + screen |
-| Codex              | `codex`                  | partial hooks + screen |
-| Factory Droid      | `droid`, `factory`       | partial hooks + screen |
-| Cursor Agent       | `cursor-agent`, `cursor` | screen only            |
-| Antigravity        | `agy`, `antigravity`     | screen only            |
-| Grok Build         | `grok`                   | screen only            |
-| GitHub Copilot CLI | `copilot`                | screen only            |
-| Amp                | `amp`                    | screen only            |
-| Cline              | `cline`                  | screen only            |
-| Devin              | `devin`                  | screen only            |
-| Gemini             | `gemini`                 | screen only            |
-| Hermes             | `hermes`, `hermes-agent` | screen only            |
-| Kilo Code          | `kilo`, `kilocode`       | screen only            |
-| Kimi Code          | `kimi`                   | screen only            |
-| Kiro               | `kiro-cli`               | screen only            |
-| Qoder CLI          | `qodercli`, `qoderclicn` | screen only            |
-
-Architecture-suffixed binary names (e.g. `codex-aarch64-a`) are matched via a
-prefix fallback.
-
-### Install menu
-
-Press `h` in the TUI to open the integration install menu (it also auto-pops on
-first launch). Select an integration and press `enter` to install, `u` to
-uninstall, or `a` to install all. Installs run off the UI thread and never
-block the dashboard. The available integrations are: `pi`, `codex`, `claude`,
-`droid`, `opencode`.
-
-You can also install/uninstall from the CLI:
-
-```sh
-seshagy integration install pi
-seshagy integration uninstall pi
-```
-
-Shell-hook integrations (codex/claude/droid) merge their entries into the
-agent's settings/hooks JSON idempotently and preserve existing user and herdr
-entries. The Pi extension installs to `~/.pi/agent/extensions/` (or
-`$PI_CODING_AGENT_DIR`). The OpenCode plugin installs to opencode's
-auto-discovered `plugin/` directory under its config dir.
-
-## TUI keys
-
-| Key                    | Action                                                                             |
-| ---------------------- | ---------------------------------------------------------------------------------- |
-| `enter`                | attach/switch to a session, create/switch from a directory, or focus an agent pane |
-| `j`/`k`, arrows        | move selection                                                                     |
-| `1`..`5`               | select source by configured order                                                  |
-| `a`                    | all sources                                                                        |
-| `t`                    | tmux sessions                                                                      |
-| `o`                    | toggle agents scope (current session vs all)                                       |
-| `z`                    | zoxide directories                                                                 |
-| `f`                    | fd directories                                                                     |
-| `/`                    | filter visible rows                                                                |
-| `backspace`            | clear filter when not editing                                                      |
-| `r`                    | refresh                                                                            |
-| `R`                    | rename selected session                                                            |
-| `x`                    | kill selected session or agent pane                                                |
-| `y`                    | open `yazi`, then create/switch from its exit directory                            |
-| `h`                    | open the integration install menu                                                  |
-| `m`                    | change classic/type-first input mode                                               |
-| `p`                    | toggle preview pane                                                                |
-| `?`                    | toggle help                                                                        |
-| `q` / `esc` / `ctrl-c` | quit                                                                               |
-
-In type-first mode, typing edits the filter immediately. Most action keys then
-require the configured prefix first (`ctrl+x` by default). `enter` and movement
-keys stay unprefixed.
-
-## CLI helpers
-
-The TUI is the main interface. The CLI helpers are useful for scripts, fzf-style
-menus, and agent hooks.
-
-```sh
-seshagy --get-all
-seshagy --get-sessions
-seshagy --get-agents
-seshagy --get-current-session-agents
-seshagy --get-zoxide
-seshagy --get-fd
-seshagy --delete-item '<rendered line from --get-all>'
-```
-
-All commands above (plus `config` and `--version`) support a trailing `--json`
-flag for machine-readable JSON on stdout. Human text output is unchanged when
-`--json` is omitted.
-
-Successful responses include top-level `schema_version` and `ok` fields. With
-`--json`, errors also print JSON on stdout (not stderr), for example
-`{"schema_version":1,"ok":false,"error":"...","code":"usage|error"}`.
-Scripts should check the exit code and the `ok` field.
-
-`--get-* --json` returns structured fields per item (`kind`, `pane_id`, `state`,
-and so on). Use `line_plain` for ANSI-free text suitable for parsing; `line`
-keeps TUI styling for display.
-
-Agent metadata helpers (used by the installed integrations to report state):
-
-```sh
-seshagy --report-agent \
-  --pane %1 \
-  --agent pi \
-  --state working \
-  --source seshagy:pi \
-  --seq 42
-
-seshagy --release-agent --pane %1 --source seshagy:pi --seq 43
-```
-
-`--cwd <dir>` may replace `--pane`; the pane is resolved by a unique
-working-directory match across all panes (used by the OpenCode plugin, which
-runs in a server process without a reliable `$TMUX_PANE`).
-
-`--seq` is a monotonic ordering token. Reports with a sequence number `<=` the
-last applied sequence are rejected (strict-greater), so stale hook reports
-cannot resurrect cleared state.
-
-Other commands:
-
-```sh
-seshagy integration install <name>
-seshagy integration uninstall <name>
-
-seshagy config path
-seshagy config show
-seshagy config init [--force]
-```
-
-## Configuration
-
-Config is TOML at:
-
-```text
-$XDG_CONFIG_HOME/seshagy/config.toml
-```
-
-If `XDG_CONFIG_HOME` is unset, seshagy uses:
-
-```text
-~/.config/seshagy/config.toml
-```
-
-Inspect or create it with:
-
-```sh
-seshagy config path
-seshagy config show
 seshagy config init
 ```
 
-Common settings:
+From there, you can:
 
-```toml
-[sources]
-default = "all"
-order = ["all", "sessions", "zoxide", "fd", "agents"]
+- Customize theme colors and icons to match your terminal rice.
+- Tweak `fd` commands.
+- Enable `type_first` mode to instantly filter lists by typing without prefix keys.
+- Toggle TUI styles (popup vs. cmdline) and layout order.
 
-[directories]
-fd_command = 'fd -H -a -d 2 -t d -E .Trash . "$HOME"'
+---
 
-[type_first]
-enabled = false
-prefix = "ctrl+x"
+## 📖 Deep Dive & CLI
 
-[agents]
-manifest_fallback = true   # capture-pane screen-rule backstop (default on)
-catalog_url = ""           # defaults to the herdr public catalog when empty
+While the TUI is the main interface, seshagy provides a rich set of CLI commands for scripting, fzf-style menus, and agent integrations.
 
-[tui]
-input_style = "popup"        # popup | cmdline
-dim_background = true         # dim the list behind the popup (popup mode only)
+<details>
+<summary>Click to view CLI commands and advanced usage</summary>
+
+```sh
+# Fetch raw data
+seshagy --get-all --json
+seshagy --get-sessions
+seshagy --get-agents
+seshagy --get-zoxide
+
+# Agent integration internals
+seshagy integration install pi
+seshagy integration uninstall claude
+
+# Manual multiplexer wiring
+# herdr:
+seshagy keybind install herdr --key f
+# tmux:
+seshagy keybind install tmux --mode popup
 ```
 
-The default `order` lists tabs left→right (`agents` last). `current-agents` is
-not a tab; it is a CLI-only scope (`--get-current-session-agents`), reachable in
-the TUI via the `o` key (toggles the agents source between the current session
-and all).
+### Multiplexer Vocabulary
 
-### Theme colors
+seshagy speaks your multiplexer's language seamlessly:
 
-`[theme.colors]` controls TUI accents. Values can be:
+| Concept  | tmux    | herdr     |
+| -------- | ------- | --------- |
+| Project  | Session | Workspace |
+| Layout   | Window  | Tab       |
+| Terminal | Pane    | Pane      |
 
-- an ANSI palette index (`"8"`, `"13"`, …),
-- a hex color (`"#cba6f7"`),
-- or `"default"` to inherit the terminal foreground (used by `active_tab` by default).
+</details>
 
-| Key              | Used for                             |
-| ---------------- | ------------------------------------ |
-| `focused_border` | border on the focused pane           |
-| `active_tab`     | selected source tab label            |
-| `inactive_tab`   | unselected source tabs               |
-| `border`         | pane borders                         |
-| `title`          | pane titles and headings             |
-| `accent`         | emphasis text and the top accent bar |
-| `key`            | key names in help/footer             |
-| `muted`          | subtitles and secondary text         |
-| `success`        | success status messages              |
-| `info`           | informational status messages        |
-| `warning`        | warning status messages              |
-| `danger`         | error/danger status messages         |
+## 🛠 Development
 
-Example:
+- `mise run verify` runs the CI gate (fmt, lint, test, build).
+- `make build` produces a local `./seshagy` binary.
 
-```toml
-[theme]
-  [theme.colors]
-    focused_border = "#cba6f7"
-    active_tab = "default"
-    border = "#313244"
-    inactive_tab = "#6c7086"
-    title = "#b4befe"
-    accent = "#cba6f7"
-    key = "#f9e2af"
-    muted = "#7f849c"
-    success = "#a6e3a1"
-    info = "#89dceb"
-    warning = "#f9e2af"
-    danger = "#f38ba8"
-```
+---
 
-The TUI keeps the terminal's default foreground/background for list text and
-selection (reverse video), so changing your terminal theme still rethemes most
-of seshagy without extra config.
-
-### Icons
-
-`[icons]` controls row prefixes in the list pane.
-
-`mode` selects how source-kind prefixes render:
-
-- `"icons"` — Nerd Font glyphs (default)
-- `"text"` — single-letter labels
-- `"none"` — no prefix
-
-`agent_state_mode` selects how agent pane state is shown in the TUI list and
-detail views. It overrides `mode` for state display only; source icons still
-follow `mode`. CLI output always prints the state name in brackets and ignores
-these settings.
-
-- `"inherit"` — follow `mode` (default)
-- `"icons"` — per-state glyphs from `[icons.agent_state.*]`
-- `"text"` — per-state labels in brackets
-- `"none"` — hide state indicators in list rows
-
-Each source kind can be customized under `[icons.session]`, `[icons.zoxide]`,
-`[icons.fd]`:
-
-| Key     | Purpose                                                         |
-| ------- | --------------------------------------------------------------- |
-| `icon`  | glyph shown in `icons` mode (include trailing space if desired) |
-| `label` | text shown in `text` mode                                       |
-| `color` | ANSI index or hex color for that icon                           |
-
-Agent state appearance is customized per state under
-`[icons.agent_state.working]`, `[icons.agent_state.blocked]`,
-`[icons.agent_state.done]`, and `[icons.agent_state.idle]`:
-
-| Key     | Purpose                                                                                |
-| ------- | -------------------------------------------------------------------------------------- |
-| `icon`  | glyph shown when `agent_state_mode` resolves to icons                                  |
-| `label` | text shown when `agent_state_mode` resolves to text (wrapped in `[…]` in list rows)    |
-| `color` | optional ANSI index or hex color; when empty, the TUI uses theme colors for that state |
-
-Default state glyphs and labels:
-
-| State   | `icon` | `label`   | `color` |
-| ------- | ------ | --------- | ------- |
-| working | `●`    | `working` | `10`    |
-| blocked | `◐`    | `blocked` | `11`    |
-| done    | `◉`    | `done`    | `14`    |
-| idle    | `○`    | `idle`    | `8`     |
-| unknown | `?`    | `unknown` | `8`     |
-
-Example `[icons.agent_state]` (defaults from `seshagy config init`):
-
-```toml
-  [icons.agent_state]
-    [icons.agent_state.idle]
-      icon = "○"
-      label = "idle"
-      color = "8"
-    [icons.agent_state.working]
-      icon = "●"
-      label = "working"
-      color = "10"
-    [icons.agent_state.blocked]
-      icon = "◐"
-      label = "blocked"
-      color = "11"
-    [icons.agent_state.done]
-      icon = "◉"
-      label = "done"
-      color = "14"
-    [icons.agent_state.unknown]
-      icon = "?"
-      label = "unknown"
-      color = "8"
-```
-
-Run `seshagy config init` to write the full default `config.toml`, then edit
-colors and icons there. `seshagy config show` prints the resolved config.
-
-## Limits and expectations
-
-- a multiplexer is required for session and agent operations: tmux (`$TMUX`) or herdr (`$HERDR_ENV=1`). Without one, seshagy shows directory sources only.
-- Hook/plugin integrations report state through the `@seshagy_agent_*`
-  namespace **under tmux**; under herdr these hooks early-exit and herdr owns
-  state detection. Agents without integrations are still discovered (process
-  name + descendant walk) and classified by the capture-pane screen-rule
-  backstop when `[agents] manifest_fallback` is enabled (default).
-- The screen-rule backstop captures pane content; this is the sanctioned
-  `manifest_fallback` exception to the "no pane scraping" rule.
-- Directory results depend on your `zoxide` database and configured `fd` command.
-- `yazi` directory picking is blocked when seshagy is running inside a tmux popup.
-
-## Build, test, and release
-
-- `mise run verify` runs the CI gate (`fmt:check`, `lint`, `vet`, `test`, `build`).
-- `mise run fmt` formats Go and YAML files.
-- `mise run vuln` runs `govulncheck ./...`.
-- `make build` builds the local `./seshagy` binary from `./cmd/seshagy`.
-
-Releases are tag-driven: after `mise run verify`, `mise run vuln`, and
-`mise run release:check` pass on a clean tree, push a `v*` tag to run
-GoReleaser.
+_Built for developers who value their time and terminal._
