@@ -30,6 +30,7 @@ type styles struct {
 	app         lipgloss.Style
 	tabActive   lipgloss.Style
 	tabInactive lipgloss.Style
+	itemName    lipgloss.Style
 	pane        lipgloss.Style
 	paneFocus   lipgloss.Style
 	title       lipgloss.Style
@@ -93,6 +94,7 @@ func stylesFromConfig(cfg appconfig.Config) styles {
 	s.app = lipgloss.NewStyle().Foreground(p.fg).Background(p.bg)
 	s.tabActive = lipgloss.NewStyle().Foreground(activeTab).Bold(true)
 	s.tabInactive = lipgloss.NewStyle().Foreground(inactiveTab)
+	s.itemName = lipgloss.NewStyle().Foreground(p.fg)
 	s.pane = lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(border).

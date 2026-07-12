@@ -447,12 +447,12 @@ func (m Model) rowParts(item sessionmgr.Item) (string, string) {
 				state = renderTmuxStateLabel(s, icons, item.Attached)
 			}
 		}
-		name := s.tabActive.Render(item.Name)
+		name := s.itemName.Render(item.Name)
 		return rowText(m.iconFor(item.Kind), state, name), ago(item.Activity)
 	case sessionmgr.KindZoxide:
-		return rowText(m.iconFor(item.Kind), item.Path), "zoxide"
+		return rowText(m.iconFor(item.Kind), s.itemName.Render(item.Path)), "zoxide"
 	case sessionmgr.KindFD:
-		return rowText(m.iconFor(item.Kind), item.Path), "fd"
+		return rowText(m.iconFor(item.Kind), s.itemName.Render(item.Path)), "fd"
 	case sessionmgr.KindAgent:
 		icons := m.config.IconSet()
 		var glyph string
@@ -462,7 +462,7 @@ func (m Model) rowParts(item sessionmgr.Item) (string, string) {
 				glyph = renderAgentStateLabel(s, icons, item.AgentState)
 			}
 		}
-		name := s.tabActive.Render(item.DisplayName())
+		name := s.itemName.Render(item.DisplayName())
 		return rowText(glyph, name), item.Location
 	default:
 		return item.DisplayName(), ""
