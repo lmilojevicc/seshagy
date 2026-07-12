@@ -9,6 +9,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 
 	appconfig "github.com/lmilojevicc/seshagy/internal/config"
 	"github.com/lmilojevicc/seshagy/internal/sessionmgr"
@@ -1114,6 +1115,112 @@ func TestConfiguredThemeColorsApply(t *testing.T) {
 			"default active tab should use terminal foreground, got %T",
 			s.tabActive.GetForeground(),
 		)
+	}
+}
+
+func TestItemNameStyleIndependentOfActiveTab(t *testing.T) {
+	cases := []struct {
+		name      string
+		activeTab string
+		wantTab   lipgloss.TerminalColor
+	}{
+		{
+			name:      "real active_tab color does not leak into item names",
+			activeTab: "#f5c2e7",
+			wantTab:   lipgloss.Color("#f5c2e7"),
+		},
+		{
+			name:      "default active_tab keeps terminal-default item names",
+			activeTab: "default",
+			wantTab:   lipgloss.NoColor{},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := appconfig.Default()
+			cfg.Theme.Colors.ActiveTab = tc.activeTab
+			s := stylesFromConfig(cfg)
+
+			// Item names must be decoupled from active_tab: always terminal default.
+			if _, ok := s.itemName.GetForeground().(lipgloss.NoColor); !ok {
+				t.Fatalf(
+					"itemName foreground with active_tab=%q = %T, want lipgloss.NoColor (terminal default)",
+					tc.activeTab,
+					s.itemName.GetForeground(),
+				)
+			}
+			// The active tab itself must still follow active_tab.
+			if got := s.tabActive.GetForeground(); got != tc.wantTab {
+				t.Fatalf(
+					"tabActive foreground with active_tab=%q = %v, want %v",
+					tc.activeTab,
+					got,
+					tc.wantTab,
+				)
+			}
+		})
+	}
+}
+
+// TestRowPartsItemNameIgnoresActiveTabColor is the behavioral guard for issue
+// #30: a rendered session/agent row must not inherit the active_tab color.
+// Unlike TestItemNameStyleIndependentOfActiveTab (which checks the style
+// field), this asserts on rowParts() rendered output, so it catches a revert
+// of rowParts() back to s.tabActive.
+//
+// lipgloss strips styling when no color terminal is detected (as in tests),
+// so the TrueColor profile is forced for the duration of this test and
+// restored afterward. Under TrueColor a real active_tab color emits a
+// truecolor SGR escape that NoColor (the itemName foreground) does not, so
+// the row would byte-differ if rowParts used s.tabActive.
+//
+// newTestModel sets m.styles from the default config, so changing m.config
+// alone does not propagate active_tab into styles; render() reassigns
+// m.styles via stylesFromConfig(cfg) to make the active_tab value take effect.
+func TestRowPartsItemNameIgnoresActiveTabColor(t *testing.T) {
+	origProfile := lipgloss.ColorProfile()
+	defer lipgloss.SetColorProfile(origProfile)
+	lipgloss.SetColorProfile(termenv.TrueColor)
+
+	items := []sessionmgr.Item{
+		{Kind: sessionmgr.KindSession, Name: "demo"},
+		{Kind: sessionmgr.KindAgent, AgentName: "pi"},
+	}
+
+	render := func(activeTab string, item sessionmgr.Item) string {
+		cfg := appconfig.Default()
+		cfg.Theme.Colors.ActiveTab = activeTab
+		m := newTestModel(t)
+		m.config = cfg
+		m.styles = stylesFromConfig(cfg) // propagate active_tab into styles
+		primary, _ := m.rowParts(item)
+		return primary
+	}
+
+	for _, item := range items {
+		pink := render("#f5c2e7", item)
+		def := render("default", item)
+		if pink != def {
+			t.Fatalf("%s row must not inherit active_tab color:\npink:   %q\ndefault: %q",
+				item.Kind, pink, def)
+		}
+	}
+}
+
+// TestItemNameIsRegularWeight guards the row-weight unification: list-row
+// item names (session/agent/zoxide/fd) render at regular weight via
+// s.itemName, which uses terminal-default foreground with no bold. Fails if
+// .Bold(true) is re-added to s.itemName. TrueColor is forced because lipgloss
+// strips styling under the default no-TTY profile.
+func TestItemNameIsRegularWeight(t *testing.T) {
+	origProfile := lipgloss.ColorProfile()
+	defer lipgloss.SetColorProfile(origProfile)
+	lipgloss.SetColorProfile(termenv.TrueColor)
+
+	s := stylesFromConfig(appconfig.Default())
+	got := s.itemName.Render("demo")
+	if strings.Contains(got, "\x1b[1m") || strings.Contains(got, "\x1b[1;") {
+		t.Fatalf("itemName must be regular weight (no bold SGR): got %q", got)
 	}
 }
 
