@@ -53,19 +53,27 @@ func (herdrBackend) ListSessions(ctx context.Context) ([]Item, error) {
 	for _, t := range herdrTabs(ctx) {
 		tabCounts[t.WorkspaceID]++
 	}
+	// Per-workspace representative path from panes: prefer the focused pane's
+	// cwd, else the first pane's cwd. `workspace list` exposes no cwd.
+	paths := herdrWorkspacePaths(ctx)
 	items := make([]Item, 0, len(workspaces))
 	for _, ws := range workspaces {
 		name := ws.Label
 		if name == "" {
 			name = ws.WorkspaceID
 		}
+		path := paths[ws.WorkspaceID]
+		if path == "" {
+			path = ws.Cwd
+		}
 		items = append(items, Item{
 			Kind:     KindSession,
 			Name:     name,
 			Target:   ws.WorkspaceID,
-			Path:     ws.Cwd,
+			Path:     path,
 			Attached: ws.Focused,
 			Windows:  tabCounts[ws.WorkspaceID],
+			Panes:    ws.PaneCount,
 		})
 	}
 	return items, nil
@@ -270,6 +278,44 @@ func herdrTabs(ctx context.Context) []tabInfo {
 		return nil
 	}
 	return tabs
+}
+
+// herdrPanes fetches `herdr pane list` (all panes, single call) and returns the
+// slice of panes. Errors are swallowed (best-effort, mirroring herdrTabs).
+func herdrPanes(ctx context.Context) []paneInfo {
+	out, err := herdrOutput(ctx, "pane", "list")
+	if err != nil {
+		return nil
+	}
+	panes, err := parseHerdrPanes(out)
+	if err != nil {
+		return nil
+	}
+	return panes
+}
+
+// herdrWorkspacePaths returns a representative cwd per workspace_id from the
+// pane list: the focused pane's foreground_cwd/cwd if one exists, else the
+// first pane's cwd. The workspace `cwd` field is usually empty under herdr, so
+// panes are the practical path source. Errors are swallowed (best-effort).
+func herdrWorkspacePaths(ctx context.Context) map[string]string {
+	panes := herdrPanes(ctx)
+	paths := make(map[string]string, len(panes))
+	for _, p := range panes {
+		cwd := p.ForegroundCwd
+		if cwd == "" {
+			cwd = p.Cwd
+		}
+		if cwd == "" {
+			continue
+		}
+		if p.Focused {
+			paths[p.WorkspaceID] = cwd
+		} else if _, ok := paths[p.WorkspaceID]; !ok {
+			paths[p.WorkspaceID] = cwd
+		}
+	}
+	return paths
 }
 
 // herdrTabLabels returns a tab_id → label map for resolving opaque tab ids in
