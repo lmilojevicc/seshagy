@@ -353,6 +353,48 @@ func (m Model) renderBody(height int) string {
 	return lipgloss.JoinHorizontal(lipgloss.Top, left, strings.Repeat(" ", gap), right)
 }
 
+// titledTopEdge builds the top border line of a rounded pane at display width
+// w with title overlaid fieldset-style: ╭─ title ──╮. The whole edge is
+// rendered in borderFG so the title reads as part of the border. lipgloss
+// v1.1.0 has no native border-title API, so this is composed by hand. Empty
+// titles and very narrow widths fall back to a plain dashed edge.
+func titledTopEdge(title string, w int, borderFG lipgloss.TerminalColor) string {
+	if title == "" || w < 7 {
+		return lipgloss.NewStyle().Foreground(borderFG).
+			Render("╭" + strings.Repeat("─", max(0, w-2)) + "╮")
+	}
+	// Layout: ╭─ (3) + title + space (1) + dashes + ╮ (1); keep >= 1 trailing dash.
+	clamped := clampText(title, w-6)
+	dashes := w - 5 - lipgloss.Width(clamped)
+	if dashes < 1 {
+		dashes = 1
+	}
+	edge := "╭─ " + clamped + " " + strings.Repeat("─", dashes) + "╮"
+	return lipgloss.NewStyle().Foreground(borderFG).Render(edge)
+}
+
+// paneWithTitle renders a pane via style (width/height applied as for the
+// other pane renderers) and overlays title onto its top border. The title
+// inherits the style's own border foreground, so focused (paneFocus) and
+// unfocused (pane) panes keep their distinct border colors.
+func paneWithTitle(style lipgloss.Style, content, title string, width, height int) string {
+	boxStyle := style.Width(width - 2)
+	if height > 0 {
+		boxStyle = boxStyle.Height(height - 2)
+	}
+	box := boxStyle.Render(content)
+	lines := strings.Split(box, "\n")
+	if len(lines) == 0 {
+		return box
+	}
+	w := lipgloss.Width(lines[0])
+	if w < 3 {
+		return box
+	}
+	lines[0] = titledTopEdge(title, w, style.GetBorderTopForeground())
+	return strings.Join(lines, "\n")
+}
+
 func (m Model) renderListPane(width, height int) string {
 	s := m.styles
 	innerW := max(10, width-4)
@@ -394,7 +436,7 @@ func (m Model) renderListPane(width, height int) string {
 			title += " · state: " + string(m.agentsStateFilter)
 		}
 	}
-	lines := []string{s.title.Render(clampText(title, innerW))}
+	lines := []string{}
 	if m.loading {
 		lines = append(lines, s.muted.Render("refreshing…"))
 	}
@@ -405,7 +447,7 @@ func (m Model) renderListPane(width, height int) string {
 		}
 		lines = append(lines, "", s.muted.Render(empty))
 	} else {
-		start, end := visibleWindow(len(items), m.cursor, max(1, innerH-2))
+		start, end := visibleWindow(len(items), m.cursor, max(1, innerH-1))
 		if start > 0 {
 			lines = append(lines, s.muted.Render(fmt.Sprintf("  ↑ %d more", start)))
 		}
@@ -417,7 +459,7 @@ func (m Model) renderListPane(width, height int) string {
 		}
 	}
 	content := trimHeight(strings.Join(lines, "\n"), innerH)
-	return s.paneFocus.Width(width - 2).Height(height - 2).Render(content)
+	return paneWithTitle(s.paneFocus, content, title, width, height)
 }
 
 func (m Model) renderRow(item sessionmgr.Item, selected bool, width int) string {
@@ -503,15 +545,19 @@ func rowText(parts ...string) string {
 }
 
 func (m Model) renderRightPane(width, height int) string {
-	detailH := min(10, max(7, height/3))
 	if !m.showPreview {
-		detailH = height
+		return m.renderDetailPane(width, height)
 	}
-	detail := m.renderDetailPane(width, detailH)
-	if !m.showPreview {
-		return detail
+	// The detail pane adapts to its content (no trailing blank padding); the
+	// preview pane fills the remainder. Cap detail height so the preview keeps
+	// a usable minimum even when the metadata body is long.
+	detail := m.renderDetailPane(width, 0)
+	detailH := lipgloss.Height(detail)
+	if maxDetail := height - 6; maxDetail > 0 && detailH > maxDetail {
+		detail = m.renderDetailPane(width, maxDetail)
+		detailH = lipgloss.Height(detail)
 	}
-	previewH := height - lipgloss.Height(detail) - 1
+	previewH := height - detailH - 1
 	if previewH < 5 {
 		previewH = 5
 	}
@@ -521,16 +567,37 @@ func (m Model) renderRightPane(width, height int) string {
 
 func (m Model) renderDetailPane(width, height int) string {
 	s := m.styles
-	innerH := max(4, height-2)
 	item, ok := m.selectedItem()
+	title := "Details"
 	var lines []string
 	if !ok {
-		lines = []string{s.title.Render("Details"), "", s.muted.Render("select an item")}
+		lines = []string{s.muted.Render("select an item")}
 	} else {
+		title = m.detailTitle(item)
 		lines = m.detailLines(item)
 	}
-	content := trimHeight(strings.Join(lines, "\n"), innerH)
-	return s.pane.Width(width - 2).Height(height - 2).Render(content)
+	content := strings.Join(lines, "\n")
+	// height <= 0 means "size to content": render at the body's natural height
+	// (no trailing padding) so the preview pane can fill the remainder.
+	if height > 0 {
+		content = trimHeight(content, max(4, height-2))
+	}
+	return paneWithTitle(s.pane, content, title, width, height)
+}
+
+// detailTitle returns the title shown on the detail pane border: the selected
+// item's name and kind (backend-aware vocabulary). The body drops these lines.
+func (m Model) detailTitle(item sessionmgr.Item) string {
+	switch item.Kind {
+	case sessionmgr.KindSession:
+		return item.Name + " · " + m.terms.BackendName + " " + m.terms.SessionNoun
+	case sessionmgr.KindAgent:
+		return item.DisplayName() + " · agent"
+	case sessionmgr.KindZoxide, sessionmgr.KindFD:
+		return sessionmgr.SessionNameFromDir(item.Path) + " · " + string(item.Kind) + " directory"
+	default:
+		return item.DisplayName()
+	}
 }
 
 func (m Model) detailLines(item sessionmgr.Item) []string {
@@ -540,9 +607,6 @@ func (m Model) detailLines(item sessionmgr.Item) []string {
 		icons := m.config.IconSet()
 		attached := renderTmuxStateDetail(s, item.Attached, icons)
 		lines := []string{
-			s.title.Render(item.Name),
-			s.muted.Render(m.terms.BackendName + " " + m.terms.SessionNoun),
-			"",
 			kv(s, "path", sessionmgr.ContractHome(item.Path)),
 			kv(s, "attached", attached),
 			kv(s, m.terms.WindowPlural, fmt.Sprint(item.Windows)),
@@ -562,9 +626,6 @@ func (m Model) detailLines(item sessionmgr.Item) []string {
 		return lines
 	case sessionmgr.KindZoxide, sessionmgr.KindFD:
 		return []string{
-			s.title.Render(sessionmgr.SessionNameFromDir(item.Path)),
-			s.muted.Render(string(item.Kind) + " directory"),
-			"",
 			kv(s, "path", item.Path),
 			kv(s, "enter", "create/switch "+m.terms.BackendName+" "+m.terms.SessionNoun),
 		}
@@ -578,9 +639,6 @@ func (m Model) detailLines(item sessionmgr.Item) []string {
 			)
 		}
 		lines := []string{
-			s.title.Render(item.DisplayName()),
-			s.muted.Render("agent · " + item.AgentName),
-			"",
 			kv(s, "state", stateLabel),
 			kv(s, "location", item.Location),
 		}
@@ -598,7 +656,7 @@ func (m Model) detailLines(item sessionmgr.Item) []string {
 		lines = append(lines, kv(s, "path", sessionmgr.ContractHome(item.Path)))
 		return lines
 	default:
-		return []string{s.title.Render(item.DisplayName())}
+		return nil
 	}
 }
 
@@ -614,7 +672,7 @@ func (m Model) renderPreviewPane(width, height int) string {
 	if content == "" {
 		content = s.muted.Render("preview loading…")
 	}
-	lines := []string{s.title.Render(clampText(title, innerW)), ""}
+	lines := []string{}
 	contentH := max(1, innerH-len(lines))
 	previewLines := strings.Split(content, "\n")
 	// tmux-captured panes (sessions, agents) are bottom-anchored: when content
@@ -631,9 +689,13 @@ func (m Model) renderPreviewPane(width, height int) string {
 	for len(lines) < innerH {
 		lines = append(lines, "")
 	}
-	return s.pane.Width(width - 2).
-		Height(height - 2).
-		Render(trimHeight(strings.Join(lines, "\n"), innerH))
+	return paneWithTitle(
+		s.pane,
+		trimHeight(strings.Join(lines, "\n"), innerH),
+		title,
+		width,
+		height,
+	)
 }
 
 // isTailPreviewKind reports whether a kind's preview is sourced from a

@@ -1395,3 +1395,112 @@ func TestSessionDetailHidesPanesAndTimestampsWhenZero(t *testing.T) {
 		}
 	}
 }
+
+// TestTitledTopEdge covers the hand-composed border title: exact display
+// width, fieldset layout, clamping, and the empty/narrow fallbacks.
+func TestTitledTopEdge(t *testing.T) {
+	fg := lipgloss.Color("9")
+	cases := []struct {
+		name  string
+		title string
+		w     int
+		want  []string // substrings the plain edge must contain
+	}{
+		{
+			name:  "normal",
+			title: "All (3 · 2 agents)",
+			w:     40,
+			want:  []string{"╭─ ", "All (3 · 2 agents)", "─╮"},
+		},
+		{
+			name:  "long clamped",
+			title: "All (1145 · 12 workspaces · 8 agents · 1125 dirs)",
+			w:     26,
+			want:  []string{"╭─ ", "…", "─╮"},
+		},
+		{name: "empty plain edge", title: "", w: 20, want: []string{"╭", "╮"}},
+		{name: "narrow plain edge", title: "Preview", w: 5, want: []string{"╭", "╮"}},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			edge := titledTopEdge(tt.title, tt.w, fg)
+			clean := sessionmgr.StripANSI(edge)
+			if got := lipgloss.Width(clean); got != tt.w {
+				t.Fatalf("display width = %d, want %d (%q)", got, tt.w, clean)
+			}
+			for _, want := range tt.want {
+				if !strings.Contains(clean, want) {
+					t.Fatalf("edge %q missing %q", clean, want)
+				}
+			}
+			// Clamped case must not show the full (overlong) title text.
+			if tt.name == "long clamped" && strings.Contains(clean, "workspaces") {
+				t.Fatalf("long title not clamped: %q", clean)
+			}
+			// Empty/narrow fallback must be a plain dashed edge (no title body).
+			if (tt.name == "empty plain edge" || tt.name == "narrow plain edge") &&
+				strings.Contains(clean, "All") {
+				t.Fatalf("fallback edge leaked title: %q", clean)
+			}
+		})
+	}
+}
+
+// TestListPreviewDetailTitlesOnBorder verifies the section titles moved from
+// the pane body onto the top border (fieldset style), and the old in-body
+// title/kind lines are gone.
+func TestListPreviewDetailTitlesOnBorder(t *testing.T) {
+	m := newTestModel(t)
+	m.terms = sessionmgr.HerdrTerms()
+	m.width = 120
+	m.height = 32
+	m.items = []sessionmgr.Item{{
+		Kind:    sessionmgr.KindSession,
+		Name:    "proj",
+		Target:  "w1",
+		Path:    "/tmp/proj",
+		Windows: 2,
+		Panes:   5,
+	}}
+	m.cursor = 0
+	m.source = sessionmgr.ModeAll
+
+	// List: ModeAll summary lives on the top border line.
+	listOut := sessionmgr.StripANSI(m.renderListPane(60, 16))
+	listTop := strings.Split(listOut, "\n")[0]
+	if !strings.HasPrefix(listTop, "╭") || !strings.HasSuffix(listTop, "╮") {
+		t.Fatalf("list top line is not a border edge: %q", listTop)
+	}
+	if !strings.Contains(listTop, "All (") {
+		t.Fatalf("list border missing ModeAll summary: %q", listTop)
+	}
+
+	// Detail: name · kind on the border; body's first non-blank line is a kv.
+	detailOut := sessionmgr.StripANSI(m.renderDetailPane(60, 14))
+	detailTop := strings.Split(detailOut, "\n")[0]
+	if !strings.HasPrefix(detailTop, "╭") {
+		t.Fatalf("detail top line is not a border edge: %q", detailTop)
+	}
+	if !strings.Contains(detailTop, "proj · herdr workspace") {
+		t.Fatalf("detail border missing 'proj · herdr workspace': %q", detailTop)
+	}
+	// Old in-body title/kind lines must be gone from the body.
+	body := strings.TrimSpace(strings.Join(strings.Split(detailOut, "\n")[1:], "\n"))
+	if strings.HasPrefix(body, "proj") {
+		t.Fatalf("detail body still starts with the name line:\n%s", detailOut)
+	}
+	if !strings.Contains(detailOut, "path") {
+		t.Fatalf("detail body missing 'path' kv:\n%s", detailOut)
+	}
+
+	// Preview: 'Preview · name' on the border.
+	m.preview = "hello world"
+	previewOut := sessionmgr.StripANSI(m.renderPreviewPane(60, 12))
+	previewTop := strings.Split(previewOut, "\n")[0]
+	if !strings.HasPrefix(previewTop, "╭") {
+		t.Fatalf("preview top line is not a border edge: %q", previewTop)
+	}
+	if !strings.Contains(previewTop, "Preview · proj") {
+		t.Fatalf("preview border missing 'Preview · proj': %q", previewTop)
+	}
+}
