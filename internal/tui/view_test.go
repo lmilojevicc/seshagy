@@ -1289,13 +1289,15 @@ func TestHerdrTermsRenderedStrings(t *testing.T) {
 		t.Fatalf("footer missing '✓ herdr'\n%s", footer)
 	}
 
-	// Session detail: "herdr workspace" and "tabs" key
+	// Session detail: "herdr workspace", "tabs", and "panes" keys; path shown;
+	// activity/created omitted (herdr exposes no timestamps).
 	m.items = []sessionmgr.Item{{
 		Kind:    sessionmgr.KindSession,
 		Name:    "proj",
 		Target:  "w1",
 		Path:    "/tmp/proj",
 		Windows: 2,
+		Panes:   5,
 	}}
 	m.cursor = 0
 	detail := m.renderDetailPane(60, 10)
@@ -1305,6 +1307,15 @@ func TestHerdrTermsRenderedStrings(t *testing.T) {
 	}
 	if !strings.Contains(clean, "tabs") {
 		t.Fatalf("session detail missing 'tabs' key\n%s", clean)
+	}
+	if !strings.Contains(clean, "panes") {
+		t.Fatalf("session detail missing 'panes' key\n%s", clean)
+	}
+	if !strings.Contains(clean, "/tmp/proj") {
+		t.Fatalf("session detail missing path value\n%s", clean)
+	}
+	if strings.Contains(clean, "activity") || strings.Contains(clean, "created") {
+		t.Fatalf("herdr session detail must omit activity/created (no timestamps)\n%s", clean)
 	}
 }
 
@@ -1332,5 +1343,55 @@ func TestHerdrAgentDetailShowsTabLabel(t *testing.T) {
 	// The opaque tab id must NOT leak.
 	if strings.Contains(clean, "w1:t2") {
 		t.Fatalf("agent detail leaks opaque tab id\n%s", clean)
+	}
+}
+
+// TestSessionDetailShowsPanesAndTimestampsWhenSet pins the positive branch: when
+// a backend reports a pane count and real created/activity timestamps, all
+// three rows render. Guards against a regression that always-hides them.
+func TestSessionDetailShowsPanesAndTimestampsWhenSet(t *testing.T) {
+	m := newTestModel(t) // default tmux terms
+	m.width = 120
+	m.height = 32
+	m.items = []sessionmgr.Item{{
+		Kind:     sessionmgr.KindSession,
+		Name:     "demo",
+		Path:     "/tmp/demo",
+		Windows:  2,
+		Panes:    4,
+		Created:  time.Now().Add(-24 * time.Hour),
+		Activity: time.Now().Add(-time.Hour),
+	}}
+	m.cursor = 0
+	detail := m.renderDetailPane(60, 14)
+	clean := sessionmgr.StripANSI(detail)
+	for _, want := range []string{"panes", "activity", "created"} {
+		if !strings.Contains(clean, want) {
+			t.Fatalf("session detail missing %q\n%s", want, clean)
+		}
+	}
+}
+
+// TestSessionDetailHidesPanesAndTimestampsWhenZero pins the negative branch:
+// when pane count and timestamps are absent, the rows are omitted rather than
+// showing a misleading "unknown".
+func TestSessionDetailHidesPanesAndTimestampsWhenZero(t *testing.T) {
+	m := newTestModel(t) // default tmux terms
+	m.width = 120
+	m.height = 32
+	m.items = []sessionmgr.Item{{
+		Kind:    sessionmgr.KindSession,
+		Name:    "demo",
+		Path:    "/tmp/demo",
+		Windows: 2,
+		// Panes, Activity, Created intentionally zero.
+	}}
+	m.cursor = 0
+	detail := m.renderDetailPane(60, 14)
+	clean := sessionmgr.StripANSI(detail)
+	for _, unwanted := range []string{"panes", "activity", "created"} {
+		if strings.Contains(clean, unwanted) {
+			t.Fatalf("session detail must omit %q when absent\n%s", unwanted, clean)
+		}
 	}
 }

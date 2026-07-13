@@ -375,14 +375,21 @@ func TestHerdrBackendListSessions(t *testing.T) {
 		outputF: func(args []string) ([]byte, error) {
 			if args[0] == "workspace" && args[1] == "list" {
 				return []byte(`{"result":{"type":"workspace_list","workspaces":[` +
-					`{"workspace_id":"w1","label":"proj","cwd":"/proj","focused":true},` +
-					`{"workspace_id":"w2","cwd":"/api"}]}}`), nil
+					`{"workspace_id":"w1","label":"proj","cwd":"/proj","focused":true,"pane_count":3},` +
+					`{"workspace_id":"w2","cwd":"/api","pane_count":1}]}}`), nil
 			}
 			if args[0] == "tab" && args[1] == "list" {
 				return []byte(`{"result":{"type":"tab_list","tabs":[` +
 					`{"tab_id":"w1:t1","workspace_id":"w1","label":"main"},` +
 					`{"tab_id":"w1:t2","workspace_id":"w1","label":"logs"},` +
 					`{"tab_id":"w2:t1","workspace_id":"w2","label":"api"}` +
+					`]}}`), nil
+			}
+			if args[0] == "pane" && args[1] == "list" {
+				return []byte(`{"result":{"type":"pane_list","panes":[` +
+					`{"pane_id":"w1:p1","workspace_id":"w1","cwd":"/proj","foreground_cwd":"/proj/src","focused":true},` +
+					`{"pane_id":"w1:p2","workspace_id":"w1","cwd":"/proj/docs"},` +
+					`{"pane_id":"w2:p1","workspace_id":"w2","cwd":"/api"}` +
 					`]}}`), nil
 			}
 			return nil, nil
@@ -405,12 +412,139 @@ func TestHerdrBackendListSessions(t *testing.T) {
 	if items[0].Windows != 2 {
 		t.Fatalf("items[0].Windows = %d, want 2 (tab count)", items[0].Windows)
 	}
+	// Path comes from the focused pane's foreground_cwd; Panes from pane_count.
+	if items[0].Path != "/proj/src" {
+		t.Fatalf("items[0].Path = %q, want /proj/src (focused pane foreground_cwd)", items[0].Path)
+	}
+	if items[0].Panes != 3 {
+		t.Fatalf("items[0].Panes = %d, want 3", items[0].Panes)
+	}
 	// Workspace 2: no label → Name falls back to workspace_id, 1 tab.
 	if items[1].Name != "w2" || items[1].Target != "w2" {
 		t.Fatalf("items[1] = %+v", items[1])
 	}
 	if items[1].Windows != 1 {
 		t.Fatalf("items[1].Windows = %d, want 1", items[1].Windows)
+	}
+	// Workspace 2 has no focused pane → path falls back to first pane cwd.
+	if items[1].Path != "/api" {
+		t.Fatalf("items[1].Path = %q, want /api (first pane cwd, no focused pane)", items[1].Path)
+	}
+	if items[1].Panes != 1 {
+		t.Fatalf("items[1].Panes = %d, want 1", items[1].Panes)
+	}
+}
+
+// TestHerdrBackendListSessionsFocusedPath verifies the workspace path resolves
+// to the focused pane's foreground_cwd even when that pane is not the first in
+// the pane list.
+func TestHerdrBackendListSessionsFocusedPath(t *testing.T) {
+	rec := &herdrCmdRecorder{
+		outputF: func(args []string) ([]byte, error) {
+			if args[0] == "workspace" && args[1] == "list" {
+				return []byte(`{"result":{"type":"workspace_list","workspaces":[` +
+					`{"workspace_id":"w1","label":"proj","cwd":"","focused":true,"pane_count":2}]}}`), nil
+			}
+			if args[0] == "tab" && args[1] == "list" {
+				return []byte(`{"result":{"type":"tab_list","tabs":[` +
+					`{"tab_id":"w1:t1","workspace_id":"w1","label":"main"}]}}`), nil
+			}
+			if args[0] == "pane" && args[1] == "list" {
+				// First pane is NOT focused; second pane is focused with a distinct cwd.
+				return []byte(`{"result":{"type":"pane_list","panes":[` +
+					`{"pane_id":"w1:p1","workspace_id":"w1","cwd":"/proj/main","focused":false},` +
+					`{"pane_id":"w1:p2","workspace_id":"w1","cwd":"/proj/other","foreground_cwd":"/proj/focused","focused":true}` +
+					`]}}`), nil
+			}
+			return nil, nil
+		},
+	}
+	setHerdrHooksForTest(t, rec.outputFn, rec.runFn)
+
+	items, err := NewHerdrBackend().ListSessions(context.Background())
+	if err != nil {
+		t.Fatalf("ListSessions error: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("len = %d, want 1", len(items))
+	}
+	// Focused pane wins over the first pane; foreground_cwd preferred over cwd.
+	if items[0].Path != "/proj/focused" {
+		t.Fatalf("Path = %q, want /proj/focused (focused pane foreground_cwd)", items[0].Path)
+	}
+}
+
+// TestHerdrBackendListSessionsNoFocusedPaneUsesFirstPaneCwd verifies that when
+// no pane is focused, the first pane's cwd is used (first-seen wins), distinct
+// from the workspace cwd fallback.
+func TestHerdrBackendListSessionsNoFocusedPaneUsesFirstPaneCwd(t *testing.T) {
+	rec := &herdrCmdRecorder{
+		outputF: func(args []string) ([]byte, error) {
+			if args[0] == "workspace" && args[1] == "list" {
+				return []byte(`{"result":{"type":"workspace_list","workspaces":[` +
+					`{"workspace_id":"w1","label":"proj","cwd":"","focused":false,"pane_count":2}]}}`), nil
+			}
+			if args[0] == "tab" && args[1] == "list" {
+				return []byte(`{"result":{"type":"tab_list","tabs":[` +
+					`{"tab_id":"w1:t1","workspace_id":"w1","label":"main"}]}}`), nil
+			}
+			if args[0] == "pane" && args[1] == "list" {
+				// Neither pane is focused; workspace cwd is empty.
+				return []byte(`{"result":{"type":"pane_list","panes":[` +
+					`{"pane_id":"w1:p1","workspace_id":"w1","cwd":"/proj/first","focused":false},` +
+					`{"pane_id":"w1:p2","workspace_id":"w1","cwd":"/proj/second","focused":false}` +
+					`]}}`), nil
+			}
+			return nil, nil
+		},
+	}
+	setHerdrHooksForTest(t, rec.outputFn, rec.runFn)
+
+	items, err := NewHerdrBackend().ListSessions(context.Background())
+	if err != nil {
+		t.Fatalf("ListSessions error: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("len = %d, want 1", len(items))
+	}
+	// First-seen pane cwd wins; cannot come from the empty workspace cwd.
+	if items[0].Path != "/proj/first" {
+		t.Fatalf("Path = %q, want /proj/first (first-seen pane cwd)", items[0].Path)
+	}
+}
+
+// TestHerdrBackendListSessionsPaneListErrorFallsBackToWorkspaceCwd verifies
+// that a `pane list` failure is swallowed (best-effort) and the workspace's
+// own cwd is used instead.
+func TestHerdrBackendListSessionsPaneListErrorFallsBackToWorkspaceCwd(t *testing.T) {
+	rec := &herdrCmdRecorder{
+		outputF: func(args []string) ([]byte, error) {
+			if args[0] == "workspace" && args[1] == "list" {
+				return []byte(`{"result":{"type":"workspace_list","workspaces":[` +
+					`{"workspace_id":"w1","label":"proj","cwd":"/from-ws","focused":true,"pane_count":1}]}}`), nil
+			}
+			if args[0] == "tab" && args[1] == "list" {
+				return []byte(`{"result":{"type":"tab_list","tabs":[` +
+					`{"tab_id":"w1:t1","workspace_id":"w1","label":"main"}]}}`), nil
+			}
+			if args[0] == "pane" && args[1] == "list" {
+				return nil, errors.New("boom")
+			}
+			return nil, nil
+		},
+	}
+	setHerdrHooksForTest(t, rec.outputFn, rec.runFn)
+
+	items, err := NewHerdrBackend().ListSessions(context.Background())
+	if err != nil {
+		t.Fatalf("ListSessions error: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("len = %d, want 1", len(items))
+	}
+	// pane list failed → fallback to workspace cwd.
+	if items[0].Path != "/from-ws" {
+		t.Fatalf("Path = %q, want /from-ws (workspace cwd fallback)", items[0].Path)
 	}
 }
 

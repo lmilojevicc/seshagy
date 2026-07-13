@@ -34,6 +34,7 @@ type workspaceInfo struct {
 	Label       string `json:"label"`
 	Cwd         string `json:"cwd"`
 	Focused     bool   `json:"focused"`
+	PaneCount   int    `json:"pane_count"`
 }
 
 // tabInfo mirrors the TabInfo fields seshagy needs from

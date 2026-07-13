@@ -40,6 +40,7 @@ type Item struct {
 	Activity time.Time
 	Attached bool
 	Windows  int
+	Panes    int
 
 	PaneID   string
 	Session  string

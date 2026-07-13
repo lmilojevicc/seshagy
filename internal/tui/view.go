@@ -539,16 +539,27 @@ func (m Model) detailLines(item sessionmgr.Item) []string {
 	case sessionmgr.KindSession:
 		icons := m.config.IconSet()
 		attached := renderTmuxStateDetail(s, item.Attached, icons)
-		return []string{
+		lines := []string{
 			s.title.Render(item.Name),
 			s.muted.Render(m.terms.BackendName + " " + m.terms.SessionNoun),
 			"",
 			kv(s, "path", sessionmgr.ContractHome(item.Path)),
 			kv(s, "attached", attached),
 			kv(s, m.terms.WindowPlural, fmt.Sprint(item.Windows)),
-			kv(s, "activity", ago(item.Activity)),
-			kv(s, "created", ago(item.Created)),
 		}
+		// Pane count and timestamps are optional: only herdr reports a pane count,
+		// and herdr exposes no created/activity. Omit the rows when absent instead of
+		// showing a misleading "unknown".
+		if item.Panes > 0 {
+			lines = append(lines, kv(s, m.terms.PanePlural, fmt.Sprint(item.Panes)))
+		}
+		if !item.Activity.IsZero() {
+			lines = append(lines, kv(s, "activity", ago(item.Activity)))
+		}
+		if !item.Created.IsZero() {
+			lines = append(lines, kv(s, "created", ago(item.Created)))
+		}
+		return lines
 	case sessionmgr.KindZoxide, sessionmgr.KindFD:
 		return []string{
 			s.title.Render(sessionmgr.SessionNameFromDir(item.Path)),
