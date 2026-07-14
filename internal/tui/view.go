@@ -14,7 +14,7 @@ import (
 	"github.com/lmilojevicc/seshagy/internal/sessionmgr"
 )
 
-// previewMinWidth gates list+preview split and full tab labels in renderTabs.
+// previewMinWidth gates the list+preview split.
 const previewMinWidth = 110
 
 // tabWidthUnset skips tab width limits when terminal width is unknown.
@@ -226,89 +226,51 @@ func (m Model) renderInstallMenu(height int) string {
 
 func (m Model) renderTabs() string {
 	s := m.styles
-	tabs := m.sourceTabs()
-	all := make([]int, len(tabs))
-	for i := range tabs {
-		all[i] = i
-	}
 	maxW := safeWidth(m.width)
-	tabPad := lipgloss.NewStyle().Padding(0, 1)
-	render := func(full bool, sep string, brand bool, visible []int) string {
-		parts := make([]string, 0, len(visible)+1)
-		if brand {
-			parts = append(parts, s.emphasis.Render("seshagy"))
-		}
-		for _, i := range visible {
-			tab := tabs[i]
-			label := fmt.Sprintf("[%s] %s", tab.key, tab.name)
-			if !full {
-				label = fmt.Sprintf("[%s]", tab.key)
+	tabs := m.sourceTabs()
+
+	// Source-tab chips (finder style): active tab is a reverse-video pill,
+	// inactive tabs are muted padded chips, joined by a muted middot. Labels
+	// fall back through three widths (key+name -> name -> key) so the row fits.
+	try := func(format string) string {
+		parts := make([]string, 0, len(tabs))
+		for _, tab := range tabs {
+			var label string
+			switch format {
+			case "key-name":
+				label = tab.key + " " + tab.name
+			case "name":
+				label = tab.name
+			default:
+				label = tab.key
 			}
 			if tab.mode == m.source {
-				parts = append(parts, s.tabActive.Render(label))
+				parts = append(parts, s.chipActive.Render(label))
 			} else {
-				parts = append(parts, s.tabInactive.Render(label))
+				parts = append(parts, s.chipIdle.Render(label))
 			}
 		}
-		line := strings.Join(parts, sep)
-		if brand || sep != "" || full {
-			line = tabPad.Render(line)
-		}
+		return strings.Join(parts, s.muted.Render(" · "))
+	}
+
+	line := try("key-name")
+	if m.width > 0 && lipgloss.Width(line) > maxW {
+		line = try("name")
+	}
+	if m.width > 0 && lipgloss.Width(line) > maxW {
+		line = try("key")
+	}
+
+	// Right-aligned visible-count badge when room allows.
+	items := m.visibleItems()
+	count := fmt.Sprintf("%d", len(items))
+	if m.query != "" {
+		count = fmt.Sprintf("%d/%d", len(items), len(m.items))
+	}
+	if m.width <= 0 {
 		return line
 	}
-	fitsOneLine := func(content string) bool {
-		return lipgloss.Width(content) <= maxW && lipgloss.Height(content) <= 1
-	}
-	fitsTwoLine := func(content string) bool {
-		return lipgloss.Width(content) <= maxW && lipgloss.Height(content) <= 2
-	}
-	tryFull := m.width <= 0 || !m.showPreview || m.width >= previewMinWidth
-	if tryFull {
-		line := render(true, "  ", true, all)
-		if fitsOneLine(line) {
-			return line
-		}
-	}
-	layouts := []struct {
-		sep   string
-		brand bool
-	}{
-		{"  ", true},
-		{" ", true},
-		{" ", false},
-		{"", false},
-	}
-	for _, layout := range layouts {
-		line := render(false, layout.sep, layout.brand, all)
-		if fitsOneLine(line) {
-			return line
-		}
-	}
-	brandLine := tabPad.Render(s.emphasis.Render("seshagy"))
-	tabRow := tabPad.Render(render(false, "", false, all))
-	twoLine := brandLine + "\n" + tabRow
-	if fitsTwoLine(twoLine) {
-		return twoLine
-	}
-	visible := append([]int(nil), all...)
-	for len(visible) > 1 {
-		line := render(false, "", false, visible)
-		if fitsOneLine(line) {
-			return line
-		}
-		removed := false
-		for i := len(visible) - 1; i >= 0; i-- {
-			if tabs[visible[i]].mode != m.source {
-				visible = append(visible[:i], visible[i+1:]...)
-				removed = true
-				break
-			}
-		}
-		if !removed {
-			break
-		}
-	}
-	return render(false, "", false, visible)
+	return composeLine(line, count, maxW, s.muted)
 }
 
 type sourceTab struct {

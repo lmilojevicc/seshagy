@@ -54,7 +54,7 @@ func TestViewRendersDashboardChromeAndRows(t *testing.T) {
 		{Kind: sessionmgr.KindZoxide, Name: "~/code/demo", Path: "~/code/demo"},
 	}
 	out := sessionmgr.StripANSI(m.View())
-	for _, want := range []string{"seshagy", "[1] All", "All (3", "demo", "pi", "Preview"} {
+	for _, want := range []string{"1 All", "All (3", "demo", "pi", "Preview"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("View() missing %q\n%s", want, out)
 		}
@@ -245,7 +245,7 @@ func TestTabBarSurvivesRefreshAtWidth51(t *testing.T) {
 		}
 		line0 := sessionmgr.StripANSI(lines[0])
 		line1 := sessionmgr.StripANSI(lines[1])
-		if !strings.Contains(line0, "[1]") || !strings.Contains(line0, "seshagy") {
+		if !strings.Contains(line0, "All") {
 			t.Fatalf("%s: tab bar not on first line:\nline0=%q\nline1=%q", label, line0, line1)
 		}
 		if strings.HasPrefix(line1, "All (") {
@@ -327,7 +327,7 @@ func TestConfiguredSourceOrderAndDefault(t *testing.T) {
 		t.Fatalf("New() source = %v, want configured zoxide", m.source)
 	}
 	out := sessionmgr.StripANSI(m.renderTabs())
-	for _, want := range []string{"[1] Sessions", "[2] Zoxide", "[3] fd", "[4] All"} {
+	for _, want := range []string{"1 Sessions", "2 Zoxide", "3 fd", "4 All"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("configured tabs missing %q\n%s", want, out)
 		}
@@ -341,6 +341,88 @@ func TestConfiguredSourceOrderAndDefault(t *testing.T) {
 	m = model.(Model)
 	if m.source != sessionmgr.ModeAll {
 		t.Fatalf("configured key 4 source = %v, want all", m.source)
+	}
+}
+
+// TestRenderTabsChipStyle verifies the finder-style chip rendering: active tab
+// is a reverse-video pill (chipActive), others are muted chips (chipIdle),
+// joined by a muted middot separator, with a right-aligned count badge.
+func TestRenderTabsChipStyle(t *testing.T) {
+	m := newTestModel(t)
+	model, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 24})
+	m = model.(Model)
+	m.items = []sessionmgr.Item{
+		{Kind: sessionmgr.KindSession, Name: "a"},
+		{Kind: sessionmgr.KindSession, Name: "b"},
+		{Kind: sessionmgr.KindSession, Name: "c"},
+	}
+
+	// Style properties: active chip is reverse-video, idle is not.
+	if !m.styles.chipActive.GetReverse() {
+		t.Fatal("chipActive must have Reverse(true)")
+	}
+	if m.styles.chipIdle.GetReverse() {
+		t.Fatal("chipIdle must NOT have Reverse")
+	}
+
+	clean := sessionmgr.StripANSI(m.renderTabs())
+
+	// Middot separator present.
+	if !strings.Contains(clean, "·") {
+		t.Fatalf("chip row missing ' · ' separator\n%s", clean)
+	}
+
+	// Active tab label present (default source = All, key 1).
+	if !strings.Contains(clean, "1 All") {
+		t.Fatalf("chip row missing active '1 All'\n%s", clean)
+	}
+
+	// Count badge: 3 visible items.
+	if !strings.Contains(clean, "3") {
+		t.Fatalf("chip row missing count badge '3'\n%s", clean)
+	}
+}
+
+// TestRenderTabsChipQueryCount verifies the filtered count badge (vis/total)
+// appears when a query is active.
+func TestRenderTabsChipQueryCount(t *testing.T) {
+	m := newTestModel(t)
+	model, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 24})
+	m = model.(Model)
+	m.items = []sessionmgr.Item{
+		{Kind: sessionmgr.KindSession, Name: "api"},
+		{Kind: sessionmgr.KindSession, Name: "web"},
+		{Kind: sessionmgr.KindSession, Name: "app"},
+	}
+	m.query = "ap"
+	clean := sessionmgr.StripANSI(m.renderTabs())
+	// 2 matches (api, app) out of 3 total.
+	if !strings.Contains(clean, "2/3") {
+		t.Fatalf("chip row missing filtered count '2/3'\n%s", clean)
+	}
+}
+
+// TestRenderTabsChipFitsNarrowWidth verifies the chip row never exceeds the
+// terminal width at narrow sizes, falling back through label formats.
+func TestRenderTabsChipFitsNarrowWidth(t *testing.T) {
+	for _, width := range []int{20, 25, 30, 40, 51} {
+		t.Run(fmt.Sprintf("%d", width), func(t *testing.T) {
+			m := newTestModel(t)
+			model, _ := m.Update(tea.WindowSizeMsg{Width: width, Height: 24})
+			m = model.(Model)
+			m.items = make([]sessionmgr.Item, 100)
+			line := m.renderTabs()
+			clean := sessionmgr.StripANSI(line)
+			if w := lipgloss.Width(clean); w > safeWidth(width) {
+				t.Fatalf(
+					"width %d: chip row too wide (%d > %d): %q",
+					width,
+					w,
+					safeWidth(width),
+					clean,
+				)
+			}
+		})
 	}
 }
 
