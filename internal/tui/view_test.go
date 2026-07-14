@@ -346,7 +346,7 @@ func TestConfiguredSourceOrderAndDefault(t *testing.T) {
 
 // TestRenderTabsChipStyle verifies the finder-style chip rendering: active tab
 // is the active_tab color (chipActive, bold + padded), others are muted chips
-// (chipIdle), joined by a muted middot separator, with a right-aligned count
+// (chipIdle), joined by a muted '|' separator, with a right-aligned count
 // badge.
 func TestRenderTabsChipStyle(t *testing.T) {
 	m := newTestModel(t)
@@ -371,9 +371,9 @@ func TestRenderTabsChipStyle(t *testing.T) {
 
 	clean := sessionmgr.StripANSI(m.renderTabs())
 
-	// Middot separator present.
-	if !strings.Contains(clean, "·") {
-		t.Fatalf("chip row missing ' · ' separator\n%s", clean)
+	// Pipe separator present.
+	if !strings.Contains(clean, "|") {
+		t.Fatalf("chip row missing ' | ' separator\n%s", clean)
 	}
 
 	// Active tab label present (default source = All, key 1).
@@ -873,24 +873,32 @@ func TestTypeFirstManualModePromptRequiresPrefix(t *testing.T) {
 	}
 }
 
-func TestFooterKeepsStatusOnOneLine(t *testing.T) {
+// TestFooterIsHelpOnlyByDefault verifies the footer is just the help line in
+// the default (popup) input style — no backend indicator and no status message
+// ("ready"/"loaded …"/"refreshing…"). Those used to be a status strip above the
+// help; the overview tiles now carry the counts and active source. Cmdline
+// input style still renders the search/rename field above the help.
+func TestFooterIsHelpOnlyByDefault(t *testing.T) {
 	m := newTestModel(t)
-	m.width = 80
+	m.width = 120
 	m.source = sessionmgr.ModeAll
 	m.status = "loaded 1171 items"
-	m.showHelp = false
+	m.showHelp = true
 
 	footer := m.renderFooter()
-	if height := lipgloss.Height(footer); height != 2 {
-		t.Fatalf("footer height = %d, want 2\n%s", height, sessionmgr.StripANSI(footer))
-	}
 	clean := sessionmgr.StripANSI(footer)
 	lines := strings.Split(clean, "\n")
-	if len(lines) != 2 {
-		t.Fatalf("footer lines = %d, want 2\n%s", len(lines), clean)
+	if len(lines) != 1 {
+		t.Fatalf("footer should be a single help line, got %d lines\n%s", len(lines), clean)
 	}
-	if !strings.Contains(lines[0], "loaded 1171 items") {
-		t.Fatalf("status wrapped or disappeared from first line:\n%s", clean)
+	if !strings.Contains(lines[0], "m mode") {
+		t.Fatalf("footer help line missing keycaps\n%s", lines[0])
+	}
+	if strings.Contains(clean, "loaded 1171 items") {
+		t.Fatalf("footer must not render the status message\n%s", clean)
+	}
+	if strings.Contains(clean, "✓ ") {
+		t.Fatalf("footer must not render the backend indicator\n%s", clean)
 	}
 	for i, line := range lines {
 		if width := lipgloss.Width(line); width > safeWidth(m.width) {
@@ -902,40 +910,21 @@ func TestFooterKeepsStatusOnOneLine(t *testing.T) {
 			)
 		}
 	}
-}
 
-// TestFooterStatusStripOnlyShowsBackend verifies the status strip (footer line 1,
-// left side) was trimmed to just the backend indicator. The source list name,
-// type-first, and /query used to clutter it but are redundant now that the
-// SOURCES tile shows the active source and the count badge reflects filtering.
-func TestFooterStatusStripOnlyShowsBackend(t *testing.T) {
-	m := newTestModel(t)
-	m.width = 120
-	m.source = sessionmgr.ModeAll
-	m.config.TypeFirst.Enabled = true
-	m.config.TypeFirst.Prefix = appconfig.DefaultPrefix
-	m.query = "foo"
-
-	clean := sessionmgr.StripANSI(m.renderFooter())
-	lines := strings.Split(clean, "\n")
-	if len(lines) < 1 {
-		t.Fatalf("footer has no lines\n%s", clean)
+	// Cmdline input style still shows the search/rename field above the help.
+	m.config.TUI.InputStyle = appconfig.InputStyleCmdline
+	m.inputMode = modeSearch
+	m.searchInput.SetValue("proj")
+	cl := strings.Split(sessionmgr.StripANSI(m.renderFooter()), "\n")
+	if len(cl) != 2 {
+		t.Fatalf(
+			"cmdline search footer should have input + help (2 lines), got %d\n%s",
+			len(cl),
+			cl,
+		)
 	}
-	line1 := lines[0]
-	// Backend indicator stays.
-	if !strings.Contains(line1, "✓ ") {
-		t.Fatalf("footer line 1 missing backend indicator\n%s", line1)
-	}
-	// Removed segments no longer appear on line 1.
-	sourceList := sessionmgr.ModeAll.DisplayNames(m.terms).List
-	if strings.Contains(line1, sourceList) {
-		t.Fatalf("footer line 1 should not show source list name %q\n%s", sourceList, line1)
-	}
-	if strings.Contains(line1, "type-first") {
-		t.Fatalf("footer line 1 should not show type-first indicator\n%s", line1)
-	}
-	if strings.Contains(line1, "/foo") {
-		t.Fatalf("footer line 1 should not show /query segment\n%s", line1)
+	if !strings.Contains(cl[0], "proj") {
+		t.Fatalf("cmdline search input not rendered above help\n%s", cl[0])
 	}
 }
 
@@ -1013,18 +1002,6 @@ func TestFooterWarningStatusesUseWarningStyle(t *testing.T) {
 				style.GetBold(),
 				s.warning.GetForeground(),
 			)
-		}
-		m := newTestModel(t)
-		m.width = 80
-		m.status = status
-		m.showHelp = false
-		if clean := sessionmgr.StripANSI(
-			m.renderFooter(),
-		); !strings.Contains(
-			strings.Split(clean, "\n")[0],
-			status,
-		) {
-			t.Fatalf("footer did not render warning status %q on first line:\n%s", status, clean)
 		}
 	}
 }
@@ -1375,12 +1352,6 @@ func TestTmuxTermsByteIdenticalStrings(t *testing.T) {
 	m.width = 120
 	m.height = 32
 
-	// Footer: ✓ tmux
-	footer := m.renderFooter()
-	if !strings.Contains(sessionmgr.StripANSI(footer), "✓ tmux") {
-		t.Fatalf("footer missing '✓ tmux' under tmux terms\n%s", footer)
-	}
-
 	// Session detail: "tmux session" and "windows" key
 	m.items = []sessionmgr.Item{{
 		Kind:    sessionmgr.KindSession,
@@ -1426,12 +1397,6 @@ func TestHerdrTermsRenderedStrings(t *testing.T) {
 	m.terms = sessionmgr.HerdrTerms()
 	m.width = 120
 	m.height = 32
-
-	// Footer: ✓ herdr
-	footer := m.renderFooter()
-	if !strings.Contains(sessionmgr.StripANSI(footer), "✓ herdr") {
-		t.Fatalf("footer missing '✓ herdr'\n%s", footer)
-	}
 
 	// Session detail: "herdr workspace", "tabs", and "panes" keys; path shown;
 	// activity/created omitted (herdr exposes no timestamps).

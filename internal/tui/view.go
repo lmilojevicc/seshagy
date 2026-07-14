@@ -263,7 +263,7 @@ func (m Model) renderSourceChips(width int) string {
 				parts = append(parts, s.chipIdle.Render(label))
 			}
 		}
-		return strings.Join(parts, s.muted.Render(" · "))
+		return strings.Join(parts, s.muted.Render(" | "))
 	}
 
 	line := try("key-name")
@@ -758,43 +758,6 @@ func isTailPreviewKind(kind sessionmgr.Kind) bool {
 
 func (m Model) renderFooter() string {
 	s := m.styles
-	// When the search/rename popup owns the input, the footer shows the normal
-	// status line instead of the inline text field.
-	mode := m.inputMode
-	if (mode == modeSearch || mode == modeRename) && m.inputPopupActive() {
-		mode = modeNormal
-	}
-	var input string
-	inputStyle := s.muted
-	switch mode {
-	case modeSearch:
-		input = m.searchInput.View()
-	case modeRename:
-		input = m.renameInput.View()
-	default:
-		input = m.status
-		if m.backgroundRefreshing() {
-			if input == "" || input == "ready" {
-				input = "refreshing…"
-			} else {
-				input += " · refreshing…"
-			}
-		}
-		if input == "" {
-			input = "ready"
-		}
-		inputStyle = footerStatusStyle(s, input, m.err != nil)
-	}
-	// The source list name, type-first, and /query indicators used to live here
-	// too, but they're redundant now: the active source is in the SOURCES tile,
-	// the filter query shows via the count badge, and type-first has its own
-	// help keys. Keep only the backend indicator (shown nowhere else).
-	var left string
-	if m.mux.InMultiplexer() {
-		left = s.success.Render("✓ " + m.terms.BackendName)
-	} else {
-		left = s.warning.Render("outside tmux/herdr")
-	}
 	var help string
 	if m.showHelp {
 		if m.config.TypeFirst.Enabled && !m.prefixArmed {
@@ -834,15 +797,14 @@ func (m Model) renderFooter() string {
 	} else {
 		help = s.muted.Render("? help")
 	}
-	// The status style has one column of horizontal padding on each side. Keep
-	// the composed text inside that content area, and render one column shy of
-	// the terminal width to avoid terminal auto-wrap at the right edge.
+	// The footer is just the help line. The old status strip (backend indicator,
+	// loaded/refreshing status, errors) is gone because the overview tiles now
+	// carry the counts and active source. The one exception is cmdline input
+	// style: while actively searching/renaming, render the text input as a
+	// one-line footer above the help (popup style uses its own overlay).
 	footerW := safeWidth(m.width)
 	contentW := max(1, footerW-2)
-	var line1 string
-	// Cmdline input style: the first footer line becomes the text input itself
-	// (prompt + value + cursor), like Vim's / search bar, instead of the status
-	// line. Line 2 (help) is unchanged.
+	helpLine := clampText(help, contentW)
 	if (m.inputMode == modeSearch || m.inputMode == modeRename) &&
 		m.config.TUI.InputStyle == appconfig.InputStyleCmdline {
 		var ti textinput.Model
@@ -856,12 +818,10 @@ func (m Model) renderFooter() string {
 		if w := contentW - lipgloss.Width(ti.Prompt); w > 0 {
 			ti.Width = w
 		}
-		line1 = clampText(ti.View(), contentW)
-	} else {
-		line1 = composeLine(left, input, contentW, inputStyle)
+		inputLine := clampText(ti.View(), contentW)
+		return s.status.Width(footerW).Render(inputLine + "\n" + helpLine)
 	}
-	line2 := clampText(help, contentW)
-	return s.status.Width(footerW).Render(line1 + "\n" + line2)
+	return s.status.Width(footerW).Render(helpLine)
 }
 
 func footerStatusStyle(s styles, status string, hasError bool) lipgloss.Style {

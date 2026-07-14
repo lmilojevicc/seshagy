@@ -152,18 +152,22 @@ func TestFooterCmdlineShowsTextInputOnLine1(t *testing.T) {
 
 func TestFooterPopupStyleStillComposesStatus(t *testing.T) {
 	m := newTestModel(t)
-	// Default (popup) config: small terminal falls back to the inline field on
-	// the right of the status line, so line 1 holds both the status source info
-	// and the search input.
+	// Default (popup) input style: the footer stays help-only. The search/rename
+	// field renders as its own overlay, not in the footer, so even while searching
+	// the footer has no status strip and no inline input.
 	m.config.TUI.InputStyle = appconfig.InputStylePopup
 	m.width, m.height = 40, 4
 	m.inputMode = modeSearch
 	m.searchInput.SetValue("test")
 	footer := sessionmgr.StripANSI(m.renderFooter())
 	lines := strings.Split(footer, "\n")
-	// Line 1 holds the backend indicator (left) + the inline search input (right);
-	// the source list name is no longer in the status strip (it's in the SOURCES tile).
-	if !strings.Contains(lines[0], "✓") || !strings.Contains(lines[0], "test") {
-		t.Fatalf("popup small-terminal line 1 should hold backend + search input: %q", lines[0])
+	if len(lines) != 1 {
+		t.Fatalf("popup footer should be a single help line, got %d\n%s", len(lines), footer)
+	}
+	if strings.Contains(footer, "test") {
+		t.Fatalf("popup footer must not embed the search input (it is an overlay)\n%s", footer)
+	}
+	if strings.Contains(footer, "✓") {
+		t.Fatalf("popup footer must not show the backend indicator\n%s", footer)
 	}
 }
