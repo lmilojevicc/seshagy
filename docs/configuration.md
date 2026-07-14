@@ -140,6 +140,23 @@ and all).
 | `warning`        | warning status messages              |
 | `danger`         | error/danger status messages         |
 
+Per-pane borders and border titles can be themed independently. Each defaults
+to the relevant global when unset (`list_border` inherits `focused_border`;
+ `metadata_border` and `preview_border` inherit `border`; each `*_border_title`
+ inherits its pane's `*_border`), so the default look is unchanged unless set.
+
+| Key                     | Used for                                                 |
+| ----------------------- | -------------------------------------------------------- |
+| `list_border`           | list pane border (default: inherits `focused_border`)    |
+| `metadata_border`       | metadata/detail pane border (default: inherits `border`) |
+| `preview_border`        | preview pane border (default: inherits `border`)         |
+| `list_border_title`     | list pane border-title text (default: inherits `list_border`)     |
+| `metadata_border_title` | metadata pane border-title text (default: inherits `metadata_border`) |
+| `preview_border_title`  | preview pane border-title text (default: inherits `preview_border`)  |
+
+When a `*_border_title` differs from its `*_border`, only the title text uses
+the title color; the corners and dashes keep the border color.
+
 Example:
 
 ```toml

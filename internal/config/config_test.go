@@ -216,7 +216,9 @@ mode = "icons"
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
-	defaults := Default().Theme.Colors
+	def := Default()
+	def.Normalize()
+	defaults := def.Theme.Colors
 	if loaded.Theme.Colors != defaults {
 		t.Fatalf("theme defaults from older config = %#v, want %#v", loaded.Theme.Colors, defaults)
 	}
@@ -666,9 +668,53 @@ func TestNormalizeThemeColorsFillsAllEmptyFields(t *testing.T) {
 		{"Info", cfg.Theme.Colors.Info, defaults.Info},
 		{"Warning", cfg.Theme.Colors.Warning, defaults.Warning},
 		{"Danger", cfg.Theme.Colors.Danger, defaults.Danger},
+		// Per-pane tokens inherit the relevant global when unset.
+		{"ListBorder", cfg.Theme.Colors.ListBorder, defaults.FocusedBorder},
+		{"MetadataBorder", cfg.Theme.Colors.MetadataBorder, defaults.Border},
+		{"PreviewBorder", cfg.Theme.Colors.PreviewBorder, defaults.Border},
+		{"ListBorderTitle", cfg.Theme.Colors.ListBorderTitle, defaults.FocusedBorder},
+		{"MetadataBorderTitle", cfg.Theme.Colors.MetadataBorderTitle, defaults.Border},
+		{"PreviewBorderTitle", cfg.Theme.Colors.PreviewBorderTitle, defaults.Border},
 	} {
 		if tc.got != tc.want {
 			t.Fatalf("%s = %q, want default %q", tc.name, tc.got, tc.want)
+		}
+	}
+}
+
+func TestNormalizeThemeColorsPaneTokensInheritCustomGlobals(t *testing.T) {
+	cfg := Default()
+	cfg.Theme.Colors.FocusedBorder = "#aaaaaa"
+	cfg.Theme.Colors.Border = "#bbbbbb"
+	// Leave the six per-pane tokens unset so they must inherit.
+	cfg.Theme.Colors.ListBorder = ""
+	cfg.Theme.Colors.MetadataBorder = ""
+	cfg.Theme.Colors.PreviewBorder = ""
+	cfg.Theme.Colors.ListBorderTitle = ""
+	cfg.Theme.Colors.MetadataBorderTitle = ""
+	cfg.Theme.Colors.PreviewBorderTitle = ""
+	cfg.Normalize()
+
+	c := cfg.Theme.Colors
+	want := map[string]string{
+		"ListBorder":          "#aaaaaa",
+		"MetadataBorder":      "#bbbbbb",
+		"PreviewBorder":       "#bbbbbb",
+		"ListBorderTitle":     "#aaaaaa",
+		"MetadataBorderTitle": "#bbbbbb",
+		"PreviewBorderTitle":  "#bbbbbb",
+	}
+	got := map[string]string{
+		"ListBorder":          c.ListBorder,
+		"MetadataBorder":      c.MetadataBorder,
+		"PreviewBorder":       c.PreviewBorder,
+		"ListBorderTitle":     c.ListBorderTitle,
+		"MetadataBorderTitle": c.MetadataBorderTitle,
+		"PreviewBorderTitle":  c.PreviewBorderTitle,
+	}
+	for k, w := range want {
+		if got[k] != w {
+			t.Fatalf("%s = %q, want inherited %q", k, got[k], w)
 		}
 	}
 }

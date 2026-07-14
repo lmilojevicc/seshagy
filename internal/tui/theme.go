@@ -27,28 +27,34 @@ type palette struct {
 type styles struct {
 	p palette
 
-	app         lipgloss.Style
-	tabActive   lipgloss.Style
-	tabInactive lipgloss.Style
-	itemName    lipgloss.Style
-	pane        lipgloss.Style
-	paneFocus   lipgloss.Style
-	title       lipgloss.Style
-	subtitle    lipgloss.Style
-	muted       lipgloss.Style
-	emphasis    lipgloss.Style
-	key         lipgloss.Style
-	iconSession lipgloss.Style
-	iconZoxide  lipgloss.Style
-	iconFD      lipgloss.Style
-	iconAgent   lipgloss.Style
-	selectedBG  lipgloss.Style
-	bar         lipgloss.Style
-	status      lipgloss.Style
-	success     lipgloss.Style
-	info        lipgloss.Style
-	warning     lipgloss.Style
-	danger      lipgloss.Style
+	app           lipgloss.Style
+	tabActive     lipgloss.Style
+	tabInactive   lipgloss.Style
+	itemName      lipgloss.Style
+	pane          lipgloss.Style
+	paneFocus     lipgloss.Style
+	paneList      lipgloss.Style
+	paneDetail    lipgloss.Style
+	panePreview   lipgloss.Style
+	listTitle     lipgloss.TerminalColor
+	metadataTitle lipgloss.TerminalColor
+	previewTitle  lipgloss.TerminalColor
+	title         lipgloss.Style
+	subtitle      lipgloss.Style
+	muted         lipgloss.Style
+	emphasis      lipgloss.Style
+	key           lipgloss.Style
+	iconSession   lipgloss.Style
+	iconZoxide    lipgloss.Style
+	iconFD        lipgloss.Style
+	iconAgent     lipgloss.Style
+	selectedBG    lipgloss.Style
+	bar           lipgloss.Style
+	status        lipgloss.Style
+	success       lipgloss.Style
+	info          lipgloss.Style
+	warning       lipgloss.Style
+	danger        lipgloss.Style
 }
 
 func defaultStyles() styles {
@@ -100,6 +106,18 @@ func stylesFromConfig(cfg appconfig.Config) styles {
 		BorderForeground(border).
 		Padding(0, 1)
 	s.paneFocus = s.pane.BorderForeground(focusedBorder)
+	// Per-pane borders and border-title colors. Each defaults to the relevant
+	// global (or the pane's own border, for titles) via themeColor on top of
+	// the config-layer inheritance, so unset tokens reproduce today's look.
+	listBorder := themeColor(colors.ListBorder, focusedBorder)
+	metadataBorder := themeColor(colors.MetadataBorder, border)
+	previewBorder := themeColor(colors.PreviewBorder, border)
+	s.paneList = s.pane.BorderForeground(listBorder)
+	s.paneDetail = s.pane.BorderForeground(metadataBorder)
+	s.panePreview = s.pane.BorderForeground(previewBorder)
+	s.listTitle = themeColor(colors.ListBorderTitle, listBorder)
+	s.metadataTitle = themeColor(colors.MetadataBorderTitle, metadataBorder)
+	s.previewTitle = themeColor(colors.PreviewBorderTitle, previewBorder)
 	s.title = lipgloss.NewStyle().Foreground(title).Bold(true)
 	s.subtitle = lipgloss.NewStyle().Foreground(muted)
 	s.muted = lipgloss.NewStyle().Foreground(muted)

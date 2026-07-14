@@ -354,11 +354,13 @@ func (m Model) renderBody(height int) string {
 }
 
 // titledTopEdge builds the top border line of a rounded pane at display width
-// w with title overlaid fieldset-style: ╭─ title ──╮. The whole edge is
-// rendered in borderFG so the title reads as part of the border. lipgloss
-// v1.1.0 has no native border-title API, so this is composed by hand. Empty
-// titles and very narrow widths fall back to a plain dashed edge.
-func titledTopEdge(title string, w int, borderFG lipgloss.TerminalColor) string {
+// w with title overlaid fieldset-style: ╭─ title ──╮. The corners and dashes
+// are rendered in borderFG; the title text is rendered in titleFG, so a pane
+// can give its title a distinct color from its border. When titleFG == borderFG
+// the edge is monochrome (the default). lipgloss v1.1.0 has no native
+// border-title API, so this is composed by hand. Empty titles and very narrow
+// widths fall back to a plain dashed edge in borderFG.
+func titledTopEdge(title string, w int, borderFG, titleFG lipgloss.TerminalColor) string {
 	if title == "" || w < 7 {
 		return lipgloss.NewStyle().Foreground(borderFG).
 			Render("╭" + strings.Repeat("─", max(0, w-2)) + "╮")
@@ -369,15 +371,24 @@ func titledTopEdge(title string, w int, borderFG lipgloss.TerminalColor) string 
 	if dashes < 1 {
 		dashes = 1
 	}
-	edge := "╭─ " + clamped + " " + strings.Repeat("─", dashes) + "╮"
-	return lipgloss.NewStyle().Foreground(borderFG).Render(edge)
+	border := lipgloss.NewStyle().Foreground(borderFG)
+	return border.Render("╭─ ") +
+		lipgloss.NewStyle().Foreground(titleFG).Render(clamped) +
+		border.Render(" "+strings.Repeat("─", dashes)+"╮")
 }
 
 // paneWithTitle renders a pane via style (width/height applied as for the
-// other pane renderers) and overlays title onto its top border. The title
-// inherits the style's own border foreground, so focused (paneFocus) and
-// unfocused (pane) panes keep their distinct border colors.
-func paneWithTitle(style lipgloss.Style, content, title string, width, height int) string {
+// other pane renderers) and overlays title onto its top border. The border
+// line color comes from the style's own border foreground; the title text
+// color comes from titleFG, which by default matches the pane border (via
+// theme inheritance) so the edge is monochrome unless a distinct title color
+// is configured.
+func paneWithTitle(
+	style lipgloss.Style,
+	titleFG lipgloss.TerminalColor,
+	content, title string,
+	width, height int,
+) string {
 	boxStyle := style.Width(width - 2)
 	if height > 0 {
 		boxStyle = boxStyle.Height(height - 2)
@@ -391,7 +402,7 @@ func paneWithTitle(style lipgloss.Style, content, title string, width, height in
 	if w < 3 {
 		return box
 	}
-	lines[0] = titledTopEdge(title, w, style.GetBorderTopForeground())
+	lines[0] = titledTopEdge(title, w, style.GetBorderTopForeground(), titleFG)
 	return strings.Join(lines, "\n")
 }
 
@@ -459,7 +470,7 @@ func (m Model) renderListPane(width, height int) string {
 		}
 	}
 	content := trimHeight(strings.Join(lines, "\n"), innerH)
-	return paneWithTitle(s.paneFocus, content, title, width, height)
+	return paneWithTitle(s.paneList, s.listTitle, content, title, width, height)
 }
 
 func (m Model) renderRow(item sessionmgr.Item, selected bool, width int) string {
@@ -582,7 +593,7 @@ func (m Model) renderDetailPane(width, height int) string {
 	if height > 0 {
 		content = trimHeight(content, max(4, height-2))
 	}
-	return paneWithTitle(s.pane, content, title, width, height)
+	return paneWithTitle(s.paneDetail, s.metadataTitle, content, title, width, height)
 }
 
 // detailTitle returns the title shown on the detail pane border: the selected
@@ -690,7 +701,8 @@ func (m Model) renderPreviewPane(width, height int) string {
 		lines = append(lines, "")
 	}
 	return paneWithTitle(
-		s.pane,
+		s.panePreview,
+		s.previewTitle,
 		trimHeight(strings.Join(lines, "\n"), innerH),
 		title,
 		width,

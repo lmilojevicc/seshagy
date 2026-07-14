@@ -1055,6 +1055,12 @@ func TestConfiguredThemeColorsApply(t *testing.T) {
 	cfg.Theme.Colors.Info = "#89dceb"
 	cfg.Theme.Colors.Warning = "#f9e2af"
 	cfg.Theme.Colors.Danger = "#f38ba8"
+	cfg.Theme.Colors.ListBorder = "#111111"
+	cfg.Theme.Colors.MetadataBorder = "#222222"
+	cfg.Theme.Colors.PreviewBorder = "#333333"
+	cfg.Theme.Colors.ListBorderTitle = "#444444"
+	cfg.Theme.Colors.MetadataBorderTitle = "#555555"
+	cfg.Theme.Colors.PreviewBorderTitle = "#666666"
 	s := stylesFromConfig(cfg)
 
 	wantBorder := lipgloss.Color("#ff79c6")
@@ -1106,6 +1112,25 @@ func TestConfiguredThemeColorsApply(t *testing.T) {
 	}
 	if got := s.danger.GetForeground(); got != lipgloss.Color("#f38ba8") {
 		t.Fatalf("danger color = %v, want #f38ba8", got)
+	}
+	// Per-pane borders and border titles resolve to their configured colors.
+	if got := s.paneList.GetBorderTopForeground(); got != lipgloss.Color("#111111") {
+		t.Fatalf("list border = %v, want #111111", got)
+	}
+	if got := s.paneDetail.GetBorderTopForeground(); got != lipgloss.Color("#222222") {
+		t.Fatalf("metadata border = %v, want #222222", got)
+	}
+	if got := s.panePreview.GetBorderTopForeground(); got != lipgloss.Color("#333333") {
+		t.Fatalf("preview border = %v, want #333333", got)
+	}
+	if s.listTitle != lipgloss.Color("#444444") {
+		t.Fatalf("list title = %v, want #444444", s.listTitle)
+	}
+	if s.metadataTitle != lipgloss.Color("#555555") {
+		t.Fatalf("metadata title = %v, want #555555", s.metadataTitle)
+	}
+	if s.previewTitle != lipgloss.Color("#666666") {
+		t.Fatalf("preview title = %v, want #666666", s.previewTitle)
 	}
 
 	cfg.Theme.Colors.ActiveTab = "default"
@@ -1397,33 +1422,67 @@ func TestSessionDetailHidesPanesAndTimestampsWhenZero(t *testing.T) {
 }
 
 // TestTitledTopEdge covers the hand-composed border title: exact display
-// width, fieldset layout, clamping, and the empty/narrow fallbacks.
+// width, fieldset layout, clamping, the empty/narrow fallbacks, and the
+// multi-color edge (title text colored separately from the border).
 func TestTitledTopEdge(t *testing.T) {
-	fg := lipgloss.Color("9")
+	borderFG := lipgloss.Color("9")
+	titleFG := lipgloss.Color("12")
+	// Force a color profile so the multi-color assertion can observe SGR
+	// sequences (the test environment strips color from the default profile).
+	prevProfile := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prevProfile) })
 	cases := []struct {
-		name  string
-		title string
-		w     int
-		want  []string // substrings the plain edge must contain
+		name              string
+		title             string
+		w                 int
+		want              []string // substrings the plain edge must contain
+		borderFG, titleFG lipgloss.TerminalColor
 	}{
 		{
-			name:  "normal",
-			title: "All (3 · 2 agents)",
-			w:     40,
-			want:  []string{"╭─ ", "All (3 · 2 agents)", "─╮"},
+			name:     "normal",
+			title:    "All (3 · 2 agents)",
+			w:        40,
+			want:     []string{"╭─ ", "All (3 · 2 agents)", "─╮"},
+			borderFG: borderFG,
+			titleFG:  borderFG,
 		},
 		{
-			name:  "long clamped",
-			title: "All (1145 · 12 workspaces · 8 agents · 1125 dirs)",
-			w:     26,
-			want:  []string{"╭─ ", "…", "─╮"},
+			name:     "long clamped",
+			title:    "All (1145 · 12 workspaces · 8 agents · 1125 dirs)",
+			w:        26,
+			want:     []string{"╭─ ", "…", "─╮"},
+			borderFG: borderFG,
+			titleFG:  borderFG,
 		},
-		{name: "empty plain edge", title: "", w: 20, want: []string{"╭", "╮"}},
-		{name: "narrow plain edge", title: "Preview", w: 5, want: []string{"╭", "╮"}},
+		{
+			name:     "empty plain edge",
+			title:    "",
+			w:        20,
+			want:     []string{"╭", "╮"},
+			borderFG: borderFG,
+			titleFG:  borderFG,
+		},
+		{
+			name:     "narrow plain edge",
+			title:    "Preview",
+			w:        5,
+			want:     []string{"╭", "╮"},
+			borderFG: borderFG,
+			titleFG:  borderFG,
+		},
+		{
+			name:     "two colors",
+			title:    "Preview",
+			w:        30,
+			want:     []string{"╭─ ", "Preview", "─╮"},
+			borderFG: borderFG,
+			titleFG:  titleFG,
+		},
 	}
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
-			edge := titledTopEdge(tt.title, tt.w, fg)
+			edge := titledTopEdge(tt.title, tt.w, tt.borderFG, tt.titleFG)
 			clean := sessionmgr.StripANSI(edge)
 			if got := lipgloss.Width(clean); got != tt.w {
 				t.Fatalf("display width = %d, want %d (%q)", got, tt.w, clean)
@@ -1433,17 +1492,40 @@ func TestTitledTopEdge(t *testing.T) {
 					t.Fatalf("edge %q missing %q", clean, want)
 				}
 			}
-			// Clamped case must not show the full (overlong) title text.
 			if tt.name == "long clamped" && strings.Contains(clean, "workspaces") {
 				t.Fatalf("long title not clamped: %q", clean)
 			}
-			// Empty/narrow fallback must be a plain dashed edge (no title body).
-			if (tt.name == "empty plain edge" || tt.name == "narrow plain edge") &&
-				strings.Contains(clean, "All") {
+			if tt.name == "narrow plain edge" && strings.Contains(clean, "Preview") {
 				t.Fatalf("fallback edge leaked title: %q", clean)
+			}
+			// When the title color differs from the border, the edge must carry
+			// both sequences: border for corners+dashes, title for the text.
+			if tt.borderFG != tt.titleFG {
+				borderSet, titleSet := sgrPrefix(tt.borderFG), sgrPrefix(tt.titleFG)
+				if borderSet == titleSet {
+					t.Fatalf("test colors collide: %q", borderSet)
+				}
+				if !strings.Contains(edge, borderSet) || !strings.Contains(edge, titleSet) {
+					t.Fatalf(
+						"two-color edge missing a color sequence:\nedge=%q\nborder=%q\ntitle=%q",
+						edge,
+						borderSet,
+						titleSet,
+					)
+				}
 			}
 		})
 	}
+}
+
+// sgrPrefix returns the leading foreground SGR escape sequence lipgloss emits
+// for c, so tests can assert a specific color sequence is present in output.
+func sgrPrefix(c lipgloss.TerminalColor) string {
+	rendered := lipgloss.NewStyle().Foreground(c).Render("X")
+	if i := strings.Index(rendered, "X"); i >= 0 {
+		return rendered[:i]
+	}
+	return rendered
 }
 
 // TestListPreviewDetailTitlesOnBorder verifies the section titles moved from
@@ -1502,5 +1584,68 @@ func TestListPreviewDetailTitlesOnBorder(t *testing.T) {
 	}
 	if !strings.Contains(previewTop, "Preview · proj") {
 		t.Fatalf("preview border missing 'Preview · proj': %q", previewTop)
+	}
+}
+
+// TestPaneTitlesUsePerPaneColors verifies each pane renders its top border in
+// its configured border color and the title text in its configured title color.
+func TestPaneTitlesUsePerPaneColors(t *testing.T) {
+	prevProfile := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prevProfile) })
+
+	cfg := appconfig.Default()
+	cfg.Theme.Colors.ListBorder = "#100000"
+	cfg.Theme.Colors.MetadataBorder = "#001000"
+	cfg.Theme.Colors.PreviewBorder = "#000010"
+	cfg.Theme.Colors.ListBorderTitle = "#110000"
+	cfg.Theme.Colors.MetadataBorderTitle = "#001100"
+	cfg.Theme.Colors.PreviewBorderTitle = "#000011"
+
+	m := newTestModel(t)
+	m.config = cfg
+	m.styles = stylesFromConfig(cfg)
+	m.terms = sessionmgr.HerdrTerms()
+	m.width = 120
+	m.height = 32
+	m.items = []sessionmgr.Item{{
+		Kind:    sessionmgr.KindSession,
+		Name:    "proj",
+		Target:  "w1",
+		Path:    "/tmp/proj",
+		Windows: 2,
+		Panes:   5,
+	}}
+	m.cursor = 0
+	m.source = sessionmgr.ModeAll
+	m.preview = "hello"
+
+	s := m.styles
+	border := map[string]string{
+		"list":     sgrPrefix(s.paneList.GetBorderTopForeground()),
+		"metadata": sgrPrefix(s.paneDetail.GetBorderTopForeground()),
+		"preview":  sgrPrefix(s.panePreview.GetBorderTopForeground()),
+	}
+	title := map[string]string{
+		"list":     sgrPrefix(s.listTitle),
+		"metadata": sgrPrefix(s.metadataTitle),
+		"preview":  sgrPrefix(s.previewTitle),
+	}
+	outs := map[string]string{
+		"list":     m.renderListPane(60, 16),
+		"metadata": m.renderDetailPane(60, 14),
+		"preview":  m.renderPreviewPane(60, 12),
+	}
+	for _, pane := range []string{"list", "metadata", "preview"} {
+		top := strings.Split(outs[pane], "\n")[0]
+		if border[pane] == title[pane] {
+			t.Fatalf("%s pane border and title colors collide", pane)
+		}
+		if !strings.Contains(top, border[pane]) {
+			t.Fatalf("%s pane top border missing its border color sequence", pane)
+		}
+		if !strings.Contains(top, title[pane]) {
+			t.Fatalf("%s pane top border missing its title color sequence", pane)
+		}
 	}
 }
