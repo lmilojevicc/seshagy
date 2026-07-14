@@ -804,7 +804,8 @@ func (m Model) renderFooter() string {
 	// one-line footer above the help (popup style uses its own overlay).
 	footerW := safeWidth(m.width)
 	contentW := max(1, footerW-2)
-	helpLine := clampText(help, contentW)
+	helpLine := clampText(help, max(1, footerW-4))
+	helpTile := paneWithTitle(s.tileHelp, s.helpTileTitle, helpLine, "HELP", footerW, 0)
 	if (m.inputMode == modeSearch || m.inputMode == modeRename) &&
 		m.config.TUI.InputStyle == appconfig.InputStyleCmdline {
 		var ti textinput.Model
@@ -819,9 +820,9 @@ func (m Model) renderFooter() string {
 			ti.Width = w
 		}
 		inputLine := clampText(ti.View(), contentW)
-		return s.status.Width(footerW).Render(inputLine + "\n" + helpLine)
+		return inputLine + "\n" + helpTile
 	}
-	return s.status.Width(footerW).Render(helpLine)
+	return helpTile
 }
 
 func footerStatusStyle(s styles, status string, hasError bool) lipgloss.Style {

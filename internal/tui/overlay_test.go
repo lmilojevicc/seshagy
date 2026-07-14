@@ -122,8 +122,8 @@ func TestFooterCmdlineShowsTextInputOnLine1(t *testing.T) {
 	m.searchInput.SetValue("my-project")
 	footer := sessionmgr.StripANSI(m.renderFooter())
 	lines := strings.Split(footer, "\n")
-	if len(lines) != 2 {
-		t.Fatalf("footer lines = %d, want 2\n%s", len(lines), footer)
+	if len(lines) != 4 {
+		t.Fatalf("footer lines = %d, want 4 (input + HELP tile)\n%s", len(lines), footer)
 	}
 	if trimmed := strings.TrimSpace(lines[0]); !strings.HasPrefix(trimmed, "/ my-project") {
 		t.Fatalf("cmdline search line 1 = %q, want to start with / my-project", trimmed)
@@ -138,6 +138,9 @@ func TestFooterCmdlineShowsTextInputOnLine1(t *testing.T) {
 	m.renameInput.SetValue("new-name")
 	footer = sessionmgr.StripANSI(m.renderFooter())
 	lines = strings.Split(footer, "\n")
+	if len(lines) != 4 {
+		t.Fatalf("rename footer lines = %d, want 4 (input + HELP tile)\n%s", len(lines), footer)
+	}
 	if !strings.Contains(lines[0], "old-name -> ") || !strings.Contains(lines[0], "new-name") {
 		t.Fatalf("cmdline rename line 1 = %q, want old-name -> new-name", lines[0])
 	}
@@ -161,8 +164,8 @@ func TestFooterPopupStyleStillComposesStatus(t *testing.T) {
 	m.searchInput.SetValue("test")
 	footer := sessionmgr.StripANSI(m.renderFooter())
 	lines := strings.Split(footer, "\n")
-	if len(lines) != 1 {
-		t.Fatalf("popup footer should be a single help line, got %d\n%s", len(lines), footer)
+	if len(lines) != 3 {
+		t.Fatalf("popup footer should be a HELP tile (3 lines), got %d\n%s", len(lines), footer)
 	}
 	if strings.Contains(footer, "test") {
 		t.Fatalf("popup footer must not embed the search input (it is an overlay)\n%s", footer)

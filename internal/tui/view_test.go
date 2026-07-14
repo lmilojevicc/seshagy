@@ -888,11 +888,18 @@ func TestFooterIsHelpOnlyByDefault(t *testing.T) {
 	footer := m.renderFooter()
 	clean := sessionmgr.StripANSI(footer)
 	lines := strings.Split(clean, "\n")
-	if len(lines) != 1 {
-		t.Fatalf("footer should be a single help line, got %d lines\n%s", len(lines), clean)
+	if len(lines) != 3 {
+		t.Fatalf(
+			"footer should be a HELP tile (3 lines: border + help + border), got %d\n%s",
+			len(lines),
+			clean,
+		)
 	}
-	if !strings.Contains(lines[0], "m mode") {
-		t.Fatalf("footer help line missing keycaps\n%s", lines[0])
+	if !strings.HasPrefix(lines[0], "╭") || !strings.Contains(lines[0], "HELP") {
+		t.Fatalf("footer top line should be the HELP border, got %q", lines[0])
+	}
+	if !strings.Contains(clean, "m mode") {
+		t.Fatalf("footer missing help keycaps\n%s", clean)
 	}
 	if strings.Contains(clean, "loaded 1171 items") {
 		t.Fatalf("footer must not render the status message\n%s", clean)
@@ -916,9 +923,9 @@ func TestFooterIsHelpOnlyByDefault(t *testing.T) {
 	m.inputMode = modeSearch
 	m.searchInput.SetValue("proj")
 	cl := strings.Split(sessionmgr.StripANSI(m.renderFooter()), "\n")
-	if len(cl) != 2 {
+	if len(cl) != 4 {
 		t.Fatalf(
-			"cmdline search footer should have input + help (2 lines), got %d\n%s",
+			"cmdline search footer should have input + HELP tile (4 lines), got %d\n%s",
 			len(cl),
 			cl,
 		)

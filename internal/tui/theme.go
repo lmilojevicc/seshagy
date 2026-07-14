@@ -43,9 +43,11 @@ type styles struct {
 	tileWorkspace      lipgloss.Style
 	tileAgent          lipgloss.Style
 	tileSources        lipgloss.Style
+	tileHelp           lipgloss.Style
 	workspaceTileTitle lipgloss.TerminalColor
 	agentTileTitle     lipgloss.TerminalColor
 	sourcesTileTitle   lipgloss.TerminalColor
+	helpTileTitle      lipgloss.TerminalColor
 	title              lipgloss.Style
 	muted              lipgloss.Style
 	emphasis           lipgloss.Style
@@ -138,6 +140,9 @@ func stylesFromConfig(cfg appconfig.Config) styles {
 	// SOURCES tile wraps the tab chips; reuses the base border + popup title.
 	s.tileSources = s.pane
 	s.sourcesTileTitle = popupTitle
+	// HELP tile wraps the footer keycaps; same base border + popup title.
+	s.tileHelp = s.pane
+	s.helpTileTitle = popupTitle
 	s.title = lipgloss.NewStyle().Foreground(popupTitle).Bold(true)
 	s.muted = lipgloss.NewStyle().Foreground(muted)
 	s.emphasis = lipgloss.NewStyle().Foreground(accent).Bold(true)
