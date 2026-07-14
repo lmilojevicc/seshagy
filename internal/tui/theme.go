@@ -42,8 +42,10 @@ type styles struct {
 	previewTitle       lipgloss.TerminalColor
 	tileWorkspace      lipgloss.Style
 	tileAgent          lipgloss.Style
+	tileSources        lipgloss.Style
 	workspaceTileTitle lipgloss.TerminalColor
 	agentTileTitle     lipgloss.TerminalColor
+	sourcesTileTitle   lipgloss.TerminalColor
 	title              lipgloss.Style
 	muted              lipgloss.Style
 	emphasis           lipgloss.Style
@@ -99,12 +101,11 @@ func stylesFromConfig(cfg appconfig.Config) styles {
 	s.app = lipgloss.NewStyle().Foreground(p.fg).Background(p.bg)
 	s.tabActive = lipgloss.NewStyle().Foreground(activeTab).Bold(true)
 	s.tabInactive = lipgloss.NewStyle().Foreground(inactiveTab)
-	// Source-tab chips: active is a reverse-video pill, idle a padded muted chip.
-	// Reuses active_tab/inactive_tab colors (no new config tokens).
+	// Source-tab chips: active is the active_tab color (bold, padded), idle a
+	// muted padded chip. Reuses active_tab/inactive_tab colors (no new tokens).
 	s.chipActive = lipgloss.NewStyle().
 		Foreground(activeTab).
 		Bold(true).
-		Reverse(true).
 		Padding(0, 1)
 	s.chipIdle = lipgloss.NewStyle().
 		Foreground(inactiveTab).
@@ -134,6 +135,9 @@ func stylesFromConfig(cfg appconfig.Config) styles {
 	s.tileAgent = s.pane.BorderForeground(agentTileBorder)
 	s.workspaceTileTitle = themeColor(colors.WorkspaceTileTitle, popupTitle)
 	s.agentTileTitle = themeColor(colors.AgentTileTitle, popupTitle)
+	// SOURCES tile wraps the tab chips; reuses the base border + popup title.
+	s.tileSources = s.pane
+	s.sourcesTileTitle = popupTitle
 	s.title = lipgloss.NewStyle().Foreground(popupTitle).Bold(true)
 	s.muted = lipgloss.NewStyle().Foreground(muted)
 	s.emphasis = lipgloss.NewStyle().Foreground(accent).Bold(true)

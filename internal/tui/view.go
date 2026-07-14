@@ -230,12 +230,21 @@ func (m Model) renderInstallMenu(height int) string {
 
 func (m Model) renderTabs() string {
 	s := m.styles
-	maxW := safeWidth(m.width)
+	w := safeWidth(m.width)
+	inner := max(1, w-4) // border (2) + horizontal padding (2)
+	chips := m.renderSourceChips(inner)
+	return paneWithTitle(s.tileSources, s.sourcesTileTitle, chips, "SOURCES", w, 0)
+}
+
+// renderSourceChips builds the source-tab chip line (active tab in the
+// active_tab color, others muted), joined by a muted middot, with labels
+// falling back key+name -> name -> key to fit, and a right-aligned visible-count
+// badge (vis/total when filtering). The line is clamped to width.
+func (m Model) renderSourceChips(width int) string {
+	s := m.styles
+	maxW := width
 	tabs := m.sourceTabs()
 
-	// Source-tab chips (finder style): active tab is a reverse-video pill,
-	// inactive tabs are muted padded chips, joined by a muted middot. Labels
-	// fall back through three widths (key+name -> name -> key) so the row fits.
 	try := func(format string) string {
 		parts := make([]string, 0, len(tabs))
 		for _, tab := range tabs {
@@ -258,10 +267,10 @@ func (m Model) renderTabs() string {
 	}
 
 	line := try("key-name")
-	if m.width > 0 && lipgloss.Width(line) > maxW {
+	if lipgloss.Width(line) > maxW {
 		line = try("name")
 	}
-	if m.width > 0 && lipgloss.Width(line) > maxW {
+	if lipgloss.Width(line) > maxW {
 		line = try("key")
 	}
 
@@ -270,9 +279,6 @@ func (m Model) renderTabs() string {
 	count := fmt.Sprintf("%d", len(items))
 	if m.query != "" {
 		count = fmt.Sprintf("%d/%d", len(items), len(m.items))
-	}
-	if m.width <= 0 {
-		return line
 	}
 	return composeLine(line, count, maxW, s.muted)
 }
@@ -333,24 +339,16 @@ func (m Model) renderOverview() string {
 }
 
 // agentChips renders the colored agent-state chips for the overview tile,
-// reusing the configured icon-set glyphs/colors via renderAgentState. Only
-// states with a non-zero count are shown; with no agents at all a muted
-// placeholder is rendered instead.
+// reusing the configured icon-set glyphs/colors via renderAgentState. All five
+// states are always shown (with 0 counts) so the tile reads as a fixed legend
+// rather than appearing empty.
 func (m Model) agentChips(icons sessionmgr.IconSet, stats overviewStats) string {
 	s := m.styles
-	if stats.agentTotal() == 0 {
-		return s.muted.Render("no active agents")
-	}
 	parts := make([]string, 0, len(agentStateOrder))
 	for _, state := range agentStateOrder {
 		count := stats.agents[state]
-		if count == 0 {
-			continue
-		}
 		glyph := renderAgentState(s, icons, state)
-		cnt := fmt.Sprintf("%d", count)
-		style := agentStateStyle(s, state)
-		cnt = style.Render(cnt)
+		cnt := agentStateStyle(s, state).Render(fmt.Sprintf("%d", count))
 		parts = append(parts, glyph+" "+cnt)
 	}
 	return strings.Join(parts, "  ")

@@ -345,8 +345,9 @@ func TestConfiguredSourceOrderAndDefault(t *testing.T) {
 }
 
 // TestRenderTabsChipStyle verifies the finder-style chip rendering: active tab
-// is a reverse-video pill (chipActive), others are muted chips (chipIdle),
-// joined by a muted middot separator, with a right-aligned count badge.
+// is the active_tab color (chipActive, bold + padded), others are muted chips
+// (chipIdle), joined by a muted middot separator, with a right-aligned count
+// badge.
 func TestRenderTabsChipStyle(t *testing.T) {
 	m := newTestModel(t)
 	model, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 24})
@@ -357,9 +358,12 @@ func TestRenderTabsChipStyle(t *testing.T) {
 		{Kind: sessionmgr.KindSession, Name: "c"},
 	}
 
-	// Style properties: active chip is reverse-video, idle is not.
-	if !m.styles.chipActive.GetReverse() {
-		t.Fatal("chipActive must have Reverse(true)")
+	// Style properties: active chip uses the active_tab color (not a reverse pill).
+	if m.styles.chipActive.GetReverse() {
+		t.Fatal("chipActive must NOT have Reverse (active_tab foreground, not a reversed block)")
+	}
+	if !m.styles.chipActive.GetBold() {
+		t.Fatal("chipActive must be Bold")
 	}
 	if m.styles.chipIdle.GetReverse() {
 		t.Fatal("chipIdle must NOT have Reverse")
@@ -1793,8 +1797,8 @@ func TestRenderOverviewHidesWhenNoDataOrShort(t *testing.T) {
 	}
 }
 
-// TestRenderOverviewNoAgents verifies the agents tile shows a placeholder when
-// there are zero agents.
+// TestRenderOverviewNoAgents verifies the agents tile shows the full state
+// legend (all five states, with 0 counts) even when there are zero agents.
 func TestRenderOverviewNoAgents(t *testing.T) {
 	m := newTestModel(t)
 	m.width, m.height = 120, 32
@@ -1805,7 +1809,16 @@ func TestRenderOverviewNoAgents(t *testing.T) {
 		}, fetchedAt: time.Now()},
 	}
 	out := sessionmgr.StripANSI(m.renderOverview())
-	if !strings.Contains(out, "no active agents") {
-		t.Fatalf("overview should show placeholder for zero agents\n%s", out)
+	if !strings.Contains(out, "AGENTS") {
+		t.Fatalf("overview missing AGENTS tile title\n%s", out)
+	}
+	// The legend renders every state with a 0 count, not a placeholder.
+	zeros := strings.Count(out, "0")
+	if zeros < 5 {
+		t.Fatalf(
+			"overview agents tile should show five 0-count states, found %d zeros\n%s",
+			zeros,
+			out,
+		)
 	}
 }
