@@ -542,6 +542,7 @@ func (m Model) deleteSelected() (tea.Model, tea.Cmd) {
 	switch item.Kind {
 	case sessionmgr.KindSession:
 		m.status = m.terms.KillVerb + " " + m.terms.SessionNoun + " " + item.Name
+		m.killInFlight = true
 		return m, deleteSessionCmd(m.mux, item)
 	default:
 		m.status = "delete only applies to " + m.terms.SessionPlural

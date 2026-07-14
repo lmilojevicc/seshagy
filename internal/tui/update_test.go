@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
+
 	"github.com/lmilojevicc/seshagy/internal/sessionmgr"
 )
 
@@ -273,4 +275,54 @@ func testUpdateItems(names ...string) []sessionmgr.Item {
 		items[i] = sessionmgr.Item{Kind: sessionmgr.KindSession, Name: name}
 	}
 	return items
+}
+
+// TestActionDoneMsgClearsKillInFlight verifies that completing a kill (success
+// or error) clears the in-flight flag so the ephemeral focus-loss poll resumes.
+func TestActionDoneMsgClearsKillInFlight(t *testing.T) {
+	m := New()
+	m.killInFlight = true
+	model, _ := m.Update(actionDoneMsg{status: "killed session demo"})
+	if model.(Model).killInFlight {
+		t.Fatal("killInFlight not cleared on success")
+	}
+
+	m2 := New()
+	m2.killInFlight = true
+	model2, _ := m2.Update(actionDoneMsg{status: "x", err: errors.New("boom")})
+	if model2.(Model).killInFlight {
+		t.Fatal("killInFlight not cleared on error")
+	}
+}
+
+// TestEphemeralTickSkipsQuitWhileKillInFlight verifies that while a kill is in
+// flight, the ephemeral focus-loss poll does NOT quit seshagy (the close's
+// refocus would otherwise dismiss the dashboard before the focus-restore
+// lands). When no kill is in flight, focus-loss still quits as before.
+func TestEphemeralTickSkipsQuitWhileKillInFlight(t *testing.T) {
+	m := New()
+	m.mux = sessionmgr.NewHerdrBackend()
+	m.ephemeral = true
+	m.herdrPaneID = "pSelf"
+	m.herdrWorkspaceID = "wSelf"
+
+	// In flight: must re-schedule the tick, not quit.
+	m.killInFlight = true
+	_, cmd := m.Update(ephemeralTickMsg{})
+	if cmd == nil {
+		t.Fatal("expected re-tick cmd while killInFlight")
+	}
+	if _, ok := cmd().(tea.QuitMsg); ok {
+		t.Fatal("ephemeral tick quit while killInFlight")
+	}
+
+	// Not in flight: the pane query fails (no such pane) → focus lost → quit.
+	m.killInFlight = false
+	_, cmd = m.Update(ephemeralTickMsg{})
+	if cmd == nil {
+		t.Fatal("expected a cmd when not in flight")
+	}
+	if _, ok := cmd().(tea.QuitMsg); !ok {
+		t.Fatalf("expected tea.Quit on focus-loss when not in flight; got %T", cmd())
+	}
 }

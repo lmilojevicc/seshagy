@@ -66,6 +66,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.ephemeral {
 			return m, nil
 		}
+		// A kill is in flight: the close refocuses the client, but KillSession
+		// restores focus right after. Don't treat that transient focus-loss as
+		// a dismissal — keep the dashboard alive until the action completes.
+		if m.killInFlight {
+			return m, ephemeralTickCmd()
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 		switch m.mux.Kind() {
@@ -180,6 +186,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.err = msg.err
 			m.status = msg.err.Error()
+			m.killInFlight = false
 			m = m.invalidateAllCaches()
 			var refresh tea.Cmd
 			m, refresh = m.beginRefresh(m.source, true)
@@ -187,6 +194,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.err = nil
 		m.status = msg.status
+		m.killInFlight = false
 		m = m.invalidateAllCaches()
 		var refresh tea.Cmd
 		m, refresh = m.beginRefresh(m.source, true)

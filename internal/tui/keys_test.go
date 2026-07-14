@@ -710,3 +710,27 @@ func TestTabCyclesSectionsInTypeFirstMode(t *testing.T) {
 		)
 	}
 }
+
+// TestDeleteSelectedSetsKillInFlight verifies that pressing x on a session
+// arms killInFlight so the ephemeral focus-loss poll is suppressed while
+// KillSession (and its focus-restore) runs. Non-session deletes must not arm.
+func TestDeleteSelectedSetsKillInFlight(t *testing.T) {
+	m := newTestModel(t)
+	m.items = []sessionmgr.Item{{Kind: sessionmgr.KindSession, Name: "demo"}}
+	model, cmd := m.deleteSelected()
+	got := model.(Model)
+	if !got.killInFlight {
+		t.Fatal("killInFlight not set after session delete")
+	}
+	if cmd == nil {
+		t.Fatal("expected deleteSessionCmd after session delete")
+	}
+
+	// Unsupported kind must not arm the flag.
+	m2 := newTestModel(t)
+	m2.items = []sessionmgr.Item{{Kind: sessionmgr.KindZoxide, Name: "z"}}
+	model2, _ := m2.deleteSelected()
+	if model2.(Model).killInFlight {
+		t.Fatal("killInFlight should not be set for non-session delete")
+	}
+}
