@@ -174,6 +174,15 @@ Example:
     info = "#89dceb"
     warning = "#f9e2af"
     danger = "#f38ba8"
+    # Per-pane borders and border titles. Each inherits when unset
+    # (list_border -> focused_border; metadata/preview_border -> border;
+    # *_border_title -> its pane border), so these are optional.
+    # list_border = "#89b4fa"
+    # metadata_border = "#45475a"
+    # preview_border = "#45475a"
+    # list_border_title = "#cdd6f4"
+    # metadata_border_title = "#cdd6f4"
+    # preview_border_title = "#cdd6f4"
 ```
 
 The TUI keeps the terminal's default foreground/background for list text and
