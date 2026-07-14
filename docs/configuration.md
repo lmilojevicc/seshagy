@@ -127,29 +127,47 @@ and all).
 
 | Key              | Used for                             |
 | ---------------- | ------------------------------------ |
-| `focused_border` | border on the focused pane           |
+| `popup_border`   | border on popups (input prompt, setup/install menus) |
 | `active_tab`     | selected source tab label            |
 | `inactive_tab`   | unselected source tabs               |
 | `border`         | pane borders                         |
-| `title`          | pane titles and headings             |
-| `accent`         | emphasis text and the top accent bar |
+| `popup_title`    | popup / dialog headings (input prompt, setup, install menu) |
+| `title`          | deprecated alias for `popup_title`   |
+| `accent`         | emphasis text and the selection cursor |
 | `key`            | key names in help/footer             |
-| `muted`          | subtitles and secondary text         |
+| `muted`          | secondary / help / status text       |
 | `success`        | success status messages              |
 | `info`           | informational status messages        |
 | `warning`        | warning status messages              |
 | `danger`         | error/danger status messages         |
+
+Per-pane borders and border titles can be themed independently. Each defaults
+to the relevant global when unset (`list_border` inherits `border`;
+ `metadata_border` and `preview_border` inherit `border`; each `*_border_title`
+ inherits its pane's `*_border`), so the default look is unchanged unless set.
+
+| Key                     | Used for                                                 |
+| ----------------------- | -------------------------------------------------------- |
+| `list_border`           | list pane border (default: inherits `border`)             |
+| `metadata_border`       | metadata/detail pane border (default: inherits `border`) |
+| `preview_border`        | preview pane border (default: inherits `border`)         |
+| `list_border_title`     | list pane border-title text (default: inherits `list_border`)     |
+| `metadata_border_title` | metadata pane border-title text (default: inherits `metadata_border`) |
+| `preview_border_title`  | preview pane border-title text (default: inherits `preview_border`)  |
+
+When a `*_border_title` differs from its `*_border`, only the title text uses
+the title color; the corners and dashes keep the border color.
 
 Example:
 
 ```toml
 [theme]
   [theme.colors]
-    focused_border = "#cba6f7"
+    popup_border = "#cba6f7"
     active_tab = "default"
     border = "#313244"
     inactive_tab = "#6c7086"
-    title = "#b4befe"
+    popup_title = "#b4befe"
     accent = "#cba6f7"
     key = "#f9e2af"
     muted = "#7f849c"
@@ -157,6 +175,15 @@ Example:
     info = "#89dceb"
     warning = "#f9e2af"
     danger = "#f38ba8"
+    # Per-pane borders and border titles. Each inherits when unset
+    # (list_border -> border; metadata/preview_border -> border;
+    # *_border_title -> its pane border), so these are optional.
+    # list_border = "#89b4fa"
+    # metadata_border = "#45475a"
+    # preview_border = "#45475a"
+    # list_border_title = "#cdd6f4"
+    # metadata_border_title = "#cdd6f4"
+    # preview_border_title = "#cdd6f4"
 ```
 
 The TUI keeps the terminal's default foreground/background for list text and

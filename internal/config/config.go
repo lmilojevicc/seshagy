@@ -62,18 +62,25 @@ type ThemeConfig struct {
 }
 
 type ThemeColorsConfig struct {
-	FocusedBorder string `toml:"focused_border" json:"focused_border"`
-	ActiveTab     string `toml:"active_tab"     json:"active_tab"`
-	Border        string `toml:"border"         json:"border"`
-	InactiveTab   string `toml:"inactive_tab"   json:"inactive_tab"`
-	Title         string `toml:"title"          json:"title"`
-	Accent        string `toml:"accent"         json:"accent"`
-	Key           string `toml:"key"            json:"key"`
-	Muted         string `toml:"muted"          json:"muted"`
-	Success       string `toml:"success"        json:"success"`
-	Info          string `toml:"info"           json:"info"`
-	Warning       string `toml:"warning"        json:"warning"`
-	Danger        string `toml:"danger"         json:"danger"`
+	PopupBorder         string `toml:"popup_border"          json:"popup_border"`
+	ActiveTab           string `toml:"active_tab"            json:"active_tab"`
+	Border              string `toml:"border"                json:"border"`
+	InactiveTab         string `toml:"inactive_tab"          json:"inactive_tab"`
+	PopupTitle          string `toml:"popup_title"           json:"popup_title"`
+	Title               string `toml:"title"                 json:"title"` // deprecated alias for popup_title
+	Accent              string `toml:"accent"                json:"accent"`
+	Key                 string `toml:"key"                   json:"key"`
+	Muted               string `toml:"muted"                 json:"muted"`
+	Success             string `toml:"success"               json:"success"`
+	Info                string `toml:"info"                  json:"info"`
+	Warning             string `toml:"warning"               json:"warning"`
+	Danger              string `toml:"danger"                json:"danger"`
+	ListBorder          string `toml:"list_border"           json:"list_border"`
+	MetadataBorder      string `toml:"metadata_border"       json:"metadata_border"`
+	PreviewBorder       string `toml:"preview_border"        json:"preview_border"`
+	ListBorderTitle     string `toml:"list_border_title"     json:"list_border_title"`
+	MetadataBorderTitle string `toml:"metadata_border_title" json:"metadata_border_title"`
+	PreviewBorderTitle  string `toml:"preview_border_title"  json:"preview_border_title"`
 }
 
 type IconsConfig struct {
@@ -153,18 +160,18 @@ func Default() Config {
 		Sources:     SourcesConfig{Default: "all", Order: defaultSourceOrderNames()},
 		Directories: DirectoriesConfig{FDCommand: sessionmgr.DefaultFDCommand},
 		Theme: ThemeConfig{Colors: ThemeColorsConfig{
-			FocusedBorder: "13",
-			ActiveTab:     "default",
-			Border:        "8",
-			InactiveTab:   "8",
-			Title:         "12",
-			Accent:        "13",
-			Key:           "11",
-			Muted:         "8",
-			Success:       "10",
-			Info:          "14",
-			Warning:       "11",
-			Danger:        "9",
+			PopupBorder: "13",
+			ActiveTab:   "default",
+			Border:      "8",
+			InactiveTab: "8",
+			Title:       "12",
+			Accent:      "13",
+			Key:         "11",
+			Muted:       "8",
+			Success:     "10",
+			Info:        "14",
+			Warning:     "11",
+			Danger:      "9",
 		}},
 		Icons: IconsConfig{
 			Mode:       IconModeIcons,
@@ -268,8 +275,8 @@ func (c *Config) Normalize() {
 }
 
 func normalizeThemeColors(colors *ThemeColorsConfig, defaults ThemeColorsConfig) {
-	if strings.TrimSpace(colors.FocusedBorder) == "" {
-		colors.FocusedBorder = defaults.FocusedBorder
+	if strings.TrimSpace(colors.PopupBorder) == "" {
+		colors.PopupBorder = defaults.PopupBorder
 	}
 	if strings.TrimSpace(colors.ActiveTab) == "" {
 		colors.ActiveTab = defaults.ActiveTab
@@ -282,6 +289,11 @@ func normalizeThemeColors(colors *ThemeColorsConfig, defaults ThemeColorsConfig)
 	}
 	if strings.TrimSpace(colors.Title) == "" {
 		colors.Title = defaults.Title
+	}
+	// popup_title colors popup/dialog headings; the legacy `title` key is a
+	// deprecated alias, so popup_title inherits it when unset.
+	if strings.TrimSpace(colors.PopupTitle) == "" {
+		colors.PopupTitle = colors.Title
 	}
 	if strings.TrimSpace(colors.Accent) == "" {
 		colors.Accent = defaults.Accent
@@ -303,6 +315,28 @@ func normalizeThemeColors(colors *ThemeColorsConfig, defaults ThemeColorsConfig)
 	}
 	if strings.TrimSpace(colors.Danger) == "" {
 		colors.Danger = defaults.Danger
+	}
+	// Per-pane borders and border titles inherit the relevant global (or the
+	// pane's own border, for titles) when unset, so omitting them preserves
+	// today's look. The globals above are already resolved, so these read the
+	// user's final values rather than the hardcoded defaults.
+	if strings.TrimSpace(colors.ListBorder) == "" {
+		colors.ListBorder = colors.Border
+	}
+	if strings.TrimSpace(colors.MetadataBorder) == "" {
+		colors.MetadataBorder = colors.Border
+	}
+	if strings.TrimSpace(colors.PreviewBorder) == "" {
+		colors.PreviewBorder = colors.Border
+	}
+	if strings.TrimSpace(colors.ListBorderTitle) == "" {
+		colors.ListBorderTitle = colors.ListBorder
+	}
+	if strings.TrimSpace(colors.MetadataBorderTitle) == "" {
+		colors.MetadataBorderTitle = colors.MetadataBorder
+	}
+	if strings.TrimSpace(colors.PreviewBorderTitle) == "" {
+		colors.PreviewBorderTitle = colors.PreviewBorder
 	}
 }
 

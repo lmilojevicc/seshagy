@@ -24,7 +24,7 @@ func TestLoadDefaultWhenMissing(t *testing.T) {
 	if cfg.LoadOptions().FDCommand != sessionmgr.DefaultFDCommand {
 		t.Fatalf("default fd command = %q", cfg.LoadOptions().FDCommand)
 	}
-	if cfg.Theme.Colors.FocusedBorder != "13" || cfg.Theme.Colors.ActiveTab != "default" ||
+	if cfg.Theme.Colors.PopupBorder != "13" || cfg.Theme.Colors.ActiveTab != "default" ||
 		cfg.Theme.Colors.Border != "8" ||
 		cfg.Theme.Colors.InactiveTab != "8" ||
 		cfg.Theme.Colors.Title != "12" ||
@@ -61,7 +61,7 @@ func TestSaveAndLoadConfig(t *testing.T) {
 	cfg.Sources.Default = "zoxide"
 	cfg.Sources.Order = []string{"sessions", "zoxide", "fd", "all"}
 	cfg.Directories.FDCommand = `printf '%s\n' /tmp/project`
-	cfg.Theme.Colors.FocusedBorder = "#ff79c6"
+	cfg.Theme.Colors.PopupBorder = "#ff79c6"
 	cfg.Theme.Colors.ActiveTab = "#f5c2e7"
 	cfg.Theme.Colors.Border = "#313244"
 	cfg.Theme.Colors.InactiveTab = "#6c7086"
@@ -128,7 +128,7 @@ func TestSaveAndLoadConfig(t *testing.T) {
 	if loaded.LoadOptions().FDCommand != `printf '%s\n' /tmp/project` {
 		t.Fatalf("loaded fd command = %q", loaded.LoadOptions().FDCommand)
 	}
-	if loaded.Theme.Colors.FocusedBorder != "#ff79c6" ||
+	if loaded.Theme.Colors.PopupBorder != "#ff79c6" ||
 		loaded.Theme.Colors.ActiveTab != "#f5c2e7" ||
 		loaded.Theme.Colors.Border != "#313244" ||
 		loaded.Theme.Colors.InactiveTab != "#6c7086" ||
@@ -216,7 +216,9 @@ mode = "icons"
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
-	defaults := Default().Theme.Colors
+	def := Default()
+	def.Normalize()
+	defaults := def.Theme.Colors
 	if loaded.Theme.Colors != defaults {
 		t.Fatalf("theme defaults from older config = %#v, want %#v", loaded.Theme.Colors, defaults)
 	}
@@ -643,6 +645,29 @@ func TestNormalizeThemeColorsPartial(t *testing.T) {
 	}
 }
 
+// TestNormalizeThemeColorsPopupTitleAlias verifies that popup_title inherits
+// the deprecated `title` alias when unset, and that an explicit popup_title
+// wins over the legacy title.
+func TestNormalizeThemeColorsPopupTitleAlias(t *testing.T) {
+	// Legacy `title` set, popup_title unset -> popup_title inherits title.
+	cfg := Default()
+	cfg.Theme.Colors.Title = "#abcdef"
+	cfg.Theme.Colors.PopupTitle = ""
+	cfg.Normalize()
+	if cfg.Theme.Colors.PopupTitle != "#abcdef" {
+		t.Fatalf("popup_title = %q, want inherited #abcdef", cfg.Theme.Colors.PopupTitle)
+	}
+
+	// Explicit popup_title wins over legacy title.
+	cfg2 := Default()
+	cfg2.Theme.Colors.Title = "#abcdef"
+	cfg2.Theme.Colors.PopupTitle = "#112233"
+	cfg2.Normalize()
+	if cfg2.Theme.Colors.PopupTitle != "#112233" {
+		t.Fatalf("popup_title = %q, want explicit #112233", cfg2.Theme.Colors.PopupTitle)
+	}
+}
+
 func TestNormalizeThemeColorsFillsAllEmptyFields(t *testing.T) {
 	cfg := Default()
 	cfg.Theme.Colors = ThemeColorsConfig{}
@@ -654,11 +679,12 @@ func TestNormalizeThemeColorsFillsAllEmptyFields(t *testing.T) {
 		got  string
 		want string
 	}{
-		{"FocusedBorder", cfg.Theme.Colors.FocusedBorder, defaults.FocusedBorder},
+		{"PopupBorder", cfg.Theme.Colors.PopupBorder, defaults.PopupBorder},
 		{"ActiveTab", cfg.Theme.Colors.ActiveTab, defaults.ActiveTab},
 		{"Border", cfg.Theme.Colors.Border, defaults.Border},
 		{"InactiveTab", cfg.Theme.Colors.InactiveTab, defaults.InactiveTab},
 		{"Title", cfg.Theme.Colors.Title, defaults.Title},
+		{"PopupTitle", cfg.Theme.Colors.PopupTitle, defaults.Title},
 		{"Accent", cfg.Theme.Colors.Accent, defaults.Accent},
 		{"Key", cfg.Theme.Colors.Key, defaults.Key},
 		{"Muted", cfg.Theme.Colors.Muted, defaults.Muted},
@@ -666,9 +692,53 @@ func TestNormalizeThemeColorsFillsAllEmptyFields(t *testing.T) {
 		{"Info", cfg.Theme.Colors.Info, defaults.Info},
 		{"Warning", cfg.Theme.Colors.Warning, defaults.Warning},
 		{"Danger", cfg.Theme.Colors.Danger, defaults.Danger},
+		// Per-pane tokens inherit the relevant global when unset.
+		{"ListBorder", cfg.Theme.Colors.ListBorder, defaults.Border},
+		{"MetadataBorder", cfg.Theme.Colors.MetadataBorder, defaults.Border},
+		{"PreviewBorder", cfg.Theme.Colors.PreviewBorder, defaults.Border},
+		{"ListBorderTitle", cfg.Theme.Colors.ListBorderTitle, defaults.Border},
+		{"MetadataBorderTitle", cfg.Theme.Colors.MetadataBorderTitle, defaults.Border},
+		{"PreviewBorderTitle", cfg.Theme.Colors.PreviewBorderTitle, defaults.Border},
 	} {
 		if tc.got != tc.want {
 			t.Fatalf("%s = %q, want default %q", tc.name, tc.got, tc.want)
+		}
+	}
+}
+
+func TestNormalizeThemeColorsPaneTokensInheritCustomGlobals(t *testing.T) {
+	cfg := Default()
+	cfg.Theme.Colors.PopupBorder = "#aaaaaa"
+	cfg.Theme.Colors.Border = "#bbbbbb"
+	// Leave the six per-pane tokens unset so they must inherit.
+	cfg.Theme.Colors.ListBorder = ""
+	cfg.Theme.Colors.MetadataBorder = ""
+	cfg.Theme.Colors.PreviewBorder = ""
+	cfg.Theme.Colors.ListBorderTitle = ""
+	cfg.Theme.Colors.MetadataBorderTitle = ""
+	cfg.Theme.Colors.PreviewBorderTitle = ""
+	cfg.Normalize()
+
+	c := cfg.Theme.Colors
+	want := map[string]string{
+		"ListBorder":          "#bbbbbb",
+		"MetadataBorder":      "#bbbbbb",
+		"PreviewBorder":       "#bbbbbb",
+		"ListBorderTitle":     "#bbbbbb",
+		"MetadataBorderTitle": "#bbbbbb",
+		"PreviewBorderTitle":  "#bbbbbb",
+	}
+	got := map[string]string{
+		"ListBorder":          c.ListBorder,
+		"MetadataBorder":      c.MetadataBorder,
+		"PreviewBorder":       c.PreviewBorder,
+		"ListBorderTitle":     c.ListBorderTitle,
+		"MetadataBorderTitle": c.MetadataBorderTitle,
+		"PreviewBorderTitle":  c.PreviewBorderTitle,
+	}
+	for k, w := range want {
+		if got[k] != w {
+			t.Fatalf("%s = %q, want inherited %q", k, got[k], w)
 		}
 	}
 }

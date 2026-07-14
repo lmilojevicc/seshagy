@@ -121,6 +121,7 @@ seshagy config init
 From there, you can:
 
 - Customize theme colors and icons to match your terminal rice.
+- Theme each pane independently — list, metadata, and preview borders and titles are configurable under `[theme.colors]` (see `docs/configuration.md`).
 - Tweak `fd` commands.
 - Enable `type_first` mode to instantly filter lists by typing without prefix keys.
 - Toggle TUI styles (popup vs. cmdline) and layout order.
