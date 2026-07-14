@@ -161,7 +161,9 @@ func TestFooterPopupStyleStillComposesStatus(t *testing.T) {
 	m.searchInput.SetValue("test")
 	footer := sessionmgr.StripANSI(m.renderFooter())
 	lines := strings.Split(footer, "\n")
-	if !strings.Contains(lines[0], "all") || !strings.Contains(lines[0], "/ test") {
-		t.Fatalf("popup small-terminal line 1 should hold status + search input: %q", lines[0])
+	// Line 1 holds the backend indicator (left) + the inline search input (right);
+	// the source list name is no longer in the status strip (it's in the SOURCES tile).
+	if !strings.Contains(lines[0], "✓") || !strings.Contains(lines[0], "test") {
+		t.Fatalf("popup small-terminal line 1 should hold backend + search input: %q", lines[0])
 	}
 }

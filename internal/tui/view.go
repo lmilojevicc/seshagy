@@ -785,23 +785,16 @@ func (m Model) renderFooter() string {
 		}
 		inputStyle = footerStatusStyle(s, input, m.err != nil)
 	}
-	statusLeft := []string{}
+	// The source list name, type-first, and /query indicators used to live here
+	// too, but they're redundant now: the active source is in the SOURCES tile,
+	// the filter query shows via the count badge, and type-first has its own
+	// help keys. Keep only the backend indicator (shown nowhere else).
+	var left string
 	if m.mux.InMultiplexer() {
-		statusLeft = append(statusLeft, s.success.Render("✓ "+m.terms.BackendName))
+		left = s.success.Render("✓ " + m.terms.BackendName)
 	} else {
-		statusLeft = append(statusLeft, s.warning.Render("outside tmux/herdr"))
+		left = s.warning.Render("outside tmux/herdr")
 	}
-	statusLeft = append(statusLeft, s.info.Render(m.source.DisplayNames(m.terms).List))
-	if m.config.TypeFirst.Enabled {
-		statusLeft = append(statusLeft, s.emphasis.Render("type-first"))
-		if m.prefixArmed {
-			statusLeft = append(statusLeft, s.warning.Render("prefix"))
-		}
-	}
-	if m.query != "" {
-		statusLeft = append(statusLeft, s.emphasis.Render("/"+m.query))
-	}
-	left := strings.Join(statusLeft, "  ")
 	var help string
 	if m.showHelp {
 		if m.config.TypeFirst.Enabled && !m.prefixArmed {

@@ -683,8 +683,9 @@ func TestStartupSetupPromptSavesTypeFirstChoice(t *testing.T) {
 	}
 	m.width = 100
 	out := sessionmgr.StripANSI(m.renderFooter())
-	if !strings.Contains(out, "type-first") {
-		t.Fatalf("footer should show type-first after setup\n%s", out)
+	// type-first mode is reflected via its help keys (not a status indicator).
+	if !strings.Contains(out, "type filter") {
+		t.Fatalf("footer should show type-first help after setup\n%s", out)
 	}
 }
 
@@ -900,6 +901,41 @@ func TestFooterKeepsStatusOnOneLine(t *testing.T) {
 				safeWidth(m.width),
 			)
 		}
+	}
+}
+
+// TestFooterStatusStripOnlyShowsBackend verifies the status strip (footer line 1,
+// left side) was trimmed to just the backend indicator. The source list name,
+// type-first, and /query used to clutter it but are redundant now that the
+// SOURCES tile shows the active source and the count badge reflects filtering.
+func TestFooterStatusStripOnlyShowsBackend(t *testing.T) {
+	m := newTestModel(t)
+	m.width = 120
+	m.source = sessionmgr.ModeAll
+	m.config.TypeFirst.Enabled = true
+	m.config.TypeFirst.Prefix = appconfig.DefaultPrefix
+	m.query = "foo"
+
+	clean := sessionmgr.StripANSI(m.renderFooter())
+	lines := strings.Split(clean, "\n")
+	if len(lines) < 1 {
+		t.Fatalf("footer has no lines\n%s", clean)
+	}
+	line1 := lines[0]
+	// Backend indicator stays.
+	if !strings.Contains(line1, "✓ ") {
+		t.Fatalf("footer line 1 missing backend indicator\n%s", line1)
+	}
+	// Removed segments no longer appear on line 1.
+	sourceList := sessionmgr.ModeAll.DisplayNames(m.terms).List
+	if strings.Contains(line1, sourceList) {
+		t.Fatalf("footer line 1 should not show source list name %q\n%s", sourceList, line1)
+	}
+	if strings.Contains(line1, "type-first") {
+		t.Fatalf("footer line 1 should not show type-first indicator\n%s", line1)
+	}
+	if strings.Contains(line1, "/foo") {
+		t.Fatalf("footer line 1 should not show /query segment\n%s", line1)
 	}
 }
 
