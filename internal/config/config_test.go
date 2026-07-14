@@ -645,6 +645,29 @@ func TestNormalizeThemeColorsPartial(t *testing.T) {
 	}
 }
 
+// TestNormalizeThemeColorsPopupTitleAlias verifies that popup_title inherits
+// the deprecated `title` alias when unset, and that an explicit popup_title
+// wins over the legacy title.
+func TestNormalizeThemeColorsPopupTitleAlias(t *testing.T) {
+	// Legacy `title` set, popup_title unset -> popup_title inherits title.
+	cfg := Default()
+	cfg.Theme.Colors.Title = "#abcdef"
+	cfg.Theme.Colors.PopupTitle = ""
+	cfg.Normalize()
+	if cfg.Theme.Colors.PopupTitle != "#abcdef" {
+		t.Fatalf("popup_title = %q, want inherited #abcdef", cfg.Theme.Colors.PopupTitle)
+	}
+
+	// Explicit popup_title wins over legacy title.
+	cfg2 := Default()
+	cfg2.Theme.Colors.Title = "#abcdef"
+	cfg2.Theme.Colors.PopupTitle = "#112233"
+	cfg2.Normalize()
+	if cfg2.Theme.Colors.PopupTitle != "#112233" {
+		t.Fatalf("popup_title = %q, want explicit #112233", cfg2.Theme.Colors.PopupTitle)
+	}
+}
+
 func TestNormalizeThemeColorsFillsAllEmptyFields(t *testing.T) {
 	cfg := Default()
 	cfg.Theme.Colors = ThemeColorsConfig{}
@@ -661,6 +684,7 @@ func TestNormalizeThemeColorsFillsAllEmptyFields(t *testing.T) {
 		{"Border", cfg.Theme.Colors.Border, defaults.Border},
 		{"InactiveTab", cfg.Theme.Colors.InactiveTab, defaults.InactiveTab},
 		{"Title", cfg.Theme.Colors.Title, defaults.Title},
+		{"PopupTitle", cfg.Theme.Colors.PopupTitle, defaults.Title},
 		{"Accent", cfg.Theme.Colors.Accent, defaults.Accent},
 		{"Key", cfg.Theme.Colors.Key, defaults.Key},
 		{"Muted", cfg.Theme.Colors.Muted, defaults.Muted},

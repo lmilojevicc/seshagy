@@ -66,7 +66,8 @@ type ThemeColorsConfig struct {
 	ActiveTab           string `toml:"active_tab"            json:"active_tab"`
 	Border              string `toml:"border"                json:"border"`
 	InactiveTab         string `toml:"inactive_tab"          json:"inactive_tab"`
-	Title               string `toml:"title"                 json:"title"`
+	PopupTitle          string `toml:"popup_title"           json:"popup_title"`
+	Title               string `toml:"title"                 json:"title"` // deprecated alias for popup_title
 	Accent              string `toml:"accent"                json:"accent"`
 	Key                 string `toml:"key"                   json:"key"`
 	Muted               string `toml:"muted"                 json:"muted"`
@@ -288,6 +289,11 @@ func normalizeThemeColors(colors *ThemeColorsConfig, defaults ThemeColorsConfig)
 	}
 	if strings.TrimSpace(colors.Title) == "" {
 		colors.Title = defaults.Title
+	}
+	// popup_title colors popup/dialog headings; the legacy `title` key is a
+	// deprecated alias, so popup_title inherits it when unset.
+	if strings.TrimSpace(colors.PopupTitle) == "" {
+		colors.PopupTitle = colors.Title
 	}
 	if strings.TrimSpace(colors.Accent) == "" {
 		colors.Accent = defaults.Accent

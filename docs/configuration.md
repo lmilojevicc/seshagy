@@ -131,10 +131,11 @@ and all).
 | `active_tab`     | selected source tab label            |
 | `inactive_tab`   | unselected source tabs               |
 | `border`         | pane borders                         |
-| `title`          | pane titles and headings             |
-| `accent`         | emphasis text and the top accent bar |
+| `popup_title`    | popup / dialog headings (input prompt, setup, install menu) |
+| `title`          | deprecated alias for `popup_title`   |
+| `accent`         | emphasis text and the selection cursor |
 | `key`            | key names in help/footer             |
-| `muted`          | subtitles and secondary text         |
+| `muted`          | secondary / help / status text       |
 | `success`        | success status messages              |
 | `info`           | informational status messages        |
 | `warning`        | warning status messages              |
@@ -166,7 +167,7 @@ Example:
     active_tab = "default"
     border = "#313244"
     inactive_tab = "#6c7086"
-    title = "#b4befe"
+    popup_title = "#b4befe"
     accent = "#cba6f7"
     key = "#f9e2af"
     muted = "#7f849c"

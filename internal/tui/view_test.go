@@ -1047,7 +1047,7 @@ func TestConfiguredThemeColorsApply(t *testing.T) {
 	cfg.Theme.Colors.ActiveTab = "#f5c2e7"
 	cfg.Theme.Colors.Border = "#313244"
 	cfg.Theme.Colors.InactiveTab = "#6c7086"
-	cfg.Theme.Colors.Title = "#b4befe"
+	cfg.Theme.Colors.PopupTitle = "#b4befe"
 	cfg.Theme.Colors.Accent = "#cba6f7"
 	cfg.Theme.Colors.Key = "#f9e2af"
 	cfg.Theme.Colors.Muted = "#7f849c"
@@ -1084,7 +1084,7 @@ func TestConfiguredThemeColorsApply(t *testing.T) {
 		t.Fatalf("inactive tab color = %v, want #6c7086", got)
 	}
 	if got := s.title.GetForeground(); got != lipgloss.Color("#b4befe") {
-		t.Fatalf("title color = %v, want #b4befe", got)
+		t.Fatalf("popup title color = %v, want #b4befe", got)
 	}
 	if got := s.emphasis.GetForeground(); got != lipgloss.Color("#cba6f7") {
 		t.Fatalf("accent emphasis color = %v, want #cba6f7", got)
@@ -1097,9 +1097,6 @@ func TestConfiguredThemeColorsApply(t *testing.T) {
 	}
 	if got := s.muted.GetForeground(); got != lipgloss.Color("#7f849c") {
 		t.Fatalf("muted color = %v, want #7f849c", got)
-	}
-	if got := s.subtitle.GetForeground(); got != lipgloss.Color("#7f849c") {
-		t.Fatalf("subtitle color = %v, want #7f849c", got)
 	}
 	if got := s.success.GetForeground(); got != lipgloss.Color("#a6e3a1") {
 		t.Fatalf("success color = %v, want #a6e3a1", got)
