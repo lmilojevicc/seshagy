@@ -62,7 +62,7 @@ type ThemeConfig struct {
 }
 
 type ThemeColorsConfig struct {
-	FocusedBorder       string `toml:"focused_border"        json:"focused_border"`
+	PopupBorder         string `toml:"popup_border"          json:"popup_border"`
 	ActiveTab           string `toml:"active_tab"            json:"active_tab"`
 	Border              string `toml:"border"                json:"border"`
 	InactiveTab         string `toml:"inactive_tab"          json:"inactive_tab"`
@@ -159,18 +159,18 @@ func Default() Config {
 		Sources:     SourcesConfig{Default: "all", Order: defaultSourceOrderNames()},
 		Directories: DirectoriesConfig{FDCommand: sessionmgr.DefaultFDCommand},
 		Theme: ThemeConfig{Colors: ThemeColorsConfig{
-			FocusedBorder: "13",
-			ActiveTab:     "default",
-			Border:        "8",
-			InactiveTab:   "8",
-			Title:         "12",
-			Accent:        "13",
-			Key:           "11",
-			Muted:         "8",
-			Success:       "10",
-			Info:          "14",
-			Warning:       "11",
-			Danger:        "9",
+			PopupBorder: "13",
+			ActiveTab:   "default",
+			Border:      "8",
+			InactiveTab: "8",
+			Title:       "12",
+			Accent:      "13",
+			Key:         "11",
+			Muted:       "8",
+			Success:     "10",
+			Info:        "14",
+			Warning:     "11",
+			Danger:      "9",
 		}},
 		Icons: IconsConfig{
 			Mode:       IconModeIcons,
@@ -274,8 +274,8 @@ func (c *Config) Normalize() {
 }
 
 func normalizeThemeColors(colors *ThemeColorsConfig, defaults ThemeColorsConfig) {
-	if strings.TrimSpace(colors.FocusedBorder) == "" {
-		colors.FocusedBorder = defaults.FocusedBorder
+	if strings.TrimSpace(colors.PopupBorder) == "" {
+		colors.PopupBorder = defaults.PopupBorder
 	}
 	if strings.TrimSpace(colors.ActiveTab) == "" {
 		colors.ActiveTab = defaults.ActiveTab
@@ -315,7 +315,7 @@ func normalizeThemeColors(colors *ThemeColorsConfig, defaults ThemeColorsConfig)
 	// today's look. The globals above are already resolved, so these read the
 	// user's final values rather than the hardcoded defaults.
 	if strings.TrimSpace(colors.ListBorder) == "" {
-		colors.ListBorder = colors.FocusedBorder
+		colors.ListBorder = colors.Border
 	}
 	if strings.TrimSpace(colors.MetadataBorder) == "" {
 		colors.MetadataBorder = colors.Border

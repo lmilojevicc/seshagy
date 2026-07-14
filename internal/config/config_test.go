@@ -24,7 +24,7 @@ func TestLoadDefaultWhenMissing(t *testing.T) {
 	if cfg.LoadOptions().FDCommand != sessionmgr.DefaultFDCommand {
 		t.Fatalf("default fd command = %q", cfg.LoadOptions().FDCommand)
 	}
-	if cfg.Theme.Colors.FocusedBorder != "13" || cfg.Theme.Colors.ActiveTab != "default" ||
+	if cfg.Theme.Colors.PopupBorder != "13" || cfg.Theme.Colors.ActiveTab != "default" ||
 		cfg.Theme.Colors.Border != "8" ||
 		cfg.Theme.Colors.InactiveTab != "8" ||
 		cfg.Theme.Colors.Title != "12" ||
@@ -61,7 +61,7 @@ func TestSaveAndLoadConfig(t *testing.T) {
 	cfg.Sources.Default = "zoxide"
 	cfg.Sources.Order = []string{"sessions", "zoxide", "fd", "all"}
 	cfg.Directories.FDCommand = `printf '%s\n' /tmp/project`
-	cfg.Theme.Colors.FocusedBorder = "#ff79c6"
+	cfg.Theme.Colors.PopupBorder = "#ff79c6"
 	cfg.Theme.Colors.ActiveTab = "#f5c2e7"
 	cfg.Theme.Colors.Border = "#313244"
 	cfg.Theme.Colors.InactiveTab = "#6c7086"
@@ -128,7 +128,7 @@ func TestSaveAndLoadConfig(t *testing.T) {
 	if loaded.LoadOptions().FDCommand != `printf '%s\n' /tmp/project` {
 		t.Fatalf("loaded fd command = %q", loaded.LoadOptions().FDCommand)
 	}
-	if loaded.Theme.Colors.FocusedBorder != "#ff79c6" ||
+	if loaded.Theme.Colors.PopupBorder != "#ff79c6" ||
 		loaded.Theme.Colors.ActiveTab != "#f5c2e7" ||
 		loaded.Theme.Colors.Border != "#313244" ||
 		loaded.Theme.Colors.InactiveTab != "#6c7086" ||
@@ -656,7 +656,7 @@ func TestNormalizeThemeColorsFillsAllEmptyFields(t *testing.T) {
 		got  string
 		want string
 	}{
-		{"FocusedBorder", cfg.Theme.Colors.FocusedBorder, defaults.FocusedBorder},
+		{"PopupBorder", cfg.Theme.Colors.PopupBorder, defaults.PopupBorder},
 		{"ActiveTab", cfg.Theme.Colors.ActiveTab, defaults.ActiveTab},
 		{"Border", cfg.Theme.Colors.Border, defaults.Border},
 		{"InactiveTab", cfg.Theme.Colors.InactiveTab, defaults.InactiveTab},
@@ -669,10 +669,10 @@ func TestNormalizeThemeColorsFillsAllEmptyFields(t *testing.T) {
 		{"Warning", cfg.Theme.Colors.Warning, defaults.Warning},
 		{"Danger", cfg.Theme.Colors.Danger, defaults.Danger},
 		// Per-pane tokens inherit the relevant global when unset.
-		{"ListBorder", cfg.Theme.Colors.ListBorder, defaults.FocusedBorder},
+		{"ListBorder", cfg.Theme.Colors.ListBorder, defaults.Border},
 		{"MetadataBorder", cfg.Theme.Colors.MetadataBorder, defaults.Border},
 		{"PreviewBorder", cfg.Theme.Colors.PreviewBorder, defaults.Border},
-		{"ListBorderTitle", cfg.Theme.Colors.ListBorderTitle, defaults.FocusedBorder},
+		{"ListBorderTitle", cfg.Theme.Colors.ListBorderTitle, defaults.Border},
 		{"MetadataBorderTitle", cfg.Theme.Colors.MetadataBorderTitle, defaults.Border},
 		{"PreviewBorderTitle", cfg.Theme.Colors.PreviewBorderTitle, defaults.Border},
 	} {
@@ -684,7 +684,7 @@ func TestNormalizeThemeColorsFillsAllEmptyFields(t *testing.T) {
 
 func TestNormalizeThemeColorsPaneTokensInheritCustomGlobals(t *testing.T) {
 	cfg := Default()
-	cfg.Theme.Colors.FocusedBorder = "#aaaaaa"
+	cfg.Theme.Colors.PopupBorder = "#aaaaaa"
 	cfg.Theme.Colors.Border = "#bbbbbb"
 	// Leave the six per-pane tokens unset so they must inherit.
 	cfg.Theme.Colors.ListBorder = ""
@@ -697,10 +697,10 @@ func TestNormalizeThemeColorsPaneTokensInheritCustomGlobals(t *testing.T) {
 
 	c := cfg.Theme.Colors
 	want := map[string]string{
-		"ListBorder":          "#aaaaaa",
+		"ListBorder":          "#bbbbbb",
 		"MetadataBorder":      "#bbbbbb",
 		"PreviewBorder":       "#bbbbbb",
-		"ListBorderTitle":     "#aaaaaa",
+		"ListBorderTitle":     "#bbbbbb",
 		"MetadataBorderTitle": "#bbbbbb",
 		"PreviewBorderTitle":  "#bbbbbb",
 	}

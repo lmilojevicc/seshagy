@@ -32,7 +32,7 @@ type styles struct {
 	tabInactive   lipgloss.Style
 	itemName      lipgloss.Style
 	pane          lipgloss.Style
-	paneFocus     lipgloss.Style
+	panePopup     lipgloss.Style
 	paneList      lipgloss.Style
 	paneDetail    lipgloss.Style
 	panePreview   lipgloss.Style
@@ -85,7 +85,7 @@ func stylesFromConfig(cfg appconfig.Config) styles {
 	}
 	muted := themeColor(colors.Muted, p.muted)
 	border := themeColor(colors.Border, p.border)
-	focusedBorder := themeColor(colors.FocusedBorder, p.mauve)
+	popupBorder := themeColor(colors.PopupBorder, p.mauve)
 	activeTab := themeColor(colors.ActiveTab, p.fg)
 	inactiveTab := themeColor(colors.InactiveTab, muted)
 	title := themeColor(colors.Title, p.lavender)
@@ -105,11 +105,11 @@ func stylesFromConfig(cfg appconfig.Config) styles {
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(border).
 		Padding(0, 1)
-	s.paneFocus = s.pane.BorderForeground(focusedBorder)
+	s.panePopup = s.pane.BorderForeground(popupBorder)
 	// Per-pane borders and border-title colors. Each defaults to the relevant
 	// global (or the pane's own border, for titles) via themeColor on top of
 	// the config-layer inheritance, so unset tokens reproduce today's look.
-	listBorder := themeColor(colors.ListBorder, focusedBorder)
+	listBorder := themeColor(colors.ListBorder, border)
 	metadataBorder := themeColor(colors.MetadataBorder, border)
 	previewBorder := themeColor(colors.PreviewBorder, border)
 	s.paneList = s.pane.BorderForeground(listBorder)

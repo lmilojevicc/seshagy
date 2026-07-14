@@ -1043,7 +1043,7 @@ func TestDefaultStylesUseTerminalPalette(t *testing.T) {
 
 func TestConfiguredThemeColorsApply(t *testing.T) {
 	cfg := appconfig.Default()
-	cfg.Theme.Colors.FocusedBorder = "#ff79c6"
+	cfg.Theme.Colors.PopupBorder = "#ff79c6"
 	cfg.Theme.Colors.ActiveTab = "#f5c2e7"
 	cfg.Theme.Colors.Border = "#313244"
 	cfg.Theme.Colors.InactiveTab = "#6c7086"
@@ -1065,10 +1065,10 @@ func TestConfiguredThemeColorsApply(t *testing.T) {
 
 	wantBorder := lipgloss.Color("#ff79c6")
 	for side, got := range map[string]lipgloss.TerminalColor{
-		"top":    s.paneFocus.GetBorderTopForeground(),
-		"right":  s.paneFocus.GetBorderRightForeground(),
-		"bottom": s.paneFocus.GetBorderBottomForeground(),
-		"left":   s.paneFocus.GetBorderLeftForeground(),
+		"top":    s.panePopup.GetBorderTopForeground(),
+		"right":  s.panePopup.GetBorderRightForeground(),
+		"bottom": s.panePopup.GetBorderBottomForeground(),
+		"left":   s.panePopup.GetBorderLeftForeground(),
 	} {
 		if got != wantBorder {
 			t.Fatalf("%s focused border color = %v, want %v", side, got, wantBorder)

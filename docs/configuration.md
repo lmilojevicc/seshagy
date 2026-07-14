@@ -127,7 +127,7 @@ and all).
 
 | Key              | Used for                             |
 | ---------------- | ------------------------------------ |
-| `focused_border` | border on the focused pane           |
+| `popup_border`   | border on popups (input prompt, setup/install menus) |
 | `active_tab`     | selected source tab label            |
 | `inactive_tab`   | unselected source tabs               |
 | `border`         | pane borders                         |
@@ -141,13 +141,13 @@ and all).
 | `danger`         | error/danger status messages         |
 
 Per-pane borders and border titles can be themed independently. Each defaults
-to the relevant global when unset (`list_border` inherits `focused_border`;
+to the relevant global when unset (`list_border` inherits `border`;
  `metadata_border` and `preview_border` inherit `border`; each `*_border_title`
  inherits its pane's `*_border`), so the default look is unchanged unless set.
 
 | Key                     | Used for                                                 |
 | ----------------------- | -------------------------------------------------------- |
-| `list_border`           | list pane border (default: inherits `focused_border`)    |
+| `list_border`           | list pane border (default: inherits `border`)             |
 | `metadata_border`       | metadata/detail pane border (default: inherits `border`) |
 | `preview_border`        | preview pane border (default: inherits `border`)         |
 | `list_border_title`     | list pane border-title text (default: inherits `list_border`)     |
@@ -162,7 +162,7 @@ Example:
 ```toml
 [theme]
   [theme.colors]
-    focused_border = "#cba6f7"
+    popup_border = "#cba6f7"
     active_tab = "default"
     border = "#313244"
     inactive_tab = "#6c7086"
@@ -175,7 +175,7 @@ Example:
     warning = "#f9e2af"
     danger = "#f38ba8"
     # Per-pane borders and border titles. Each inherits when unset
-    # (list_border -> focused_border; metadata/preview_border -> border;
+    # (list_border -> border; metadata/preview_border -> border;
     # *_border_title -> its pane border), so these are optional.
     # list_border = "#89b4fa"
     # metadata_border = "#45475a"

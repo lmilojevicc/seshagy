@@ -89,7 +89,7 @@ func (m Model) renderInputPopup() string {
 	if boxW < 30 {
 		boxW = 30
 	}
-	// paneFocus carries a rounded border (2 cols) + 0,1 padding (2 cols).
+	// panePopup carries a rounded border (2 cols) + 0,1 padding (2 cols).
 	contentW := boxW - 4
 	if contentW < 1 {
 		contentW = 1
@@ -117,7 +117,7 @@ func (m Model) renderInputPopup() string {
 	content := s.title.Render(title) + "\n" +
 		inputView + "\n" +
 		clampText(s.muted.Render(help), contentW)
-	return s.paneFocus.Width(boxW).Render(content)
+	return s.panePopup.Width(boxW).Render(content)
 }
 
 func (m Model) renderSetupPrompt(height int) string {
@@ -166,7 +166,7 @@ func (m Model) renderSetupPrompt(height int) string {
 	helpParts = append(helpParts, s.key.Render("q")+" quit")
 	lines = append(lines, "", strings.Join(helpParts, s.muted.Render(" · ")))
 	content := trimHeight(strings.Join(lines, "\n"), innerH)
-	box := s.paneFocus.Width(width - 2).Height(innerH).Render(content)
+	box := s.panePopup.Width(width - 2).Height(innerH).Render(content)
 	return lipgloss.Place(m.width, height, lipgloss.Center, lipgloss.Center, box)
 }
 
@@ -220,7 +220,7 @@ func (m Model) renderInstallMenu(height int) string {
 	}
 	lines = append(lines, "", strings.Join(helpParts, s.muted.Render(" · ")))
 	content := trimHeight(strings.Join(lines, "\n"), innerH)
-	box := s.paneFocus.Width(width - 2).Height(innerH).Render(content)
+	box := s.panePopup.Width(width - 2).Height(innerH).Render(content)
 	return lipgloss.Place(m.width, height, lipgloss.Center, lipgloss.Center, box)
 }
 
