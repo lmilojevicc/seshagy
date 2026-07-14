@@ -81,6 +81,12 @@ type ThemeColorsConfig struct {
 	ListBorderTitle     string `toml:"list_border_title"     json:"list_border_title"`
 	MetadataBorderTitle string `toml:"metadata_border_title" json:"metadata_border_title"`
 	PreviewBorderTitle  string `toml:"preview_border_title"  json:"preview_border_title"`
+
+	// Overview hero tiles (workspaces + agents).
+	WorkspaceTileBorder string `toml:"workspace_tile_border" json:"workspace_tile_border"`
+	WorkspaceTileTitle  string `toml:"workspace_tile_title"  json:"workspace_tile_title"`
+	AgentTileBorder     string `toml:"agent_tile_border"     json:"agent_tile_border"`
+	AgentTileTitle      string `toml:"agent_tile_title"      json:"agent_tile_title"`
 }
 
 type IconsConfig struct {
@@ -337,6 +343,20 @@ func normalizeThemeColors(colors *ThemeColorsConfig, defaults ThemeColorsConfig)
 	}
 	if strings.TrimSpace(colors.PreviewBorderTitle) == "" {
 		colors.PreviewBorderTitle = colors.PreviewBorder
+	}
+	// Overview hero tiles inherit border / popup_title so the default look is
+	// unchanged unless themed.
+	if strings.TrimSpace(colors.WorkspaceTileBorder) == "" {
+		colors.WorkspaceTileBorder = colors.Border
+	}
+	if strings.TrimSpace(colors.AgentTileBorder) == "" {
+		colors.AgentTileBorder = colors.Border
+	}
+	if strings.TrimSpace(colors.WorkspaceTileTitle) == "" {
+		colors.WorkspaceTileTitle = colors.PopupTitle
+	}
+	if strings.TrimSpace(colors.AgentTileTitle) == "" {
+		colors.AgentTileTitle = colors.PopupTitle
 	}
 }
 

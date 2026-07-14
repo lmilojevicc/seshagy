@@ -39,7 +39,11 @@ func (m Model) View() string {
 	if m.installMenu.active {
 		return s.app.Width(m.width).Height(m.height).Render(m.renderInstallMenu(m.height))
 	}
+	overview := m.renderOverview()
 	header := m.renderTabs()
+	if overview != "" {
+		header = overview + "\n" + header
+	}
 	footer := m.renderFooter()
 	bodyH := m.height - lipgloss.Height(header) - lipgloss.Height(footer)
 	if bodyH < 1 {
@@ -290,6 +294,81 @@ func (m Model) sourceTabs() []sourceTab {
 		})
 	}
 	return tabs
+}
+
+// renderOverview renders the top hero band: a WORKSPACES tile and an AGENTS
+// tile summarizing the ModeAll item set (counts are correct regardless of the
+// active source tab). It returns "" (and is hidden) before data loads and on
+// short terminals, so the list keeps its space.
+func (m Model) renderOverview() string {
+	items := m.overviewItems()
+	if len(items) == 0 || m.height < 14 {
+		return ""
+	}
+	s := m.styles
+	stats := aggregateOverviewStats(items)
+	icons := m.config.IconSet()
+
+	usableW := safeWidth(m.width)
+	gap := 1
+	wsW := clampVal(26, 18, usableW/4)
+	agentW := usableW - wsW - gap
+	if agentW < 28 {
+		agentW = max(28, usableW-wsW-gap)
+	}
+
+	wsTitle := strings.ToUpper(m.terms.SessionPlural)
+	wsContent := fmt.Sprintf(
+		"%s %s",
+		s.emphasis.Render(fmt.Sprintf("%d", stats.sessions)),
+		s.muted.Render(fmt.Sprintf("(%d attached)", stats.attached)),
+	)
+	wsTile := paneWithTitle(s.tileWorkspace, s.workspaceTileTitle, wsContent, wsTitle, wsW, 0)
+
+	agentTitle := "AGENTS"
+	agentContent := m.agentChips(icons, stats)
+	agentTile := paneWithTitle(s.tileAgent, s.agentTileTitle, agentContent, agentTitle, agentW, 0)
+
+	return lipgloss.JoinHorizontal(lipgloss.Top, wsTile, strings.Repeat(" ", gap), agentTile)
+}
+
+// agentChips renders the colored agent-state chips for the overview tile,
+// reusing the configured icon-set glyphs/colors via renderAgentState. Only
+// states with a non-zero count are shown; with no agents at all a muted
+// placeholder is rendered instead.
+func (m Model) agentChips(icons sessionmgr.IconSet, stats overviewStats) string {
+	s := m.styles
+	if stats.agentTotal() == 0 {
+		return s.muted.Render("no active agents")
+	}
+	parts := make([]string, 0, len(agentStateOrder))
+	for _, state := range agentStateOrder {
+		count := stats.agents[state]
+		if count == 0 {
+			continue
+		}
+		glyph := renderAgentState(s, icons, state)
+		cnt := fmt.Sprintf("%d", count)
+		style := agentStateStyle(s, state)
+		cnt = style.Render(cnt)
+		parts = append(parts, glyph+" "+cnt)
+	}
+	return strings.Join(parts, "  ")
+}
+
+// agentStateStyle maps an agent state to the semantic style used for its count
+// (mirrors renderAgentState's fallback coloring for emphasis).
+func agentStateStyle(s styles, state sessionmgr.AgentState) lipgloss.Style {
+	switch state {
+	case sessionmgr.AgentWorking:
+		return s.success
+	case sessionmgr.AgentBlocked:
+		return s.warning
+	case sessionmgr.AgentDone:
+		return s.info
+	default:
+		return s.muted
+	}
 }
 
 func (m Model) renderBody(height int) string {

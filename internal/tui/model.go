@@ -198,6 +198,13 @@ func (m Model) Init() tea.Cmd {
 		refreshCatalogsCmd(m.config),
 		tickCmd(),
 	}
+	// Keep the ModeAll cache warm so the overview hero band shows correct
+	// counts even when another source tab is active on launch.
+	if m.source != sessionmgr.ModeAll {
+		if _, cmd := m.beginRefresh(sessionmgr.ModeAll, false); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	}
 	if m.ephemeral {
 		cmds = append(cmds, ephemeralTickCmd())
 	}
@@ -360,6 +367,18 @@ func max(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// clampVal clamps v to the inclusive [lo, hi] range. If hi <= lo, only the
+// lower bound is enforced (v is floored at lo but not capped).
+func clampVal(v, lo, hi int) int {
+	if v < lo {
+		return lo
+	}
+	if hi > lo && v > hi {
+		return hi
+	}
+	return v
 }
 
 func clampText(s string, w int) string {

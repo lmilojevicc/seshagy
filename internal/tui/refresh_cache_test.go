@@ -288,3 +288,48 @@ func TestSwitchSourceAppliesCachedWarningStatus(t *testing.T) {
 		t.Fatalf("status = %q, want cached warning %q", got.status, warn)
 	}
 }
+
+// TestTickWarmsModeAllForOverview verifies the tick handler kicks off a
+// background ModeAll refresh (for the overview hero counts) even when the
+// active source tab is something else and already fresh.
+func TestTickWarmsModeAllForOverview(t *testing.T) {
+	m := New()
+	m.source = sessionmgr.ModeSessions
+	// Active source is fresh; ModeAll cache is absent (stale).
+	m.cache = map[sessionmgr.SourceMode]modeCache{
+		sessionmgr.ModeSessions: {items: testItems("s1"), fetchedAt: time.Now()},
+	}
+
+	model, _ := m.Update(tickMsg(time.Now()))
+	got := model.(Model)
+	if got.inflightRefresh[sessionmgr.ModeAll] == 0 {
+		t.Fatal("tick did not start a background ModeAll refresh for the overview")
+	}
+}
+
+// TestOverviewItemsReadsModeAllCache verifies overviewItems returns the warmed
+// ModeAll cache when another tab is active, m.items when ModeAll is active,
+// and nil before any ModeAll load.
+func TestOverviewItemsReadsModeAllCache(t *testing.T) {
+	m := New()
+	m.source = sessionmgr.ModeSessions
+	if got := m.overviewItems(); got != nil {
+		t.Fatalf("overviewItems before cache = %v, want nil", got)
+	}
+
+	cached := testItems("ws")
+	m.cache = map[sessionmgr.SourceMode]modeCache{
+		sessionmgr.ModeAll: {items: cached, fetchedAt: time.Now()},
+	}
+	if got := m.overviewItems(); len(got) != len(cached) {
+		t.Fatalf("overviewItems = %d items, want %d (ModeAll cache)", len(got), len(cached))
+	}
+
+	// When ModeAll is the active tab, m.items is used directly.
+	m.source = sessionmgr.ModeAll
+	m.items = testItems("active")
+	got := m.overviewItems()
+	if len(got) != len(m.items) {
+		t.Fatalf("overviewItems in ModeAll = %d, want m.items %d", len(got), len(m.items))
+	}
+}

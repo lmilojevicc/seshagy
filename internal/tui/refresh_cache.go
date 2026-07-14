@@ -43,6 +43,22 @@ func (m Model) cacheFresh(mode sessionmgr.SourceMode) bool {
 	return time.Since(entry.fetchedAt) < cacheTTL(mode)
 }
 
+// overviewItems returns the ModeAll item list used by the top overview hero
+// band, so its counts stay correct regardless of the active source tab. The
+// active tab's own list (m.items) is used directly when ModeAll is active;
+// otherwise the warmed ModeAll cache is read. Returns nil before the first
+// ModeAll load completes (the hero hides itself in that case).
+func (m Model) overviewItems() []sessionmgr.Item {
+	if m.source == sessionmgr.ModeAll {
+		return m.items
+	}
+	entry, ok := m.cacheEntry(sessionmgr.ModeAll)
+	if !ok {
+		return nil
+	}
+	return entry.items
+}
+
 func (m Model) applyCacheEntry(mode sessionmgr.SourceMode) Model {
 	entry, ok := m.cacheEntry(mode)
 	if !ok {

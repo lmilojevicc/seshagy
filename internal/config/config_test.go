@@ -699,6 +699,11 @@ func TestNormalizeThemeColorsFillsAllEmptyFields(t *testing.T) {
 		{"ListBorderTitle", cfg.Theme.Colors.ListBorderTitle, defaults.Border},
 		{"MetadataBorderTitle", cfg.Theme.Colors.MetadataBorderTitle, defaults.Border},
 		{"PreviewBorderTitle", cfg.Theme.Colors.PreviewBorderTitle, defaults.Border},
+		// Overview hero tiles inherit border / popup_title when unset.
+		{"WorkspaceTileBorder", cfg.Theme.Colors.WorkspaceTileBorder, defaults.Border},
+		{"AgentTileBorder", cfg.Theme.Colors.AgentTileBorder, defaults.Border},
+		{"WorkspaceTileTitle", cfg.Theme.Colors.WorkspaceTileTitle, defaults.Title},
+		{"AgentTileTitle", cfg.Theme.Colors.AgentTileTitle, defaults.Title},
 	} {
 		if tc.got != tc.want {
 			t.Fatalf("%s = %q, want default %q", tc.name, tc.got, tc.want)
@@ -710,7 +715,8 @@ func TestNormalizeThemeColorsPaneTokensInheritCustomGlobals(t *testing.T) {
 	cfg := Default()
 	cfg.Theme.Colors.PopupBorder = "#aaaaaa"
 	cfg.Theme.Colors.Border = "#bbbbbb"
-	// Leave the six per-pane tokens unset so they must inherit.
+	cfg.Theme.Colors.Title = "#cccccc"
+	// Leave the per-pane + overview tokens unset so they must inherit.
 	cfg.Theme.Colors.ListBorder = ""
 	cfg.Theme.Colors.MetadataBorder = ""
 	cfg.Theme.Colors.PreviewBorder = ""
@@ -727,6 +733,12 @@ func TestNormalizeThemeColorsPaneTokensInheritCustomGlobals(t *testing.T) {
 		"ListBorderTitle":     "#bbbbbb",
 		"MetadataBorderTitle": "#bbbbbb",
 		"PreviewBorderTitle":  "#bbbbbb",
+		// Overview tiles: borders inherit border; titles inherit popup_title
+		// (which itself inherits the legacy title here).
+		"WorkspaceTileBorder": "#bbbbbb",
+		"AgentTileBorder":     "#bbbbbb",
+		"WorkspaceTileTitle":  "#cccccc",
+		"AgentTileTitle":      "#cccccc",
 	}
 	got := map[string]string{
 		"ListBorder":          c.ListBorder,
@@ -735,6 +747,10 @@ func TestNormalizeThemeColorsPaneTokensInheritCustomGlobals(t *testing.T) {
 		"ListBorderTitle":     c.ListBorderTitle,
 		"MetadataBorderTitle": c.MetadataBorderTitle,
 		"PreviewBorderTitle":  c.PreviewBorderTitle,
+		"WorkspaceTileBorder": c.WorkspaceTileBorder,
+		"AgentTileBorder":     c.AgentTileBorder,
+		"WorkspaceTileTitle":  c.WorkspaceTileTitle,
+		"AgentTileTitle":      c.AgentTileTitle,
 	}
 	for k, w := range want {
 		if got[k] != w {

@@ -26,31 +26,35 @@ type palette struct {
 type styles struct {
 	p palette
 
-	app           lipgloss.Style
-	tabActive     lipgloss.Style
-	tabInactive   lipgloss.Style
-	chipActive    lipgloss.Style
-	chipIdle      lipgloss.Style
-	itemName      lipgloss.Style
-	pane          lipgloss.Style
-	panePopup     lipgloss.Style
-	paneList      lipgloss.Style
-	paneDetail    lipgloss.Style
-	panePreview   lipgloss.Style
-	listTitle     lipgloss.TerminalColor
-	metadataTitle lipgloss.TerminalColor
-	previewTitle  lipgloss.TerminalColor
-	title         lipgloss.Style
-	muted         lipgloss.Style
-	emphasis      lipgloss.Style
-	key           lipgloss.Style
-	selectedBG    lipgloss.Style
-	bar           lipgloss.Style
-	status        lipgloss.Style
-	success       lipgloss.Style
-	info          lipgloss.Style
-	warning       lipgloss.Style
-	danger        lipgloss.Style
+	app                lipgloss.Style
+	tabActive          lipgloss.Style
+	tabInactive        lipgloss.Style
+	chipActive         lipgloss.Style
+	chipIdle           lipgloss.Style
+	itemName           lipgloss.Style
+	pane               lipgloss.Style
+	panePopup          lipgloss.Style
+	paneList           lipgloss.Style
+	paneDetail         lipgloss.Style
+	panePreview        lipgloss.Style
+	listTitle          lipgloss.TerminalColor
+	metadataTitle      lipgloss.TerminalColor
+	previewTitle       lipgloss.TerminalColor
+	tileWorkspace      lipgloss.Style
+	tileAgent          lipgloss.Style
+	workspaceTileTitle lipgloss.TerminalColor
+	agentTileTitle     lipgloss.TerminalColor
+	title              lipgloss.Style
+	muted              lipgloss.Style
+	emphasis           lipgloss.Style
+	key                lipgloss.Style
+	selectedBG         lipgloss.Style
+	bar                lipgloss.Style
+	status             lipgloss.Style
+	success            lipgloss.Style
+	info               lipgloss.Style
+	warning            lipgloss.Style
+	danger             lipgloss.Style
 }
 
 func defaultStyles() styles {
@@ -123,6 +127,13 @@ func stylesFromConfig(cfg appconfig.Config) styles {
 	s.listTitle = themeColor(colors.ListBorderTitle, listBorder)
 	s.metadataTitle = themeColor(colors.MetadataBorderTitle, metadataBorder)
 	s.previewTitle = themeColor(colors.PreviewBorderTitle, previewBorder)
+	// Overview hero tiles.
+	workspaceTileBorder := themeColor(colors.WorkspaceTileBorder, border)
+	agentTileBorder := themeColor(colors.AgentTileBorder, border)
+	s.tileWorkspace = s.pane.BorderForeground(workspaceTileBorder)
+	s.tileAgent = s.pane.BorderForeground(agentTileBorder)
+	s.workspaceTileTitle = themeColor(colors.WorkspaceTileTitle, popupTitle)
+	s.agentTileTitle = themeColor(colors.AgentTileTitle, popupTitle)
 	s.title = lipgloss.NewStyle().Foreground(popupTitle).Bold(true)
 	s.muted = lipgloss.NewStyle().Foreground(muted)
 	s.emphasis = lipgloss.NewStyle().Foreground(accent).Bold(true)

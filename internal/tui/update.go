@@ -40,14 +40,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Tick(interval, func(t time.Time) tea.Msg { return tickMsg(t) })
 		}
 		if m.cacheFresh(m.source) {
-			return m, tea.Tick(interval, func(t time.Time) tea.Msg { return tickMsg(t) })
+			// Even when the active source is fresh, keep the ModeAll cache warm
+			// so the overview hero counts stay current on other tabs.
+			cmds := []tea.Cmd{tea.Tick(interval, func(t time.Time) tea.Msg { return tickMsg(t) })}
+			if !m.cacheFresh(sessionmgr.ModeAll) {
+				if _, mc := m.beginRefresh(sessionmgr.ModeAll, false); mc != nil {
+					cmds = append(cmds, mc)
+				}
+			}
+			return m, tea.Batch(cmds...)
 		}
 		var cmd tea.Cmd
 		m, cmd = m.beginRefresh(m.source, false)
-		return m, tea.Batch(
+		cmds := []tea.Cmd{
 			cmd,
 			tea.Tick(interval, func(t time.Time) tea.Msg { return tickMsg(t) }),
-		)
+		}
+		if !m.cacheFresh(sessionmgr.ModeAll) {
+			if _, mc := m.beginRefresh(sessionmgr.ModeAll, false); mc != nil {
+				cmds = append(cmds, mc)
+			}
+		}
+		return m, tea.Batch(cmds...)
 	case ephemeralTickMsg:
 		if !m.ephemeral {
 			return m, nil
