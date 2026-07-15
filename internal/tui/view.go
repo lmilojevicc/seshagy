@@ -39,11 +39,7 @@ func (m Model) View() string {
 	if m.installMenu.active {
 		return s.app.Width(m.width).Height(m.height).Render(m.renderInstallMenu(m.height))
 	}
-	overview := m.renderOverview()
-	header := m.renderTabs()
-	if overview != "" {
-		header = overview + "\n" + header
-	}
+	header := m.renderTopRow()
 	footer := m.renderFooter()
 	bodyH := m.height - lipgloss.Height(header) - lipgloss.Height(footer)
 	if bodyH < 1 {
@@ -228,12 +224,11 @@ func (m Model) renderInstallMenu(height int) string {
 	return lipgloss.Place(m.width, height, lipgloss.Center, lipgloss.Center, box)
 }
 
-func (m Model) renderTabs() string {
+func (m Model) renderSourcesTile(width int) string {
 	s := m.styles
-	w := safeWidth(m.width)
-	inner := max(1, w-4) // border (2) + horizontal padding (2)
+	inner := max(1, width-4) // border (2) + horizontal padding (2)
 	chips := m.renderSourceChips(inner)
-	return paneWithTitle(s.tileSources, s.sourcesTileTitle, chips, "SOURCES", w, 0)
+	return paneWithTitle(s.tileSources, s.sourcesTileTitle, chips, "SOURCES", width, 0)
 }
 
 // renderSourceChips builds the source-tab chip line (active tab in the
@@ -302,25 +297,27 @@ func (m Model) sourceTabs() []sourceTab {
 	return tabs
 }
 
-// renderOverview renders the top hero band: a WORKSPACES tile and an AGENTS
-// tile summarizing the ModeAll item set (counts are correct regardless of the
-// active source tab). It returns "" (and is hidden) before data loads and on
-// short terminals, so the list keeps its space.
-func (m Model) renderOverview() string {
-	items := m.overviewItems()
-	if len(items) == 0 || m.height < 14 {
-		return ""
-	}
+// renderTopRow renders the header as a single row of tiles: SOURCES (flex),
+// AGENTS (compact), and WORKSPACES (compact) when the overview is active,
+// otherwise just the SOURCES tile at full width. Collapsing the previous
+// two-row header (overview + sources) reclaims a row for the list.
+func (m Model) renderTopRow() string {
 	s := m.styles
-	stats := aggregateOverviewStats(items)
+	usableW := safeWidth(m.width)
+	overview := m.overviewItems()
+	if len(overview) == 0 || m.height < 14 {
+		return m.renderSourcesTile(usableW)
+	}
+	stats := aggregateOverviewStats(overview)
 	icons := m.config.IconSet()
 
-	usableW := safeWidth(m.width)
 	gap := 1
-	wsW := clampVal(26, 18, usableW/4)
-	agentW := usableW - wsW - gap
-	if agentW < 28 {
-		agentW = max(28, usableW-wsW-gap)
+	wsW := clampVal(22, 16, usableW/6)
+	agentW := clampVal(34, 26, usableW/3)
+	sourcesW := usableW - wsW - agentW - 2*gap
+	if sourcesW < 20 {
+		// Not enough room for all three tiles — fall back to SOURCES alone.
+		return m.renderSourcesTile(usableW)
 	}
 
 	wsTitle := strings.ToUpper(m.terms.SessionPlural)
@@ -331,11 +328,16 @@ func (m Model) renderOverview() string {
 	)
 	wsTile := paneWithTitle(s.tileWorkspace, s.workspaceTileTitle, wsContent, wsTitle, wsW, 0)
 
-	agentTitle := "AGENTS"
 	agentContent := m.agentChips(icons, stats)
-	agentTile := paneWithTitle(s.tileAgent, s.agentTileTitle, agentContent, agentTitle, agentW, 0)
+	agentTile := paneWithTitle(s.tileAgent, s.agentTileTitle, agentContent, "AGENTS", agentW, 0)
 
-	return lipgloss.JoinHorizontal(lipgloss.Top, wsTile, strings.Repeat(" ", gap), agentTile)
+	sourcesTile := m.renderSourcesTile(sourcesW)
+	return lipgloss.JoinHorizontal(
+		lipgloss.Top,
+		sourcesTile, strings.Repeat(" ", gap),
+		agentTile, strings.Repeat(" ", gap),
+		wsTile,
+	)
 }
 
 // agentChips renders the colored agent-state chips for the overview tile,
@@ -348,25 +350,11 @@ func (m Model) agentChips(icons sessionmgr.IconSet, stats overviewStats) string 
 	for _, state := range agentStateOrder {
 		count := stats.agents[state]
 		glyph := renderAgentState(s, icons, state)
-		cnt := agentStateStyle(s, state).Render(fmt.Sprintf("%d", count))
+		iconStyle := icons.ForAgentState(state)
+		cnt := renderAgentStateStyled(s, state, fmt.Sprintf("%d", count), iconStyle.Color)
 		parts = append(parts, glyph+" "+cnt)
 	}
 	return strings.Join(parts, "  ")
-}
-
-// agentStateStyle maps an agent state to the semantic style used for its count
-// (mirrors renderAgentState's fallback coloring for emphasis).
-func agentStateStyle(s styles, state sessionmgr.AgentState) lipgloss.Style {
-	switch state {
-	case sessionmgr.AgentWorking:
-		return s.success
-	case sessionmgr.AgentBlocked:
-		return s.warning
-	case sessionmgr.AgentDone:
-		return s.info
-	default:
-		return s.muted
-	}
 }
 
 func (m Model) renderBody(height int) string {

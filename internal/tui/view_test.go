@@ -326,7 +326,7 @@ func TestConfiguredSourceOrderAndDefault(t *testing.T) {
 	if m.source != sessionmgr.ModeZoxide {
 		t.Fatalf("New() source = %v, want configured zoxide", m.source)
 	}
-	out := sessionmgr.StripANSI(m.renderTabs())
+	out := sessionmgr.StripANSI(m.renderSourcesTile(safeWidth(m.width)))
 	for _, want := range []string{"1 Sessions", "2 Zoxide", "3 fd", "4 All"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("configured tabs missing %q\n%s", want, out)
@@ -369,7 +369,7 @@ func TestRenderTabsChipStyle(t *testing.T) {
 		t.Fatal("chipIdle must NOT have Reverse")
 	}
 
-	clean := sessionmgr.StripANSI(m.renderTabs())
+	clean := sessionmgr.StripANSI(m.renderSourcesTile(safeWidth(m.width)))
 
 	// Pipe separator present.
 	if !strings.Contains(clean, "|") {
@@ -399,7 +399,7 @@ func TestRenderTabsChipQueryCount(t *testing.T) {
 		{Kind: sessionmgr.KindSession, Name: "app"},
 	}
 	m.query = "ap"
-	clean := sessionmgr.StripANSI(m.renderTabs())
+	clean := sessionmgr.StripANSI(m.renderSourcesTile(safeWidth(m.width)))
 	// 2 matches (api, app) out of 3 total.
 	if !strings.Contains(clean, "2/3") {
 		t.Fatalf("chip row missing filtered count '2/3'\n%s", clean)
@@ -415,7 +415,7 @@ func TestRenderTabsChipFitsNarrowWidth(t *testing.T) {
 			model, _ := m.Update(tea.WindowSizeMsg{Width: width, Height: 24})
 			m = model.(Model)
 			m.items = make([]sessionmgr.Item, 100)
-			line := m.renderTabs()
+			line := m.renderSourcesTile(safeWidth(m.width))
 			clean := sessionmgr.StripANSI(line)
 			if w := lipgloss.Width(clean); w > safeWidth(width) {
 				t.Fatalf(
@@ -1743,7 +1743,7 @@ func TestPaneTitlesUsePerPaneColors(t *testing.T) {
 
 // TestRenderOverview verifies the hero band renders the workspaces + agents
 // tiles from the warmed ModeAll cache, and hides when no data or short height.
-func TestRenderOverview(t *testing.T) {
+func TestRenderTopRowShowsAllTiles(t *testing.T) {
 	m := newTestModel(t)
 	m.width, m.height = 120, 32
 	m.source = sessionmgr.ModeSessions
@@ -1757,40 +1757,46 @@ func TestRenderOverview(t *testing.T) {
 		}, fetchedAt: time.Now()},
 	}
 
-	out := sessionmgr.StripANSI(m.renderOverview())
-	// Workspaces tile title + count + attached.
-	if !strings.Contains(out, "SESSIONS") {
-		t.Fatalf("overview missing SESSIONS tile title\n%s", out)
+	header := m.renderTopRow()
+	out := sessionmgr.StripANSI(header)
+	// All three tiles share the single header row.
+	for _, want := range []string{"SOURCES", "AGENTS", "SESSIONS"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("header row missing %q tile title\n%s", want, out)
+		}
 	}
+	// Workspaces count + attached.
 	if !strings.Contains(out, "3") {
-		t.Fatalf("overview missing session count\n%s", out)
+		t.Fatalf("header missing session count\n%s", out)
 	}
 	if !strings.Contains(out, "(2 attached)") {
-		t.Fatalf("overview missing attached count\n%s", out)
+		t.Fatalf("header missing attached count\n%s", out)
 	}
-	// Agents tile title.
-	if !strings.Contains(out, "AGENTS") {
-		t.Fatalf("overview missing AGENTS tile title\n%s", out)
+	// Single tile row: the three tiles are side-by-side (one top-edge line),
+	// not stacked — the header is ~3 lines (top edge, content, bottom edge).
+	if h := lipgloss.Height(header); h > 4 {
+		t.Fatalf("header should be a single tile row (<=4 lines), got %d\n%s", h, header)
 	}
-	// Both tiles are bordered (fieldset top edges on line 0 and 2).
-	lines := strings.Split(out, "\n")
-	if len(lines) < 3 {
-		t.Fatalf("overview too short: %d lines\n%s", len(lines), out)
-	}
-	if !strings.HasPrefix(lines[0], "╭") || !strings.HasSuffix(lines[0], "╮") {
-		t.Fatalf("line 0 not a tile top edge: %q", lines[0])
+	lines := strings.Split(header, "\n")
+	if len(lines) == 0 || !strings.HasPrefix(lines[0], "╭") {
+		t.Fatalf("header line 0 not a tile top edge: %q", lines)
 	}
 }
 
-// TestRenderOverviewHidesWhenNoDataOrShort verifies the hero band returns ""
-// before the ModeAll cache loads and on short terminals.
-func TestRenderOverviewHidesWhenNoDataOrShort(t *testing.T) {
+// TestRenderTopRowSourcesOnlyWhenHidden verifies that when the overview is
+// hidden (no ModeAll data or short terminal) the header is just the SOURCES
+// tile — the AGENTS/WORKSPACES tiles do not render, but SOURCES always shows.
+func TestRenderTopRowSourcesOnlyWhenHidden(t *testing.T) {
 	m := newTestModel(t)
 	m.width, m.height = 120, 32
 	m.source = sessionmgr.ModeSessions
 	// No ModeAll cache yet.
-	if got := m.renderOverview(); got != "" {
-		t.Fatalf("overview should hide before data loads, got %q", got)
+	out := sessionmgr.StripANSI(m.renderTopRow())
+	if !strings.Contains(out, "SOURCES") {
+		t.Fatalf("header should always show SOURCES\n%s", out)
+	}
+	if strings.Contains(out, "AGENTS") || strings.Contains(out, "SESSIONS") {
+		t.Fatalf("overview tiles should hide before data loads\n%s", out)
 	}
 
 	// Prime cache, but make terminal short.
@@ -1800,14 +1806,18 @@ func TestRenderOverviewHidesWhenNoDataOrShort(t *testing.T) {
 		}, fetchedAt: time.Now()},
 	}
 	m.height = 10
-	if got := m.renderOverview(); got != "" {
-		t.Fatalf("overview should hide on short terminals, got %q", got)
+	out = sessionmgr.StripANSI(m.renderTopRow())
+	if !strings.Contains(out, "SOURCES") {
+		t.Fatalf("header should still show SOURCES when short\n%s", out)
+	}
+	if strings.Contains(out, "AGENTS") || strings.Contains(out, "SESSIONS") {
+		t.Fatalf("overview tiles should hide on short terminals\n%s", out)
 	}
 }
 
-// TestRenderOverviewNoAgents verifies the agents tile shows the full state
-// legend (all five states, with 0 counts) even when there are zero agents.
-func TestRenderOverviewNoAgents(t *testing.T) {
+// TestRenderTopRowAgentStatesLegend verifies the agents tile shows the full
+// state legend (all five states, with 0 counts) even when there are zero agents.
+func TestRenderTopRowAgentStatesLegend(t *testing.T) {
 	m := newTestModel(t)
 	m.width, m.height = 120, 32
 	m.source = sessionmgr.ModeSessions
@@ -1816,17 +1826,45 @@ func TestRenderOverviewNoAgents(t *testing.T) {
 			{Kind: sessionmgr.KindSession, Name: "demo"},
 		}, fetchedAt: time.Now()},
 	}
-	out := sessionmgr.StripANSI(m.renderOverview())
+	out := sessionmgr.StripANSI(m.renderTopRow())
 	if !strings.Contains(out, "AGENTS") {
-		t.Fatalf("overview missing AGENTS tile title\n%s", out)
+		t.Fatalf("header missing AGENTS tile title\n%s", out)
 	}
 	// The legend renders every state with a 0 count, not a placeholder.
 	zeros := strings.Count(out, "0")
 	if zeros < 5 {
 		t.Fatalf(
-			"overview agents tile should show five 0-count states, found %d zeros\n%s",
+			"agents tile should show five 0-count states, found %d zeros\n%s",
 			zeros,
 			out,
 		)
+	}
+}
+
+// TestAgentChipsCountUsesIconColor verifies each agent-state count is rendered
+// in the same configured icon color as its glyph (not a generic theme color).
+func TestAgentChipsCountUsesIconColor(t *testing.T) {
+	prevProfile := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prevProfile) })
+
+	m := newTestModel(t)
+	// Distinctive color so its SGR is detectable on both glyph and count.
+	m.config.Icons.AgentState.Working.Color = "#ff0000"
+	icons := m.config.IconSet()
+
+	stats := overviewStats{
+		agents: map[sessionmgr.AgentState]int{sessionmgr.AgentWorking: 3},
+	}
+	out := m.agentChips(icons, stats)
+
+	// TrueColor escape for #ff0000. The glyph and the count are each rendered
+	// via renderAgentStateStyled with the working color, so it appears >=2 times.
+	const esc = "\x1b[38;2;255;0;0m"
+	if n := strings.Count(out, esc); n < 2 {
+		t.Fatalf("working glyph+count should both use #ff0000 (want >=2, got %d)\n%s", n, out)
+	}
+	if !strings.Contains(sessionmgr.StripANSI(out), "3") {
+		t.Fatalf("agent chips missing working count 3\n%s", out)
 	}
 }
