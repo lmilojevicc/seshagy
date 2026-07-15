@@ -159,13 +159,17 @@ func New(opts ...Option) Model {
 	rename.Placeholder = "new name"
 	rename.Prompt = "rename > "
 	rename.CharLimit = 128
+	showPreview := true
+	if cfg.TUI.Preview != nil {
+		showPreview = *cfg.TUI.Preview
+	}
 	m := Model{
 		styles:          stylesFromConfig(cfg),
 		config:          cfg,
 		mux:             mux,
 		terms:           mux.Terms(),
 		source:          cfg.DefaultSource(),
-		showPreview:     true,
+		showPreview:     showPreview,
 		showHelp:        true,
 		searchInput:     search,
 		renameInput:     rename,

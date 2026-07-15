@@ -394,6 +394,53 @@ func TestDimBackgroundRoundTripFalse(t *testing.T) {
 	}
 }
 
+func TestPreviewDefaultTrueWhenMissing(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	path := Path()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	data := []byte("\n[sources]\ndefault = \"sessions\"\n")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	loaded, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if loaded.TUI.Preview == nil || !*loaded.TUI.Preview {
+		t.Fatalf("preview without [tui] = %v, want true", loaded.TUI.Preview)
+	}
+	if cfg := Default(); cfg.TUI.Preview == nil || !*cfg.TUI.Preview {
+		t.Fatalf("default preview = %v, want true", cfg.TUI.Preview)
+	}
+}
+
+func TestPreviewRoundTripFalse(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	cfg := Default()
+	falseVal := false
+	cfg.TUI.Preview = &falseVal
+	if err := Save(cfg); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	data, err := os.ReadFile(Path())
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	if !strings.Contains(string(data), `preview = false`) {
+		t.Fatalf("saved config missing preview = false: %s", data)
+	}
+	loaded, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if loaded.TUI.Preview == nil || *loaded.TUI.Preview {
+		t.Fatalf("loaded preview = %v, want false", loaded.TUI.Preview)
+	}
+}
+
 func TestInputStyleMissingSectionDefaultsPopup(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)

@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/lmilojevicc/seshagy/internal/sessionmgr"
@@ -37,6 +39,42 @@ func TestTUIFirstRefreshSmoke(t *testing.T) {
 	}
 	if cmd == nil {
 		t.Fatal("expected preview command after refresh")
+	}
+}
+
+func TestShowPreviewFollowsConfig(t *testing.T) {
+	writeTUIConfig := func(t *testing.T, body string) {
+		t.Helper()
+		dir := t.TempDir()
+		t.Setenv("XDG_CONFIG_HOME", dir)
+		path := filepath.Join(dir, "seshagy", "config.toml")
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+	}
+
+	// No [tui] section -> default preview ON.
+	writeTUIConfig(t, "[sources]\ndefault = \"sessions\"\n")
+	m := New()
+	if !m.showPreview {
+		t.Fatal("showPreview = false with no [tui] section, want true (default)")
+	}
+
+	// Explicit preview = false -> preview OFF.
+	writeTUIConfig(t, "[tui]\npreview = false\n")
+	m = New()
+	if m.showPreview {
+		t.Fatal("showPreview = true with preview = false, want false")
+	}
+
+	// Explicit preview = true -> preview ON.
+	writeTUIConfig(t, "[tui]\npreview = true\n")
+	m = New()
+	if !m.showPreview {
+		t.Fatal("showPreview = false with preview = true, want true")
 	}
 }
 

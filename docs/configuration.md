@@ -110,6 +110,7 @@ catalog_url = ""           # defaults to the herdr public catalog when empty
 [tui]
 input_style = "popup"        # popup | cmdline
 dim_background = true         # dim the list behind the popup (popup mode only)
+preview = true                # show the preview pane on start (toggle at runtime with p)
 ```
 
 The default `order` lists tabs left→right (`agents` last). `current-agents` is

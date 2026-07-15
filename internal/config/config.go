@@ -46,6 +46,7 @@ type Config struct {
 type TUIConfig struct {
 	InputStyle    string `toml:"input_style"    json:"input_style"`
 	DimBackground *bool  `toml:"dim_background" json:"dim_background"`
+	Preview       *bool  `toml:"preview"        json:"preview"`
 }
 
 type SourcesConfig struct {
@@ -189,7 +190,11 @@ func Default() Config {
 			FD:         IconConfig{Icon: sessionmgr.IconFD + " ", Label: "F", Color: "11"},
 		},
 		TypeFirst: TypeFirstConfig{Enabled: false, Prefix: DefaultPrefix},
-		TUI:       TUIConfig{InputStyle: InputStylePopup, DimBackground: ptrBool(true)},
+		TUI: TUIConfig{
+			InputStyle:    InputStylePopup,
+			DimBackground: ptrBool(true),
+			Preview:       ptrBool(true),
+		},
 	}
 }
 
@@ -277,6 +282,9 @@ func (c *Config) Normalize() {
 	c.TUI.InputStyle = normalizeInputStyle(c.TUI.InputStyle)
 	if c.TUI.DimBackground == nil {
 		c.TUI.DimBackground = ptrBool(true)
+	}
+	if c.TUI.Preview == nil {
+		c.TUI.Preview = ptrBool(true)
 	}
 }
 
