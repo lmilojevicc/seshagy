@@ -1006,7 +1006,7 @@ func TestPrefixBadgeShownWhenArmed(t *testing.T) {
 	}
 }
 
-func TestListTitleShowsFilterQuery(t *testing.T) {
+func TestListBottomBorderShowsFilterQuery(t *testing.T) {
 	m := newTestModel(t)
 	m.source = sessionmgr.ModeSessions
 	m.config.TypeFirst.Enabled = true
@@ -1016,15 +1016,20 @@ func TestListTitleShowsFilterQuery(t *testing.T) {
 	}
 	m.query = "api"
 
-	top := strings.Split(sessionmgr.StripANSI(m.renderListPane(60, 12)), "\n")[0]
-	if !strings.Contains(top, "Sessions (1/2 match · api)") {
-		t.Fatalf("type-first list title missing filter query: %q", top)
+	lines := strings.Split(sessionmgr.StripANSI(m.renderListPane(60, 12)), "\n")
+	top, bottom := lines[0], lines[len(lines)-1]
+	if strings.Contains(top, "· api") {
+		t.Fatalf("type-first list title should not embed query: %q", top)
+	}
+	if !strings.Contains(bottom, "api") {
+		t.Fatalf("type-first list bottom border missing filter query: %q", bottom)
 	}
 
 	m.inputMode = modeSearch
-	top = strings.Split(sessionmgr.StripANSI(m.renderListPane(60, 12)), "\n")[0]
-	if strings.Contains(top, "· api") {
-		t.Fatalf("classic search popup duplicated query in list title: %q", top)
+	lines = strings.Split(sessionmgr.StripANSI(m.renderListPane(60, 12)), "\n")
+	bottom = lines[len(lines)-1]
+	if strings.Contains(bottom, "api") {
+		t.Fatalf("classic search should not put query on bottom border: %q", bottom)
 	}
 }
 

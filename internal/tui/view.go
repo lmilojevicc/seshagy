@@ -468,6 +468,23 @@ func titledTopEdge(title string, w int, borderFG, titleFG lipgloss.TerminalColor
 		border.Render(" "+strings.Repeat("─", dashes)+"╮")
 }
 
+// titledBottomEdge is the bottom-border mirror of titledTopEdge: ╰─ title ──╯.
+func titledBottomEdge(title string, w int, borderFG, titleFG lipgloss.TerminalColor) string {
+	if title == "" || w < 7 {
+		return lipgloss.NewStyle().Foreground(borderFG).
+			Render("╰" + strings.Repeat("─", max(0, w-2)) + "╯")
+	}
+	clamped := clampText(title, w-6)
+	dashes := w - 5 - lipgloss.Width(clamped)
+	if dashes < 1 {
+		dashes = 1
+	}
+	border := lipgloss.NewStyle().Foreground(borderFG)
+	return border.Render("╰─ ") +
+		lipgloss.NewStyle().Foreground(titleFG).Render(clamped) +
+		border.Render(" "+strings.Repeat("─", dashes)+"╯")
+}
+
 // paneWithTitle renders a pane via style (width/height applied as for the
 // other pane renderers) and overlays title onto its top border. The border
 // line color comes from the style's own border foreground; the title text
@@ -513,11 +530,7 @@ func (m Model) renderListPane(width, height int) string {
 			title += "es"
 		}
 	}
-	queryTitle := ""
-	if m.query != "" && m.config.TypeFirst.Enabled && m.inputMode != modeSearch {
-		queryTitle = " · " + clampText(m.query, 21)
-	}
-	title += queryTitle + ")"
+	title += ")"
 	if m.source == sessionmgr.ModeAll {
 		title = fmt.Sprintf(
 			"All (%d · %d %s · %d agents · %d dirs)",
@@ -527,9 +540,6 @@ func (m Model) renderListPane(width, height int) string {
 			counts[sessionmgr.KindAgent],
 			counts[sessionmgr.KindZoxide]+counts[sessionmgr.KindFD],
 		)
-		if queryTitle != "" {
-			title = strings.TrimSuffix(title, ")") + queryTitle + ")"
-		}
 	}
 	if m.source == sessionmgr.ModeAgents {
 		scope := "all"
@@ -540,7 +550,7 @@ func (m Model) renderListPane(width, height int) string {
 				scope = m.currentSessionLabel()
 			}
 		}
-		title = fmt.Sprintf("Agents (%d · %s%s)", len(items), scope, queryTitle)
+		title = fmt.Sprintf("Agents (%d · %s)", len(items), scope)
 		if m.agentsStateFilter != "" {
 			title += " · state: " + string(m.agentsStateFilter)
 		}
@@ -568,7 +578,20 @@ func (m Model) renderListPane(width, height int) string {
 		}
 	}
 	content := trimHeight(strings.Join(lines, "\n"), innerH)
-	return paneWithTitle(s.paneList, s.listTitle, content, title, width, height)
+	box := paneWithTitle(s.paneList, s.listTitle, content, title, width, height)
+	// Type-first: show what's typed on the list's bottom border instead of
+	// crowding the title (clearer on narrow/mobile screens).
+	if m.query != "" && m.config.TypeFirst.Enabled && m.inputMode != modeSearch {
+		boxLines := strings.Split(box, "\n")
+		if w := lipgloss.Width(boxLines[0]); len(boxLines) > 0 && w >= 7 {
+			boxLines[len(boxLines)-1] = titledBottomEdge(
+				clampText(m.query, w-6), w,
+				s.paneList.GetBorderBottomForeground(), s.listTitle,
+			)
+			box = strings.Join(boxLines, "\n")
+		}
+	}
+	return box
 }
 
 func (m Model) renderRow(item sessionmgr.Item, selected bool, width int) string {
