@@ -242,8 +242,8 @@ func TestHandleRefreshMsgStoresErrorInCache(t *testing.T) {
 	if !ok || !errors.Is(entry.err, loadErr) {
 		t.Fatalf("cache err = %v, ok=%v", entry.err, ok)
 	}
-	if got.err == nil || got.err.Error() != "load failed" {
-		t.Fatalf("model err = %v", got.err)
+	if text := latestNotificationText(got); text != "load failed" {
+		t.Fatalf("notification = %q, want load failed", text)
 	}
 }
 
@@ -261,8 +261,11 @@ func TestHandleRefreshMsgSetsStatusFromWarning(t *testing.T) {
 		items:   testItems("session-a", "session-b"),
 		warning: warn,
 	})
-	if got.status != warn {
-		t.Fatalf("status = %q, want warning %q", got.status, warn)
+	if text := latestNotificationText(got); text != warn {
+		t.Fatalf("notification = %q, want warning %q", text, warn)
+	}
+	if sev := latestNotificationSeverity(got); sev != sevWarning {
+		t.Fatalf("severity = %v, want sevWarning", sev)
 	}
 	entry, ok := got.cache[sessionmgr.ModeSessions]
 	if !ok || entry.warning != warn {
@@ -284,8 +287,11 @@ func TestSwitchSourceAppliesCachedWarningStatus(t *testing.T) {
 
 	model, _ := m.switchSource(sessionmgr.ModeZoxide)
 	got := model.(Model)
-	if got.status != warn {
-		t.Fatalf("status = %q, want cached warning %q", got.status, warn)
+	if text := latestNotificationText(got); text != warn {
+		t.Fatalf("notification = %q, want cached warning %q", text, warn)
+	}
+	if sev := latestNotificationSeverity(got); sev != sevWarning {
+		t.Fatalf("severity = %v, want sevWarning", sev)
 	}
 }
 

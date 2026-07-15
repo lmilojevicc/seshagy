@@ -65,13 +65,15 @@ func (m Model) applyCacheEntry(mode sessionmgr.SourceMode) Model {
 		return m
 	}
 	m.items = entry.items
-	m.err = entry.err
 	if entry.err != nil {
-		m.status = entry.err.Error()
+		m.notify(entry.err.Error(), sevError)
 	} else if entry.warning != "" {
-		m.status = entry.warning
+		m.notify(entry.warning, sevWarning)
 	} else {
-		m.status = fmt.Sprintf("loaded %d item%s", len(entry.items), plural(len(entry.items)))
+		m.notify(
+			fmt.Sprintf("loaded %d item%s", len(entry.items), plural(len(entry.items))),
+			sevInfo,
+		)
 	}
 	m.clampCursor()
 	return m
@@ -160,18 +162,16 @@ func (m Model) handleRefreshMsg(msg refreshMsg) (Model, tea.Cmd) {
 
 	m.loading = false
 	if msg.err != nil {
-		m.err = msg.err
-		m.status = msg.err.Error()
+		m.notify(msg.err.Error(), sevError)
 		return m, nil
 	}
-	m.err = nil
 	m.items = msg.items
 	m.currentSession = msg.currentSession
 	m.clampCursor()
 	if msg.warning != "" {
-		m.status = msg.warning
+		m.notify(msg.warning, sevWarning)
 	} else {
-		m.status = fmt.Sprintf("loaded %d item%s", len(msg.items), plural(len(msg.items)))
+		m.notify(fmt.Sprintf("loaded %d item%s", len(msg.items), plural(len(msg.items))), sevInfo)
 	}
 	return m, m.previewForSelection()
 }

@@ -33,11 +33,28 @@ func TestUpdateRefreshMsgForCurrentSource(t *testing.T) {
 	if len(got.items) != 1 || got.items[0].Name != "alpha" {
 		t.Fatalf("items = %#v", got.items)
 	}
-	if got.status != "loaded 1 item" {
-		t.Fatalf("status = %q, want loaded message", got.status)
+	if text := latestNotificationText(got); text != "loaded 1 item" {
+		t.Fatalf("notification = %q, want loaded message", text)
 	}
 	if cmd == nil {
 		t.Fatal("expected preview command after refresh")
+	}
+}
+
+func TestNotificationTickDismissesAfterTTL(t *testing.T) {
+	now := time.Now()
+	m := Model{notifications: []notification{
+		{text: "expired", sev: sevInfo, at: now.Add(-notificationTTL - time.Millisecond)},
+		{text: "fresh", sev: sevInfo, at: now},
+	}}
+
+	model, cmd := m.Update(notificationTickMsg(now))
+	got := model.(Model)
+	if len(got.notifications) != 1 || got.notifications[0].text != "fresh" {
+		t.Fatalf("notifications = %#v, want only fresh", got.notifications)
+	}
+	if cmd == nil {
+		t.Fatal("notification tick did not reschedule")
 	}
 }
 
@@ -51,8 +68,8 @@ func TestUpdateAttachDoneMsgRefreshesAndSetsStatus(t *testing.T) {
 
 	model, cmd := m.Update(attachDoneMsg{})
 	got := model.(Model)
-	if got.status != "returned from tmux" {
-		t.Fatalf("status = %q, want returned from tmux", got.status)
+	if text := latestNotificationText(got); text != "returned from tmux" {
+		t.Fatalf("notification = %q, want returned from tmux", text)
 	}
 	if len(got.cache) != 0 {
 		t.Fatalf("cache not cleared = %#v", got.cache)
@@ -68,11 +85,11 @@ func TestUpdateAttachDoneMsgRecordsError(t *testing.T) {
 
 	model, cmd := m.Update(attachDoneMsg{err: loadErr})
 	got := model.(Model)
-	if !errors.Is(got.err, loadErr) {
-		t.Fatalf("err = %v, want %v", got.err, loadErr)
+	if sev := latestNotificationSeverity(got); sev != sevError {
+		t.Fatalf("severity = %v, want sevError", sev)
 	}
-	if got.status != "attach failed" {
-		t.Fatalf("status = %q", got.status)
+	if text := latestNotificationText(got); text != "attach failed" {
+		t.Fatalf("notification = %q", text)
 	}
 	if cmd == nil {
 		t.Fatal("expected refresh command after attach error")
@@ -91,8 +108,8 @@ func TestUpdateCreateDoneMsgSuccessSchedulesAttach(t *testing.T) {
 		},
 	)
 	got := model.(Model)
-	if got.status != "created session demo" {
-		t.Fatalf("status = %q", got.status)
+	if text := latestNotificationText(got); text != "created session demo" {
+		t.Fatalf("notification = %q", text)
 	}
 	if cmd == nil {
 		t.Fatal("expected attach command after create")
@@ -109,8 +126,8 @@ func TestUpdateCreateDoneMsgSuccessSchedulesAttach(t *testing.T) {
 		},
 	)
 	got = model.(Model)
-	if got.status != "using session existing" {
-		t.Fatalf("status = %q", got.status)
+	if text := latestNotificationText(got); text != "using session existing" {
+		t.Fatalf("notification = %q", text)
 	}
 	if cmd == nil {
 		t.Fatal("expected attach command after reuse")
@@ -123,11 +140,11 @@ func TestUpdateCreateDoneMsgRecordsError(t *testing.T) {
 
 	model, cmd := m.Update(createDoneMsg{err: createErr})
 	got := model.(Model)
-	if !errors.Is(got.err, createErr) {
-		t.Fatalf("err = %v, want %v", got.err, createErr)
+	if sev := latestNotificationSeverity(got); sev != sevError {
+		t.Fatalf("severity = %v, want sevError", sev)
 	}
-	if got.status != "create failed" {
-		t.Fatalf("status = %q", got.status)
+	if text := latestNotificationText(got); text != "create failed" {
+		t.Fatalf("notification = %q", text)
 	}
 	if cmd != nil {
 		t.Fatal("expected no command after create error")
@@ -182,8 +199,8 @@ func TestUpdateYaziDoneMsgSchedulesCreateSession(t *testing.T) {
 	m := newTestModel(t)
 	model, cmd := m.Update(yaziDoneMsg{path: dir})
 	got := model.(Model)
-	if got.err != nil || got.status != "" {
-		t.Fatalf("yazi success = status:%q err:%v", got.status, got.err)
+	if text := latestNotificationText(got); text != "" {
+		t.Fatalf("yazi success notification = %q", text)
 	}
 	if cmd == nil {
 		t.Fatal("expected createSession command after yazi path")
@@ -194,7 +211,7 @@ func TestUpdateYaziDoneMsgSchedulesCreateSession(t *testing.T) {
 	}
 }
 
-func TestUpdateDeleteDoneMsgRecordsKillError(t *testing.T) {
+func TestErrorNotifiedAsError(t *testing.T) {
 	m := New()
 	killErr := errors.New("kill failed")
 
@@ -204,11 +221,11 @@ func TestUpdateDeleteDoneMsgRecordsKillError(t *testing.T) {
 		err:    killErr,
 	})
 	got := model.(Model)
-	if !errors.Is(got.err, killErr) {
-		t.Fatalf("err = %v, want %v", got.err, killErr)
+	if sev := latestNotificationSeverity(got); sev != sevError {
+		t.Fatalf("severity = %v, want sevError", sev)
 	}
-	if got.status != "kill failed" {
-		t.Fatalf("status = %q, want kill failed", got.status)
+	if text := latestNotificationText(got); text != "kill failed" {
+		t.Fatalf("notification = %q, want kill failed", text)
 	}
 	if len(got.cache) != 0 {
 		t.Fatalf("cache not cleared = %#v", got.cache)
@@ -224,14 +241,17 @@ func TestUpdateYaziDoneMsgErrorAndEmptyPath(t *testing.T) {
 
 	model, cmd := m.Update(yaziDoneMsg{err: yaziErr})
 	got := model.(Model)
-	if !errors.Is(got.err, yaziErr) || got.status != "yazi failed" || cmd != nil {
-		t.Fatalf("yazi error = status:%q err:%v cmd:%v", got.status, got.err, cmd)
+	if text := latestNotificationText(got); text != "yazi failed" || cmd != nil {
+		t.Fatalf("yazi error notification = %q cmd:%v", text, cmd)
 	}
 
 	model, cmd = m.Update(yaziDoneMsg{})
 	got = model.(Model)
-	if got.status != "yazi closed without a directory" || cmd != nil {
-		t.Fatalf("empty yazi path = status:%q cmd:%v", got.status, cmd)
+	if text := latestNotificationText(
+		got,
+	); text != "yazi closed without a directory" ||
+		cmd != nil {
+		t.Fatalf("empty yazi path notification = %q cmd:%v", text, cmd)
 	}
 }
 
@@ -245,11 +265,11 @@ func TestUpdateActionDoneMsgRecordsRenameError(t *testing.T) {
 		err:    renameErr,
 	})
 	got := model.(Model)
-	if !errors.Is(got.err, renameErr) {
-		t.Fatalf("err = %v, want %v", got.err, renameErr)
+	if sev := latestNotificationSeverity(got); sev != sevError {
+		t.Fatalf("severity = %v, want sevError", sev)
 	}
-	if got.status != "rename failed" {
-		t.Fatalf("status = %q", got.status)
+	if text := latestNotificationText(got); text != "rename failed" {
+		t.Fatalf("notification = %q", text)
 	}
 	if len(got.cache) != 0 {
 		t.Fatalf("cache not cleared = %#v", got.cache)
@@ -267,8 +287,8 @@ func TestUpdateDeleteDoneMsgSetsStatusAndRefreshes(t *testing.T) {
 
 	model, cmd := m.Update(actionDoneMsg{kind: actionKill, status: "killed session demo"})
 	got := model.(Model)
-	if got.status != "killed session demo" {
-		t.Fatalf("status = %q", got.status)
+	if text := latestNotificationText(got); text != "killed session demo" {
+		t.Fatalf("notification = %q", text)
 	}
 	if len(got.cache) != 0 {
 		t.Fatalf("cache not cleared = %#v", got.cache)

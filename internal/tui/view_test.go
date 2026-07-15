@@ -230,7 +230,7 @@ func TestTabBarSurvivesRefreshAtWidth51(t *testing.T) {
 	m = model.(Model)
 	m.loading = false
 	m.showHelp = true
-	m.status = "loaded 1212 items"
+	m.notify("loaded 1212 items", sevInfo)
 	m.items = make([]sessionmgr.Item, 1212)
 	for i := range m.items {
 		m.items[i] = sessionmgr.Item{Kind: sessionmgr.KindZoxide, Path: "/tmp/x"}
@@ -548,8 +548,8 @@ func TestTypeFirstTypingFiltersAndPrefixRunsActions(t *testing.T) {
 
 	model, _ := m.handleKey(keyMsg("a"))
 	m = model.(Model)
-	if m.query != "a" || m.status != "filter: a" {
-		t.Fatalf("typing should filter immediately, query/status = %q/%q", m.query, m.status)
+	if text := latestNotificationText(m); m.query != "a" || text != "filter: a" {
+		t.Fatalf("typing should filter immediately, query/notification = %q/%q", m.query, text)
 	}
 	if got := m.visibleItems(); len(got) != 1 || got[0].Name != "api" {
 		t.Fatalf("visibleItems after typing = %#v", got)
@@ -562,15 +562,15 @@ func TestTypeFirstTypingFiltersAndPrefixRunsActions(t *testing.T) {
 	}
 }
 
-func TestTypeFirstPrefixIsConfigurableAndUnprefixedActionsWarn(t *testing.T) {
+func TestTypeFirstPrefixIsConfigurableAndUnprefixedActionsNotify(t *testing.T) {
 	m := newTestModel(t)
 	m.config.TypeFirst.Enabled = true
 	m.config.TypeFirst.Prefix = "p"
 
 	model, _ := m.handleKey(ctrlRMsg())
 	m = model.(Model)
-	if m.status != "press p before actions" || !isWarningStatus(m.status) {
-		t.Fatalf("unprefixed non-navigation action status = %q", m.status)
+	if text := latestNotificationText(m); text != "press p before actions" {
+		t.Fatalf("unprefixed non-navigation action notification = %q", text)
 	}
 
 	model, _ = m.handleKey(keyMsg("p"))
@@ -587,10 +587,13 @@ func TestTypeFirstAllowsEnterWithoutPrefix(t *testing.T) {
 
 	model, _ := m.handleKey(enterMsg())
 	m = model.(Model)
-	if m.status != "creating session from /tmp/demo" || m.prefixArmed || m.query != "" {
+	if text := latestNotificationText(
+		m,
+	); text != "creating session from /tmp/demo" || m.prefixArmed ||
+		m.query != "" {
 		t.Fatalf(
-			"enter should dispatch action without prefix, status=%q armed=%v query=%q",
-			m.status,
+			"enter should dispatch action without prefix, notification=%q armed=%v query=%q",
+			text,
 			m.prefixArmed,
 			m.query,
 		)
@@ -625,8 +628,9 @@ func TestYaziBlockedInsideTmuxPopup(t *testing.T) {
 	if cmd != nil {
 		t.Fatal("yazi should not launch inside tmux popup")
 	}
-	if m.err == nil || m.status != "cannot open yazi inside a tmux popup" {
-		t.Fatalf("popup yazi status/err = %q/%v", m.status, m.err)
+	if text := latestNotificationText(m); text != "cannot open yazi inside a tmux popup" ||
+		latestNotificationSeverity(m) != sevError {
+		t.Fatalf("popup yazi notification/severity = %q/%v", text, latestNotificationSeverity(m))
 	}
 }
 
@@ -700,14 +704,17 @@ func TestManualModePromptInClassicSavesWithoutHookScan(t *testing.T) {
 		t.Fatal("opening manual input-mode prompt should not run a command")
 	}
 	m = model.(Model)
-	if !m.setup.active || !m.setup.manual || m.setup.cursor != 1 ||
-		m.status != "change input mode" {
+	if text := latestNotificationText(
+		m,
+	); !m.setup.active || !m.setup.manual ||
+		m.setup.cursor != 1 ||
+		text != "change input mode" {
 		t.Fatalf(
-			"manual prompt state = prompt:%v manual:%v cursor:%d status:%q",
+			"manual prompt state = prompt:%v manual:%v cursor:%d notification:%q",
 			m.setup.active,
 			m.setup.manual,
 			m.setup.cursor,
-			m.status,
+			text,
 		)
 	}
 	if out := sessionmgr.StripANSI(
@@ -766,8 +773,8 @@ func TestManualModePromptEscCancelsWithoutSaving(t *testing.T) {
 			m.config,
 		)
 	}
-	if m.status != "input mode change cancelled" || !isWarningStatus(m.status) {
-		t.Fatalf("manual cancel status = %q", m.status)
+	if text := latestNotificationText(m); text != "input mode change cancelled" {
+		t.Fatalf("manual cancel notification = %q", text)
 	}
 	if appconfig.Exists() {
 		t.Fatal("manual cancel should not write config")
@@ -921,7 +928,7 @@ func TestFooterIsHelpOnlyByDefault(t *testing.T) {
 	m := newTestModel(t)
 	m.width = 120
 	m.source = sessionmgr.ModeAll
-	m.status = "loaded 1171 items"
+	m.notify("loaded 1171 items", sevInfo)
 	m.showHelp = true
 
 	footer := m.renderFooter()
@@ -974,6 +981,38 @@ func TestFooterIsHelpOnlyByDefault(t *testing.T) {
 	}
 }
 
+func TestViewRendersTopRightToast(t *testing.T) {
+	m := newTestModel(t)
+	m.width = 100
+	m.height = 24
+	m.loading = false
+	m.showPreview = false
+	m.source = sessionmgr.ModeSessions
+	m.items = []sessionmgr.Item{{Kind: sessionmgr.KindSession, Name: "dashboard-row"}}
+	m.notify("toast feedback", sevInfo)
+
+	clean := sessionmgr.StripANSI(m.View())
+	lines := strings.Split(clean, "\n")
+	toastRow := -1
+	toastColumn := -1
+	for i, line := range lines[:min(5, len(lines))] {
+		if column := strings.Index(line, "toast feedback"); column >= 0 {
+			toastRow = i
+			toastColumn = column
+			break
+		}
+	}
+	if toastRow < 0 {
+		t.Fatalf("toast not rendered near top\n%s", clean)
+	}
+	if toastColumn < m.width/2 {
+		t.Fatalf("toast column = %d, want right half of %d-column view", toastColumn, m.width)
+	}
+	if !strings.Contains(clean, "dashboard-row") {
+		t.Fatalf("dashboard row disappeared behind toast\n%s", clean)
+	}
+}
+
 func TestFooterHelpShowsSourceAndModeKeys(t *testing.T) {
 	m := newTestModel(t)
 	// Wide enough that the full footer help renders without clampText
@@ -1022,32 +1061,6 @@ func TestFooterHelpShowsSourceAndModeKeys(t *testing.T) {
 	for _, want := range []string{"m mode", "r refresh", "x kill"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("prefix-armed footer should mention %q\n%s", want, out)
-		}
-	}
-}
-
-func TestFooterWarningStatusesUseWarningStyle(t *testing.T) {
-	s := defaultStyles()
-	warnings := []string{
-		"no integrations selected",
-		"hook installation skipped",
-		"input mode change cancelled",
-		"rename cancelled",
-		"yazi closed without a directory",
-		"nothing selected",
-		"delete only applies to sessions",
-		"rename only applies to sessions and agents",
-	}
-	for _, status := range warnings {
-		style := footerStatusStyle(s, status, false)
-		if style.GetForeground() != s.warning.GetForeground() || !style.GetBold() {
-			t.Fatalf(
-				"footerStatusStyle(%q) = foreground %v bold %v, want warning foreground %v bold true",
-				status,
-				style.GetForeground(),
-				style.GetBold(),
-				s.warning.GetForeground(),
-			)
 		}
 	}
 }
@@ -1121,38 +1134,6 @@ func enterMsg() tea.KeyMsg {
 
 func ctrlRMsg() tea.KeyMsg {
 	return tea.KeyMsg{Type: tea.KeyCtrlR}
-}
-
-func TestFooterStatusStylesKeepErrorsRedAndNormalMuted(t *testing.T) {
-	s := defaultStyles()
-	if style := footerStatusStyle(
-		s,
-		"loaded 1171 items",
-		false,
-	); style.GetForeground() != s.muted.GetForeground() ||
-		style.GetBold() != s.muted.GetBold() {
-		t.Fatalf(
-			"normal status style = foreground %v bold %v, want muted foreground %v bold %v",
-			style.GetForeground(),
-			style.GetBold(),
-			s.muted.GetForeground(),
-			s.muted.GetBold(),
-		)
-	}
-	if style := footerStatusStyle(
-		s,
-		"nothing selected",
-		true,
-	); style.GetForeground() != s.danger.GetForeground() ||
-		style.GetBold() != s.danger.GetBold() {
-		t.Fatalf(
-			"error status style = foreground %v bold %v, want danger foreground %v bold %v",
-			style.GetForeground(),
-			style.GetBold(),
-			s.danger.GetForeground(),
-			s.danger.GetBold(),
-		)
-	}
 }
 
 func TestDefaultStylesUseTerminalPalette(t *testing.T) {

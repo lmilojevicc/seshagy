@@ -34,10 +34,12 @@ func (m Model) View() string {
 	}
 	s := m.styles
 	if m.setup.active {
-		return s.app.Width(m.width).Height(m.height).Render(m.renderSetupPrompt(m.height))
+		frame := s.app.Width(m.width).Height(m.height).Render(m.renderSetupPrompt(m.height))
+		return m.overlayNotifications(frame)
 	}
 	if m.installMenu.active {
-		return s.app.Width(m.width).Height(m.height).Render(m.renderInstallMenu(m.height))
+		frame := s.app.Width(m.width).Height(m.height).Render(m.renderInstallMenu(m.height))
+		return m.overlayNotifications(frame)
 	}
 	header := m.renderTopRow()
 	footer := m.renderFooter()
@@ -48,7 +50,7 @@ func (m Model) View() string {
 	body := m.renderBody(bodyH)
 	frame := joinFrame(header, body, footer, m.width, m.height)
 	if !m.inputPopupActive() {
-		return frame
+		return m.overlayNotifications(frame)
 	}
 	// Search/rename input floats as a centered popup over a dimmed copy of
 	// the normal frame. Each bg line is independently grayed so the dim
@@ -66,7 +68,64 @@ func (m Model) View() string {
 	popup := m.renderInputPopup()
 	x := max(0, (m.width-lipgloss.Width(popup))/2)
 	y := max(0, (m.height-lipgloss.Height(popup))/2)
-	return overlay(bg, popup, x, y)
+	return m.overlayNotifications(overlay(bg, popup, x, y))
+}
+
+func (m Model) overlayNotifications(frame string) string {
+	toast := m.renderNotificationToast(time.Now())
+	if toast == "" {
+		return frame
+	}
+	x := max(0, m.width-lipgloss.Width(toast)-1)
+	return overlay(frame, toast, x, 1)
+}
+
+func (m Model) renderNotificationToast(now time.Time) string {
+	live := make([]notification, 0, len(m.notifications))
+	cutoff := now.Add(-notificationTTL)
+	for _, n := range m.notifications {
+		if n.at.After(cutoff) {
+			live = append(live, n)
+		}
+	}
+	if len(live) == 0 {
+		return ""
+	}
+
+	maxDisplayW := min(max(12, m.width*2/5), max(1, m.width-2))
+	minDisplayW := min(12, maxDisplayW)
+	naturalW := 0
+	rawLines := make([]string, len(live))
+	for i, n := range live {
+		marker := "•"
+		switch n.sev {
+		case sevWarning:
+			marker = "!"
+		case sevError:
+			marker = "×"
+		}
+		text := strings.NewReplacer("\n", " ", "\r", " ").Replace(n.text)
+		rawLines[i] = marker + " " + text
+		naturalW = max(naturalW, lipgloss.Width(rawLines[i]))
+	}
+	displayW := min(max(naturalW+2, minDisplayW), maxDisplayW)
+	contentW := max(1, displayW-2)
+	lines := make([]string, len(live))
+	for i, n := range live {
+		style := m.styles.muted
+		switch n.sev {
+		case sevWarning:
+			style = m.styles.warning
+		case sevError:
+			style = m.styles.danger
+		}
+		lines[i] = style.Render(clampText(rawLines[i], contentW))
+	}
+	return lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(m.styles.muted.GetForeground()).
+		Width(contentW).
+		Render(strings.Join(lines, "\n"))
 }
 
 // inputPopupActive reports whether the search/rename text input is currently
@@ -814,37 +873,6 @@ func (m Model) renderFooter() string {
 		return inputLine + "\n" + helpTile
 	}
 	return helpTile
-}
-
-func footerStatusStyle(s styles, status string, hasError bool) lipgloss.Style {
-	if hasError {
-		return s.danger
-	}
-	if isWarningStatus(status) {
-		return s.warning
-	}
-	return s.muted
-}
-
-func isWarningStatus(status string) bool {
-	status = strings.ToLower(strings.TrimSpace(status))
-	if strings.HasPrefix(status, "press ") && strings.HasSuffix(status, " before actions") {
-		return true
-	}
-	switch status {
-	case "no integrations selected",
-		"hook installation skipped",
-		"input mode change cancelled",
-		"rename cancelled",
-		"yazi closed without a directory",
-		"nothing selected":
-		return true
-	default:
-		// These statuses are parameterized by backend terminology (session vs
-		// workspace); match on prefix so they classify under any backend.
-		return strings.HasPrefix(status, "delete only applies to ") ||
-			strings.HasPrefix(status, "rename only applies to ")
-	}
 }
 
 func renderTmuxState(s styles, icons sessionmgr.IconSet, attached bool) string {

@@ -31,8 +31,8 @@ func TestTUIFirstRefreshSmoke(t *testing.T) {
 	if len(m.items) == 0 {
 		t.Fatal("expected items after refresh")
 	}
-	if m.status == "" {
-		t.Fatal("expected non-empty status after refresh")
+	if latestNotificationText(m) == "" {
+		t.Fatal("expected a notification after refresh")
 	}
 	if m.View() == "" {
 		t.Fatal("expected non-empty view after refresh")
@@ -40,6 +40,35 @@ func TestTUIFirstRefreshSmoke(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("expected preview command after refresh")
 	}
+}
+
+func TestNotifyPushesAndTrimsToThree(t *testing.T) {
+	m := Model{}
+	for _, text := range []string{"one", "two", "three", "four"} {
+		m.notify(text, sevInfo)
+	}
+	if len(m.notifications) != 3 {
+		t.Fatalf("notifications = %d, want 3", len(m.notifications))
+	}
+	for i, want := range []string{"two", "three", "four"} {
+		if got := m.notifications[i].text; got != want {
+			t.Fatalf("notification %d = %q, want %q", i, got, want)
+		}
+	}
+}
+
+func latestNotificationText(m Model) string {
+	if len(m.notifications) == 0 {
+		return ""
+	}
+	return m.notifications[len(m.notifications)-1].text
+}
+
+func latestNotificationSeverity(m Model) notifSev {
+	if len(m.notifications) == 0 {
+		return sevInfo
+	}
+	return m.notifications[len(m.notifications)-1].sev
 }
 
 func TestShowPreviewFollowsConfig(t *testing.T) {

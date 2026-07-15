@@ -16,11 +16,25 @@ import (
 
 type inputMode int
 
+type notifSev int
+
 const (
 	modeNormal inputMode = iota
 	modeSearch
 	modeRename
 )
+
+const (
+	sevInfo notifSev = iota
+	sevWarning
+	sevError
+)
+
+type notification struct {
+	text string
+	sev  notifSev
+	at   time.Time
+}
 
 type Model struct {
 	styles styles
@@ -47,13 +61,12 @@ type Model struct {
 	renameSession string
 	inputMode     inputMode
 
-	preview     string
-	previewKey  string
-	showPreview bool
-	showHelp    bool
-	loading     bool
-	status      string
-	err         error
+	preview       string
+	previewKey    string
+	showPreview   bool
+	showHelp      bool
+	loading       bool
+	notifications []notification
 
 	agentsCurrentOnly bool
 	currentSession    string
@@ -192,8 +205,7 @@ func New(opts ...Option) Model {
 	m.refreshGen[m.source] = 1
 	m.inflightRefresh[m.source] = 1
 	if cfgErr != nil {
-		m.err = cfgErr
-		m.status = cfgErr.Error()
+		m.notify(cfgErr.Error(), sevError)
 	}
 	for _, opt := range opts {
 		opt(&m)
@@ -215,6 +227,7 @@ func (m Model) Init() tea.Cmd {
 		startupInstallMenuCmd(m.config),
 		refreshCatalogsCmd(m.config),
 		tickCmd(),
+		notificationTickCmd(),
 	}
 	// Keep the ModeAll cache warm so the overview hero band shows correct
 	// counts even when another source tab is active on launch.
@@ -227,6 +240,13 @@ func (m Model) Init() tea.Cmd {
 		cmds = append(cmds, ephemeralTickCmd())
 	}
 	return tea.Batch(cmds...)
+}
+
+func (m *Model) notify(text string, sev notifSev) {
+	m.notifications = append(m.notifications, notification{text: text, sev: sev, at: time.Now()})
+	if len(m.notifications) > 3 {
+		m.notifications = m.notifications[len(m.notifications)-3:]
+	}
 }
 
 func (m *Model) clampCursor() {
