@@ -110,39 +110,49 @@ func TestInputPopupInactiveForCmdline(t *testing.T) {
 	}
 }
 
-func TestFooterCmdlineShowsTextInputOnLine1(t *testing.T) {
+func TestFooterCmdlineShowsTextInputInTile(t *testing.T) {
 	m := newTestModel(t)
 	m.config.TUI.InputStyle = appconfig.InputStyleCmdline
 	m.width = 80
 	m.height = 32
 
-	// Search mode: line 1 is the textinput (prompt "/ " + value), not the
-	// status line. The status style adds 1-col padding, so trim before checking.
+	// Search mode: the footer stacks the SEARCH input tile (3 lines) above the
+	// HELP tile (3 lines). The textinput sits on the tile's content line.
 	m.inputMode = modeSearch
 	m.searchInput.SetValue("my-project")
 	footer := sessionmgr.StripANSI(m.renderFooter())
 	lines := strings.Split(footer, "\n")
-	if len(lines) != 4 {
-		t.Fatalf("footer lines = %d, want 4 (input + HELP tile)\n%s", len(lines), footer)
+	if len(lines) != 6 {
+		t.Fatalf("footer lines = %d, want 6 (SEARCH tile + HELP tile)\n%s", len(lines), footer)
 	}
-	if trimmed := strings.TrimSpace(lines[0]); !strings.HasPrefix(trimmed, "/ my-project") {
-		t.Fatalf("cmdline search line 1 = %q, want to start with / my-project", trimmed)
+	if !strings.Contains(lines[0], "SEARCH") {
+		t.Fatalf("cmdline search top border missing SEARCH title: %q", lines[0])
 	}
-	if strings.Contains(lines[0], "ready") {
-		t.Fatalf("cmdline line 1 should not contain status text: %q", lines[0])
+	if !strings.Contains(lines[1], "/ my-project") {
+		t.Fatalf("cmdline search input = %q, want to contain / my-project", lines[1])
+	}
+	if strings.Contains(lines[1], "ready") {
+		t.Fatalf("cmdline input line should not contain status text: %q", lines[1])
 	}
 
-	// Rename mode: line 1 starts with the old name + " -> ".
+	// Rename mode: content line starts with the old name + " -> ".
 	m.inputMode = modeRename
 	m.renameFrom = "old-name"
 	m.renameInput.SetValue("new-name")
 	footer = sessionmgr.StripANSI(m.renderFooter())
 	lines = strings.Split(footer, "\n")
-	if len(lines) != 4 {
-		t.Fatalf("rename footer lines = %d, want 4 (input + HELP tile)\n%s", len(lines), footer)
+	if len(lines) != 6 {
+		t.Fatalf(
+			"rename footer lines = %d, want 6 (RENAME tile + HELP tile)\n%s",
+			len(lines),
+			footer,
+		)
 	}
-	if !strings.Contains(lines[0], "old-name -> ") || !strings.Contains(lines[0], "new-name") {
-		t.Fatalf("cmdline rename line 1 = %q, want old-name -> new-name", lines[0])
+	if !strings.Contains(lines[0], "RENAME") {
+		t.Fatalf("cmdline rename top border missing RENAME title: %q", lines[0])
+	}
+	if !strings.Contains(lines[1], "old-name -> ") || !strings.Contains(lines[1], "new-name") {
+		t.Fatalf("cmdline rename input = %q, want old-name -> new-name", lines[1])
 	}
 
 	// No footer line should exceed the safe width.
@@ -150,6 +160,47 @@ func TestFooterCmdlineShowsTextInputOnLine1(t *testing.T) {
 		if w := lipgloss.Width(line); w > safeWidth(m.width) {
 			t.Fatalf("cmdline footer line %d width = %d, want at most %d", i, w, safeWidth(m.width))
 		}
+	}
+}
+
+func TestCmdlineInputStyleHasFieldsetTitle(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		mode  inputMode
+		title string
+	}{
+		{name: "search", mode: modeSearch, title: "SEARCH"},
+		{name: "rename", mode: modeRename, title: "RENAME"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			m := newTestModel(t)
+			m.config.TUI.InputStyle = appconfig.InputStyleCmdline
+			m.width, m.height = 120, 32
+			m.inputMode = tt.mode
+			m.renameFrom = "old-name"
+			m.searchInput.SetValue("proj")
+			m.renameInput.SetValue("new-name")
+
+			view := sessionmgr.StripANSI(m.View())
+			// The input tile title sits on its fieldset top edge (╭─ TITLE ──╮).
+			var edge string
+			for _, line := range strings.Split(view, "\n") {
+				if strings.HasPrefix(line, "╭─ ") && strings.Contains(line, tt.title) {
+					edge = line
+					break
+				}
+			}
+			if edge == "" {
+				t.Fatalf("cmdline view missing %q fieldset title edge\n%s", tt.title, view)
+			}
+			if !strings.HasSuffix(edge, "╮") {
+				t.Fatalf("cmdline %q fieldset edge not closed: %q", tt.title, edge)
+			}
+			// The HELP tile must still render beneath the input tile.
+			if !strings.Contains(view, "HELP") {
+				t.Fatalf("cmdline view missing HELP tile\n%s", view)
+			}
+		})
 	}
 }
 

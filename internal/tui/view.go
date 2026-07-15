@@ -866,26 +866,31 @@ func (m Model) renderFooter() string {
 	// loaded/refreshing status, errors) is gone because the overview tiles now
 	// carry the counts and active source. The one exception is cmdline input
 	// style: while actively searching/renaming, render the text input as a
-	// one-line footer above the help (popup style uses its own overlay).
+	// titled tile above the help (popup style uses its own overlay).
 	footerW := safeWidth(m.width)
-	contentW := max(1, footerW-2)
+	contentW := max(1, footerW-4)
 	helpLine := clampText(help, max(1, footerW-4))
 	helpTile := paneWithTitle(s.tileHelp, s.helpTileTitle, helpLine, "HELP", footerW, 0)
 	if (m.inputMode == modeSearch || m.inputMode == modeRename) &&
 		m.config.TUI.InputStyle == appconfig.InputStyleCmdline {
+		var title string
 		var ti textinput.Model
 		switch m.inputMode {
 		case modeSearch:
+			title = "SEARCH"
 			ti = m.searchInput
 		case modeRename:
+			title = "RENAME"
 			ti = m.renameInput
 			ti.Prompt = clampText(m.renameFrom, contentW/2) + " -> "
 		}
-		if w := contentW - lipgloss.Width(ti.Prompt); w > 0 {
+		// Reserve 1 cell for the textinput cursor: View() renders prompt + Width + 1.
+		if w := contentW - lipgloss.Width(ti.Prompt) - 1; w > 0 {
 			ti.Width = w
 		}
 		inputLine := clampText(ti.View(), contentW)
-		return inputLine + "\n" + helpTile
+		inputTile := paneWithTitle(s.panePopup, s.helpTileTitle, inputLine, title, footerW, 0)
+		return inputTile + "\n" + helpTile
 	}
 	return helpTile
 }

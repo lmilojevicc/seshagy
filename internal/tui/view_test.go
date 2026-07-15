@@ -1078,15 +1078,18 @@ func TestFooterIsHelpOnlyByDefault(t *testing.T) {
 	m.inputMode = modeSearch
 	m.searchInput.SetValue("proj")
 	cl := strings.Split(sessionmgr.StripANSI(m.renderFooter()), "\n")
-	if len(cl) != 4 {
+	if len(cl) != 6 {
 		t.Fatalf(
-			"cmdline search footer should have input + HELP tile (4 lines), got %d\n%s",
+			"cmdline search footer should have SEARCH tile + HELP tile (6 lines), got %d\n%s",
 			len(cl),
 			cl,
 		)
 	}
-	if !strings.Contains(cl[0], "proj") {
-		t.Fatalf("cmdline search input not rendered above help\n%s", cl[0])
+	if !strings.Contains(strings.Join(cl, "\n"), "proj") {
+		t.Fatalf("cmdline search input not rendered above help\n%s", cl)
+	}
+	if !strings.Contains(cl[0], "SEARCH") {
+		t.Fatalf("cmdline search top border missing SEARCH title: %q", cl[0])
 	}
 }
 
