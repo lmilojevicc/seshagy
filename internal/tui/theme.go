@@ -34,6 +34,7 @@ type styles struct {
 	itemName           lipgloss.Style
 	pane               lipgloss.Style
 	panePopup          lipgloss.Style
+	paneInput          lipgloss.Style
 	paneList           lipgloss.Style
 	paneDetail         lipgloss.Style
 	panePreview        lipgloss.Style
@@ -130,6 +131,10 @@ func stylesFromConfig(cfg appconfig.Config) styles {
 	s.listTitle = themeColor(colors.ListBorderTitle, listBorder)
 	s.metadataTitle = themeColor(colors.MetadataBorderTitle, metadataBorder)
 	s.previewTitle = themeColor(colors.PreviewBorderTitle, previewBorder)
+	// Search/rename input popup border matches the dashboard tiles by default
+	// (inherits the base border via config normalization) but stays themeable.
+	inputBorder := themeColor(colors.InputBorder, border)
+	s.paneInput = s.pane.BorderForeground(inputBorder)
 	// Overview hero tiles.
 	workspaceTileBorder := themeColor(colors.WorkspaceTileBorder, border)
 	agentTileBorder := themeColor(colors.AgentTileBorder, border)

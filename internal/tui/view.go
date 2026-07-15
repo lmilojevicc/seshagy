@@ -151,7 +151,7 @@ func (m Model) renderInputPopup() string {
 	if boxW < 30 {
 		boxW = 30
 	}
-	// panePopup carries a rounded border (2 cols) + 0,1 padding (2 cols).
+	// paneInput carries a rounded border (2 cols) + 0,1 padding (2 cols).
 	contentW := boxW - 4
 	if contentW < 1 {
 		contentW = 1
@@ -177,7 +177,7 @@ func (m Model) renderInputPopup() string {
 		help = "enter to rename · esc to cancel"
 	}
 	content := inputView + "\n" + clampText(s.muted.Render(help), contentW)
-	return paneWithTitle(s.panePopup, s.helpTileTitle, content, title, boxW, 0)
+	return paneWithTitle(s.paneInput, s.helpTileTitle, content, title, boxW, 0)
 }
 
 func (m Model) renderSetupPrompt(height int) string {
@@ -912,7 +912,7 @@ func (m Model) renderFooter() string {
 			ti.Width = w
 		}
 		inputLine := clampText(ti.View(), contentW)
-		inputTile := paneWithTitle(s.panePopup, s.helpTileTitle, inputLine, title, footerW, 0)
+		inputTile := paneWithTitle(s.paneInput, s.helpTileTitle, inputLine, title, footerW, 0)
 		return inputTile + "\n" + helpTile
 	}
 	return helpTile

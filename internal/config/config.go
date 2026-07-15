@@ -82,6 +82,7 @@ type ThemeColorsConfig struct {
 	ListBorderTitle     string `toml:"list_border_title"     json:"list_border_title"`
 	MetadataBorderTitle string `toml:"metadata_border_title" json:"metadata_border_title"`
 	PreviewBorderTitle  string `toml:"preview_border_title"  json:"preview_border_title"`
+	InputBorder         string `toml:"input_border"          json:"input_border"`
 
 	// Overview hero tiles (workspaces + agents).
 	WorkspaceTileBorder string `toml:"workspace_tile_border" json:"workspace_tile_border"`
@@ -351,6 +352,11 @@ func normalizeThemeColors(colors *ThemeColorsConfig, defaults ThemeColorsConfig)
 	}
 	if strings.TrimSpace(colors.PreviewBorderTitle) == "" {
 		colors.PreviewBorderTitle = colors.PreviewBorder
+	}
+	// Search/rename input popup border defaults to the base border so it matches
+	// the dashboard tiles out of the box while staying independently themeable.
+	if strings.TrimSpace(colors.InputBorder) == "" {
+		colors.InputBorder = colors.Border
 	}
 	// Overview hero tiles inherit border / popup_title so the default look is
 	// unchanged unless themed.

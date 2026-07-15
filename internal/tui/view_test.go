@@ -989,6 +989,65 @@ func TestRenameSearchPopupHasFieldsetTitle(t *testing.T) {
 	}
 }
 
+// TestInputPopupBorderMatchesTiles verifies the search/rename input popup uses
+// the same default border color as the dashboard tiles, not the distinct popup
+// mauve. Both render paths (renderInputPopup's centered popup and the cmdline
+// tile in renderFooter) draw s.paneInput, whose border is the configurable
+// input_border token defaulting to the base border.
+func TestInputPopupBorderMatchesTiles(t *testing.T) {
+	borderSides := func(st lipgloss.Style) map[string]lipgloss.TerminalColor {
+		return map[string]lipgloss.TerminalColor{
+			"top":    st.GetBorderTopForeground(),
+			"right":  st.GetBorderRightForeground(),
+			"bottom": st.GetBorderBottomForeground(),
+			"left":   st.GetBorderLeftForeground(),
+		}
+	}
+
+	// Default config: input border inherits the base border and matches the tiles.
+	s := defaultStyles()
+	tileDefault := s.pane.GetBorderTopForeground()
+	listTile := s.paneList.GetBorderTopForeground()
+	popupMauve := s.panePopup.GetBorderTopForeground()
+	for side, got := range borderSides(s.paneInput) {
+		if got != tileDefault {
+			t.Fatalf(
+				"default input popup %s border = %v, want base tile border %v",
+				side,
+				got,
+				tileDefault,
+			)
+		}
+		if got != listTile {
+			t.Fatalf(
+				"default input popup %s border = %v, want list tile border %v",
+				side,
+				got,
+				listTile,
+			)
+		}
+		if got == popupMauve {
+			t.Fatalf(
+				"default input popup %s border matches the distinct popup mauve %v",
+				side,
+				popupMauve,
+			)
+		}
+	}
+
+	// input_border is independently themeable and overrides the default without
+	// leaking into the list tile (which still follows the base border).
+	cfg := appconfig.Default()
+	cfg.Theme.Colors.InputBorder = "#1e1e2e"
+	themed := stylesFromConfig(cfg)
+	if got := themed.paneInput.GetBorderTopForeground(); got != lipgloss.Color("#1e1e2e") {
+		t.Fatalf("themed input popup border = %v, want #1e1e2e", got)
+	}
+	if got := themed.paneList.GetBorderTopForeground(); got == lipgloss.Color("#1e1e2e") {
+		t.Fatalf("themed input border leaked into the list tile border")
+	}
+}
+
 func TestPrefixBadgeShownWhenArmed(t *testing.T) {
 	m := newTestModel(t)
 	m.width = 180
