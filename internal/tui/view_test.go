@@ -873,6 +873,45 @@ func TestTypeFirstManualModePromptRequiresPrefix(t *testing.T) {
 	}
 }
 
+// TestShortHeightDoesNotTruncateFooter verifies the detail/preview stack
+// respects the available body height and leaves the complete HELP tile visible.
+func TestShortHeightDoesNotTruncateFooter(t *testing.T) {
+	for _, height := range []int{14, 16, 18} {
+		t.Run(fmt.Sprint(height), func(t *testing.T) {
+			m := newTestModel(t)
+			m.width, m.height = 120, height
+			m.source = sessionmgr.ModeAll
+			m.showPreview = true
+			m.items = []sessionmgr.Item{{
+				Kind:     sessionmgr.KindSession,
+				Name:     "demo",
+				Path:     "/tmp/demo",
+				Windows:  2,
+				Activity: time.Now(),
+				Created:  time.Now(),
+			}}
+
+			view := m.View()
+			if got := lipgloss.Height(view); got > m.height {
+				t.Fatalf("View() height = %d, terminal height = %d", got, m.height)
+			}
+			lines := strings.Split(sessionmgr.StripANSI(view), "\n")
+			footerH := lipgloss.Height(m.renderFooter())
+			if len(lines) < footerH {
+				t.Fatalf("View() has %d lines, footer needs %d", len(lines), footerH)
+			}
+			footer := strings.Join(lines[len(lines)-footerH:], "\n")
+			if !strings.Contains(footer, "HELP") {
+				t.Fatalf(
+					"HELP footer truncated at height %d\n%s",
+					height,
+					sessionmgr.StripANSI(view),
+				)
+			}
+		})
+	}
+}
+
 // TestFooterIsHelpOnlyByDefault verifies the footer is just the help line in
 // the default (popup) input style — no backend indicator and no status message
 // ("ready"/"loaded …"/"refreshing…"). Those used to be a status strip above the

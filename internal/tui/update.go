@@ -183,10 +183,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m, refresh = m.beginRefresh(m.source, true)
 		return m, tea.Batch(refresh, m.previewForSelection())
 	case actionDoneMsg:
+		if msg.kind == actionKill {
+			m.killInFlight = false
+		}
 		if msg.err != nil {
 			m.err = msg.err
 			m.status = msg.err.Error()
-			m.killInFlight = false
 			m = m.invalidateAllCaches()
 			var refresh tea.Cmd
 			m, refresh = m.beginRefresh(m.source, true)
@@ -194,7 +196,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.err = nil
 		m.status = msg.status
-		m.killInFlight = false
 		m = m.invalidateAllCaches()
 		var refresh tea.Cmd
 		m, refresh = m.beginRefresh(m.source, true)

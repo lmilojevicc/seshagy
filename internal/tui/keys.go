@@ -541,6 +541,9 @@ func (m Model) deleteSelected() (tea.Model, tea.Cmd) {
 	}
 	switch item.Kind {
 	case sessionmgr.KindSession:
+		if m.killInFlight {
+			return m, nil
+		}
 		m.status = m.terms.KillVerb + " " + m.terms.SessionNoun + " " + item.Name
 		m.killInFlight = true
 		return m, deleteSessionCmd(m.mux, item)

@@ -113,7 +113,16 @@ type previewMsg struct {
 	err     error
 }
 
+type actionKind string
+
+const (
+	actionKill        actionKind = "kill"
+	actionRename      actionKind = "rename"
+	actionAgentRename actionKind = "agentRename"
+)
+
 type actionDoneMsg struct {
+	kind   actionKind
 	status string
 	err    error
 }

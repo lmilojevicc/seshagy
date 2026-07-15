@@ -587,18 +587,21 @@ func (m Model) renderRightPane(width, height int) string {
 		return m.renderDetailPane(width, height)
 	}
 	// The detail pane adapts to its content (no trailing blank padding); the
-	// preview pane fills the remainder. Cap detail height so the preview keeps
-	// a usable minimum even when the metadata body is long.
+	// preview pane fills the remainder. At short heights, cap the detail tile
+	// so the preview keeps a three-row floor and the stacked panes never exceed
+	// the body height passed down by View.
+	const (
+		paneGapH    = 1
+		previewMinH = 3
+	)
 	detail := m.renderDetailPane(width, 0)
 	detailH := lipgloss.Height(detail)
-	if maxDetail := height - 6; maxDetail > 0 && detailH > maxDetail {
-		detail = m.renderDetailPane(width, maxDetail)
+	maxDetailH := height - paneGapH - previewMinH
+	if detailH > maxDetailH {
+		detail = m.renderDetailPane(width, maxDetailH)
 		detailH = lipgloss.Height(detail)
 	}
-	previewH := height - detailH - 1
-	if previewH < 5 {
-		previewH = 5
-	}
+	previewH := height - detailH - paneGapH
 	preview := m.renderPreviewPane(width, previewH)
 	return lipgloss.JoinVertical(lipgloss.Left, detail, "", preview)
 }
@@ -618,7 +621,7 @@ func (m Model) renderDetailPane(width, height int) string {
 	// height <= 0 means "size to content": render at the body's natural height
 	// (no trailing padding) so the preview pane can fill the remainder.
 	if height > 0 {
-		content = trimHeight(content, max(4, height-2))
+		content = trimHeight(content, max(1, height-2))
 	}
 	return paneWithTitle(s.paneDetail, s.metadataTitle, content, title, width, height)
 }
@@ -701,7 +704,7 @@ func (m Model) detailLines(item sessionmgr.Item) []string {
 func (m Model) renderPreviewPane(width, height int) string {
 	s := m.styles
 	innerW := max(10, width-4)
-	innerH := max(4, height-2)
+	innerH := max(1, height-2)
 	title := "Preview"
 	if item, ok := m.selectedItem(); ok {
 		title = "Preview · " + item.DisplayName()

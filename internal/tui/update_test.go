@@ -13,6 +13,7 @@ import (
 )
 
 func TestUpdateRefreshMsgForCurrentSource(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	m := New()
 	m.source = sessionmgr.ModeSessions
 	m.loading = true
@@ -197,7 +198,11 @@ func TestUpdateDeleteDoneMsgRecordsKillError(t *testing.T) {
 	m := New()
 	killErr := errors.New("kill failed")
 
-	model, cmd := m.Update(actionDoneMsg{status: "killed session demo", err: killErr})
+	model, cmd := m.Update(actionDoneMsg{
+		kind:   actionKill,
+		status: "killed session demo",
+		err:    killErr,
+	})
 	got := model.(Model)
 	if !errors.Is(got.err, killErr) {
 		t.Fatalf("err = %v, want %v", got.err, killErr)
@@ -234,7 +239,11 @@ func TestUpdateActionDoneMsgRecordsRenameError(t *testing.T) {
 	m := New()
 	renameErr := errors.New("rename failed")
 
-	model, cmd := m.Update(actionDoneMsg{status: "renamed old to new", err: renameErr})
+	model, cmd := m.Update(actionDoneMsg{
+		kind:   actionRename,
+		status: "renamed old to new",
+		err:    renameErr,
+	})
 	got := model.(Model)
 	if !errors.Is(got.err, renameErr) {
 		t.Fatalf("err = %v, want %v", got.err, renameErr)
@@ -256,7 +265,7 @@ func TestUpdateDeleteDoneMsgSetsStatusAndRefreshes(t *testing.T) {
 		sessionmgr.ModeSessions: {items: testUpdateItems("cached"), fetchedAt: time.Now()},
 	}
 
-	model, cmd := m.Update(actionDoneMsg{status: "killed session demo"})
+	model, cmd := m.Update(actionDoneMsg{kind: actionKill, status: "killed session demo"})
 	got := model.(Model)
 	if got.status != "killed session demo" {
 		t.Fatalf("status = %q", got.status)
@@ -282,16 +291,29 @@ func testUpdateItems(names ...string) []sessionmgr.Item {
 func TestActionDoneMsgClearsKillInFlight(t *testing.T) {
 	m := New()
 	m.killInFlight = true
-	model, _ := m.Update(actionDoneMsg{status: "killed session demo"})
+	model, _ := m.Update(actionDoneMsg{kind: actionKill, status: "killed session demo"})
 	if model.(Model).killInFlight {
 		t.Fatal("killInFlight not cleared on success")
 	}
 
 	m2 := New()
 	m2.killInFlight = true
-	model2, _ := m2.Update(actionDoneMsg{status: "x", err: errors.New("boom")})
+	model2, _ := m2.Update(actionDoneMsg{
+		kind: actionKill,
+		err:  errors.New("boom"),
+	})
 	if model2.(Model).killInFlight {
 		t.Fatal("killInFlight not cleared on error")
+	}
+}
+
+func TestActionDoneMsgRenameDoesNotClearKillInFlight(t *testing.T) {
+	m := New()
+	m.killInFlight = true
+
+	model, _ := m.Update(actionDoneMsg{kind: actionRename, status: "renamed old to new"})
+	if !model.(Model).killInFlight {
+		t.Fatal("rename completion cleared killInFlight")
 	}
 }
 

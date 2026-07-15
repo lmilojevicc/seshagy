@@ -65,7 +65,8 @@ func TestCreateDeleteRenameCommandsUseTmuxHooks(t *testing.T) {
 	}
 
 	deleteMsg := deleteSessionCmd(sessionmgr.NewTmuxBackend(), sessionmgr.Item{Kind: sessionmgr.KindSession, Name: "demo", Target: "demo"})().(actionDoneMsg)
-	if deleteMsg.err != nil || deleteMsg.status != "killed session demo" {
+	if deleteMsg.kind != actionKill || deleteMsg.err != nil ||
+		deleteMsg.status != "killed session demo" {
 		t.Fatalf("deleteSessionCmd() = %#v", deleteMsg)
 	}
 	if killedSession != "demo" {
@@ -73,7 +74,8 @@ func TestCreateDeleteRenameCommandsUseTmuxHooks(t *testing.T) {
 	}
 
 	renameMsg := renameCmd(sessionmgr.NewTmuxBackend(), "old", "old", "new")().(actionDoneMsg)
-	if renameMsg.err != nil || renamedOld != "old" || renamedNew != "new" {
+	if renameMsg.kind != actionRename || renameMsg.err != nil ||
+		renamedOld != "old" || renamedNew != "new" {
 		t.Fatalf("renameCmd() = %#v old=%q new=%q", renameMsg, renamedOld, renamedNew)
 	}
 }
@@ -143,6 +145,9 @@ func TestRenameCmdReturnsTmuxError(t *testing.T) {
 	})
 
 	renameMsg := renameCmd(sessionmgr.NewTmuxBackend(), "old", "old", "new")().(actionDoneMsg)
+	if renameMsg.kind != actionRename {
+		t.Fatalf("renameCmd() kind = %q, want %q", renameMsg.kind, actionRename)
+	}
 	if !errors.Is(renameMsg.err, renameErr) {
 		t.Fatalf("renameCmd() err = %v, want %v", renameMsg.err, renameErr)
 	}

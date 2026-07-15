@@ -381,8 +381,9 @@ func TestRenameAgentEmptyInputClearsLabel(t *testing.T) {
 	if !ok {
 		t.Fatalf("cmd msg = %T, want actionDoneMsg", msg)
 	}
-	if done.err != nil || !strings.Contains(done.status, "cleared agent alias") {
-		t.Fatalf("action = status:%q err:%v", done.status, done.err)
+	if done.kind != actionAgentRename || done.err != nil ||
+		!strings.Contains(done.status, "cleared agent alias") {
+		t.Fatalf("action = kind:%q status:%q err:%v", done.kind, done.status, done.err)
 	}
 
 	store := sessionmgr.LoadAgentLabels()
@@ -732,5 +733,19 @@ func TestDeleteSelectedSetsKillInFlight(t *testing.T) {
 	model2, _ := m2.deleteSelected()
 	if model2.(Model).killInFlight {
 		t.Fatal("killInFlight should not be set for non-session delete")
+	}
+}
+
+func TestDeleteSelectedDoesNotStartOverlappingKill(t *testing.T) {
+	m := newTestModel(t)
+	m.items = []sessionmgr.Item{{Kind: sessionmgr.KindSession, Name: "demo"}}
+	m.killInFlight = true
+
+	model, cmd := m.deleteSelected()
+	if !model.(Model).killInFlight {
+		t.Fatal("overlapping delete cleared killInFlight")
+	}
+	if cmd != nil {
+		t.Fatal("overlapping delete started another kill command")
 	}
 }
