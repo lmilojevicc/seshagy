@@ -121,7 +121,12 @@ func (m Model) beginRefresh(source sessionmgr.SourceMode, force bool) (Model, te
 	m.refreshGen[source]++
 	gen := m.refreshGen[source]
 	m.inflightRefresh[source] = gen
-	return m, refreshCmd(m.mux, source, gen, m.config.LoadOptions())
+	refresh := refreshCmd(m.mux, source, gen, m.config.LoadOptions())
+	if m.spinnerActive {
+		return m, refresh
+	}
+	m.spinnerActive = true
+	return m, tea.Batch(refresh, spinnerTickCmd())
 }
 
 func (m Model) finishRefresh(source sessionmgr.SourceMode, gen uint64) Model {
@@ -137,6 +142,15 @@ func (m Model) refreshInflight(mode sessionmgr.SourceMode) bool {
 		return false
 	}
 	return m.inflightRefresh[mode] != 0
+}
+
+func (m Model) anyRefreshInflight() bool {
+	for _, gen := range m.inflightRefresh {
+		if gen != 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func (m Model) backgroundRefreshing() bool {

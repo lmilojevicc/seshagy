@@ -159,6 +159,20 @@ func TestInvalidateCachesOnAttachDone(t *testing.T) {
 	}
 }
 
+func TestBeginRefreshStartsSpinnerTick(t *testing.T) {
+	m := New()
+	m.spinnerActive = false
+	m.inflightRefresh = map[sessionmgr.SourceMode]uint64{}
+
+	got, cmd := m.beginRefresh(sessionmgr.ModeZoxide, false)
+	if !got.spinnerActive {
+		t.Fatal("beginRefresh did not activate spinner")
+	}
+	if cmd == nil {
+		t.Fatal("beginRefresh did not schedule refresh and spinner commands")
+	}
+}
+
 func TestBeginRefreshCoalescesInflight(t *testing.T) {
 	m := New()
 	m.inflightRefresh = map[sessionmgr.SourceMode]uint64{

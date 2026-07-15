@@ -387,6 +387,45 @@ func TestRenderTabsChipStyle(t *testing.T) {
 	}
 }
 
+func TestSourcesCountSpinnerWhenInflight(t *testing.T) {
+	m := newTestModel(t)
+	m.width = 120
+	m.loading = false
+	m.inflightRefresh = map[sessionmgr.SourceMode]uint64{}
+
+	idle := sessionmgr.StripANSI(m.renderSourcesTile(safeWidth(m.width)))
+	for _, frame := range spinnerFrames {
+		if strings.ContainsRune(idle, frame) {
+			t.Fatalf("idle SOURCES tile contains spinner %q\n%s", frame, idle)
+		}
+	}
+
+	m.inflightRefresh[m.source] = 1
+	inflight := sessionmgr.StripANSI(m.renderSourcesTile(safeWidth(m.width)))
+	if !strings.ContainsRune(inflight, []rune(spinnerFrames)[0]) {
+		t.Fatalf("inflight SOURCES tile missing spinner\n%s", inflight)
+	}
+
+	m.inflightRefresh = map[sessionmgr.SourceMode]uint64{}
+	m.loading = true
+	loading := sessionmgr.StripANSI(m.renderSourcesTile(safeWidth(m.width)))
+	if !strings.ContainsRune(loading, []rune(spinnerFrames)[0]) {
+		t.Fatalf("loading SOURCES tile missing spinner\n%s", loading)
+	}
+
+	m.loading = false
+	m.inflightRefresh[m.source] = 1
+	model, cmd := m.Update(spinnerTickMsg{})
+	advanced := model.(Model)
+	if advanced.spinnerFrame != 1 || cmd == nil {
+		t.Fatalf(
+			"spinner tick = frame:%d cmd:%v, want frame 1 and reschedule",
+			advanced.spinnerFrame,
+			cmd,
+		)
+	}
+}
+
 // TestRenderTabsChipQueryCount verifies the filtered count badge (vis/total)
 // appears when a query is active.
 func TestRenderTabsChipQueryCount(t *testing.T) {
@@ -562,21 +601,24 @@ func TestTypeFirstTypingFiltersAndPrefixRunsActions(t *testing.T) {
 	}
 }
 
-func TestTypeFirstPrefixIsConfigurableAndUnprefixedActionsNotify(t *testing.T) {
+func TestTypeFirstPrefixIsConfigurableAndUnprefixedActionsNoOp(t *testing.T) {
 	m := newTestModel(t)
 	m.config.TypeFirst.Enabled = true
 	m.config.TypeFirst.Prefix = "p"
 
 	model, _ := m.handleKey(ctrlRMsg())
 	m = model.(Model)
-	if text := latestNotificationText(m); text != "press p before actions" {
-		t.Fatalf("unprefixed non-navigation action notification = %q", text)
+	if len(m.notifications) != 0 {
+		t.Fatalf("unprefixed non-navigation action notifications = %#v, want none", m.notifications)
 	}
 
 	model, _ = m.handleKey(keyMsg("p"))
 	m = model.(Model)
 	if !m.prefixArmed {
 		t.Fatal("configured prefix should arm actions")
+	}
+	if len(m.notifications) != 0 {
+		t.Fatalf("arming prefix notifications = %#v, want none", m.notifications)
 	}
 }
 
@@ -916,6 +958,75 @@ func TestShortHeightDoesNotTruncateFooter(t *testing.T) {
 				)
 			}
 		})
+	}
+}
+
+func TestRenameSearchPopupHasFieldsetTitle(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		mode  inputMode
+		title string
+	}{
+		{name: "search", mode: modeSearch, title: "SEARCH"},
+		{name: "rename", mode: modeRename, title: "RENAME"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			m := newTestModel(t)
+			m.width = 100
+			m.inputMode = tt.mode
+			m.renameFrom = "old-name"
+
+			popup := sessionmgr.StripANSI(m.renderInputPopup())
+			top := strings.Split(popup, "\n")[0]
+			if !strings.HasPrefix(top, "╭─ ") || !strings.Contains(top, tt.title) ||
+				!strings.HasSuffix(top, "╮") {
+				t.Fatalf("popup title is not on fieldset edge: %q", top)
+			}
+			for _, line := range strings.Split(popup, "\n")[1:] {
+				if strings.TrimSpace(line) == tt.title {
+					t.Fatalf("popup still contains an in-content title\n%s", popup)
+				}
+			}
+		})
+	}
+}
+
+func TestPrefixBadgeShownWhenArmed(t *testing.T) {
+	m := newTestModel(t)
+	m.width = 180
+	m.config.TypeFirst.Enabled = true
+
+	without := sessionmgr.StripANSI(m.renderFooter())
+	if strings.Contains(without, "PREFIX") {
+		t.Fatalf("unarmed HELP tile contains PREFIX badge\n%s", without)
+	}
+
+	m.prefixArmed = true
+	with := sessionmgr.StripANSI(m.renderFooter())
+	if !strings.Contains(with, "PREFIX") {
+		t.Fatalf("armed HELP tile missing PREFIX badge\n%s", with)
+	}
+}
+
+func TestListTitleShowsFilterQuery(t *testing.T) {
+	m := newTestModel(t)
+	m.source = sessionmgr.ModeSessions
+	m.config.TypeFirst.Enabled = true
+	m.items = []sessionmgr.Item{
+		{Kind: sessionmgr.KindSession, Name: "api"},
+		{Kind: sessionmgr.KindSession, Name: "web"},
+	}
+	m.query = "api"
+
+	top := strings.Split(sessionmgr.StripANSI(m.renderListPane(60, 12)), "\n")[0]
+	if !strings.Contains(top, "Sessions (1/2 match · api)") {
+		t.Fatalf("type-first list title missing filter query: %q", top)
+	}
+
+	m.inputMode = modeSearch
+	top = strings.Split(sessionmgr.StripANSI(m.renderListPane(60, 12)), "\n")[0]
+	if strings.Contains(top, "· api") {
+		t.Fatalf("classic search popup duplicated query in list title: %q", top)
 	}
 }
 

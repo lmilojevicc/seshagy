@@ -159,7 +159,7 @@ func (m Model) renderInputPopup() string {
 	var title, inputView, help string
 	switch m.inputMode {
 	case modeSearch:
-		title = "search"
+		title = "SEARCH"
 		si := m.searchInput
 		if si.Width > contentW {
 			si.Width = contentW
@@ -167,7 +167,7 @@ func (m Model) renderInputPopup() string {
 		inputView = si.View()
 		help = "enter to filter · esc to cancel"
 	case modeRename:
-		title = "rename"
+		title = "RENAME"
 		ri := m.renameInput
 		ri.Prompt = clampText(m.renameFrom, contentW/2) + " -> "
 		if ri.Width > contentW {
@@ -176,10 +176,8 @@ func (m Model) renderInputPopup() string {
 		inputView = ri.View()
 		help = "enter to rename · esc to cancel"
 	}
-	content := s.title.Render(title) + "\n" +
-		inputView + "\n" +
-		clampText(s.muted.Render(help), contentW)
-	return s.panePopup.Width(boxW).Render(content)
+	content := inputView + "\n" + clampText(s.muted.Render(help), contentW)
+	return paneWithTitle(s.panePopup, s.helpTileTitle, content, title, boxW, 0)
 }
 
 func (m Model) renderSetupPrompt(height int) string {
@@ -336,6 +334,10 @@ func (m Model) renderSourceChips(width int) string {
 	count := fmt.Sprintf("%d", len(items))
 	if m.query != "" {
 		count = fmt.Sprintf("%d/%d", len(items), len(m.items))
+	}
+	if m.loading || m.refreshInflight(m.source) {
+		frames := []rune(spinnerFrames)
+		count += " " + string(frames[m.spinnerFrame%len(frames)])
 	}
 	return composeLine(line, count, maxW, s.muted)
 }
@@ -511,7 +513,11 @@ func (m Model) renderListPane(width, height int) string {
 			title += "es"
 		}
 	}
-	title += ")"
+	queryTitle := ""
+	if m.query != "" && m.config.TypeFirst.Enabled && m.inputMode != modeSearch {
+		queryTitle = " · " + clampText(m.query, 21)
+	}
+	title += queryTitle + ")"
 	if m.source == sessionmgr.ModeAll {
 		title = fmt.Sprintf(
 			"All (%d · %d %s · %d agents · %d dirs)",
@@ -521,6 +527,9 @@ func (m Model) renderListPane(width, height int) string {
 			counts[sessionmgr.KindAgent],
 			counts[sessionmgr.KindZoxide]+counts[sessionmgr.KindFD],
 		)
+		if queryTitle != "" {
+			title = strings.TrimSuffix(title, ")") + queryTitle + ")"
+		}
 	}
 	if m.source == sessionmgr.ModeAgents {
 		scope := "all"
@@ -531,7 +540,7 @@ func (m Model) renderListPane(width, height int) string {
 				scope = m.currentSessionLabel()
 			}
 		}
-		title = fmt.Sprintf("Agents (%d · %s)", len(items), scope)
+		title = fmt.Sprintf("Agents (%d · %s%s)", len(items), scope, queryTitle)
 		if m.agentsStateFilter != "" {
 			title += " · state: " + string(m.agentsStateFilter)
 		}
@@ -849,6 +858,9 @@ func (m Model) renderFooter() string {
 		}
 	} else {
 		help = s.muted.Render("? help")
+	}
+	if m.prefixArmed {
+		help = s.warning.Bold(true).Render("PREFIX") + " " + help
 	}
 	// The footer is just the help line. The old status strip (backend indicator,
 	// loaded/refreshing status, errors) is gone because the overview tiles now

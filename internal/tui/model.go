@@ -36,6 +36,8 @@ type notification struct {
 	at   time.Time
 }
 
+const spinnerFrames = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+
 type Model struct {
 	styles styles
 	config appconfig.Config
@@ -66,6 +68,8 @@ type Model struct {
 	showPreview   bool
 	showHelp      bool
 	loading       bool
+	spinnerFrame  int
+	spinnerActive bool
 	notifications []notification
 
 	agentsCurrentOnly bool
@@ -201,6 +205,7 @@ func New(opts ...Option) Model {
 		checkPopup:      mux.InMultiplexerPopup,
 		setup:           setupPrompt{cursor: 1},
 		loading:         true,
+		spinnerActive:   true,
 	}
 	m.refreshGen[m.source] = 1
 	m.inflightRefresh[m.source] = 1
@@ -228,6 +233,7 @@ func (m Model) Init() tea.Cmd {
 		refreshCatalogsCmd(m.config),
 		tickCmd(),
 		notificationTickCmd(),
+		spinnerTickCmd(),
 	}
 	// Keep the ModeAll cache warm so the overview hero band shows correct
 	// counts even when another source tab is active on launch.

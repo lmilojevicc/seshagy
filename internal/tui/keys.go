@@ -125,7 +125,6 @@ func (m Model) handleActionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "enter":
 		return m.activateSelected()
 	case "r", "ctrl+r":
-		m.notify("refreshing", sevInfo)
 		if len(m.items) == 0 {
 			m.loading = true
 		}
@@ -252,14 +251,12 @@ func (m Model) handleTypeFirstKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.prefixArmed {
 		m.prefixArmed = false
 		if m.isPrefixKey(msg) {
-			m.notify("prefix cancelled", sevInfo)
 			return m, nil
 		}
 		return m.handleActionKey(msg)
 	}
 	if m.isPrefixKey(msg) {
 		m.prefixArmed = true
-		m.notify("prefix active: next key is an action", sevInfo)
 		return m, nil
 	}
 	if isUnprefixedNavigationKey(msg) {
@@ -274,7 +271,6 @@ func (m Model) handleTypeFirstKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if isPrintableKey(msg) {
 		return m.appendFilterText(string(msg.Runes))
 	}
-	m.notify("press "+m.config.PrefixKey()+" before actions", sevInfo)
 	return m, nil
 }
 
@@ -492,7 +488,6 @@ func (m Model) switchSource(source sessionmgr.SourceMode) (tea.Model, tea.Cmd) {
 	} else {
 		m.items = nil
 		m.loading = true
-		m.notify("loading "+source.DisplayNames(m.terms).List, sevInfo)
 	}
 	var refresh tea.Cmd
 	m, refresh = m.beginRefresh(source, false)

@@ -41,6 +41,25 @@ func TestUpdateRefreshMsgForCurrentSource(t *testing.T) {
 	}
 }
 
+func TestSpinnerTickStopsWhenIdle(t *testing.T) {
+	m := New()
+	m.loading = false
+	m.spinnerActive = true
+	m.inflightRefresh = map[sessionmgr.SourceMode]uint64{}
+
+	model, cmd := m.Update(spinnerTickMsg{})
+	got := model.(Model)
+	if cmd != nil {
+		t.Fatalf("idle spinner tick rescheduled command: %v", cmd)
+	}
+	if got.spinnerActive {
+		t.Fatal("spinnerActive remained true after idle tick")
+	}
+	if got.spinnerFrame != m.spinnerFrame {
+		t.Fatalf("idle spinner frame advanced from %d to %d", m.spinnerFrame, got.spinnerFrame)
+	}
+}
+
 func TestNotificationTickDismissesAfterTTL(t *testing.T) {
 	now := time.Now()
 	m := Model{notifications: []notification{

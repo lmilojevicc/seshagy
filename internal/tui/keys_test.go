@@ -235,8 +235,12 @@ func TestHandleActionKeyRefreshToggleHelpAndPreview(t *testing.T) {
 
 	model, cmd := m.handleActionKey(keyMsg("r"))
 	got := model.(Model)
-	if text := latestNotificationText(got); text != "refreshing" || cmd == nil {
-		t.Fatalf("refresh = notification:%q cmd:%v", text, cmd)
+	if len(got.notifications) != 0 || cmd == nil {
+		t.Fatalf(
+			"refresh = notifications:%#v cmd:%v, want no toast and a command",
+			got.notifications,
+			cmd,
+		)
 	}
 
 	model, cmd = got.handleActionKey(keyMsg("p"))

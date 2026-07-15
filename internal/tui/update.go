@@ -19,6 +19,7 @@ const (
 	ephemeralTickInterval    = 150 * time.Millisecond
 	notificationTickInterval = time.Second
 	notificationTTL          = 4 * time.Second
+	spinnerTickInterval      = 120 * time.Millisecond
 )
 
 func ephemeralTickCmd() tea.Cmd {
@@ -32,6 +33,14 @@ type notificationTickMsg time.Time
 func notificationTickCmd() tea.Cmd {
 	return tea.Tick(notificationTickInterval, func(t time.Time) tea.Msg {
 		return notificationTickMsg(t)
+	})
+}
+
+type spinnerTickMsg time.Time
+
+func spinnerTickCmd() tea.Cmd {
+	return tea.Tick(spinnerTickInterval, func(t time.Time) tea.Msg {
+		return spinnerTickMsg(t)
 	})
 }
 
@@ -56,7 +65,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// so the overview hero counts stay current on other tabs.
 			cmds := []tea.Cmd{tea.Tick(interval, func(t time.Time) tea.Msg { return tickMsg(t) })}
 			if !m.cacheFresh(sessionmgr.ModeAll) {
-				if _, mc := m.beginRefresh(sessionmgr.ModeAll, false); mc != nil {
+				var mc tea.Cmd
+				m, mc = m.beginRefresh(sessionmgr.ModeAll, false)
+				if mc != nil {
 					cmds = append(cmds, mc)
 				}
 			}
@@ -69,7 +80,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			tea.Tick(interval, func(t time.Time) tea.Msg { return tickMsg(t) }),
 		}
 		if !m.cacheFresh(sessionmgr.ModeAll) {
-			if _, mc := m.beginRefresh(sessionmgr.ModeAll, false); mc != nil {
+			var mc tea.Cmd
+			m, mc = m.beginRefresh(sessionmgr.ModeAll, false)
+			if mc != nil {
 				cmds = append(cmds, mc)
 			}
 		}
@@ -84,6 +97,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.notifications = live
 		return m, notificationTickCmd()
+	case spinnerTickMsg:
+		if !m.anyRefreshInflight() {
+			m.spinnerActive = false
+			return m, nil
+		}
+		m.spinnerFrame = (m.spinnerFrame + 1) % len([]rune(spinnerFrames))
+		return m, spinnerTickCmd()
 	case ephemeralTickMsg:
 		if !m.ephemeral {
 			return m, nil
