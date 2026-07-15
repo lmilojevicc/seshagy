@@ -28,6 +28,7 @@ func agentItems(sessions ...string) []sessionmgr.Item {
 // query.
 func TestAgentsScopeToggleFiltersByCurrentSession(t *testing.T) {
 	m := New()
+	m.config.TypeFirst.Enabled = false
 	m.source = sessionmgr.ModeAgents
 	m.currentSession = "seshagy"
 	m.items = agentItems("seshagy", "seshagy", "dotfiles", "monorepo")
@@ -69,6 +70,7 @@ func TestAgentsScopeToggleFiltersByCurrentSession(t *testing.T) {
 // everything: the filter stays inert until a session is known.
 func TestAgentsScopeEmptyCurrentSessionShowsAll(t *testing.T) {
 	m := New()
+	m.config.TypeFirst.Enabled = false
 	m.source = sessionmgr.ModeAgents
 	m.currentSession = ""
 	m.items = agentItems("seshagy", "dotfiles")
@@ -85,6 +87,7 @@ func TestAgentsScopeEmptyCurrentSessionShowsAll(t *testing.T) {
 // visible regardless of the scope toggle.
 func TestAgentsScopeDoesNotAffectModeAll(t *testing.T) {
 	m := New()
+	m.config.TypeFirst.Enabled = false
 	m.source = sessionmgr.ModeAll
 	m.currentSession = "seshagy"
 	m.agentsCurrentOnly = true
@@ -105,6 +108,7 @@ func TestAgentsScopeDoesNotAffectModeAll(t *testing.T) {
 // is a no-op elsewhere.
 func TestAgentsScopeKeyOnlyActsInAgentsTab(t *testing.T) {
 	m := New()
+	m.config.TypeFirst.Enabled = false
 	m.source = sessionmgr.ModeAgents
 	m.currentSession = "seshagy"
 	m.items = agentItems("seshagy", "dotfiles")

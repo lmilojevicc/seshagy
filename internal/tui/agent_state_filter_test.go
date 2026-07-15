@@ -29,6 +29,7 @@ func agentStateItems(states ...sessionmgr.AgentState) []sessionmgr.Item {
 // elsewhere.
 func TestAgentsStateKeyOnlyActsInAgentsTab(t *testing.T) {
 	m := New()
+	m.config.TypeFirst.Enabled = false
 	m.source = sessionmgr.ModeAgents
 	m.items = agentStateItems(
 		sessionmgr.AgentWorking,
@@ -61,6 +62,7 @@ func TestAgentsStateKeyOnlyActsInAgentsTab(t *testing.T) {
 // non-matching agents in visibleItems() and lifts cleanly when cleared.
 func TestAgentsStateFilterNarrowsVisibleItems(t *testing.T) {
 	m := New()
+	m.config.TypeFirst.Enabled = false
 	m.source = sessionmgr.ModeAgents
 	m.items = agentStateItems(
 		sessionmgr.AgentWorking,
@@ -91,6 +93,7 @@ func TestAgentsStateFilterNarrowsVisibleItems(t *testing.T) {
 // returns to "" (all states) after visiting every state.
 func TestAgentsStateFilterCycle(t *testing.T) {
 	m := New()
+	m.config.TypeFirst.Enabled = false
 	m.source = sessionmgr.ModeAgents
 	m.items = agentStateItems(sessionmgr.AgentWorking)
 
