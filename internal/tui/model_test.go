@@ -31,8 +31,8 @@ func TestTUIFirstRefreshSmoke(t *testing.T) {
 	if len(m.items) == 0 {
 		t.Fatal("expected items after refresh")
 	}
-	if latestNotificationText(m) == "" {
-		t.Fatal("expected a notification after refresh")
+	if len(m.notifications) != 0 {
+		t.Fatalf("notifications = %#v, want none for successful refresh", m.notifications)
 	}
 	if m.View() == "" {
 		t.Fatal("expected non-empty view after refresh")

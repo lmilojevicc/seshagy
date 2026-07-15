@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"fmt"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -69,11 +68,6 @@ func (m Model) applyCacheEntry(mode sessionmgr.SourceMode) Model {
 		m.notify(entry.err.Error(), sevError)
 	} else if entry.warning != "" {
 		m.notify(entry.warning, sevWarning)
-	} else {
-		m.notify(
-			fmt.Sprintf("loaded %d item%s", len(entry.items), plural(len(entry.items))),
-			sevInfo,
-		)
 	}
 	m.clampCursor()
 	return m
@@ -170,8 +164,6 @@ func (m Model) handleRefreshMsg(msg refreshMsg) (Model, tea.Cmd) {
 	m.clampCursor()
 	if msg.warning != "" {
 		m.notify(msg.warning, sevWarning)
-	} else {
-		m.notify(fmt.Sprintf("loaded %d item%s", len(msg.items), plural(len(msg.items))), sevInfo)
 	}
 	return m, m.previewForSelection()
 }

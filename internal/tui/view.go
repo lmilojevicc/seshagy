@@ -76,8 +76,8 @@ func (m Model) overlayNotifications(frame string) string {
 	if toast == "" {
 		return frame
 	}
-	x := max(0, m.width-lipgloss.Width(toast)-1)
-	return overlay(frame, toast, x, 1)
+	x := max(0, m.width-lipgloss.Width(toast)-3)
+	return overlay(frame, toast, x, 2)
 }
 
 func (m Model) renderNotificationToast(now time.Time) string {

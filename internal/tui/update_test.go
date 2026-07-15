@@ -33,8 +33,8 @@ func TestUpdateRefreshMsgForCurrentSource(t *testing.T) {
 	if len(got.items) != 1 || got.items[0].Name != "alpha" {
 		t.Fatalf("items = %#v", got.items)
 	}
-	if text := latestNotificationText(got); text != "loaded 1 item" {
-		t.Fatalf("notification = %q, want loaded message", text)
+	if len(got.notifications) != 0 {
+		t.Fatalf("notifications = %#v, want none for successful refresh", got.notifications)
 	}
 	if cmd == nil {
 		t.Fatal("expected preview command after refresh")
