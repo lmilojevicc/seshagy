@@ -145,7 +145,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.prompt {
 			m.openInputModePrompt(false)
-			m.notify("choose startup input mode", sevInfo)
 			return m, nil
 		}
 		return m, nil

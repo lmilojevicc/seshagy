@@ -587,8 +587,12 @@ func TestTypeFirstTypingFiltersAndPrefixRunsActions(t *testing.T) {
 
 	model, _ := m.handleKey(keyMsg("a"))
 	m = model.(Model)
-	if text := latestNotificationText(m); m.query != "a" || text != "filter: a" {
-		t.Fatalf("typing should filter immediately, query/notification = %q/%q", m.query, text)
+	if m.query != "a" || len(m.notifications) != 0 {
+		t.Fatalf(
+			"typing should filter immediately without a toast, query/notifications = %q/%#v",
+			m.query,
+			m.notifications,
+		)
 	}
 	if got := m.visibleItems(); len(got) != 1 || got[0].Name != "api" {
 		t.Fatalf("visibleItems after typing = %#v", got)
@@ -627,15 +631,13 @@ func TestTypeFirstAllowsEnterWithoutPrefix(t *testing.T) {
 	m.config.TypeFirst.Enabled = true
 	m.items = []sessionmgr.Item{{Kind: sessionmgr.KindZoxide, Path: "/tmp/demo"}}
 
-	model, _ := m.handleKey(enterMsg())
+	model, cmd := m.handleKey(enterMsg())
 	m = model.(Model)
-	if text := latestNotificationText(
-		m,
-	); text != "creating session from /tmp/demo" || m.prefixArmed ||
-		m.query != "" {
+	if cmd == nil || len(m.notifications) != 0 || m.prefixArmed || m.query != "" {
 		t.Fatalf(
-			"enter should dispatch action without prefix, notification=%q armed=%v query=%q",
-			text,
+			"enter should dispatch action without prefix or toast, cmd=%v notifications=%#v armed=%v query=%q",
+			cmd,
+			m.notifications,
 			m.prefixArmed,
 			m.query,
 		)
@@ -746,17 +748,13 @@ func TestManualModePromptInClassicSavesWithoutHookScan(t *testing.T) {
 		t.Fatal("opening manual input-mode prompt should not run a command")
 	}
 	m = model.(Model)
-	if text := latestNotificationText(
-		m,
-	); !m.setup.active || !m.setup.manual ||
-		m.setup.cursor != 1 ||
-		text != "change input mode" {
+	if !m.setup.active || !m.setup.manual || m.setup.cursor != 1 || len(m.notifications) != 0 {
 		t.Fatalf(
-			"manual prompt state = prompt:%v manual:%v cursor:%d notification:%q",
+			"manual prompt state = prompt:%v manual:%v cursor:%d notifications:%#v",
 			m.setup.active,
 			m.setup.manual,
 			m.setup.cursor,
-			text,
+			m.notifications,
 		)
 	}
 	if out := sessionmgr.StripANSI(
@@ -815,8 +813,8 @@ func TestManualModePromptEscCancelsWithoutSaving(t *testing.T) {
 			m.config,
 		)
 	}
-	if text := latestNotificationText(m); text != "input mode change cancelled" {
-		t.Fatalf("manual cancel notification = %q", text)
+	if len(m.notifications) != 0 {
+		t.Fatalf("manual cancel notifications = %#v, want none", m.notifications)
 	}
 	if appconfig.Exists() {
 		t.Fatal("manual cancel should not write config")

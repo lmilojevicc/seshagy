@@ -49,7 +49,6 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "esc":
 			m.inputMode = modeNormal
 			m.renameInput.Blur()
-			m.notify("rename cancelled", sevInfo)
 			return m, nil
 		case "enter":
 			newName := strings.TrimSpace(m.renameInput.Value())
@@ -67,7 +66,6 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, renameAgentCmd(m.mux, target, oldName, session, "")
 			}
 			if newName == "" || oldName == "" || newName == oldName {
-				m.notify("rename cancelled", sevInfo)
 				return m, nil
 			}
 			switch kind {
@@ -140,13 +138,8 @@ func (m Model) handleActionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.agentsCurrentOnly = !m.agentsCurrentOnly
-		switch {
-		case m.agentsCurrentOnly && m.currentSession == "":
+		if m.agentsCurrentOnly && m.currentSession == "" {
 			m.notify("agents: not in a "+m.terms.BackendName+" "+m.terms.SessionNoun, sevWarning)
-		case m.agentsCurrentOnly:
-			m.notify("agents: "+m.currentSessionLabel(), sevInfo)
-		default:
-			m.notify("agents: all "+m.terms.SessionPlural, sevInfo)
 		}
 		m.clampCursor()
 		return m, m.previewForSelection()
@@ -155,11 +148,6 @@ func (m Model) handleActionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.agentsStateFilter = nextAgentStateFilter(m.agentsStateFilter)
-		if m.agentsStateFilter == "" {
-			m.notify("agents: all states", sevInfo)
-		} else {
-			m.notify("agents: "+string(m.agentsStateFilter), sevInfo)
-		}
 		m.clampCursor()
 		return m, m.previewForSelection()
 	case "/":
@@ -181,14 +169,12 @@ func (m Model) handleActionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.previewForSelection()
 	case "m":
 		m.openInputModePrompt(true)
-		m.notify("change input mode", sevInfo)
 		return m, nil
 	case "?":
 		m.showHelp = !m.showHelp
 		return m, nil
 	case "h":
 		m.openInstallMenu(false)
-		m.notify("install menu", sevInfo)
 		return m, nil
 	case "a", "ctrl+a":
 		return m.switchSource(sessionmgr.ModeAll)
@@ -305,7 +291,6 @@ func (m Model) appendFilterText(text string) (tea.Model, tea.Cmd) {
 	m.query += text
 	m.searchInput.SetValue(m.query)
 	m.clampCursor()
-	m.notify("filter: "+m.query, sevInfo)
 	return m, m.previewForSelection()
 }
 
@@ -317,11 +302,6 @@ func (m Model) deleteFilterRune() (tea.Model, tea.Cmd) {
 	m.query = string(runes[:len(runes)-1])
 	m.searchInput.SetValue(m.query)
 	m.clampCursor()
-	if m.query == "" {
-		m.notify("filter cleared", sevInfo)
-	} else {
-		m.notify("filter: "+m.query, sevInfo)
-	}
 	return m, m.previewForSelection()
 }
 
@@ -332,7 +312,6 @@ func (m Model) clearFilterText() (tea.Model, tea.Cmd) {
 	m.query = ""
 	m.searchInput.SetValue("")
 	m.cursor = 0
-	m.notify("filter cleared", sevInfo)
 	return m, m.previewForSelection()
 }
 
@@ -394,7 +373,6 @@ func (m Model) handleSetupKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m Model) cancelInputModePrompt() (tea.Model, tea.Cmd) {
 	m.setup.active = false
 	m.setup.manual = false
-	m.notify("input mode change cancelled", sevInfo)
 	return m, nil
 }
 
@@ -451,7 +429,6 @@ func (m Model) closeInstallMenu() (tea.Model, tea.Cmd) {
 		}
 		m.config = cfg
 	}
-	m.notify("install menu closed", sevInfo)
 	var refresh tea.Cmd
 	m, refresh = m.beginRefresh(m.source, true)
 	return m, refresh
@@ -497,12 +474,10 @@ func (m Model) switchSource(source sessionmgr.SourceMode) (tea.Model, tea.Cmd) {
 func (m Model) activateSelected() (tea.Model, tea.Cmd) {
 	item, ok := m.selectedItem()
 	if !ok {
-		m.notify("nothing selected", sevInfo)
 		return m, nil
 	}
 	switch item.Kind {
 	case sessionmgr.KindSession:
-		m.notify("attaching "+item.Name, sevInfo)
 		return m, attachCmd(m.mux, item)
 	case sessionmgr.KindAgent:
 		if item.Session == "" || item.Window == "" || item.PaneID == "" {
@@ -518,7 +493,6 @@ func (m Model) activateSelected() (tea.Model, tea.Cmd) {
 		m.notify(fmt.Sprintf("focusing %s on %s", item.DisplayName(), item.Location), sevInfo)
 		return m, focusAgentCmd(m.mux, item)
 	case sessionmgr.KindZoxide, sessionmgr.KindFD:
-		m.notify("creating "+m.terms.SessionNoun+" from "+item.Path, sevInfo)
 		return m, createSessionCmd(m.mux, item.Path)
 	default:
 		return m, nil
@@ -528,7 +502,6 @@ func (m Model) activateSelected() (tea.Model, tea.Cmd) {
 func (m Model) deleteSelected() (tea.Model, tea.Cmd) {
 	item, ok := m.selectedItem()
 	if !ok {
-		m.notify("nothing selected", sevInfo)
 		return m, nil
 	}
 	switch item.Kind {
@@ -536,7 +509,6 @@ func (m Model) deleteSelected() (tea.Model, tea.Cmd) {
 		if m.killInFlight {
 			return m, nil
 		}
-		m.notify(m.terms.KillVerb+" "+m.terms.SessionNoun+" "+item.Name, sevInfo)
 		m.killInFlight = true
 		return m, deleteSessionCmd(m.mux, item)
 	default:
@@ -548,7 +520,6 @@ func (m Model) deleteSelected() (tea.Model, tea.Cmd) {
 func (m Model) startRename() (tea.Model, tea.Cmd) {
 	item, ok := m.selectedItem()
 	if !ok {
-		m.notify("nothing selected", sevInfo)
 		return m, nil
 	}
 	switch item.Kind {
@@ -559,7 +530,6 @@ func (m Model) startRename() (tea.Model, tea.Cmd) {
 		m.renameTarget = item.ActionTarget()
 		m.renameInput.SetValue("")
 		m.renameInput.Focus()
-		m.notify("renaming "+item.Name, sevInfo)
 		return m, textinput.Blink
 	case sessionmgr.KindAgent:
 		m.inputMode = modeRename
@@ -569,7 +539,6 @@ func (m Model) startRename() (tea.Model, tea.Cmd) {
 		m.renameTarget = item.ActionTarget() // herdr rename targets the pane id
 		m.renameInput.SetValue(item.DisplayName())
 		m.renameInput.Focus()
-		m.notify("renaming agent "+item.AgentName, sevInfo)
 		return m, textinput.Blink
 	default:
 		m.notify("rename only applies to "+m.terms.SessionPlural+" and agents", sevInfo)
