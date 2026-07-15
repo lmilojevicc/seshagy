@@ -981,7 +981,7 @@ func TestFooterIsHelpOnlyByDefault(t *testing.T) {
 	}
 }
 
-func TestViewRendersTopRightToast(t *testing.T) {
+func TestViewRendersBottomRightToast(t *testing.T) {
 	m := newTestModel(t)
 	m.width = 100
 	m.height = 24
@@ -991,19 +991,21 @@ func TestViewRendersTopRightToast(t *testing.T) {
 	m.items = []sessionmgr.Item{{Kind: sessionmgr.KindSession, Name: "dashboard-row"}}
 	m.notify("toast feedback", sevInfo)
 
+	toastH := lipgloss.Height(m.renderNotificationToast(time.Now()))
 	clean := sessionmgr.StripANSI(m.View())
 	lines := strings.Split(clean, "\n")
 	toastRow := -1
 	toastColumn := -1
-	for i, line := range lines[:min(5, len(lines))] {
+	for i, line := range lines {
 		if column := strings.Index(line, "toast feedback"); column >= 0 {
 			toastRow = i
 			toastColumn = column
 			break
 		}
 	}
-	if toastRow < 0 {
-		t.Fatalf("toast not rendered near top\n%s", clean)
+	wantToastRow := max(0, m.height-toastH-1) + 1
+	if toastRow != wantToastRow {
+		t.Fatalf("toast row = %d, want %d near bottom\n%s", toastRow, wantToastRow, clean)
 	}
 	if toastColumn < m.width/2 {
 		t.Fatalf("toast column = %d, want right half of %d-column view", toastColumn, m.width)

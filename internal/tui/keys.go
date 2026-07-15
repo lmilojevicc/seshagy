@@ -545,7 +545,7 @@ func (m Model) deleteSelected() (tea.Model, tea.Cmd) {
 		m.killInFlight = true
 		return m, deleteSessionCmd(m.mux, item)
 	default:
-		m.notify("delete only applies to "+m.terms.SessionPlural, sevInfo)
+		m.notify("delete only applies to "+m.terms.SessionPlural, sevWarning)
 		return m, nil
 	}
 }

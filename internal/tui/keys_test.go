@@ -369,16 +369,28 @@ func TestStartYaziOutsidePopup(t *testing.T) {
 	}
 }
 
-func TestNoOpProducesNotification(t *testing.T) {
-	m := newTestModel(t)
-	m.items = []sessionmgr.Item{{Kind: sessionmgr.KindAgent, AgentName: "pi"}}
-	model, cmd := m.handleActionKey(keyMsg("x"))
-	got := model.(Model)
-	if text := latestNotificationText(
-		got,
-	); text != "delete only applies to sessions" ||
-		cmd != nil {
-		t.Fatalf("agent delete = notification:%q cmd:%v", text, cmd)
+func TestDeleteNonSessionItemWarns(t *testing.T) {
+	for _, kind := range []sessionmgr.Kind{
+		sessionmgr.KindAgent,
+		sessionmgr.KindZoxide,
+		sessionmgr.KindFD,
+	} {
+		t.Run(string(kind), func(t *testing.T) {
+			m := newTestModel(t)
+			m.items = []sessionmgr.Item{{Kind: kind, AgentName: "pi", Path: "/tmp/project"}}
+
+			model, cmd := m.handleActionKey(keyMsg("x"))
+			got := model.(Model)
+			if text := latestNotificationText(
+				got,
+			); text != "delete only applies to sessions" ||
+				cmd != nil {
+				t.Fatalf("delete = notification:%q cmd:%v", text, cmd)
+			}
+			if sev := latestNotificationSeverity(got); sev != sevWarning {
+				t.Fatalf("delete severity = %v, want sevWarning", sev)
+			}
+		})
 	}
 }
 
