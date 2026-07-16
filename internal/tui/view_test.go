@@ -569,6 +569,71 @@ func TestCustomTmuxStateLabelInTextMode(t *testing.T) {
 	}
 }
 
+func TestAgentStateTextModeShowsLabelInList(t *testing.T) {
+	m := newTestModel(t)
+	cfg := appconfig.Default()
+	cfg.Icons.Mode = appconfig.IconModeText
+	m.config = cfg
+
+	item := sessionmgr.Item{
+		Kind:       sessionmgr.KindAgent,
+		AgentName:  "pi",
+		AgentState: sessionmgr.AgentWorking,
+	}
+	primary, _ := m.rowParts(item)
+	got := sessionmgr.StripANSI(primary)
+	if !strings.Contains(got, "[working]") {
+		t.Fatalf("text mode agent row = %q, want [working] label", got)
+	}
+	if strings.Contains(got, "\u25cf") {
+		t.Fatalf("text mode agent row = %q, should not show glyph", got)
+	}
+}
+
+func TestAgentStateChipsTextModeShowsLabels(t *testing.T) {
+	m := newTestModel(t)
+	cfg := appconfig.Default()
+	cfg.Icons.Mode = appconfig.IconModeText
+	m.config = cfg
+
+	icons := m.config.IconSet()
+	stats := overviewStats{
+		agents: map[sessionmgr.AgentState]int{sessionmgr.AgentWorking: 2},
+	}
+	out := sessionmgr.StripANSI(m.agentChips(icons, stats))
+	for _, label := range []string{"idle", "working", "blocked", "done", "unknown"} {
+		if !strings.Contains(out, label) {
+			t.Fatalf("text mode agent chips missing label %q\n%s", label, out)
+		}
+	}
+	for _, glyph := range []string{"\u25cf", "\u25d0", "\u25c9"} {
+		if strings.Contains(out, glyph) {
+			t.Fatalf("text mode agent chips should not show glyphs\n%s", out)
+		}
+	}
+}
+
+func TestAgentStateDetailTextModeShowsLabelOnly(t *testing.T) {
+	m := newTestModel(t)
+	cfg := appconfig.Default()
+	cfg.Icons.Mode = appconfig.IconModeText
+	m.config = cfg
+
+	item := sessionmgr.Item{
+		Kind:       sessionmgr.KindAgent,
+		AgentName:  "pi",
+		AgentState: sessionmgr.AgentWorking,
+		Location:   "demo:1",
+	}
+	detail := sessionmgr.StripANSI(strings.Join(m.detailLines(item), "\n"))
+	if !strings.Contains(detail, "working") {
+		t.Fatalf("text mode agent detail missing state label\n%s", detail)
+	}
+	if strings.Contains(detail, "\u25cf") {
+		t.Fatalf("text mode agent detail should not show glyph\n%s", detail)
+	}
+}
+
 func TestTypeFirstTypingFiltersAndPrefixRunsActions(t *testing.T) {
 	m := newTestModel(t)
 	m.config.TypeFirst.Enabled = true

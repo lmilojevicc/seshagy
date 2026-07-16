@@ -518,6 +518,54 @@ func TestIconSetTmuxStateProjection(t *testing.T) {
 	}
 }
 
+func TestIconSetAgentStateProjection(t *testing.T) {
+	states := []sessionmgr.AgentState{
+		sessionmgr.AgentIdle,
+		sessionmgr.AgentWorking,
+		sessionmgr.AgentBlocked,
+		sessionmgr.AgentDone,
+		sessionmgr.AgentUnknown,
+	}
+
+	// mode="text" + agent_state_mode="inherit" resolves to TEXT for every
+	// agent state (the reported bug: agent tiles/rows ignored text mode).
+	cfg := Default()
+	cfg.Icons.Mode = IconModeText
+	cfg.Icons.AgentStateMode = StateDisplayModeInherit
+	icons := cfg.IconSet()
+	for _, state := range states {
+		style := icons.ForAgentState(state)
+		if style.Text != style.ASCII {
+			t.Fatalf("text+inherit %s: Text = %q, want ASCII %q",
+				state, style.Text, style.ASCII)
+		}
+		if style.Text == style.Icon {
+			t.Fatalf("text+inherit %s: Text equals glyph %q (mode ignored)",
+				state, style.Text)
+		}
+	}
+
+	// Explicit agent_state_mode="icons" overrides a text global → glyph.
+	cfg.Icons.AgentStateMode = StateDisplayModeIcons
+	icons = cfg.IconSet()
+	for _, state := range states {
+		style := icons.ForAgentState(state)
+		if style.Text != style.Icon {
+			t.Fatalf("icons override %s: Text = %q, want glyph %q",
+				state, style.Text, style.Icon)
+		}
+	}
+
+	// agent_state_mode="none" hides agent state (no display value).
+	cfg.Icons.AgentStateMode = StateDisplayModeNone
+	icons = cfg.IconSet()
+	for _, state := range states {
+		if style := icons.ForAgentState(state); style.Text != "" {
+			t.Fatalf("none %s: Text = %q, want empty", state, style.Text)
+		}
+	}
+}
+
 func TestDefaultTmuxStateDetachedColor(t *testing.T) {
 	cfg := Default()
 	if got := cfg.Icons.TmuxState.Detached.Color; got != "8" {

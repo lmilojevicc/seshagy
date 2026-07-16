@@ -440,7 +440,8 @@ func (m Model) renderTopRow() string {
 }
 
 // agentChips renders the colored agent-state chips for the overview tile,
-// reusing the configured icon-set glyphs/colors via renderAgentState. All five
+// reusing the configured icon-set colors and the mode-resolved display value
+// (glyph in icon mode, ASCII label in text mode) via ForAgentState. All five
 // states are always shown (with 0 counts) so the tile reads as a fixed legend
 // rather than appearing empty.
 func (m Model) agentChips(icons sessionmgr.IconSet, stats overviewStats) string {
@@ -448,8 +449,8 @@ func (m Model) agentChips(icons sessionmgr.IconSet, stats overviewStats) string 
 	parts := make([]string, 0, len(agentStateOrder))
 	for _, state := range agentStateOrder {
 		count := stats.agents[state]
-		glyph := renderAgentState(s, icons, state)
 		iconStyle := icons.ForAgentState(state)
+		glyph := renderAgentStateStyled(s, state, iconStyle.Text, iconStyle.Color)
 		cnt := renderAgentStateStyled(s, state, fmt.Sprintf("%d", count), iconStyle.Color)
 		parts = append(parts, glyph+" "+cnt)
 	}
@@ -799,7 +800,7 @@ func (m Model) detailLines(item sessionmgr.Item) []string {
 	case sessionmgr.KindAgent:
 		icons := m.config.IconSet()
 		stateLabel := agentStateText(item.AgentState)
-		if !icons.AgentStateHidden() {
+		if !icons.AgentStateHidden() && icons.AgentStateUsesIcons() {
 			stateLabel = rowText(
 				renderAgentState(s, icons, item.AgentState),
 				agentStateText(item.AgentState),

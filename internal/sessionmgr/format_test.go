@@ -38,11 +38,12 @@ func TestIconSetForUnknownAgentState(t *testing.T) {
 		t.Fatalf("default unknown state style = %#v, want icon ?, label unknown", style)
 	}
 
+	// In icon mode (the default icon set) the unknown glyph prefixes the line.
 	line := FormatLineWithIcons(Item{
 		Kind:       KindAgent,
 		AgentName:  "pi",
 		AgentState: AgentUnknown,
-	}, IconSet{})
+	}, DefaultIconSet())
 	clean := StripANSI(line)
 	if !strings.HasPrefix(clean, "? pi") {
 		t.Fatalf("unknown agent line = %q, want ? prefix", clean)
@@ -150,6 +151,85 @@ func TestHexToRGBRejectsInvalid(t *testing.T) {
 		return
 	}
 	t.Fatal("hexToRGB should reject short hex")
+}
+
+// TestIconSetForAgentStateResolvesMode asserts ForAgentState resolves the
+// configured display mode into the shown value (.Text), mirroring IconSet.For
+// for kind icons. This is the central fix for agent-state icons ignoring
+// mode="text" / agent_state_mode="inherit".
+func TestIconSetForAgentStateResolvesMode(t *testing.T) {
+	states := []AgentState{AgentIdle, AgentWorking, AgentBlocked, AgentDone, AgentUnknown}
+
+	cases := []struct {
+		name  string
+		set   IconSet
+		want  func(style IconStyle) string // expected .Text derivation
+		label string
+	}{
+		{
+			name:  "global text + agent inherit",
+			set:   IconSet{Enabled: true, ASCII: true, AgentStateMode: "inherit"},
+			want:  func(s IconStyle) string { return s.ASCII },
+			label: "ASCII label",
+		},
+		{
+			name:  "global icons + agent text explicit",
+			set:   IconSet{Enabled: true, ASCII: false, AgentStateMode: "text"},
+			want:  func(s IconStyle) string { return s.ASCII },
+			label: "ASCII label",
+		},
+		{
+			name:  "global text + agent icons override",
+			set:   IconSet{Enabled: true, ASCII: true, AgentStateMode: "icons"},
+			want:  func(s IconStyle) string { return s.Icon },
+			label: "glyph",
+		},
+		{
+			name:  "global icons + agent inherit",
+			set:   IconSet{Enabled: true, ASCII: false, AgentStateMode: "inherit"},
+			want:  func(s IconStyle) string { return s.Icon },
+			label: "glyph",
+		},
+	}
+	for _, tc := range cases {
+		for _, st := range states {
+			style := tc.set.ForAgentState(st)
+			want := tc.want(style)
+			if style.Text != want {
+				t.Fatalf("%s %s: Text = %q, want %s %q",
+					tc.name, st, style.Text, tc.label, want)
+			}
+		}
+	}
+
+	// agent_state_mode="none" hides the category entirely (no display value).
+	hidden := IconSet{Enabled: true, ASCII: false, AgentStateMode: "none"}
+	for _, st := range states {
+		if style := hidden.ForAgentState(st); style.Text != "" {
+			t.Fatalf("none %s: Text = %q, want empty", st, style.Text)
+		}
+	}
+}
+
+// TestFormatLineWithIconsAgentStateHonorsMode asserts the action-line/JSON row
+// representation honors the resolved mode (was always the glyph before).
+func TestFormatLineWithIconsAgentStateHonorsMode(t *testing.T) {
+	item := Item{Kind: KindAgent, AgentName: "pi", AgentState: AgentWorking}
+
+	iconLine := StripANSI(FormatLineWithIcons(item,
+		IconSet{Enabled: true, ASCII: false, AgentStateMode: "inherit"}))
+	if !strings.HasPrefix(iconLine, "\u25cf pi") {
+		t.Fatalf("icon mode agent line = %q, want \u25cf prefix", iconLine)
+	}
+
+	textLine := StripANSI(FormatLineWithIcons(item,
+		IconSet{Enabled: true, ASCII: true, AgentStateMode: "inherit"}))
+	if !strings.HasPrefix(textLine, "working pi") {
+		t.Fatalf("text mode agent line = %q, want working prefix", textLine)
+	}
+	if strings.Contains(textLine, "\u25cf") {
+		t.Fatalf("text mode agent line = %q, should not use glyph", textLine)
+	}
 }
 
 func TestFormatLineDefaultKindUsesDisplayName(t *testing.T) {
