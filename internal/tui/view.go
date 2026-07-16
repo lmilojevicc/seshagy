@@ -414,12 +414,12 @@ func (m Model) renderTopRow() string {
 	icons := m.config.IconSet()
 
 	gap := 1
-	wsW := clampVal(22, 16, usableW/6)
-	agentW := clampVal(34, 26, usableW/3)
-	sourcesW := usableW - wsW - agentW - 2*gap
-	if sourcesW < 20 || !m.completeSourceChipRowFits(sourcesW-4) {
-		// Not enough room for a complete minimal SOURCES row in the
-		// three-tile layout — fall back to SOURCES alone.
+	sourcesW, agentW, wsW, ok := m.topRowWidths(usableW, stats, icons)
+	if !ok {
+		// Not enough room for a complete minimal SOURCES row in the three-tile
+		// layout — fall back to SOURCES alone. topRowWidths' viability check is
+		// independent of the icon mode, so wider text-mode labels never collapse
+		// the tile on their own (only genuine SOURCES starvation does).
 		return m.renderSourcesTile(usableW)
 	}
 
@@ -427,7 +427,7 @@ func (m Model) renderTopRow() string {
 	wsContent := s.emphasis.Render(fmt.Sprintf("%d", stats.sessions))
 	wsTile := paneWithTitle(s.tileWorkspace, s.workspaceTileTitle, wsContent, wsTitle, wsW, 0)
 
-	agentContent := m.agentChips(icons, stats)
+	agentContent := m.agentChips(icons, stats, max(1, agentW-4))
 	agentTile := paneWithTitle(s.tileAgent, s.agentTileTitle, agentContent, "AGENTS", agentW, 0)
 
 	sourcesTile := m.renderSourcesTile(sourcesW)
@@ -439,22 +439,161 @@ func (m Model) renderTopRow() string {
 	)
 }
 
+// topRowWidths allocates the SOURCES, AGENTS, and WORKSPACES tile widths for
+// the three-tile overview header. ok is false when the terminal is too narrow
+// for a three-tile layout and the caller should fall back to a full-width
+// SOURCES tile.
+//
+// The viability check uses compact (glyph-sized) AGENTS and WORKSPACES widths
+// and is independent of the icon mode, so wider text-mode labels never collapse
+// the tile — only genuine SOURCES width starvation does, at the same threshold
+// as icon mode. Once viable, WORKSPACES (which carries only a session count) is
+// shrunk to its title+count width and the freed room goes to AGENTS (the widest
+// content), keeping the SOURCES allocation unchanged. In text mode AGENTS then
+// grows further toward the legend's natural width while SOURCES keeps its
+// chip-row floor, so labels ellipsize instead of wrapping.
+func (m Model) topRowWidths(
+	usableW int,
+	stats overviewStats,
+	icons sessionmgr.IconSet,
+) (sourcesW, agentW, wsW int, ok bool) {
+	const gap = 1
+	// Viability: compact glyph-sized tiles, mode-independent.
+	wsCompact := clampVal(22, 16, usableW/6)
+	compactAgent := clampVal(34, 26, usableW/3)
+	sourcesW = usableW - wsCompact - compactAgent - 2*gap
+	if sourcesW < 20 || !m.completeSourceChipRowFits(sourcesW-4) {
+		return 0, 0, 0, false
+	}
+	// WORKSPACES only carries a count: shrink it to its title+count width (16
+	// fits both "SESSIONS" and "WORKSPACES" on the border) and hand the freed
+	// width to AGENTS. SOURCES keeps the allocation validated above — agentW
+	// absorbs exactly the WORKSPACES shrinkage, so sourcesW is unchanged.
+	wsW = 16
+	agentW = compactAgent + (wsCompact - wsW)
+	// Text-mode labels are wider than glyphs; grow AGENTS toward the legend's
+	// natural width while SOURCES keeps its minimal chip-row floor.
+	if !icons.AgentStateUsesIcons() {
+		sourceFloor := max(20, lipgloss.Width(m.renderSourceChipLabels("key"))+
+			1+lipgloss.Width(m.sourceCountBadge())+4)
+		if natural := lipgloss.Width(m.agentChipRow(icons, stats, 0, " ")) + 4; natural > agentW {
+			if maxAgent := usableW - wsW - 2*gap - sourceFloor; maxAgent > agentW {
+				agentW = clampVal(natural, agentW, maxAgent)
+			}
+		}
+	}
+	sourcesW = usableW - wsW - agentW - 2*gap
+	return sourcesW, agentW, wsW, true
+}
+
 // agentChips renders the colored agent-state chips for the overview tile,
-// reusing the configured icon-set colors and the mode-resolved display value
-// (glyph in icon mode, ASCII label in text mode) via ForAgentState. All five
-// states are always shown (with 0 counts) so the tile reads as a fixed legend
-// rather than appearing empty.
-func (m Model) agentChips(icons sessionmgr.IconSet, stats overviewStats) string {
+// fitted to innerW so the legend never wraps or overflows its tile. It uses
+// the configured icon-set colors and the mode-resolved display value (glyph in
+// icon mode, ASCII label in text mode) via ForAgentState. All five states are
+// always shown (with 0 counts) so the tile reads as a fixed legend rather than
+// appearing empty. The wide two-space legend is kept when it fits (icon mode
+// renders identically to before); when the labels are wider than the tile
+// (text mode at narrow widths) the separators tighten and the labels are
+// progressively shortened, keeping all five states visible instead of dropping
+// the tile. If one-cell labels still do not fit because counts are wide, counts
+// are compacted to progressively smaller cells before the whole-row clamp is
+// used as a final safeguard.
+func (m Model) agentChips(icons sessionmgr.IconSet, stats overviewStats, innerW int) string {
+	innerW = max(1, innerW)
+	for _, spec := range []struct {
+		maxLabel int
+		maxCount int
+		sep      string
+	}{
+		{0, 0, "  "},
+		{0, 0, " "},
+		{4, 0, " "},
+		{3, 0, " "},
+		{2, 0, " "},
+		{1, 0, " "},
+		{1, 3, " "},
+		{1, 2, " "},
+		{1, 1, " "},
+	} {
+		if row := m.agentChipRowFitted(
+			icons,
+			stats,
+			spec.maxLabel,
+			spec.maxCount,
+			spec.sep,
+		); lipgloss.Width(
+			row,
+		) <= innerW {
+			return row
+		}
+	}
+	return clampText(m.agentChipRowFitted(icons, stats, 1, 1, " "), innerW)
+}
+
+// agentChipRow builds the canonical, unfitted agent-state chip line.
+func (m Model) agentChipRow(
+	icons sessionmgr.IconSet,
+	stats overviewStats,
+	maxLabel int,
+	sep string,
+) string {
+	return m.agentChipRowFitted(icons, stats, maxLabel, 0, sep)
+}
+
+// agentChipRowFitted builds one agent-state chip line for the overview legend.
+// The per-state value comes from ForAgentState (glyph or label); positive label
+// and count limits clamp those cells independently so fitting never removes a
+// complete chip.
+func (m Model) agentChipRowFitted(
+	icons sessionmgr.IconSet,
+	stats overviewStats,
+	maxLabel, maxCount int,
+	sep string,
+) string {
 	s := m.styles
 	parts := make([]string, 0, len(agentStateOrder))
 	for _, state := range agentStateOrder {
 		count := stats.agents[state]
 		iconStyle := icons.ForAgentState(state)
-		glyph := renderAgentStateStyled(s, state, iconStyle.Text, iconStyle.Color)
-		cnt := renderAgentStateStyled(s, state, fmt.Sprintf("%d", count), iconStyle.Color)
+		label := iconStyle.Text
+		if maxLabel > 0 && lipgloss.Width(label) > maxLabel {
+			label = clampText(label, maxLabel)
+		}
+		countText := fmt.Sprintf("%d", count)
+		if maxCount > 0 && lipgloss.Width(countText) > maxCount {
+			countText = compactAgentCount(count, maxCount)
+		}
+		glyph := renderAgentStateStyled(s, state, label, iconStyle.Color)
+		cnt := renderAgentStateStyled(s, state, countText, iconStyle.Color)
 		parts = append(parts, glyph+" "+cnt)
 	}
-	return strings.Join(parts, "  ")
+	return strings.Join(parts, sep)
+}
+
+func compactAgentCount(count, maxWidth int) string {
+	if maxWidth <= 0 {
+		return ""
+	}
+	raw := fmt.Sprintf("%d", count)
+	if lipgloss.Width(raw) <= maxWidth {
+		return raw
+	}
+	for _, unit := range []struct {
+		value  int
+		suffix string
+	}{
+		{1_000_000_000, "b"},
+		{1_000_000, "m"},
+		{1_000, "k"},
+	} {
+		if count >= unit.value {
+			compact := fmt.Sprintf("%d%s", count/unit.value, unit.suffix)
+			if lipgloss.Width(compact) <= maxWidth {
+				return compact
+			}
+		}
+	}
+	return clampText(raw, maxWidth)
 }
 
 func (m Model) renderBody(height int) string {

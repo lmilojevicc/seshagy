@@ -600,7 +600,7 @@ func TestAgentStateChipsTextModeShowsLabels(t *testing.T) {
 	stats := overviewStats{
 		agents: map[sessionmgr.AgentState]int{sessionmgr.AgentWorking: 2},
 	}
-	out := sessionmgr.StripANSI(m.agentChips(icons, stats))
+	out := sessionmgr.StripANSI(m.agentChips(icons, stats, 80))
 	for _, label := range []string{"idle", "working", "blocked", "done", "unknown"} {
 		if !strings.Contains(out, label) {
 			t.Fatalf("text mode agent chips missing label %q\n%s", label, out)
@@ -2498,7 +2498,7 @@ func TestAgentChipsCountUsesIconColor(t *testing.T) {
 	stats := overviewStats{
 		agents: map[sessionmgr.AgentState]int{sessionmgr.AgentWorking: 3},
 	}
-	out := m.agentChips(icons, stats)
+	out := m.agentChips(icons, stats, 80)
 
 	// TrueColor escape for #ff0000. The glyph and the count are each rendered
 	// via renderAgentStateStyled with the working color, so it appears >=2 times.
