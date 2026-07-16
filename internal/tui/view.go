@@ -424,11 +424,7 @@ func (m Model) renderTopRow() string {
 	}
 
 	wsTitle := strings.ToUpper(m.terms.SessionPlural)
-	wsContent := fmt.Sprintf(
-		"%s %s",
-		s.emphasis.Render(fmt.Sprintf("%d", stats.sessions)),
-		s.muted.Render(fmt.Sprintf("(%d attached)", stats.attached)),
-	)
+	wsContent := s.emphasis.Render(fmt.Sprintf("%d", stats.sessions))
 	wsTile := paneWithTitle(s.tileWorkspace, s.workspaceTileTitle, wsContent, wsTitle, wsW, 0)
 
 	agentContent := m.agentChips(icons, stats)

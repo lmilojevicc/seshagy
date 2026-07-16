@@ -2237,12 +2237,9 @@ func TestRenderTopRowShowsAllTiles(t *testing.T) {
 			t.Fatalf("header row missing %q tile title\n%s", want, out)
 		}
 	}
-	// Workspaces count + attached.
+	// Workspaces count.
 	if !strings.Contains(out, "3") {
 		t.Fatalf("header missing session count\n%s", out)
-	}
-	if !strings.Contains(out, "(2 attached)") {
-		t.Fatalf("header missing attached count\n%s", out)
 	}
 	// Single tile row: the three tiles are side-by-side (one top-edge line),
 	// not stacked — the header is ~3 lines (top edge, content, bottom edge).

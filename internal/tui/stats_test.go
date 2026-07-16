@@ -26,9 +26,6 @@ func TestAggregateOverviewStats(t *testing.T) {
 	if stats.sessions != 3 {
 		t.Fatalf("sessions = %d, want 3", stats.sessions)
 	}
-	if stats.attached != 2 {
-		t.Fatalf("attached = %d, want 2", stats.attached)
-	}
 	wantAgents := map[sessionmgr.AgentState]int{
 		sessionmgr.AgentWorking: 2,
 		sessionmgr.AgentBlocked: 1,
@@ -61,7 +58,7 @@ func TestAggregateOverviewStatsNormalizesRawStates(t *testing.T) {
 
 func TestAggregateOverviewStatsEmpty(t *testing.T) {
 	stats := aggregateOverviewStats(nil)
-	if stats.sessions != 0 || stats.attached != 0 {
+	if stats.sessions != 0 {
 		t.Fatalf("empty stats = %#v, want zeros", stats)
 	}
 	// All five state buckets are initialized to 0.

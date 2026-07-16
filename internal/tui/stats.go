@@ -8,7 +8,6 @@ import (
 // Only sessions and agents are summarized here (directories are excluded).
 type overviewStats struct {
 	sessions int
-	attached int
 	agents   map[sessionmgr.AgentState]int
 }
 
@@ -22,7 +21,7 @@ var agentStateOrder = []sessionmgr.AgentState{
 }
 
 // aggregateOverviewStats reduces a ModeAll item list into the hero counts.
-// Sessions are tallied with their attached count; agents are bucketed by their
+// Sessions are tallied; agents are bucketed by their
 // normalized state (raw states are mapped through NormalizeAgentState so the
 // zero value and any wire variants land in a known bucket).
 func aggregateOverviewStats(items []sessionmgr.Item) overviewStats {
@@ -36,9 +35,6 @@ func aggregateOverviewStats(items []sessionmgr.Item) overviewStats {
 		switch item.Kind {
 		case sessionmgr.KindSession:
 			st.sessions++
-			if item.Attached {
-				st.attached++
-			}
 		case sessionmgr.KindAgent:
 			st.agents[sessionmgr.NormalizeAgentState(string(item.AgentState))]++
 		}
