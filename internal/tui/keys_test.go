@@ -512,6 +512,37 @@ func TestDeleteNonSessionItemWarns(t *testing.T) {
 	}
 }
 
+func TestRenameNonRenameableItemWarns(t *testing.T) {
+	const want = "rename only applies to sessions and agents"
+	for _, tt := range []struct {
+		name string
+		run  func(Model) (tea.Model, tea.Cmd)
+	}{
+		{name: "start", run: func(m Model) (tea.Model, tea.Cmd) {
+			m.items = []sessionmgr.Item{{Kind: sessionmgr.KindFD, Path: "/tmp/project"}}
+			return m.startRename()
+		}},
+		{name: "submit", run: func(m Model) (tea.Model, tea.Cmd) {
+			m.inputMode = modeRename
+			m.renameKind = sessionmgr.KindFD
+			m.renameFrom = "old"
+			m.renameInput.SetValue("new")
+			return m.handleKey(enterMsg())
+		}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			model, cmd := tt.run(newTestModel(t))
+			got := model.(Model)
+			if text := latestNotificationText(got); text != want || cmd != nil {
+				t.Fatalf("rename = notification:%q cmd:%v", text, cmd)
+			}
+			if sev := latestNotificationSeverity(got); sev != sevWarning {
+				t.Fatalf("rename severity = %v, want sevWarning", sev)
+			}
+		})
+	}
+}
+
 func TestRenameAgentEmptyInputClearsLabel(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 

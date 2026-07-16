@@ -153,10 +153,6 @@ func (m Model) anyRefreshInflight() bool {
 	return false
 }
 
-func (m Model) backgroundRefreshing() bool {
-	return m.refreshInflight(m.source) && !m.loading
-}
-
 func (m Model) handleRefreshMsg(msg refreshMsg) (Model, tea.Cmd) {
 	if m.inflightRefresh == nil || msg.gen != m.inflightRefresh[msg.source] {
 		return m, nil

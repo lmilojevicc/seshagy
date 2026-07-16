@@ -10,7 +10,6 @@ import (
 
 type palette struct {
 	bg       lipgloss.TerminalColor
-	bgAlt    lipgloss.TerminalColor
 	fg       lipgloss.TerminalColor
 	muted    lipgloss.TerminalColor
 	border   lipgloss.TerminalColor
@@ -27,8 +26,6 @@ type styles struct {
 	p palette
 
 	app                lipgloss.Style
-	tabActive          lipgloss.Style
-	tabInactive        lipgloss.Style
 	chipActive         lipgloss.Style
 	chipIdle           lipgloss.Style
 	itemName           lipgloss.Style
@@ -55,7 +52,6 @@ type styles struct {
 	key                lipgloss.Style
 	selectedBG         lipgloss.Style
 	bar                lipgloss.Style
-	status             lipgloss.Style
 	success            lipgloss.Style
 	info               lipgloss.Style
 	warning            lipgloss.Style
@@ -75,7 +71,6 @@ func stylesFromConfig(cfg appconfig.Config) styles {
 	// instead of painting a fixed Catppuccin surface over it.
 	p := palette{
 		bg:       lipgloss.NoColor{},
-		bgAlt:    lipgloss.NoColor{},
 		fg:       lipgloss.NoColor{},
 		muted:    lipgloss.Color("8"),
 		border:   lipgloss.Color("8"),
@@ -102,8 +97,6 @@ func stylesFromConfig(cfg appconfig.Config) styles {
 
 	s := styles{p: p}
 	s.app = lipgloss.NewStyle().Foreground(p.fg).Background(p.bg)
-	s.tabActive = lipgloss.NewStyle().Foreground(activeTab).Bold(true)
-	s.tabInactive = lipgloss.NewStyle().Foreground(inactiveTab)
 	// Source-tab chips: active is the active_tab color (bold, padded), idle a
 	// muted padded chip. Reuses active_tab/inactive_tab colors (no new tokens).
 	s.chipActive = lipgloss.NewStyle().
@@ -154,7 +147,6 @@ func stylesFromConfig(cfg appconfig.Config) styles {
 	s.key = lipgloss.NewStyle().Foreground(key).Bold(true)
 	s.selectedBG = lipgloss.NewStyle().Reverse(true)
 	s.bar = lipgloss.NewStyle().Foreground(accent)
-	s.status = lipgloss.NewStyle().Foreground(p.fg).Background(p.bgAlt).Padding(0, 1)
 	s.success = lipgloss.NewStyle().Foreground(success).Bold(true)
 	s.info = lipgloss.NewStyle().Foreground(info).Bold(true)
 	s.warning = lipgloss.NewStyle().Foreground(warning).Bold(true)

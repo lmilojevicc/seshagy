@@ -45,12 +45,3 @@ func aggregateOverviewStats(items []sessionmgr.Item) overviewStats {
 	}
 	return st
 }
-
-// agentTotal returns the total number of agents across all states.
-func (s overviewStats) agentTotal() int {
-	total := 0
-	for _, c := range s.agents {
-		total += c
-	}
-	return total
-}

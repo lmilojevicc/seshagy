@@ -242,7 +242,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if msg.path == "" {
-			m.notify("yazi closed without a directory", sevInfo)
+			m.notify("yazi closed without a directory", sevWarning)
 			return m, nil
 		}
 		return m, createSessionCmd(m.mux, msg.path)

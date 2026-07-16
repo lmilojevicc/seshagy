@@ -1,9 +1,11 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
@@ -232,18 +234,89 @@ func TestPopupStyleRendersInlineRenameWhenSuppressedByNarrowWidth(t *testing.T) 
 }
 
 func TestPopupStyleRendersInlineInputWhenSuppressedByShortHeight(t *testing.T) {
-	m := newTestModel(t)
-	m.config.TUI.InputStyle = appconfig.InputStylePopup
-	m.width, m.height = 80, 4
-	m.inputMode = modeSearch
-	m.searchInput.SetValue("short-query")
+	for _, tt := range []struct {
+		name  string
+		mode  inputMode
+		title string
+		value string
+	}{
+		{name: "search", mode: modeSearch, title: "SEARCH", value: "short-query"},
+		{name: "rename", mode: modeRename, title: "RENAME", value: "short-name"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			m := newTestModel(t)
+			m.config.TUI.InputStyle = appconfig.InputStylePopup
+			m.width, m.height = 80, 4
+			m.inputMode = tt.mode
+			m.renameFrom = "old"
+			m.searchInput.SetValue(tt.value)
+			m.renameInput.SetValue(tt.value)
 
-	view := sessionmgr.StripANSI(m.View())
-	if !strings.Contains(view, "SEARCH") || !strings.Contains(view, "short-query") {
-		t.Fatalf("short popup-style view missing inline SEARCH input\n%s", view)
+			view := sessionmgr.StripANSI(m.View())
+			if !strings.Contains(view, tt.title) || !strings.Contains(view, tt.value) {
+				t.Fatalf("short popup-style view missing inline %s input\n%s", tt.title, view)
+			}
+			if strings.Contains(view, "HELP") {
+				t.Fatalf("short popup-style view should prioritize input over HELP\n%s", view)
+			}
+		})
 	}
-	if strings.Contains(view, "HELP") {
-		t.Fatalf("short popup-style view should prioritize input over HELP\n%s", view)
+}
+
+func TestViewPreservesInlineInputAtHeightBoundaries(t *testing.T) {
+	for _, style := range []struct {
+		name  string
+		value string
+		width int
+	}{
+		{name: "cmdline", value: appconfig.InputStyleCmdline, width: 80},
+		{name: "narrow-popup", value: appconfig.InputStylePopup, width: 24},
+	} {
+		for _, mode := range []struct {
+			name  string
+			value inputMode
+		}{
+			{name: "search", value: modeSearch},
+			{name: "rename", value: modeRename},
+		} {
+			for _, height := range []int{1, 4, 5, 8, 9, 10} {
+				t.Run(fmt.Sprintf("%s/%s/%d", style.name, mode.name, height), func(t *testing.T) {
+					m := newTestModel(t)
+					m.config.TUI.InputStyle = style.value
+					m.width, m.height = style.width, height
+					m.inputMode = mode.value
+					m.renameFrom = "old"
+					m.searchInput.SetValue("typed-value")
+					m.renameInput.SetValue("typed-value")
+
+					view := sessionmgr.StripANSI(m.View())
+					if !strings.Contains(view, "typed-value") {
+						t.Fatalf("typed value missing at height %d\n%s", height, view)
+					}
+					if got := lipgloss.Height(view); got > height {
+						t.Fatalf("view height = %d, terminal height = %d\n%s", got, height, view)
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestRenamePopupDoesNotWrapAtNarrowWidth(t *testing.T) {
+	m := newTestModel(t)
+	model, _ := m.Update(tea.WindowSizeMsg{Width: 34, Height: 20})
+	m = model.(Model)
+	m.config.TUI.InputStyle = appconfig.InputStylePopup
+	m.inputMode = modeRename
+	m.renameFrom = "old-name"
+	m.renameInput.SetValue("new-name")
+
+	popup := sessionmgr.StripANSI(m.renderInputPopup())
+	if got := lipgloss.Height(popup); got != 4 {
+		t.Fatalf("rename popup height = %d, want 4 (2 content rows)\n%s", got, popup)
+	}
+	if !strings.Contains(popup, "old-name -> new-name") {
+		t.Fatalf("rename popup split prompt and value across rows\n%s", popup)
 	}
 }
 

@@ -74,7 +74,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			case sessionmgr.KindAgent:
 				return m, renameAgentCmd(m.mux, target, oldName, session, newName)
 			default:
-				m.notify("rename only applies to "+m.terms.SessionPlural+" and agents", sevInfo)
+				m.notify("rename only applies to "+m.terms.SessionPlural+" and agents", sevWarning)
 				return m, nil
 			}
 		case "ctrl+c":
@@ -541,7 +541,7 @@ func (m Model) startRename() (tea.Model, tea.Cmd) {
 		m.renameInput.Focus()
 		return m, textinput.Blink
 	default:
-		m.notify("rename only applies to "+m.terms.SessionPlural+" and agents", sevInfo)
+		m.notify("rename only applies to "+m.terms.SessionPlural+" and agents", sevWarning)
 		return m, nil
 	}
 }

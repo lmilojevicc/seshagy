@@ -43,17 +43,23 @@ func (m Model) View() string {
 	}
 	header := m.renderTopRow()
 	footer := m.renderFooter()
-	inputActive := m.inputMode == modeSearch || m.inputMode == modeRename
-	if inputActive && m.height < 5 {
-		// Preserve the active input when even the header and a one-line body
-		// would push this input-only footer outside the terminal.
-		return m.overlayNotifications(trimHeight(footer, m.height))
+	if m.inlineInputActive() {
+		inputTile := m.renderInlineInputTile()
+		if m.height == 1 {
+			// A bordered tile cannot expose its content in one row.
+			return m.overlayNotifications(m.renderInputLine(safeWidth(m.width)))
+		}
+		if m.height < lipgloss.Height(header)+1+lipgloss.Height(inputTile) {
+			// Preserve the complete input tile when the header plus even a
+			// one-line body would push part of it outside the terminal.
+			return m.overlayNotifications(trimHeight(inputTile, m.height))
+		}
 	}
 	bodyH := m.height - lipgloss.Height(header) - lipgloss.Height(footer)
 	if bodyH < 1 {
 		bodyH = 1
 	}
-	body := m.renderBody(bodyH)
+	body := trimHeight(m.renderBody(bodyH), bodyH)
 	frame := joinFrame(header, body, footer, m.width, m.height)
 	if !m.inputPopupActive() {
 		return m.overlayNotifications(frame)
@@ -149,6 +155,39 @@ func (m Model) inputPopupActive() bool {
 		m.width >= 34 && m.height >= 5
 }
 
+func (m Model) inlineInputActive() bool {
+	if m.inputMode != modeSearch && m.inputMode != modeRename {
+		return false
+	}
+	return m.config.TUI.InputStyle == appconfig.InputStyleCmdline || !m.inputPopupActive()
+}
+
+// configuredInput returns the active text input sized to available, including
+// its prompt and one cell for the cursor.
+func (m Model) configuredInput(available int) (string, textinput.Model, string) {
+	available = max(1, available)
+	var title, help string
+	var ti textinput.Model
+	switch m.inputMode {
+	case modeRename:
+		title = "RENAME"
+		ti = m.renameInput
+		ti.Prompt = clampText(m.renameFrom, available/2) + " -> "
+		help = "enter to rename · esc to cancel"
+	default:
+		title = "SEARCH"
+		ti = m.searchInput
+		help = "enter to filter · esc to cancel"
+	}
+	ti.Width = max(1, available-lipgloss.Width(ti.Prompt)-1)
+	return title, ti, help
+}
+
+func (m Model) renderInputLine(available int) string {
+	_, ti, _ := m.configuredInput(available)
+	return clampText(ti.View(), available)
+}
+
 // renderInputPopup renders the bordered centered popup that hosts the
 // search or rename text input plus a one-line help row.
 func (m Model) renderInputPopup() string {
@@ -162,27 +201,8 @@ func (m Model) renderInputPopup() string {
 	if contentW < 1 {
 		contentW = 1
 	}
-	var title, inputView, help string
-	switch m.inputMode {
-	case modeSearch:
-		title = "SEARCH"
-		si := m.searchInput
-		if si.Width > contentW {
-			si.Width = contentW
-		}
-		inputView = si.View()
-		help = "enter to filter · esc to cancel"
-	case modeRename:
-		title = "RENAME"
-		ri := m.renameInput
-		ri.Prompt = clampText(m.renameFrom, contentW/2) + " -> "
-		if ri.Width > contentW {
-			ri.Width = contentW
-		}
-		inputView = ri.View()
-		help = "enter to rename · esc to cancel"
-	}
-	content := inputView + "\n" + clampText(s.muted.Render(help), contentW)
+	title, ti, help := m.configuredInput(contentW)
+	content := clampText(ti.View(), contentW) + "\n" + clampText(s.muted.Render(help), contentW)
 	return paneWithTitle(s.paneInput, s.helpTileTitle, content, title, boxW, 0)
 }
 
@@ -303,39 +323,46 @@ func (m Model) renderSourcesTile(width int) string {
 // badge (vis/total when filtering). The line is clamped to width.
 func (m Model) renderSourceChips(width int) string {
 	s := m.styles
-	maxW := width
-	tabs := m.sourceTabs()
+	count := m.sourceCountBadge()
+	countW := lipgloss.Width(count)
+	if countW >= width {
+		return s.muted.Render(clampText(count, width))
+	}
+	chipsW := width - countW - 1
+	line := m.renderSourceChipLabels("key-name")
+	if lipgloss.Width(line) > chipsW {
+		line = m.renderSourceChipLabels("name")
+	}
+	if lipgloss.Width(line) > chipsW {
+		line = m.renderSourceChipLabels("key")
+	}
+	line = clampText(line, chipsW)
+	return composeLine(line, count, width, s.muted)
+}
 
-	try := func(format string) string {
-		parts := make([]string, 0, len(tabs))
-		for _, tab := range tabs {
-			var label string
-			switch format {
-			case "key-name":
-				label = tab.key + " " + tab.name
-			case "name":
-				label = tab.name
-			default:
-				label = tab.key
-			}
-			if tab.mode == m.source {
-				parts = append(parts, s.chipActive.Render(label))
-			} else {
-				parts = append(parts, s.chipIdle.Render(label))
-			}
+func (m Model) renderSourceChipLabels(format string) string {
+	s := m.styles
+	parts := make([]string, 0, len(m.sourceTabs()))
+	for _, tab := range m.sourceTabs() {
+		var label string
+		switch format {
+		case "key-name":
+			label = tab.key + " " + tab.name
+		case "name":
+			label = tab.name
+		default:
+			label = tab.key
 		}
-		return strings.Join(parts, s.muted.Render(" | "))
+		if tab.mode == m.source {
+			parts = append(parts, s.chipActive.Render(label))
+		} else {
+			parts = append(parts, s.chipIdle.Render(label))
+		}
 	}
+	return strings.Join(parts, s.muted.Render(" | "))
+}
 
-	line := try("key-name")
-	if lipgloss.Width(line) > maxW {
-		line = try("name")
-	}
-	if lipgloss.Width(line) > maxW {
-		line = try("key")
-	}
-
-	// Right-aligned visible-count badge when room allows.
+func (m Model) sourceCountBadge() string {
 	items := m.visibleItems()
 	count := fmt.Sprintf("%d", len(items))
 	if m.query != "" {
@@ -345,7 +372,12 @@ func (m Model) renderSourceChips(width int) string {
 		frames := []rune(spinnerFrames)
 		count += " " + string(frames[m.spinnerFrame%len(frames)])
 	}
-	return composeLine(line, count, maxW, s.muted)
+	return count
+}
+
+func (m Model) completeSourceChipRowFits(width int) bool {
+	return lipgloss.Width(m.renderSourceChipLabels("key"))+
+		1+lipgloss.Width(m.sourceCountBadge()) <= width
 }
 
 type sourceTab struct {
@@ -385,8 +417,9 @@ func (m Model) renderTopRow() string {
 	wsW := clampVal(22, 16, usableW/6)
 	agentW := clampVal(34, 26, usableW/3)
 	sourcesW := usableW - wsW - agentW - 2*gap
-	if sourcesW < 20 {
-		// Not enough room for all three tiles — fall back to SOURCES alone.
+	if sourcesW < 20 || !m.completeSourceChipRowFits(sourcesW-4) {
+		// Not enough room for a complete minimal SOURCES row in the
+		// three-tile layout — fall back to SOURCES alone.
 		return m.renderSourcesTile(usableW)
 	}
 
@@ -683,9 +716,6 @@ func rowText(parts ...string) string {
 }
 
 func (m Model) renderRightPane(width, height int) string {
-	if !m.showPreview {
-		return m.renderDetailPane(width, height)
-	}
 	// The detail pane adapts to its content (no trailing blank padding); the
 	// preview pane fills the remainder. At short heights, cap the detail tile
 	// so the preview keeps a three-row floor and the stacked panes never exceed
@@ -897,36 +927,33 @@ func (m Model) renderFooter() string {
 	// cmdline input renders here, as does popup input when the terminal is too
 	// small for its overlay.
 	footerW := safeWidth(m.width)
-	contentW := max(1, footerW-4)
 	helpLine := clampText(help, max(1, footerW-4))
 	helpTile := paneWithTitle(s.tileHelp, s.helpTileTitle, helpLine, "HELP", footerW, 0)
 	popupStyleSuppressedBySize := m.config.TUI.InputStyle == appconfig.InputStylePopup &&
 		(m.width < 34 || m.height < 5)
 	if (m.inputMode == modeSearch || m.inputMode == modeRename) &&
 		(m.config.TUI.InputStyle == appconfig.InputStyleCmdline || popupStyleSuppressedBySize) {
-		var title string
-		var ti textinput.Model
-		switch m.inputMode {
-		case modeSearch:
-			title = "SEARCH"
-			ti = m.searchInput
-		case modeRename:
-			title = "RENAME"
-			ti = m.renameInput
-			ti.Prompt = clampText(m.renameFrom, contentW/2) + " -> "
-		}
-		// Reserve 1 cell for the textinput cursor: View() renders prompt + Width + 1.
-		if w := contentW - lipgloss.Width(ti.Prompt) - 1; w > 0 {
-			ti.Width = w
-		}
-		inputLine := clampText(ti.View(), contentW)
-		inputTile := paneWithTitle(s.paneInput, s.helpTileTitle, inputLine, title, footerW, 0)
+		inputTile := m.renderInlineInputTile()
 		if m.height > 0 && m.height < 5 {
 			return inputTile
 		}
 		return inputTile + "\n" + helpTile
 	}
 	return helpTile
+}
+
+func (m Model) renderInlineInputTile() string {
+	footerW := safeWidth(m.width)
+	contentW := max(1, footerW-4)
+	title, _, _ := m.configuredInput(contentW)
+	return paneWithTitle(
+		m.styles.paneInput,
+		m.styles.helpTileTitle,
+		m.renderInputLine(contentW),
+		title,
+		footerW,
+		0,
+	)
 }
 
 func renderTmuxState(s styles, icons sessionmgr.IconSet, attached bool) string {

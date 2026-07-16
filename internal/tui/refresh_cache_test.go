@@ -188,17 +188,6 @@ func TestBeginRefreshCoalescesInflight(t *testing.T) {
 	}
 }
 
-func TestBackgroundRefreshingFooterState(t *testing.T) {
-	m := New()
-	m.loading = false
-	m.inflightRefresh = map[sessionmgr.SourceMode]uint64{
-		m.source: 1,
-	}
-	if !m.backgroundRefreshing() {
-		t.Fatal("backgroundRefreshing = false, want true")
-	}
-}
-
 func TestInvalidateAllCachesDropsInflightRefresh(t *testing.T) {
 	m := New()
 	m.source = sessionmgr.ModeSessions

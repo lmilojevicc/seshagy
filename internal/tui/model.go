@@ -392,13 +392,6 @@ func sortedCounts(items []sessionmgr.Item) map[sessionmgr.Kind]int {
 	return counts
 }
 
-func plural(n int) string {
-	if n == 1 {
-		return ""
-	}
-	return "s"
-}
-
 func min(a, b int) int {
 	if a < b {
 		return a

@@ -746,6 +746,7 @@ func TestNormalizeThemeColorsFillsAllEmptyFields(t *testing.T) {
 		{"ListBorderTitle", cfg.Theme.Colors.ListBorderTitle, defaults.Border},
 		{"MetadataBorderTitle", cfg.Theme.Colors.MetadataBorderTitle, defaults.Border},
 		{"PreviewBorderTitle", cfg.Theme.Colors.PreviewBorderTitle, defaults.Border},
+		{"InputBorder", cfg.Theme.Colors.InputBorder, defaults.Border},
 		// Overview hero tiles inherit border / popup_title when unset.
 		{"WorkspaceTileBorder", cfg.Theme.Colors.WorkspaceTileBorder, defaults.Border},
 		{"AgentTileBorder", cfg.Theme.Colors.AgentTileBorder, defaults.Border},
@@ -770,6 +771,7 @@ func TestNormalizeThemeColorsPaneTokensInheritCustomGlobals(t *testing.T) {
 	cfg.Theme.Colors.ListBorderTitle = ""
 	cfg.Theme.Colors.MetadataBorderTitle = ""
 	cfg.Theme.Colors.PreviewBorderTitle = ""
+	cfg.Theme.Colors.InputBorder = ""
 	cfg.Normalize()
 
 	c := cfg.Theme.Colors
@@ -780,6 +782,7 @@ func TestNormalizeThemeColorsPaneTokensInheritCustomGlobals(t *testing.T) {
 		"ListBorderTitle":     "#bbbbbb",
 		"MetadataBorderTitle": "#bbbbbb",
 		"PreviewBorderTitle":  "#bbbbbb",
+		"InputBorder":         "#bbbbbb",
 		// Overview tiles: borders inherit border; titles inherit popup_title
 		// (which itself inherits the legacy title here).
 		"WorkspaceTileBorder": "#bbbbbb",
@@ -794,6 +797,7 @@ func TestNormalizeThemeColorsPaneTokensInheritCustomGlobals(t *testing.T) {
 		"ListBorderTitle":     c.ListBorderTitle,
 		"MetadataBorderTitle": c.MetadataBorderTitle,
 		"PreviewBorderTitle":  c.PreviewBorderTitle,
+		"InputBorder":         c.InputBorder,
 		"WorkspaceTileBorder": c.WorkspaceTileBorder,
 		"AgentTileBorder":     c.AgentTileBorder,
 		"WorkspaceTileTitle":  c.WorkspaceTileTitle,

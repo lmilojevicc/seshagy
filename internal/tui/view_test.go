@@ -54,7 +54,7 @@ func TestViewRendersDashboardChromeAndRows(t *testing.T) {
 		{Kind: sessionmgr.KindZoxide, Name: "~/code/demo", Path: "~/code/demo"},
 	}
 	out := sessionmgr.StripANSI(m.View())
-	for _, want := range []string{"1 All", "All (3", "demo", "pi", "Preview"} {
+	for _, want := range []string{"SOURCES", "All (3", "demo", "pi", "Preview"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("View() missing %q\n%s", want, out)
 		}
@@ -211,13 +211,6 @@ func TestSearchModeWrapsAtEdges(t *testing.T) {
 	m = model.(Model)
 	if m.cursor != 0 {
 		t.Fatalf("down in search mode from last: cursor=%d, want 0", m.cursor)
-	}
-}
-
-func TestRenderTabsFitsTerminalWidth(t *testing.T) {
-	for width := 20; width <= 120; width++ {
-		t.Run(fmt.Sprintf("%d", width), func(t *testing.T) {
-		})
 	}
 }
 
@@ -1557,9 +1550,6 @@ func TestDefaultStylesUseTerminalPalette(t *testing.T) {
 	if _, ok := s.app.GetBackground().(lipgloss.NoColor); !ok {
 		t.Fatalf("app background should use terminal default, got %T", s.app.GetBackground())
 	}
-	if _, ok := s.status.GetBackground().(lipgloss.NoColor); !ok {
-		t.Fatalf("status background should use terminal default, got %T", s.status.GetBackground())
-	}
 	if !s.selectedBG.GetReverse() {
 		t.Fatal("selected rows should use reverse video so selection follows terminal colors")
 	}
@@ -1613,14 +1603,14 @@ func TestConfiguredThemeColorsApply(t *testing.T) {
 			t.Fatalf("%s focused border color = %v, want %v", side, got, wantBorder)
 		}
 	}
-	if got := s.tabActive.GetForeground(); got != lipgloss.Color("#f5c2e7") {
-		t.Fatalf("active tab color = %v, want #f5c2e7", got)
+	if got := s.chipActive.GetForeground(); got != lipgloss.Color("#f5c2e7") {
+		t.Fatalf("active chip color = %v, want #f5c2e7", got)
 	}
 	if got := s.pane.GetBorderTopForeground(); got != lipgloss.Color("#313244") {
 		t.Fatalf("border color = %v, want #313244", got)
 	}
-	if got := s.tabInactive.GetForeground(); got != lipgloss.Color("#6c7086") {
-		t.Fatalf("inactive tab color = %v, want #6c7086", got)
+	if got := s.chipIdle.GetForeground(); got != lipgloss.Color("#6c7086") {
+		t.Fatalf("inactive chip color = %v, want #6c7086", got)
 	}
 	if got := s.title.GetForeground(); got != lipgloss.Color("#b4befe") {
 		t.Fatalf("popup title color = %v, want #b4befe", got)
@@ -1671,10 +1661,10 @@ func TestConfiguredThemeColorsApply(t *testing.T) {
 
 	cfg.Theme.Colors.ActiveTab = "default"
 	s = stylesFromConfig(cfg)
-	if _, ok := s.tabActive.GetForeground().(lipgloss.NoColor); !ok {
+	if _, ok := s.chipActive.GetForeground().(lipgloss.NoColor); !ok {
 		t.Fatalf(
-			"default active tab should use terminal foreground, got %T",
-			s.tabActive.GetForeground(),
+			"default active chip should use terminal foreground, got %T",
+			s.chipActive.GetForeground(),
 		)
 	}
 }
@@ -1710,10 +1700,10 @@ func TestItemNameStyleIndependentOfActiveTab(t *testing.T) {
 					s.itemName.GetForeground(),
 				)
 			}
-			// The active tab itself must still follow active_tab.
-			if got := s.tabActive.GetForeground(); got != tc.wantTab {
+			// The active source chip itself must still follow active_tab.
+			if got := s.chipActive.GetForeground(); got != tc.wantTab {
 				t.Fatalf(
-					"tabActive foreground with active_tab=%q = %v, want %v",
+					"chipActive foreground with active_tab=%q = %v, want %v",
 					tc.activeTab,
 					got,
 					tc.wantTab,
@@ -1727,13 +1717,13 @@ func TestItemNameStyleIndependentOfActiveTab(t *testing.T) {
 // #30: a rendered session/agent row must not inherit the active_tab color.
 // Unlike TestItemNameStyleIndependentOfActiveTab (which checks the style
 // field), this asserts on rowParts() rendered output, so it catches a revert
-// of rowParts() back to s.tabActive.
+// of rowParts() back to s.chipActive.
 //
 // lipgloss strips styling when no color terminal is detected (as in tests),
 // so the TrueColor profile is forced for the duration of this test and
 // restored afterward. Under TrueColor a real active_tab color emits a
 // truecolor SGR escape that NoColor (the itemName foreground) does not, so
-// the row would byte-differ if rowParts used s.tabActive.
+// the row would byte-differ if rowParts used s.chipActive.
 //
 // newTestModel sets m.styles from the default config, so changing m.config
 // alone does not propagate active_tab into styles; render() reassigns
@@ -2297,6 +2287,67 @@ func TestRenderTopRowSourcesOnlyWhenHidden(t *testing.T) {
 	}
 }
 
+func TestRenderTopRowKeepsSourceSpinnerInThreeTileLayout(t *testing.T) {
+	m := newTestModel(t)
+	m.width, m.height = 120, 32
+	m.source = sessionmgr.ModeSessions
+	m.loading = false
+	m.items = []sessionmgr.Item{{Kind: sessionmgr.KindSession, Name: "demo"}}
+	m.cache = map[sessionmgr.SourceMode]modeCache{
+		sessionmgr.ModeAll: {items: []sessionmgr.Item{
+			{Kind: sessionmgr.KindSession, Name: "demo"},
+			{Kind: sessionmgr.KindAgent, AgentName: "pi", AgentState: sessionmgr.AgentWorking},
+		}, fetchedAt: time.Now()},
+	}
+	m.inflightRefresh = map[sessionmgr.SourceMode]uint64{m.source: 1}
+
+	header := m.renderTopRow()
+	out := sessionmgr.StripANSI(header)
+	if !strings.Contains(out, "AGENTS") || !strings.Contains(out, "SESSIONS") {
+		t.Fatalf("expected real three-tile header\n%s", out)
+	}
+	if !strings.ContainsRune(out, []rune(spinnerFrames)[0]) {
+		t.Fatalf("three-tile SOURCES row dropped refresh spinner\n%s", out)
+	}
+}
+
+func TestRenderTopRowNarrowBoundariesFitOrCollapseCleanly(t *testing.T) {
+	for _, width := range []int{79, 80, 81} {
+		t.Run(fmt.Sprint(width), func(t *testing.T) {
+			m := newTestModel(t)
+			m.width, m.height = width, 32
+			m.source = sessionmgr.ModeSessions
+			m.loading = false
+			m.items = []sessionmgr.Item{{Kind: sessionmgr.KindSession, Name: "demo"}}
+			m.cache = map[sessionmgr.SourceMode]modeCache{
+				sessionmgr.ModeAll: {items: []sessionmgr.Item{
+					{Kind: sessionmgr.KindSession, Name: "demo"},
+					{
+						Kind:       sessionmgr.KindAgent,
+						AgentName:  "pi",
+						AgentState: sessionmgr.AgentWorking,
+					},
+				}, fetchedAt: time.Now()},
+			}
+			m.inflightRefresh = map[sessionmgr.SourceMode]uint64{m.source: 1}
+
+			header := m.renderTopRow()
+			out := sessionmgr.StripANSI(header)
+			for i, line := range strings.Split(header, "\n") {
+				if got := lipgloss.Width(line); got > safeWidth(width) {
+					t.Fatalf("line %d width = %d, want <= %d\n%s", i, got, safeWidth(width), out)
+				}
+			}
+			if strings.Contains(out, "…") {
+				t.Fatalf("source chips were truncated instead of fitting or collapsing\n%s", out)
+			}
+			if !strings.ContainsRune(out, []rune(spinnerFrames)[0]) {
+				t.Fatalf("source row dropped reserved spinner\n%s", out)
+			}
+		})
+	}
+}
+
 func TestRenderTopRowNarrowWidthCollapsesToSourcesOnly(t *testing.T) {
 	m := newTestModel(t)
 	m.width, m.height = 58, 32
@@ -2314,6 +2365,33 @@ func TestRenderTopRowNarrowWidthCollapsesToSourcesOnly(t *testing.T) {
 	}
 	if strings.Contains(out, "AGENTS") || strings.Contains(out, "SESSIONS") {
 		t.Fatalf("narrow header did not collapse overview tiles\n%s", out)
+	}
+}
+
+func TestOverlayNotificationsSurviveSetupAndInstallViews(t *testing.T) {
+	for _, tt := range []struct {
+		name       string
+		identifier string
+		activate   func(*Model)
+	}{
+		{name: "setup", identifier: "Choose startup input mode", activate: func(m *Model) {
+			m.setup.active = true
+		}},
+		{name: "install", identifier: "Install agent integrations", activate: func(m *Model) {
+			m.openInstallMenu(false)
+		}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			m := newTestModel(t)
+			m.width, m.height = 120, 32
+			tt.activate(&m)
+			m.notify("overlay toast", sevWarning)
+
+			out := sessionmgr.StripANSI(m.View())
+			if !strings.Contains(out, tt.identifier) || !strings.Contains(out, "overlay toast") {
+				t.Fatalf("overlay view lost prompt/menu or toast\n%s", out)
+			}
+		})
 	}
 }
 

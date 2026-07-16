@@ -272,6 +272,9 @@ func TestUpdateYaziDoneMsgErrorAndEmptyPath(t *testing.T) {
 		cmd != nil {
 		t.Fatalf("empty yazi path notification = %q cmd:%v", text, cmd)
 	}
+	if sev := latestNotificationSeverity(got); sev != sevWarning {
+		t.Fatalf("empty yazi path severity = %v, want sevWarning", sev)
+	}
 }
 
 func TestUpdateActionDoneMsgRecordsRenameError(t *testing.T) {

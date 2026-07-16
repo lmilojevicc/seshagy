@@ -41,9 +41,6 @@ func TestAggregateOverviewStats(t *testing.T) {
 			t.Fatalf("agents[%s] = %d, want %d", state, got, want)
 		}
 	}
-	if got := stats.agentTotal(); got != 6 {
-		t.Fatalf("agentTotal = %d, want 6", got)
-	}
 }
 
 // TestAggregateOverviewStatsNormalizesRawStates verifies that a raw/empty agent
@@ -64,7 +61,7 @@ func TestAggregateOverviewStatsNormalizesRawStates(t *testing.T) {
 
 func TestAggregateOverviewStatsEmpty(t *testing.T) {
 	stats := aggregateOverviewStats(nil)
-	if stats.sessions != 0 || stats.attached != 0 || stats.agentTotal() != 0 {
+	if stats.sessions != 0 || stats.attached != 0 {
 		t.Fatalf("empty stats = %#v, want zeros", stats)
 	}
 	// All five state buckets are initialized to 0.

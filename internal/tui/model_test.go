@@ -107,7 +107,7 @@ func TestShowPreviewFollowsConfig(t *testing.T) {
 	}
 }
 
-func TestSelectedKeySortItemsAndPlural(t *testing.T) {
+func TestSelectedKeyAndSortItems(t *testing.T) {
 	m := New()
 	m.items = []sessionmgr.Item{
 		{Kind: sessionmgr.KindFD, Path: "/tmp/b"},
@@ -126,10 +126,6 @@ func TestSelectedKeySortItemsAndPlural(t *testing.T) {
 	m.cursor = 99
 	if m.selectedKey() != "" {
 		t.Fatal("expected empty selectedKey for invalid cursor")
-	}
-
-	if plural(1) != "" || plural(2) != "s" {
-		t.Fatalf("plural(1)=%q plural(2)=%q", plural(1), plural(2))
 	}
 }
 
