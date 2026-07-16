@@ -43,6 +43,12 @@ func (m Model) View() string {
 	}
 	header := m.renderTopRow()
 	footer := m.renderFooter()
+	inputActive := m.inputMode == modeSearch || m.inputMode == modeRename
+	if inputActive && m.height < 5 {
+		// Preserve the active input when even the header and a one-line body
+		// would push this input-only footer outside the terminal.
+		return m.overlayNotifications(trimHeight(footer, m.height))
+	}
 	bodyH := m.height - lipgloss.Height(header) - lipgloss.Height(footer)
 	if bodyH < 1 {
 		bodyH = 1
@@ -887,15 +893,17 @@ func (m Model) renderFooter() string {
 	}
 	// The footer is just the help line. The old status strip (backend indicator,
 	// loaded/refreshing status, errors) is gone because the overview tiles now
-	// carry the counts and active source. The one exception is cmdline input
-	// style: while actively searching/renaming, render the text input as a
-	// titled tile above the help (popup style uses its own overlay).
+	// carry the counts and active source. While actively searching/renaming,
+	// cmdline input renders here, as does popup input when the terminal is too
+	// small for its overlay.
 	footerW := safeWidth(m.width)
 	contentW := max(1, footerW-4)
 	helpLine := clampText(help, max(1, footerW-4))
 	helpTile := paneWithTitle(s.tileHelp, s.helpTileTitle, helpLine, "HELP", footerW, 0)
+	popupStyleSuppressedBySize := m.config.TUI.InputStyle == appconfig.InputStylePopup &&
+		(m.width < 34 || m.height < 5)
 	if (m.inputMode == modeSearch || m.inputMode == modeRename) &&
-		m.config.TUI.InputStyle == appconfig.InputStyleCmdline {
+		(m.config.TUI.InputStyle == appconfig.InputStyleCmdline || popupStyleSuppressedBySize) {
 		var title string
 		var ti textinput.Model
 		switch m.inputMode {
@@ -913,6 +921,9 @@ func (m Model) renderFooter() string {
 		}
 		inputLine := clampText(ti.View(), contentW)
 		inputTile := paneWithTitle(s.paneInput, s.helpTileTitle, inputLine, title, footerW, 0)
+		if m.height > 0 && m.height < 5 {
+			return inputTile
+		}
 		return inputTile + "\n" + helpTile
 	}
 	return helpTile

@@ -204,24 +204,62 @@ func TestCmdlineInputStyleHasFieldsetTitle(t *testing.T) {
 	}
 }
 
-func TestFooterPopupStyleStillComposesStatus(t *testing.T) {
+func TestPopupStyleRendersInlineInputWhenSuppressedByNarrowWidth(t *testing.T) {
 	m := newTestModel(t)
-	// Default (popup) input style: the footer stays help-only. The search/rename
-	// field renders as its own overlay, not in the footer, so even while searching
-	// the footer has no status strip and no inline input.
 	m.config.TUI.InputStyle = appconfig.InputStylePopup
-	m.width, m.height = 40, 4
+	m.width, m.height = 24, 12
 	m.inputMode = modeSearch
-	m.searchInput.SetValue("test")
+	m.searchInput.SetValue("needle")
+
+	view := sessionmgr.StripANSI(m.View())
+	if !strings.Contains(view, "SEARCH") || !strings.Contains(view, "needle") {
+		t.Fatalf("narrow popup-style view missing inline SEARCH input\n%s", view)
+	}
+}
+
+func TestPopupStyleRendersInlineRenameWhenSuppressedByNarrowWidth(t *testing.T) {
+	m := newTestModel(t)
+	m.config.TUI.InputStyle = appconfig.InputStylePopup
+	m.width, m.height = 24, 12
+	m.inputMode = modeRename
+	m.renameFrom = "old"
+	m.renameInput.SetValue("new-name")
+
+	view := sessionmgr.StripANSI(m.View())
+	if !strings.Contains(view, "RENAME") || !strings.Contains(view, "new-name") {
+		t.Fatalf("narrow popup-style view missing inline RENAME input\n%s", view)
+	}
+}
+
+func TestPopupStyleRendersInlineInputWhenSuppressedByShortHeight(t *testing.T) {
+	m := newTestModel(t)
+	m.config.TUI.InputStyle = appconfig.InputStylePopup
+	m.width, m.height = 80, 4
+	m.inputMode = modeSearch
+	m.searchInput.SetValue("short-query")
+
+	view := sessionmgr.StripANSI(m.View())
+	if !strings.Contains(view, "SEARCH") || !strings.Contains(view, "short-query") {
+		t.Fatalf("short popup-style view missing inline SEARCH input\n%s", view)
+	}
+	if strings.Contains(view, "HELP") {
+		t.Fatalf("short popup-style view should prioritize input over HELP\n%s", view)
+	}
+}
+
+func TestPopupStyleDoesNotRenderDuplicateInlineInputAtPopupSize(t *testing.T) {
+	m := newTestModel(t)
+	m.config.TUI.InputStyle = appconfig.InputStylePopup
+	m.width, m.height = 80, 20
+	m.inputMode = modeSearch
+	m.searchInput.SetValue("popup-query")
+
 	footer := sessionmgr.StripANSI(m.renderFooter())
-	lines := strings.Split(footer, "\n")
-	if len(lines) != 3 {
-		t.Fatalf("popup footer should be a HELP tile (3 lines), got %d\n%s", len(lines), footer)
+	if strings.Contains(footer, "SEARCH") || strings.Contains(footer, "popup-query") {
+		t.Fatalf("popup-capable footer must not duplicate the SEARCH input\n%s", footer)
 	}
-	if strings.Contains(footer, "test") {
-		t.Fatalf("popup footer must not embed the search input (it is an overlay)\n%s", footer)
-	}
-	if strings.Contains(footer, "✓") {
-		t.Fatalf("popup footer must not show the backend indicator\n%s", footer)
+	view := sessionmgr.StripANSI(m.View())
+	if !strings.Contains(view, "SEARCH") || !strings.Contains(view, "popup-query") {
+		t.Fatalf("popup-capable view missing the SEARCH overlay\n%s", view)
 	}
 }
