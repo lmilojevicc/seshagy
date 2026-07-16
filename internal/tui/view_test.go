@@ -959,6 +959,79 @@ func TestShortHeightDoesNotTruncateFooter(t *testing.T) {
 	}
 }
 
+func TestShortHeightRightPanePreservesPreviewFloorAndCapsDetail(t *testing.T) {
+	for _, terminalH := range []int{14, 16} {
+		t.Run(fmt.Sprint(terminalH), func(t *testing.T) {
+			m := newTestModel(t)
+			m.width, m.height = 120, terminalH
+			m.source = sessionmgr.ModeAgents
+			m.showPreview = true
+			m.items = []sessionmgr.Item{{
+				Kind:       sessionmgr.KindAgent,
+				AgentName:  "codex",
+				AgentState: sessionmgr.AgentWorking,
+				Location:   "demo:2.1",
+				Session:    "demo",
+				TabLabel:   "editor",
+				Path:       "/tmp/demo/deep/path",
+			}}
+			m.preview = "one\ntwo\nthree\nfour"
+
+			bodyH := terminalH - lipgloss.Height(
+				m.renderTopRow(),
+			) - lipgloss.Height(
+				m.renderFooter(),
+			)
+			right := sessionmgr.StripANSI(m.renderRightPane(56, bodyH))
+			lines := strings.Split(right, "\n")
+			previewTop := -1
+			for i, line := range lines {
+				if strings.HasPrefix(line, "╭") && strings.Contains(line, "Preview · codex") {
+					previewTop = i
+					break
+				}
+			}
+			if previewTop < 2 {
+				t.Fatalf("right pane missing separated detail/preview blocks\n%s", right)
+			}
+			if strings.TrimSpace(lines[previewTop-1]) != "" {
+				t.Fatalf(
+					"row before preview is not the pane gap: %q\n%s",
+					lines[previewTop-1],
+					right,
+				)
+			}
+
+			detailRows := previewTop - 1
+			previewRows := len(lines) - previewTop
+			if previewRows < 3 {
+				t.Fatalf("preview block has %d rows, want at least 3\n%s", previewRows, right)
+			}
+			if detailRows > bodyH-1-3 {
+				t.Fatalf(
+					"detail block has %d rows in %d-row body, leaving less than preview floor\n%s",
+					detailRows,
+					bodyH,
+					right,
+				)
+			}
+			if len(lines) != bodyH {
+				t.Fatalf(
+					"right pane has %d rows, want body height %d\n%s",
+					len(lines),
+					bodyH,
+					right,
+				)
+			}
+			if !strings.HasPrefix(lines[0], "╭") ||
+				!strings.HasPrefix(lines[detailRows-1], "╰") ||
+				!strings.HasPrefix(lines[len(lines)-1], "╰") {
+				t.Fatalf("detail or preview block is missing a visible border\n%s", right)
+			}
+		})
+	}
+}
+
 func TestRenameSearchPopupHasFieldsetTitle(t *testing.T) {
 	for _, tt := range []struct {
 		name  string
@@ -984,6 +1057,76 @@ func TestRenameSearchPopupHasFieldsetTitle(t *testing.T) {
 				if strings.TrimSpace(line) == tt.title {
 					t.Fatalf("popup still contains an in-content title\n%s", popup)
 				}
+			}
+		})
+	}
+}
+
+func TestSearchPopupDimsOnlyDashboardWhenConfigured(t *testing.T) {
+	prevProfile := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prevProfile) })
+
+	m := newTestModel(t)
+	m.width, m.height = 100, 24
+	m.loading = false
+	m.showPreview = false
+	m.source = sessionmgr.ModeSessions
+	m.items = []sessionmgr.Item{{Kind: sessionmgr.KindSession, Name: "dashboard-row"}}
+	m.inputMode = modeSearch
+	m.query = "dashboard"
+	m.searchInput.SetValue(m.query)
+	m.searchInput.Focus()
+
+	dimmed := true
+	m.config.TUI.DimBackground = &dimmed
+	dimSequence := sgrPrefix(lipgloss.Color("242"))
+	view := m.View()
+	var dashboardLine string
+	for _, line := range strings.Split(view, "\n") {
+		if strings.Contains(sessionmgr.StripANSI(line), "dashboard-row") {
+			dashboardLine = line
+			break
+		}
+	}
+	if dashboardLine == "" || !strings.Contains(dashboardLine, dimSequence) {
+		t.Fatalf("dashboard row missing dim color sequence %q\n%s", dimSequence, view)
+	}
+	popup := m.renderInputPopup()
+	var popupInputLine string
+	for _, line := range strings.Split(popup, "\n") {
+		if strings.Contains(sessionmgr.StripANSI(line), m.query) {
+			popupInputLine = line
+			break
+		}
+	}
+	if popupInputLine == "" || !strings.Contains(view, popupInputLine) {
+		t.Fatalf(
+			"view does not contain the undisturbed popup input line\npopup=%q\nview=%s",
+			popupInputLine,
+			view,
+		)
+	}
+	if strings.Contains(popupInputLine, dimSequence) {
+		t.Fatalf("search popup input line inherited dashboard dim color: %q", popupInputLine)
+	}
+
+	falseValue := false
+	for name, value := range map[string]*bool{"default nil": nil, "explicit false": &falseValue} {
+		t.Run(name, func(t *testing.T) {
+			m.config.TUI.DimBackground = value
+			out := m.View()
+			foundDashboard := false
+			for _, line := range strings.Split(out, "\n") {
+				if strings.Contains(sessionmgr.StripANSI(line), "dashboard-row") {
+					foundDashboard = true
+					if strings.Contains(line, dimSequence) {
+						t.Fatalf("dashboard dimmed with dim_background %s: %q", name, line)
+					}
+				}
+			}
+			if !foundDashboard {
+				t.Fatalf("dashboard row missing with dim_background %s\n%s", name, out)
 			}
 		})
 	}
@@ -1088,7 +1231,28 @@ func TestListBottomBorderShowsFilterQuery(t *testing.T) {
 	lines = strings.Split(sessionmgr.StripANSI(m.renderListPane(60, 12)), "\n")
 	bottom = lines[len(lines)-1]
 	if strings.Contains(bottom, "api") {
-		t.Fatalf("classic search should not put query on bottom border: %q", bottom)
+		t.Fatalf("active search should not put query on bottom border: %q", bottom)
+	}
+}
+
+func TestClassicSearchDoesNotRenderQueryOnListBottomBorder(t *testing.T) {
+	m := newTestModel(t)
+	m.source = sessionmgr.ModeSessions
+	m.config.TypeFirst.Enabled = false
+	m.inputMode = modeSearch
+	m.items = []sessionmgr.Item{
+		{Kind: sessionmgr.KindSession, Name: "api"},
+		{Kind: sessionmgr.KindSession, Name: "web"},
+	}
+	m.query = "api"
+
+	lines := strings.Split(sessionmgr.StripANSI(m.renderListPane(60, 12)), "\n")
+	top, bottom := lines[0], lines[len(lines)-1]
+	if !strings.Contains(top, "1/2 match") {
+		t.Fatalf("classic search list title missing match count: %q", top)
+	}
+	if strings.Contains(bottom, m.query) {
+		t.Fatalf("classic search query leaked onto list bottom border: %q", bottom)
 	}
 }
 
@@ -1188,6 +1352,77 @@ func TestViewRendersBottomRightToast(t *testing.T) {
 	}
 	if !strings.Contains(clean, "dashboard-row") {
 		t.Fatalf("dashboard row disappeared behind toast\n%s", clean)
+	}
+}
+
+func TestRenderNotificationToastStacksThreeSeveritiesInOneBorder(t *testing.T) {
+	prevProfile := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prevProfile) })
+
+	cfg := appconfig.Default()
+	cfg.Theme.Colors.Muted = "#112233"
+	cfg.Theme.Colors.Warning = "#445566"
+	cfg.Theme.Colors.Danger = "#778899"
+	m := newTestModel(t)
+	m.width, m.height = 100, 24
+	m.config = cfg
+	m.styles = stylesFromConfig(cfg)
+	m.notify("information", sevInfo)
+	m.notify("caution", sevWarning)
+	m.notify("failure", sevError)
+
+	toast := m.renderNotificationToast(time.Now())
+	cleanLines := strings.Split(sessionmgr.StripANSI(toast), "\n")
+	rawLines := strings.Split(toast, "\n")
+	if got := lipgloss.Height(toast); got != 5 {
+		t.Fatalf(
+			"three notifications rendered at height %d, want 5 rows including border\n%s",
+			got,
+			toast,
+		)
+	}
+	if len(cleanLines) != 5 ||
+		!strings.HasPrefix(cleanLines[0], "╭") || !strings.HasSuffix(cleanLines[0], "╮") ||
+		!strings.HasPrefix(cleanLines[4], "╰") || !strings.HasSuffix(cleanLines[4], "╯") {
+		t.Fatalf(
+			"notifications do not share one rounded border\n%s",
+			strings.Join(cleanLines, "\n"),
+		)
+	}
+	for i, want := range []string{"• information", "! caution", "× failure"} {
+		if !strings.Contains(cleanLines[i+1], want) {
+			t.Fatalf(
+				"toast row %d = %q, want %q in info→warning→error order",
+				i+1,
+				cleanLines[i+1],
+				want,
+			)
+		}
+		if !strings.HasPrefix(cleanLines[i+1], "│") || !strings.HasSuffix(cleanLines[i+1], "│") {
+			t.Fatalf("toast content row %d is outside shared border: %q", i+1, cleanLines[i+1])
+		}
+	}
+	for _, check := range []struct {
+		line   int
+		marker string
+		style  lipgloss.Style
+	}{
+		{line: 1, marker: "•", style: m.styles.muted},
+		{line: 2, marker: "!", style: m.styles.warning},
+		{line: 3, marker: "×", style: m.styles.danger},
+	} {
+		styledMarker := check.style.Render(check.marker)
+		markerAt := strings.Index(styledMarker, check.marker)
+		if markerAt < 0 ||
+			!strings.Contains(rawLines[check.line], styledMarker[:markerAt]+check.marker) {
+			t.Fatalf(
+				"toast marker %q on line %d is missing its configured severity color: %q",
+				check.marker,
+				check.line,
+				rawLines[check.line],
+			)
+		}
 	}
 }
 
@@ -1807,6 +2042,55 @@ func TestTitledTopEdge(t *testing.T) {
 	}
 }
 
+func TestTitledBottomEdge(t *testing.T) {
+	borderFG := lipgloss.Color("9")
+	titleFG := lipgloss.Color("12")
+	prevProfile := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prevProfile) })
+
+	for _, tt := range []struct {
+		name  string
+		title string
+		w     int
+	}{
+		{name: "normal two colors", title: "filter", w: 20},
+		{name: "empty plain edge", title: "", w: 12},
+		{name: "narrow plain edge", title: "filter", w: 6},
+		{name: "long title clamped", title: "a-filter-query-that-is-too-long", w: 18},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			edge := titledBottomEdge(tt.title, tt.w, borderFG, titleFG)
+			clean := sessionmgr.StripANSI(edge)
+			if got := lipgloss.Width(clean); got != tt.w {
+				t.Fatalf("display width = %d, want %d (%q)", got, tt.w, clean)
+			}
+			if !strings.HasPrefix(clean, "╰") || !strings.HasSuffix(clean, "╯") {
+				t.Fatalf("bottom edge lacks rounded corners: %q", clean)
+			}
+			switch tt.name {
+			case "normal two colors":
+				if !strings.Contains(clean, "╰─ filter ") ||
+					!strings.Contains(edge, sgrPrefix(borderFG)) ||
+					!strings.Contains(edge, sgrPrefix(titleFG)) {
+					t.Fatalf("normal edge lacks fieldset layout or two colors: %q", edge)
+				}
+			case "empty plain edge", "narrow plain edge":
+				if strings.Contains(clean, tt.title) && tt.title != "" {
+					t.Fatalf("plain fallback leaked title: %q", clean)
+				}
+				if clean != "╰"+strings.Repeat("─", tt.w-2)+"╯" {
+					t.Fatalf("plain fallback = %q", clean)
+				}
+			case "long title clamped":
+				if !strings.Contains(clean, "…") || strings.Contains(clean, "too-long") {
+					t.Fatalf("long title was not clamped: %q", clean)
+				}
+			}
+		})
+	}
+}
+
 // sgrPrefix returns the leading foreground SGR escape sequence lipgloss emits
 // for c, so tests can assert a specific color sequence is present in output.
 func sgrPrefix(c lipgloss.TerminalColor) string {
@@ -2010,6 +2294,26 @@ func TestRenderTopRowSourcesOnlyWhenHidden(t *testing.T) {
 	}
 	if strings.Contains(out, "AGENTS") || strings.Contains(out, "SESSIONS") {
 		t.Fatalf("overview tiles should hide on short terminals\n%s", out)
+	}
+}
+
+func TestRenderTopRowNarrowWidthCollapsesToSourcesOnly(t *testing.T) {
+	m := newTestModel(t)
+	m.width, m.height = 58, 32
+	m.source = sessionmgr.ModeSessions
+	m.cache = map[sessionmgr.SourceMode]modeCache{
+		sessionmgr.ModeAll: {items: []sessionmgr.Item{
+			{Kind: sessionmgr.KindSession, Name: "demo"},
+			{Kind: sessionmgr.KindAgent, AgentName: "pi", AgentState: sessionmgr.AgentWorking},
+		}, fetchedAt: time.Now()},
+	}
+
+	out := sessionmgr.StripANSI(m.renderTopRow())
+	if !strings.Contains(out, "SOURCES") {
+		t.Fatalf("narrow header missing SOURCES tile\n%s", out)
+	}
+	if strings.Contains(out, "AGENTS") || strings.Contains(out, "SESSIONS") {
+		t.Fatalf("narrow header did not collapse overview tiles\n%s", out)
 	}
 }
 

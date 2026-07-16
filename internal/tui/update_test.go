@@ -346,13 +346,35 @@ func TestActionDoneMsgClearsKillInFlight(t *testing.T) {
 	}
 }
 
-func TestActionDoneMsgRenameDoesNotClearKillInFlight(t *testing.T) {
+func TestActionDoneMsgRenameKindsDoNotClearKillInFlight(t *testing.T) {
+	for _, kind := range []actionKind{actionRename, actionAgentRename} {
+		for _, err := range []error{nil, errors.New("boom")} {
+			name := string(kind) + "/success"
+			if err != nil {
+				name = string(kind) + "/error"
+			}
+			t.Run(name, func(t *testing.T) {
+				m := New()
+				m.killInFlight = true
+
+				model, _ := m.Update(actionDoneMsg{
+					kind:   kind,
+					status: "rename complete",
+					err:    err,
+				})
+				if !model.(Model).killInFlight {
+					t.Fatalf("%s completion cleared killInFlight", kind)
+				}
+			})
+		}
+	}
+
+	// Positive control: only a completed kill owns and clears the flag.
 	m := New()
 	m.killInFlight = true
-
-	model, _ := m.Update(actionDoneMsg{kind: actionRename, status: "renamed old to new"})
-	if !model.(Model).killInFlight {
-		t.Fatal("rename completion cleared killInFlight")
+	model, _ := m.Update(actionDoneMsg{kind: actionKill, status: "killed session demo"})
+	if model.(Model).killInFlight {
+		t.Fatal("kill completion did not clear killInFlight")
 	}
 }
 
