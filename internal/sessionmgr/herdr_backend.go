@@ -134,6 +134,14 @@ func (herdrBackend) KillSession(ctx context.Context, target string) error {
 	if err := herdrRun(ctx, "workspace", "close", target); err != nil {
 		return fmt.Errorf("herdr workspace close: %w", err)
 	}
+	// herdr workspace close refocuses the client onto another workspace.
+	// Restore focus to the workspace seshagy runs in so the user isn't moved —
+	// unless they just closed that workspace themselves. Best-effort: the
+	// close already succeeded. (No query between close and focus — fastest
+	// restore, least flicker.)
+	if cur, err := (herdrBackend{}).CurrentSession(ctx); err == nil && cur != "" && cur != target {
+		_ = herdrRun(ctx, "workspace", "focus", cur)
+	}
 	return nil
 }
 

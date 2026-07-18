@@ -689,6 +689,9 @@ func TestHerdrBackendSuppression(t *testing.T) {
 }
 
 func TestHerdrBackendCommandsUseCorrectArgs(t *testing.T) {
+	// seshagy runs inside this workspace; killing it (w1 == current) is the
+	// self-kill edge case, so no focus-restore should follow the close.
+	t.Setenv("HERDR_WORKSPACE_ID", "w1")
 	rec := &herdrCmdRecorder{}
 	setHerdrHooksForTest(t, rec.outputFn, rec.runFn)
 
@@ -741,6 +744,86 @@ func TestHerdrBackendCommandsUseCorrectArgs(t *testing.T) {
 			if got[j] != want[j] {
 				t.Fatalf("call[%d][%d] = %q, want %q (full: %v)", i, j, got[j], want[j], got)
 			}
+		}
+	}
+}
+
+// TestHerdrKillSessionRestoresFocusWhenPaneLostFocus verifies that killing a
+// non-current workspace restores focus to seshagy's own workspace when herdr
+// has dismissed the seshagy pane (ephemeral mode) or refocused the client —
+// TestHerdrKillSessionRestoresFocusToCurrent verifies that after closing a
+// non-current workspace, KillSession unconditionally restores focus to the
+// workspace seshagy runs in — herdr workspace close refocuses the client onto
+// another workspace, so the restore prevents the user from being stranded. No
+// pane-current query is made between close and focus (fastest restore).
+func TestHerdrKillSessionRestoresFocusToCurrent(t *testing.T) {
+	t.Setenv("HERDR_WORKSPACE_ID", "wSelf")
+	t.Setenv("HERDR_PANE_ID", "pSelf")
+	rec := &herdrCmdRecorder{}
+	setHerdrHooksForTest(t, rec.outputFn, rec.runFn)
+
+	mux := NewHerdrBackend()
+	if err := mux.KillSession(context.Background(), "wOther"); err != nil {
+		t.Fatalf("KillSession: %v", err)
+	}
+
+	wantCalls := [][]string{
+		{"workspace", "close", "wOther"},
+		{"workspace", "focus", "wSelf"},
+	}
+	if len(rec.calls) != len(wantCalls) {
+		t.Fatalf("calls = %d, want %d: %v", len(rec.calls), len(wantCalls), rec.calls)
+	}
+	for i, want := range wantCalls {
+		got := rec.calls[i]
+		if len(got) != len(want) {
+			t.Fatalf("call[%d] = %v, want %v", i, got, want)
+		}
+		for j := range got {
+			if got[j] != want[j] {
+				t.Fatalf("call[%d][%d] = %q, want %q (full: %v)", i, j, got[j], want[j], got)
+			}
+		}
+	}
+	// No pane query should be made — the restore is unconditional.
+	for _, c := range rec.calls {
+		if len(c) >= 2 && c[0] == "pane" {
+			t.Fatalf("unexpected pane query during kill: %v", c)
+		}
+	}
+}
+
+// TestHerdrKillSessionSkipsFocusRestoreForCurrent verifies the self-kill edge
+// case: closing the workspace seshagy itself runs in does NOT attempt a focus
+// restore (the workspace is gone; a move is unavoidable). Short-circuits
+// before the focus restore.
+func TestHerdrKillSessionSkipsFocusRestoreForCurrent(t *testing.T) {
+	t.Setenv("HERDR_WORKSPACE_ID", "wSelf")
+	t.Setenv("HERDR_PANE_ID", "pSelf")
+	rec := &herdrCmdRecorder{}
+	setHerdrHooksForTest(t, rec.outputFn, rec.runFn)
+
+	mux := NewHerdrBackend()
+	if err := mux.KillSession(context.Background(), "wSelf"); err != nil {
+		t.Fatalf("KillSession: %v", err)
+	}
+
+	wantCalls := [][]string{
+		{"workspace", "close", "wSelf"},
+	}
+	if len(rec.calls) != len(wantCalls) {
+		t.Fatalf("calls = %d, want %d: %v", len(rec.calls), len(wantCalls), rec.calls)
+	}
+	got := rec.calls[0]
+	want := wantCalls[0]
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] || got[2] != want[2] {
+		t.Fatalf("call[0] = %v, want %v", got, want)
+	}
+	// No pane-current query or focus command should follow.
+	for _, c := range rec.calls {
+		if len(c) >= 2 &&
+			((c[0] == "workspace" && c[1] == "focus") || (c[0] == "pane" && c[1] == "current")) {
+			t.Fatalf("unexpected command after self-kill: %v", c)
 		}
 	}
 }

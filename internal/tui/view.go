@@ -14,7 +14,7 @@ import (
 	"github.com/lmilojevicc/seshagy/internal/sessionmgr"
 )
 
-// previewMinWidth gates list+preview split and full tab labels in renderTabs.
+// previewMinWidth gates the list+preview split.
 const previewMinWidth = 110
 
 // tabWidthUnset skips tab width limits when terminal width is unknown.
@@ -34,21 +34,35 @@ func (m Model) View() string {
 	}
 	s := m.styles
 	if m.setup.active {
-		return s.app.Width(m.width).Height(m.height).Render(m.renderSetupPrompt(m.height))
+		frame := s.app.Width(m.width).Height(m.height).Render(m.renderSetupPrompt(m.height))
+		return m.overlayNotifications(frame)
 	}
 	if m.installMenu.active {
-		return s.app.Width(m.width).Height(m.height).Render(m.renderInstallMenu(m.height))
+		frame := s.app.Width(m.width).Height(m.height).Render(m.renderInstallMenu(m.height))
+		return m.overlayNotifications(frame)
 	}
-	header := m.renderTabs()
+	header := m.renderTopRow()
 	footer := m.renderFooter()
+	if m.inlineInputActive() {
+		inputTile := m.renderInlineInputTile()
+		if m.height == 1 {
+			// A bordered tile cannot expose its content in one row.
+			return m.overlayNotifications(m.renderInputLine(safeWidth(m.width)))
+		}
+		if m.height < lipgloss.Height(header)+1+lipgloss.Height(inputTile) {
+			// Preserve the complete input tile when the header plus even a
+			// one-line body would push part of it outside the terminal.
+			return m.overlayNotifications(trimHeight(inputTile, m.height))
+		}
+	}
 	bodyH := m.height - lipgloss.Height(header) - lipgloss.Height(footer)
 	if bodyH < 1 {
 		bodyH = 1
 	}
-	body := m.renderBody(bodyH)
+	body := trimHeight(m.renderBody(bodyH), bodyH)
 	frame := joinFrame(header, body, footer, m.width, m.height)
 	if !m.inputPopupActive() {
-		return frame
+		return m.overlayNotifications(frame)
 	}
 	// Search/rename input floats as a centered popup over a dimmed copy of
 	// the normal frame. Each bg line is independently grayed so the dim
@@ -66,7 +80,67 @@ func (m Model) View() string {
 	popup := m.renderInputPopup()
 	x := max(0, (m.width-lipgloss.Width(popup))/2)
 	y := max(0, (m.height-lipgloss.Height(popup))/2)
-	return overlay(bg, popup, x, y)
+	return m.overlayNotifications(overlay(bg, popup, x, y))
+}
+
+func (m Model) overlayNotifications(frame string) string {
+	toast := m.renderNotificationToast(time.Now())
+	if toast == "" {
+		return frame
+	}
+	toastW := lipgloss.Width(toast)
+	toastH := lipgloss.Height(toast)
+	x := max(0, m.width-toastW-3)
+	y := max(0, m.height-toastH-1)
+	return overlay(frame, toast, x, y)
+}
+
+func (m Model) renderNotificationToast(now time.Time) string {
+	live := make([]notification, 0, len(m.notifications))
+	cutoff := now.Add(-notificationTTL)
+	for _, n := range m.notifications {
+		if n.at.After(cutoff) {
+			live = append(live, n)
+		}
+	}
+	if len(live) == 0 {
+		return ""
+	}
+
+	maxDisplayW := min(max(12, m.width*2/5), max(1, m.width-2))
+	minDisplayW := min(12, maxDisplayW)
+	naturalW := 0
+	rawLines := make([]string, len(live))
+	for i, n := range live {
+		marker := "•"
+		switch n.sev {
+		case sevWarning:
+			marker = "!"
+		case sevError:
+			marker = "×"
+		}
+		text := strings.NewReplacer("\n", " ", "\r", " ").Replace(n.text)
+		rawLines[i] = marker + " " + text
+		naturalW = max(naturalW, lipgloss.Width(rawLines[i]))
+	}
+	displayW := min(max(naturalW+2, minDisplayW), maxDisplayW)
+	contentW := max(1, displayW-2)
+	lines := make([]string, len(live))
+	for i, n := range live {
+		style := m.styles.muted
+		switch n.sev {
+		case sevWarning:
+			style = m.styles.warning
+		case sevError:
+			style = m.styles.danger
+		}
+		lines[i] = style.Render(clampText(rawLines[i], contentW))
+	}
+	return lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(m.styles.muted.GetForeground()).
+		Width(contentW).
+		Render(strings.Join(lines, "\n"))
 }
 
 // inputPopupActive reports whether the search/rename text input is currently
@@ -81,6 +155,39 @@ func (m Model) inputPopupActive() bool {
 		m.width >= 34 && m.height >= 5
 }
 
+func (m Model) inlineInputActive() bool {
+	if m.inputMode != modeSearch && m.inputMode != modeRename {
+		return false
+	}
+	return m.config.TUI.InputStyle == appconfig.InputStyleCmdline || !m.inputPopupActive()
+}
+
+// configuredInput returns the active text input sized to available, including
+// its prompt and one cell for the cursor.
+func (m Model) configuredInput(available int) (string, textinput.Model, string) {
+	available = max(1, available)
+	var title, help string
+	var ti textinput.Model
+	switch m.inputMode {
+	case modeRename:
+		title = "RENAME"
+		ti = m.renameInput
+		ti.Prompt = clampText(m.renameFrom, available/2) + " -> "
+		help = "enter to rename · esc to cancel"
+	default:
+		title = "SEARCH"
+		ti = m.searchInput
+		help = "enter to filter · esc to cancel"
+	}
+	ti.Width = max(1, available-lipgloss.Width(ti.Prompt)-1)
+	return title, ti, help
+}
+
+func (m Model) renderInputLine(available int) string {
+	_, ti, _ := m.configuredInput(available)
+	return clampText(ti.View(), available)
+}
+
 // renderInputPopup renders the bordered centered popup that hosts the
 // search or rename text input plus a one-line help row.
 func (m Model) renderInputPopup() string {
@@ -89,35 +196,14 @@ func (m Model) renderInputPopup() string {
 	if boxW < 30 {
 		boxW = 30
 	}
-	// panePopup carries a rounded border (2 cols) + 0,1 padding (2 cols).
+	// paneInput carries a rounded border (2 cols) + 0,1 padding (2 cols).
 	contentW := boxW - 4
 	if contentW < 1 {
 		contentW = 1
 	}
-	var title, inputView, help string
-	switch m.inputMode {
-	case modeSearch:
-		title = "search"
-		si := m.searchInput
-		if si.Width > contentW {
-			si.Width = contentW
-		}
-		inputView = si.View()
-		help = "enter to filter · esc to cancel"
-	case modeRename:
-		title = "rename"
-		ri := m.renameInput
-		ri.Prompt = clampText(m.renameFrom, contentW/2) + " -> "
-		if ri.Width > contentW {
-			ri.Width = contentW
-		}
-		inputView = ri.View()
-		help = "enter to rename · esc to cancel"
-	}
-	content := s.title.Render(title) + "\n" +
-		inputView + "\n" +
-		clampText(s.muted.Render(help), contentW)
-	return s.panePopup.Width(boxW).Render(content)
+	title, ti, help := m.configuredInput(contentW)
+	content := clampText(ti.View(), contentW) + "\n" + clampText(s.muted.Render(help), contentW)
+	return paneWithTitle(s.paneInput, s.helpTileTitle, content, title, boxW, 0)
 }
 
 func (m Model) renderSetupPrompt(height int) string {
@@ -224,91 +310,74 @@ func (m Model) renderInstallMenu(height int) string {
 	return lipgloss.Place(m.width, height, lipgloss.Center, lipgloss.Center, box)
 }
 
-func (m Model) renderTabs() string {
+func (m Model) renderSourcesTile(width int) string {
 	s := m.styles
-	tabs := m.sourceTabs()
-	all := make([]int, len(tabs))
-	for i := range tabs {
-		all[i] = i
+	inner := max(1, width-4) // border (2) + horizontal padding (2)
+	chips := m.renderSourceChips(inner)
+	return paneWithTitle(s.tileSources, s.sourcesTileTitle, chips, "SOURCES", width, 0)
+}
+
+// renderSourceChips builds the source-tab chip line (active tab in the
+// active_tab color, others muted), joined by a muted middot, with labels
+// falling back key+name -> name -> key to fit, and a right-aligned visible-count
+// badge (vis/total when filtering). The line is clamped to width.
+func (m Model) renderSourceChips(width int) string {
+	s := m.styles
+	count := m.sourceCountBadge()
+	countW := lipgloss.Width(count)
+	if countW >= width {
+		return s.muted.Render(clampText(count, width))
 	}
-	maxW := safeWidth(m.width)
-	tabPad := lipgloss.NewStyle().Padding(0, 1)
-	render := func(full bool, sep string, brand bool, visible []int) string {
-		parts := make([]string, 0, len(visible)+1)
-		if brand {
-			parts = append(parts, s.emphasis.Render("seshagy"))
+	chipsW := width - countW - 1
+	line := m.renderSourceChipLabels("key-name")
+	if lipgloss.Width(line) > chipsW {
+		line = m.renderSourceChipLabels("name")
+	}
+	if lipgloss.Width(line) > chipsW {
+		line = m.renderSourceChipLabels("key")
+	}
+	line = clampText(line, chipsW)
+	return composeLine(line, count, width, s.muted)
+}
+
+func (m Model) renderSourceChipLabels(format string) string {
+	s := m.styles
+	parts := make([]string, 0, len(m.sourceTabs()))
+	for _, tab := range m.sourceTabs() {
+		var label string
+		switch format {
+		case "key-name":
+			label = tab.key + " " + tab.name
+		case "name":
+			label = tab.name
+		default:
+			label = tab.key
 		}
-		for _, i := range visible {
-			tab := tabs[i]
-			label := fmt.Sprintf("[%s] %s", tab.key, tab.name)
-			if !full {
-				label = fmt.Sprintf("[%s]", tab.key)
-			}
-			if tab.mode == m.source {
-				parts = append(parts, s.tabActive.Render(label))
-			} else {
-				parts = append(parts, s.tabInactive.Render(label))
-			}
-		}
-		line := strings.Join(parts, sep)
-		if brand || sep != "" || full {
-			line = tabPad.Render(line)
-		}
-		return line
-	}
-	fitsOneLine := func(content string) bool {
-		return lipgloss.Width(content) <= maxW && lipgloss.Height(content) <= 1
-	}
-	fitsTwoLine := func(content string) bool {
-		return lipgloss.Width(content) <= maxW && lipgloss.Height(content) <= 2
-	}
-	tryFull := m.width <= 0 || !m.showPreview || m.width >= previewMinWidth
-	if tryFull {
-		line := render(true, "  ", true, all)
-		if fitsOneLine(line) {
-			return line
-		}
-	}
-	layouts := []struct {
-		sep   string
-		brand bool
-	}{
-		{"  ", true},
-		{" ", true},
-		{" ", false},
-		{"", false},
-	}
-	for _, layout := range layouts {
-		line := render(false, layout.sep, layout.brand, all)
-		if fitsOneLine(line) {
-			return line
+		if tab.mode == m.source {
+			parts = append(parts, s.chipActive.Render(label))
+		} else {
+			parts = append(parts, s.chipIdle.Render(label))
 		}
 	}
-	brandLine := tabPad.Render(s.emphasis.Render("seshagy"))
-	tabRow := tabPad.Render(render(false, "", false, all))
-	twoLine := brandLine + "\n" + tabRow
-	if fitsTwoLine(twoLine) {
-		return twoLine
+	return strings.Join(parts, s.muted.Render(" | "))
+}
+
+func (m Model) sourceCountBadge() string {
+	items := m.visibleItems()
+	count := fmt.Sprintf("%d", len(items))
+	if m.query != "" {
+		count = fmt.Sprintf("%d/%d", len(items), len(m.items))
 	}
-	visible := append([]int(nil), all...)
-	for len(visible) > 1 {
-		line := render(false, "", false, visible)
-		if fitsOneLine(line) {
-			return line
-		}
-		removed := false
-		for i := len(visible) - 1; i >= 0; i-- {
-			if tabs[visible[i]].mode != m.source {
-				visible = append(visible[:i], visible[i+1:]...)
-				removed = true
-				break
-			}
-		}
-		if !removed {
-			break
-		}
+	if m.loading || m.refreshInflight(m.source) {
+		frames := []rune(spinnerFrames)
+		count += " " + string(frames[m.spinnerFrame%len(frames)])
 	}
-	return render(false, "", false, visible)
+	return count
+}
+
+func (m Model) completeSourceChipRowFits(width int) bool {
+	return lipgloss.Width(m.renderSourceChipLabels("key"))+
+		1+lipgloss.Width(m.sourceCountBadge()) <= width
 }
 
 type sourceTab struct {
@@ -328,6 +397,203 @@ func (m Model) sourceTabs() []sourceTab {
 		})
 	}
 	return tabs
+}
+
+// renderTopRow renders the header as a single row of tiles: SOURCES (flex),
+// AGENTS (compact), and WORKSPACES (compact) when the overview is active,
+// otherwise just the SOURCES tile at full width. Collapsing the previous
+// two-row header (overview + sources) reclaims a row for the list.
+func (m Model) renderTopRow() string {
+	s := m.styles
+	usableW := safeWidth(m.width)
+	overview := m.overviewItems()
+	if len(overview) == 0 || m.height < 14 {
+		return m.renderSourcesTile(usableW)
+	}
+	stats := aggregateOverviewStats(overview)
+	icons := m.config.IconSet()
+
+	gap := 1
+	sourcesW, agentW, wsW, ok := m.topRowWidths(usableW, stats, icons)
+	if !ok {
+		// Not enough room for a complete minimal SOURCES row in the three-tile
+		// layout — fall back to SOURCES alone. topRowWidths' viability check is
+		// independent of the icon mode, so wider text-mode labels never collapse
+		// the tile on their own (only genuine SOURCES starvation does).
+		return m.renderSourcesTile(usableW)
+	}
+
+	wsTitle := strings.ToUpper(m.terms.SessionPlural)
+	wsContent := s.emphasis.Render(fmt.Sprintf("%d", stats.sessions))
+	wsTile := paneWithTitle(s.tileWorkspace, s.workspaceTileTitle, wsContent, wsTitle, wsW, 0)
+
+	agentContent := m.agentChips(icons, stats, max(1, agentW-4))
+	agentTile := paneWithTitle(s.tileAgent, s.agentTileTitle, agentContent, "AGENTS", agentW, 0)
+
+	sourcesTile := m.renderSourcesTile(sourcesW)
+	return lipgloss.JoinHorizontal(
+		lipgloss.Top,
+		sourcesTile, strings.Repeat(" ", gap),
+		agentTile, strings.Repeat(" ", gap),
+		wsTile,
+	)
+}
+
+// topRowWidths allocates the SOURCES, AGENTS, and WORKSPACES tile widths for
+// the three-tile overview header. ok is false when the terminal is too narrow
+// for a three-tile layout and the caller should fall back to a full-width
+// SOURCES tile.
+//
+// The viability check uses compact (glyph-sized) AGENTS and WORKSPACES widths
+// and is independent of the icon mode, so wider text-mode labels never collapse
+// the tile — only genuine SOURCES width starvation does, at the same threshold
+// as icon mode. Once viable, WORKSPACES (which carries only a session count) is
+// shrunk to its title+count width and the freed room goes to AGENTS (the widest
+// content), keeping the SOURCES allocation unchanged. In text mode AGENTS then
+// grows further toward the legend's natural width while SOURCES keeps its
+// chip-row floor, so labels ellipsize instead of wrapping.
+func (m Model) topRowWidths(
+	usableW int,
+	stats overviewStats,
+	icons sessionmgr.IconSet,
+) (sourcesW, agentW, wsW int, ok bool) {
+	const gap = 1
+	// Viability: compact glyph-sized tiles, mode-independent.
+	wsCompact := clampVal(22, 16, usableW/6)
+	compactAgent := clampVal(34, 26, usableW/3)
+	sourcesW = usableW - wsCompact - compactAgent - 2*gap
+	if sourcesW < 20 || !m.completeSourceChipRowFits(sourcesW-4) {
+		return 0, 0, 0, false
+	}
+	// WORKSPACES only carries a count: shrink it to its title+count width (16
+	// fits both "SESSIONS" and "WORKSPACES" on the border) and hand the freed
+	// width to AGENTS. SOURCES keeps the allocation validated above — agentW
+	// absorbs exactly the WORKSPACES shrinkage, so sourcesW is unchanged.
+	wsW = 16
+	agentW = compactAgent + (wsCompact - wsW)
+	// Text-mode labels are wider than glyphs; grow AGENTS toward the legend's
+	// natural width while SOURCES keeps its minimal chip-row floor.
+	if !icons.AgentStateUsesIcons() {
+		sourceFloor := max(20, lipgloss.Width(m.renderSourceChipLabels("key"))+
+			1+lipgloss.Width(m.sourceCountBadge())+4)
+		if natural := lipgloss.Width(m.agentChipRow(icons, stats, 0, " ")) + 4; natural > agentW {
+			if maxAgent := usableW - wsW - 2*gap - sourceFloor; maxAgent > agentW {
+				agentW = clampVal(natural, agentW, maxAgent)
+			}
+		}
+	}
+	sourcesW = usableW - wsW - agentW - 2*gap
+	return sourcesW, agentW, wsW, true
+}
+
+// agentChips renders the colored agent-state chips for the overview tile,
+// fitted to innerW so the legend never wraps or overflows its tile. It uses
+// the configured icon-set colors and the mode-resolved display value (glyph in
+// icon mode, ASCII label in text mode) via ForAgentState. All five states are
+// always shown (with 0 counts) so the tile reads as a fixed legend rather than
+// appearing empty. The wide two-space legend is kept when it fits (icon mode
+// renders identically to before); when the labels are wider than the tile
+// (text mode at narrow widths) the separators tighten and the labels are
+// progressively shortened, keeping all five states visible instead of dropping
+// the tile. If one-cell labels still do not fit because counts are wide, counts
+// are compacted to progressively smaller cells before the whole-row clamp is
+// used as a final safeguard.
+func (m Model) agentChips(icons sessionmgr.IconSet, stats overviewStats, innerW int) string {
+	innerW = max(1, innerW)
+	for _, spec := range []struct {
+		maxLabel int
+		maxCount int
+		sep      string
+	}{
+		{0, 0, "  "},
+		{0, 0, " "},
+		{4, 0, " "},
+		{3, 0, " "},
+		{2, 0, " "},
+		{1, 0, " "},
+		{1, 3, " "},
+		{1, 2, " "},
+		{1, 1, " "},
+	} {
+		if row := m.agentChipRowFitted(
+			icons,
+			stats,
+			spec.maxLabel,
+			spec.maxCount,
+			spec.sep,
+		); lipgloss.Width(
+			row,
+		) <= innerW {
+			return row
+		}
+	}
+	return clampText(m.agentChipRowFitted(icons, stats, 1, 1, " "), innerW)
+}
+
+// agentChipRow builds the canonical, unfitted agent-state chip line.
+func (m Model) agentChipRow(
+	icons sessionmgr.IconSet,
+	stats overviewStats,
+	maxLabel int,
+	sep string,
+) string {
+	return m.agentChipRowFitted(icons, stats, maxLabel, 0, sep)
+}
+
+// agentChipRowFitted builds one agent-state chip line for the overview legend.
+// The per-state value comes from ForAgentState (glyph or label); positive label
+// and count limits clamp those cells independently so fitting never removes a
+// complete chip.
+func (m Model) agentChipRowFitted(
+	icons sessionmgr.IconSet,
+	stats overviewStats,
+	maxLabel, maxCount int,
+	sep string,
+) string {
+	s := m.styles
+	parts := make([]string, 0, len(agentStateOrder))
+	for _, state := range agentStateOrder {
+		count := stats.agents[state]
+		iconStyle := icons.ForAgentState(state)
+		label := iconStyle.Text
+		if maxLabel > 0 && lipgloss.Width(label) > maxLabel {
+			label = clampText(label, maxLabel)
+		}
+		countText := fmt.Sprintf("%d", count)
+		if maxCount > 0 && lipgloss.Width(countText) > maxCount {
+			countText = compactAgentCount(count, maxCount)
+		}
+		glyph := renderAgentStateStyled(s, state, label, iconStyle.Color)
+		cnt := renderAgentStateStyled(s, state, countText, iconStyle.Color)
+		parts = append(parts, glyph+" "+cnt)
+	}
+	return strings.Join(parts, sep)
+}
+
+func compactAgentCount(count, maxWidth int) string {
+	if maxWidth <= 0 {
+		return ""
+	}
+	raw := fmt.Sprintf("%d", count)
+	if lipgloss.Width(raw) <= maxWidth {
+		return raw
+	}
+	for _, unit := range []struct {
+		value  int
+		suffix string
+	}{
+		{1_000_000_000, "b"},
+		{1_000_000, "m"},
+		{1_000, "k"},
+	} {
+		if count >= unit.value {
+			compact := fmt.Sprintf("%d%s", count/unit.value, unit.suffix)
+			if lipgloss.Width(compact) <= maxWidth {
+				return compact
+			}
+		}
+	}
+	return clampText(raw, maxWidth)
 }
 
 func (m Model) renderBody(height int) string {
@@ -375,6 +641,23 @@ func titledTopEdge(title string, w int, borderFG, titleFG lipgloss.TerminalColor
 	return border.Render("╭─ ") +
 		lipgloss.NewStyle().Foreground(titleFG).Render(clamped) +
 		border.Render(" "+strings.Repeat("─", dashes)+"╮")
+}
+
+// titledBottomEdge is the bottom-border mirror of titledTopEdge: ╰─ title ──╯.
+func titledBottomEdge(title string, w int, borderFG, titleFG lipgloss.TerminalColor) string {
+	if title == "" || w < 7 {
+		return lipgloss.NewStyle().Foreground(borderFG).
+			Render("╰" + strings.Repeat("─", max(0, w-2)) + "╯")
+	}
+	clamped := clampText(title, w-6)
+	dashes := w - 5 - lipgloss.Width(clamped)
+	if dashes < 1 {
+		dashes = 1
+	}
+	border := lipgloss.NewStyle().Foreground(borderFG)
+	return border.Render("╰─ ") +
+		lipgloss.NewStyle().Foreground(titleFG).Render(clamped) +
+		border.Render(" "+strings.Repeat("─", dashes)+"╯")
 }
 
 // paneWithTitle renders a pane via style (width/height applied as for the
@@ -470,7 +753,20 @@ func (m Model) renderListPane(width, height int) string {
 		}
 	}
 	content := trimHeight(strings.Join(lines, "\n"), innerH)
-	return paneWithTitle(s.paneList, s.listTitle, content, title, width, height)
+	box := paneWithTitle(s.paneList, s.listTitle, content, title, width, height)
+	// Type-first: show what's typed on the list's bottom border instead of
+	// crowding the title (clearer on narrow/mobile screens).
+	if m.query != "" && m.config.TypeFirst.Enabled && m.inputMode != modeSearch {
+		boxLines := strings.Split(box, "\n")
+		if w := lipgloss.Width(boxLines[0]); len(boxLines) > 0 && w >= 7 {
+			boxLines[len(boxLines)-1] = titledBottomEdge(
+				clampText(m.query, w-6), w,
+				s.paneList.GetBorderBottomForeground(), s.listTitle,
+			)
+			box = strings.Join(boxLines, "\n")
+		}
+	}
+	return box
 }
 
 func (m Model) renderRow(item sessionmgr.Item, selected bool, width int) string {
@@ -556,22 +852,22 @@ func rowText(parts ...string) string {
 }
 
 func (m Model) renderRightPane(width, height int) string {
-	if !m.showPreview {
-		return m.renderDetailPane(width, height)
-	}
 	// The detail pane adapts to its content (no trailing blank padding); the
-	// preview pane fills the remainder. Cap detail height so the preview keeps
-	// a usable minimum even when the metadata body is long.
+	// preview pane fills the remainder. At short heights, cap the detail tile
+	// so the preview keeps a three-row floor and the stacked panes never exceed
+	// the body height passed down by View.
+	const (
+		paneGapH    = 1
+		previewMinH = 3
+	)
 	detail := m.renderDetailPane(width, 0)
 	detailH := lipgloss.Height(detail)
-	if maxDetail := height - 6; maxDetail > 0 && detailH > maxDetail {
-		detail = m.renderDetailPane(width, maxDetail)
+	maxDetailH := height - paneGapH - previewMinH
+	if detailH > maxDetailH {
+		detail = m.renderDetailPane(width, maxDetailH)
 		detailH = lipgloss.Height(detail)
 	}
-	previewH := height - detailH - 1
-	if previewH < 5 {
-		previewH = 5
-	}
+	previewH := height - detailH - paneGapH
 	preview := m.renderPreviewPane(width, previewH)
 	return lipgloss.JoinVertical(lipgloss.Left, detail, "", preview)
 }
@@ -591,7 +887,7 @@ func (m Model) renderDetailPane(width, height int) string {
 	// height <= 0 means "size to content": render at the body's natural height
 	// (no trailing padding) so the preview pane can fill the remainder.
 	if height > 0 {
-		content = trimHeight(content, max(4, height-2))
+		content = trimHeight(content, max(1, height-2))
 	}
 	return paneWithTitle(s.paneDetail, s.metadataTitle, content, title, width, height)
 }
@@ -643,7 +939,7 @@ func (m Model) detailLines(item sessionmgr.Item) []string {
 	case sessionmgr.KindAgent:
 		icons := m.config.IconSet()
 		stateLabel := agentStateText(item.AgentState)
-		if !icons.AgentStateHidden() {
+		if !icons.AgentStateHidden() && icons.AgentStateUsesIcons() {
 			stateLabel = rowText(
 				renderAgentState(s, icons, item.AgentState),
 				agentStateText(item.AgentState),
@@ -674,7 +970,7 @@ func (m Model) detailLines(item sessionmgr.Item) []string {
 func (m Model) renderPreviewPane(width, height int) string {
 	s := m.styles
 	innerW := max(10, width-4)
-	innerH := max(4, height-2)
+	innerH := max(1, height-2)
 	title := "Preview"
 	if item, ok := m.selectedItem(); ok {
 		title = "Preview · " + item.DisplayName()
@@ -719,50 +1015,6 @@ func isTailPreviewKind(kind sessionmgr.Kind) bool {
 
 func (m Model) renderFooter() string {
 	s := m.styles
-	// When the search/rename popup owns the input, the footer shows the normal
-	// status line instead of the inline text field.
-	mode := m.inputMode
-	if (mode == modeSearch || mode == modeRename) && m.inputPopupActive() {
-		mode = modeNormal
-	}
-	var input string
-	inputStyle := s.muted
-	switch mode {
-	case modeSearch:
-		input = m.searchInput.View()
-	case modeRename:
-		input = m.renameInput.View()
-	default:
-		input = m.status
-		if m.backgroundRefreshing() {
-			if input == "" || input == "ready" {
-				input = "refreshing…"
-			} else {
-				input += " · refreshing…"
-			}
-		}
-		if input == "" {
-			input = "ready"
-		}
-		inputStyle = footerStatusStyle(s, input, m.err != nil)
-	}
-	statusLeft := []string{}
-	if m.mux.InMultiplexer() {
-		statusLeft = append(statusLeft, s.success.Render("✓ "+m.terms.BackendName))
-	} else {
-		statusLeft = append(statusLeft, s.warning.Render("outside tmux/herdr"))
-	}
-	statusLeft = append(statusLeft, s.info.Render(m.source.DisplayNames(m.terms).List))
-	if m.config.TypeFirst.Enabled {
-		statusLeft = append(statusLeft, s.emphasis.Render("type-first"))
-		if m.prefixArmed {
-			statusLeft = append(statusLeft, s.warning.Render("prefix"))
-		}
-	}
-	if m.query != "" {
-		statusLeft = append(statusLeft, s.emphasis.Render("/"+m.query))
-	}
-	left := strings.Join(statusLeft, "  ")
 	var help string
 	if m.showHelp {
 		if m.config.TypeFirst.Enabled && !m.prefixArmed {
@@ -802,65 +1054,42 @@ func (m Model) renderFooter() string {
 	} else {
 		help = s.muted.Render("? help")
 	}
-	// The status style has one column of horizontal padding on each side. Keep
-	// the composed text inside that content area, and render one column shy of
-	// the terminal width to avoid terminal auto-wrap at the right edge.
+	if m.prefixArmed {
+		help = s.warning.Bold(true).Render("PREFIX") + " " + help
+	}
+	// The footer is just the help line. The old status strip (backend indicator,
+	// loaded/refreshing status, errors) is gone because the overview tiles now
+	// carry the counts and active source. While actively searching/renaming,
+	// cmdline input renders here, as does popup input when the terminal is too
+	// small for its overlay.
 	footerW := safeWidth(m.width)
-	contentW := max(1, footerW-2)
-	var line1 string
-	// Cmdline input style: the first footer line becomes the text input itself
-	// (prompt + value + cursor), like Vim's / search bar, instead of the status
-	// line. Line 2 (help) is unchanged.
+	helpLine := clampText(help, max(1, footerW-4))
+	helpTile := paneWithTitle(s.tileHelp, s.helpTileTitle, helpLine, "HELP", footerW, 0)
+	popupStyleSuppressedBySize := m.config.TUI.InputStyle == appconfig.InputStylePopup &&
+		(m.width < 34 || m.height < 5)
 	if (m.inputMode == modeSearch || m.inputMode == modeRename) &&
-		m.config.TUI.InputStyle == appconfig.InputStyleCmdline {
-		var ti textinput.Model
-		switch m.inputMode {
-		case modeSearch:
-			ti = m.searchInput
-		case modeRename:
-			ti = m.renameInput
-			ti.Prompt = clampText(m.renameFrom, contentW/2) + " -> "
+		(m.config.TUI.InputStyle == appconfig.InputStyleCmdline || popupStyleSuppressedBySize) {
+		inputTile := m.renderInlineInputTile()
+		if m.height > 0 && m.height < 5 {
+			return inputTile
 		}
-		if w := contentW - lipgloss.Width(ti.Prompt); w > 0 {
-			ti.Width = w
-		}
-		line1 = clampText(ti.View(), contentW)
-	} else {
-		line1 = composeLine(left, input, contentW, inputStyle)
+		return inputTile + "\n" + helpTile
 	}
-	line2 := clampText(help, contentW)
-	return s.status.Width(footerW).Render(line1 + "\n" + line2)
+	return helpTile
 }
 
-func footerStatusStyle(s styles, status string, hasError bool) lipgloss.Style {
-	if hasError {
-		return s.danger
-	}
-	if isWarningStatus(status) {
-		return s.warning
-	}
-	return s.muted
-}
-
-func isWarningStatus(status string) bool {
-	status = strings.ToLower(strings.TrimSpace(status))
-	if strings.HasPrefix(status, "press ") && strings.HasSuffix(status, " before actions") {
-		return true
-	}
-	switch status {
-	case "no integrations selected",
-		"hook installation skipped",
-		"input mode change cancelled",
-		"rename cancelled",
-		"yazi closed without a directory",
-		"nothing selected":
-		return true
-	default:
-		// These statuses are parameterized by backend terminology (session vs
-		// workspace); match on prefix so they classify under any backend.
-		return strings.HasPrefix(status, "delete only applies to ") ||
-			strings.HasPrefix(status, "rename only applies to ")
-	}
+func (m Model) renderInlineInputTile() string {
+	footerW := safeWidth(m.width)
+	contentW := max(1, footerW-4)
+	title, _, _ := m.configuredInput(contentW)
+	return paneWithTitle(
+		m.styles.paneInput,
+		m.styles.helpTileTitle,
+		m.renderInputLine(contentW),
+		title,
+		footerW,
+		0,
+	)
 }
 
 func renderTmuxState(s styles, icons sessionmgr.IconSet, attached bool) string {

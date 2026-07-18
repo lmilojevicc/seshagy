@@ -1,9 +1,11 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
@@ -110,36 +112,49 @@ func TestInputPopupInactiveForCmdline(t *testing.T) {
 	}
 }
 
-func TestFooterCmdlineShowsTextInputOnLine1(t *testing.T) {
+func TestFooterCmdlineShowsTextInputInTile(t *testing.T) {
 	m := newTestModel(t)
 	m.config.TUI.InputStyle = appconfig.InputStyleCmdline
 	m.width = 80
 	m.height = 32
 
-	// Search mode: line 1 is the textinput (prompt "/ " + value), not the
-	// status line. The status style adds 1-col padding, so trim before checking.
+	// Search mode: the footer stacks the SEARCH input tile (3 lines) above the
+	// HELP tile (3 lines). The textinput sits on the tile's content line.
 	m.inputMode = modeSearch
 	m.searchInput.SetValue("my-project")
 	footer := sessionmgr.StripANSI(m.renderFooter())
 	lines := strings.Split(footer, "\n")
-	if len(lines) != 2 {
-		t.Fatalf("footer lines = %d, want 2\n%s", len(lines), footer)
+	if len(lines) != 6 {
+		t.Fatalf("footer lines = %d, want 6 (SEARCH tile + HELP tile)\n%s", len(lines), footer)
 	}
-	if trimmed := strings.TrimSpace(lines[0]); !strings.HasPrefix(trimmed, "/ my-project") {
-		t.Fatalf("cmdline search line 1 = %q, want to start with / my-project", trimmed)
+	if !strings.Contains(lines[0], "SEARCH") {
+		t.Fatalf("cmdline search top border missing SEARCH title: %q", lines[0])
 	}
-	if strings.Contains(lines[0], "ready") {
-		t.Fatalf("cmdline line 1 should not contain status text: %q", lines[0])
+	if !strings.Contains(lines[1], "/ my-project") {
+		t.Fatalf("cmdline search input = %q, want to contain / my-project", lines[1])
+	}
+	if strings.Contains(lines[1], "ready") {
+		t.Fatalf("cmdline input line should not contain status text: %q", lines[1])
 	}
 
-	// Rename mode: line 1 starts with the old name + " -> ".
+	// Rename mode: content line starts with the old name + " -> ".
 	m.inputMode = modeRename
 	m.renameFrom = "old-name"
 	m.renameInput.SetValue("new-name")
 	footer = sessionmgr.StripANSI(m.renderFooter())
 	lines = strings.Split(footer, "\n")
-	if !strings.Contains(lines[0], "old-name -> ") || !strings.Contains(lines[0], "new-name") {
-		t.Fatalf("cmdline rename line 1 = %q, want old-name -> new-name", lines[0])
+	if len(lines) != 6 {
+		t.Fatalf(
+			"rename footer lines = %d, want 6 (RENAME tile + HELP tile)\n%s",
+			len(lines),
+			footer,
+		)
+	}
+	if !strings.Contains(lines[0], "RENAME") {
+		t.Fatalf("cmdline rename top border missing RENAME title: %q", lines[0])
+	}
+	if !strings.Contains(lines[1], "old-name -> ") || !strings.Contains(lines[1], "new-name") {
+		t.Fatalf("cmdline rename input = %q, want old-name -> new-name", lines[1])
 	}
 
 	// No footer line should exceed the safe width.
@@ -150,18 +165,174 @@ func TestFooterCmdlineShowsTextInputOnLine1(t *testing.T) {
 	}
 }
 
-func TestFooterPopupStyleStillComposesStatus(t *testing.T) {
+func TestCmdlineInputStyleHasFieldsetTitle(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		mode  inputMode
+		title string
+	}{
+		{name: "search", mode: modeSearch, title: "SEARCH"},
+		{name: "rename", mode: modeRename, title: "RENAME"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			m := newTestModel(t)
+			m.config.TUI.InputStyle = appconfig.InputStyleCmdline
+			m.width, m.height = 120, 32
+			m.inputMode = tt.mode
+			m.renameFrom = "old-name"
+			m.searchInput.SetValue("proj")
+			m.renameInput.SetValue("new-name")
+
+			view := sessionmgr.StripANSI(m.View())
+			// The input tile title sits on its fieldset top edge (╭─ TITLE ──╮).
+			var edge string
+			for _, line := range strings.Split(view, "\n") {
+				if strings.HasPrefix(line, "╭─ ") && strings.Contains(line, tt.title) {
+					edge = line
+					break
+				}
+			}
+			if edge == "" {
+				t.Fatalf("cmdline view missing %q fieldset title edge\n%s", tt.title, view)
+			}
+			if !strings.HasSuffix(edge, "╮") {
+				t.Fatalf("cmdline %q fieldset edge not closed: %q", tt.title, edge)
+			}
+			// The HELP tile must still render beneath the input tile.
+			if !strings.Contains(view, "HELP") {
+				t.Fatalf("cmdline view missing HELP tile\n%s", view)
+			}
+		})
+	}
+}
+
+func TestPopupStyleRendersInlineInputWhenSuppressedByNarrowWidth(t *testing.T) {
 	m := newTestModel(t)
-	// Default (popup) config: small terminal falls back to the inline field on
-	// the right of the status line, so line 1 holds both the status source info
-	// and the search input.
 	m.config.TUI.InputStyle = appconfig.InputStylePopup
-	m.width, m.height = 40, 4
+	m.width, m.height = 24, 12
 	m.inputMode = modeSearch
-	m.searchInput.SetValue("test")
+	m.searchInput.SetValue("needle")
+
+	view := sessionmgr.StripANSI(m.View())
+	if !strings.Contains(view, "SEARCH") || !strings.Contains(view, "needle") {
+		t.Fatalf("narrow popup-style view missing inline SEARCH input\n%s", view)
+	}
+}
+
+func TestPopupStyleRendersInlineRenameWhenSuppressedByNarrowWidth(t *testing.T) {
+	m := newTestModel(t)
+	m.config.TUI.InputStyle = appconfig.InputStylePopup
+	m.width, m.height = 24, 12
+	m.inputMode = modeRename
+	m.renameFrom = "old"
+	m.renameInput.SetValue("new-name")
+
+	view := sessionmgr.StripANSI(m.View())
+	if !strings.Contains(view, "RENAME") || !strings.Contains(view, "new-name") {
+		t.Fatalf("narrow popup-style view missing inline RENAME input\n%s", view)
+	}
+}
+
+func TestPopupStyleRendersInlineInputWhenSuppressedByShortHeight(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		mode  inputMode
+		title string
+		value string
+	}{
+		{name: "search", mode: modeSearch, title: "SEARCH", value: "short-query"},
+		{name: "rename", mode: modeRename, title: "RENAME", value: "short-name"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			m := newTestModel(t)
+			m.config.TUI.InputStyle = appconfig.InputStylePopup
+			m.width, m.height = 80, 4
+			m.inputMode = tt.mode
+			m.renameFrom = "old"
+			m.searchInput.SetValue(tt.value)
+			m.renameInput.SetValue(tt.value)
+
+			view := sessionmgr.StripANSI(m.View())
+			if !strings.Contains(view, tt.title) || !strings.Contains(view, tt.value) {
+				t.Fatalf("short popup-style view missing inline %s input\n%s", tt.title, view)
+			}
+			if strings.Contains(view, "HELP") {
+				t.Fatalf("short popup-style view should prioritize input over HELP\n%s", view)
+			}
+		})
+	}
+}
+
+func TestViewPreservesInlineInputAtHeightBoundaries(t *testing.T) {
+	for _, style := range []struct {
+		name  string
+		value string
+		width int
+	}{
+		{name: "cmdline", value: appconfig.InputStyleCmdline, width: 80},
+		{name: "narrow-popup", value: appconfig.InputStylePopup, width: 24},
+	} {
+		for _, mode := range []struct {
+			name  string
+			value inputMode
+		}{
+			{name: "search", value: modeSearch},
+			{name: "rename", value: modeRename},
+		} {
+			for _, height := range []int{1, 4, 5, 8, 9, 10} {
+				t.Run(fmt.Sprintf("%s/%s/%d", style.name, mode.name, height), func(t *testing.T) {
+					m := newTestModel(t)
+					m.config.TUI.InputStyle = style.value
+					m.width, m.height = style.width, height
+					m.inputMode = mode.value
+					m.renameFrom = "old"
+					m.searchInput.SetValue("typed-value")
+					m.renameInput.SetValue("typed-value")
+
+					view := sessionmgr.StripANSI(m.View())
+					if !strings.Contains(view, "typed-value") {
+						t.Fatalf("typed value missing at height %d\n%s", height, view)
+					}
+					if got := lipgloss.Height(view); got > height {
+						t.Fatalf("view height = %d, terminal height = %d\n%s", got, height, view)
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestRenamePopupDoesNotWrapAtNarrowWidth(t *testing.T) {
+	m := newTestModel(t)
+	model, _ := m.Update(tea.WindowSizeMsg{Width: 34, Height: 20})
+	m = model.(Model)
+	m.config.TUI.InputStyle = appconfig.InputStylePopup
+	m.inputMode = modeRename
+	m.renameFrom = "old-name"
+	m.renameInput.SetValue("new-name")
+
+	popup := sessionmgr.StripANSI(m.renderInputPopup())
+	if got := lipgloss.Height(popup); got != 4 {
+		t.Fatalf("rename popup height = %d, want 4 (2 content rows)\n%s", got, popup)
+	}
+	if !strings.Contains(popup, "old-name -> new-name") {
+		t.Fatalf("rename popup split prompt and value across rows\n%s", popup)
+	}
+}
+
+func TestPopupStyleDoesNotRenderDuplicateInlineInputAtPopupSize(t *testing.T) {
+	m := newTestModel(t)
+	m.config.TUI.InputStyle = appconfig.InputStylePopup
+	m.width, m.height = 80, 20
+	m.inputMode = modeSearch
+	m.searchInput.SetValue("popup-query")
+
 	footer := sessionmgr.StripANSI(m.renderFooter())
-	lines := strings.Split(footer, "\n")
-	if !strings.Contains(lines[0], "all") || !strings.Contains(lines[0], "/ test") {
-		t.Fatalf("popup small-terminal line 1 should hold status + search input: %q", lines[0])
+	if strings.Contains(footer, "SEARCH") || strings.Contains(footer, "popup-query") {
+		t.Fatalf("popup-capable footer must not duplicate the SEARCH input\n%s", footer)
+	}
+	view := sessionmgr.StripANSI(m.View())
+	if !strings.Contains(view, "SEARCH") || !strings.Contains(view, "popup-query") {
+		t.Fatalf("popup-capable view missing the SEARCH overlay\n%s", view)
 	}
 }

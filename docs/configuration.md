@@ -110,6 +110,7 @@ catalog_url = ""           # defaults to the herdr public catalog when empty
 [tui]
 input_style = "popup"        # popup | cmdline
 dim_background = true         # dim the list behind the popup (popup mode only)
+preview = true                # show the preview pane on start (toggle at runtime with p)
 ```
 
 The default `order` lists tabs left→right (`agents` last). `current-agents` is
@@ -127,7 +128,7 @@ and all).
 
 | Key              | Used for                             |
 | ---------------- | ------------------------------------ |
-| `popup_border`   | border on popups (input prompt, setup/install menus) |
+| `popup_border`   | border on setup/install dialogs only       |
 | `active_tab`     | selected source tab label            |
 | `inactive_tab`   | unselected source tabs               |
 | `border`         | pane borders                         |
@@ -141,19 +142,26 @@ and all).
 | `warning`        | warning status messages              |
 | `danger`         | error/danger status messages         |
 
-Per-pane borders and border titles can be themed independently. Each defaults
-to the relevant global when unset (`list_border` inherits `border`;
- `metadata_border` and `preview_border` inherit `border`; each `*_border_title`
- inherits its pane's `*_border`), so the default look is unchanged unless set.
+Per-pane borders, border titles, input fields, and overview tiles can be themed
+independently. Each defaults to the relevant global when unset (`list_border`,
+`metadata_border`, `preview_border`, `input_border`, `workspace_tile_border`,
+and `agent_tile_border` inherit `border`; each `*_border_title` inherits its
+pane's `*_border`; workspace and agent tile titles inherit `popup_title`), so
+the default look is unchanged unless set.
 
 | Key                     | Used for                                                 |
 | ----------------------- | -------------------------------------------------------- |
-| `list_border`           | list pane border (default: inherits `border`)             |
+| `list_border`           | list pane border (default: inherits `border`)            |
 | `metadata_border`       | metadata/detail pane border (default: inherits `border`) |
 | `preview_border`        | preview pane border (default: inherits `border`)         |
-| `list_border_title`     | list pane border-title text (default: inherits `list_border`)     |
+| `input_border`          | search/rename input border (default: inherits `border`)  |
+| `list_border_title`     | list pane border-title text (default: inherits `list_border`) |
 | `metadata_border_title` | metadata pane border-title text (default: inherits `metadata_border`) |
-| `preview_border_title`  | preview pane border-title text (default: inherits `preview_border`)  |
+| `preview_border_title`  | preview pane border-title text (default: inherits `preview_border`) |
+| `workspace_tile_border` | workspace tile border (default: inherits `border`)       |
+| `workspace_tile_title`  | workspace tile title (default: inherits `popup_title`)   |
+| `agent_tile_border`     | agent tile border (default: inherits `border`)           |
+| `agent_tile_title`      | agent tile title (default: inherits `popup_title`)       |
 
 When a `*_border_title` differs from its `*_border`, only the title text uses
 the title color; the corners and dashes keep the border color.

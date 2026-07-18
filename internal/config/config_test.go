@@ -394,6 +394,53 @@ func TestDimBackgroundRoundTripFalse(t *testing.T) {
 	}
 }
 
+func TestPreviewDefaultTrueWhenMissing(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	path := Path()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	data := []byte("\n[sources]\ndefault = \"sessions\"\n")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	loaded, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if loaded.TUI.Preview == nil || !*loaded.TUI.Preview {
+		t.Fatalf("preview without [tui] = %v, want true", loaded.TUI.Preview)
+	}
+	if cfg := Default(); cfg.TUI.Preview == nil || !*cfg.TUI.Preview {
+		t.Fatalf("default preview = %v, want true", cfg.TUI.Preview)
+	}
+}
+
+func TestPreviewRoundTripFalse(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	cfg := Default()
+	falseVal := false
+	cfg.TUI.Preview = &falseVal
+	if err := Save(cfg); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	data, err := os.ReadFile(Path())
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	if !strings.Contains(string(data), `preview = false`) {
+		t.Fatalf("saved config missing preview = false: %s", data)
+	}
+	loaded, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if loaded.TUI.Preview == nil || *loaded.TUI.Preview {
+		t.Fatalf("loaded preview = %v, want false", loaded.TUI.Preview)
+	}
+}
+
 func TestInputStyleMissingSectionDefaultsPopup(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
@@ -468,6 +515,54 @@ func TestIconSetTmuxStateProjection(t *testing.T) {
 			icons.TmuxStateUsesLabels(),
 			icons.TmuxStateHidden(),
 		)
+	}
+}
+
+func TestIconSetAgentStateProjection(t *testing.T) {
+	states := []sessionmgr.AgentState{
+		sessionmgr.AgentIdle,
+		sessionmgr.AgentWorking,
+		sessionmgr.AgentBlocked,
+		sessionmgr.AgentDone,
+		sessionmgr.AgentUnknown,
+	}
+
+	// mode="text" + agent_state_mode="inherit" resolves to TEXT for every
+	// agent state (the reported bug: agent tiles/rows ignored text mode).
+	cfg := Default()
+	cfg.Icons.Mode = IconModeText
+	cfg.Icons.AgentStateMode = StateDisplayModeInherit
+	icons := cfg.IconSet()
+	for _, state := range states {
+		style := icons.ForAgentState(state)
+		if style.Text != style.ASCII {
+			t.Fatalf("text+inherit %s: Text = %q, want ASCII %q",
+				state, style.Text, style.ASCII)
+		}
+		if style.Text == style.Icon {
+			t.Fatalf("text+inherit %s: Text equals glyph %q (mode ignored)",
+				state, style.Text)
+		}
+	}
+
+	// Explicit agent_state_mode="icons" overrides a text global → glyph.
+	cfg.Icons.AgentStateMode = StateDisplayModeIcons
+	icons = cfg.IconSet()
+	for _, state := range states {
+		style := icons.ForAgentState(state)
+		if style.Text != style.Icon {
+			t.Fatalf("icons override %s: Text = %q, want glyph %q",
+				state, style.Text, style.Icon)
+		}
+	}
+
+	// agent_state_mode="none" hides agent state (no display value).
+	cfg.Icons.AgentStateMode = StateDisplayModeNone
+	icons = cfg.IconSet()
+	for _, state := range states {
+		if style := icons.ForAgentState(state); style.Text != "" {
+			t.Fatalf("none %s: Text = %q, want empty", state, style.Text)
+		}
 	}
 }
 
@@ -699,6 +794,12 @@ func TestNormalizeThemeColorsFillsAllEmptyFields(t *testing.T) {
 		{"ListBorderTitle", cfg.Theme.Colors.ListBorderTitle, defaults.Border},
 		{"MetadataBorderTitle", cfg.Theme.Colors.MetadataBorderTitle, defaults.Border},
 		{"PreviewBorderTitle", cfg.Theme.Colors.PreviewBorderTitle, defaults.Border},
+		{"InputBorder", cfg.Theme.Colors.InputBorder, defaults.Border},
+		// Overview hero tiles inherit border / popup_title when unset.
+		{"WorkspaceTileBorder", cfg.Theme.Colors.WorkspaceTileBorder, defaults.Border},
+		{"AgentTileBorder", cfg.Theme.Colors.AgentTileBorder, defaults.Border},
+		{"WorkspaceTileTitle", cfg.Theme.Colors.WorkspaceTileTitle, defaults.Title},
+		{"AgentTileTitle", cfg.Theme.Colors.AgentTileTitle, defaults.Title},
 	} {
 		if tc.got != tc.want {
 			t.Fatalf("%s = %q, want default %q", tc.name, tc.got, tc.want)
@@ -710,13 +811,15 @@ func TestNormalizeThemeColorsPaneTokensInheritCustomGlobals(t *testing.T) {
 	cfg := Default()
 	cfg.Theme.Colors.PopupBorder = "#aaaaaa"
 	cfg.Theme.Colors.Border = "#bbbbbb"
-	// Leave the six per-pane tokens unset so they must inherit.
+	cfg.Theme.Colors.Title = "#cccccc"
+	// Leave the per-pane + overview tokens unset so they must inherit.
 	cfg.Theme.Colors.ListBorder = ""
 	cfg.Theme.Colors.MetadataBorder = ""
 	cfg.Theme.Colors.PreviewBorder = ""
 	cfg.Theme.Colors.ListBorderTitle = ""
 	cfg.Theme.Colors.MetadataBorderTitle = ""
 	cfg.Theme.Colors.PreviewBorderTitle = ""
+	cfg.Theme.Colors.InputBorder = ""
 	cfg.Normalize()
 
 	c := cfg.Theme.Colors
@@ -727,6 +830,13 @@ func TestNormalizeThemeColorsPaneTokensInheritCustomGlobals(t *testing.T) {
 		"ListBorderTitle":     "#bbbbbb",
 		"MetadataBorderTitle": "#bbbbbb",
 		"PreviewBorderTitle":  "#bbbbbb",
+		"InputBorder":         "#bbbbbb",
+		// Overview tiles: borders inherit border; titles inherit popup_title
+		// (which itself inherits the legacy title here).
+		"WorkspaceTileBorder": "#bbbbbb",
+		"AgentTileBorder":     "#bbbbbb",
+		"WorkspaceTileTitle":  "#cccccc",
+		"AgentTileTitle":      "#cccccc",
 	}
 	got := map[string]string{
 		"ListBorder":          c.ListBorder,
@@ -735,6 +845,11 @@ func TestNormalizeThemeColorsPaneTokensInheritCustomGlobals(t *testing.T) {
 		"ListBorderTitle":     c.ListBorderTitle,
 		"MetadataBorderTitle": c.MetadataBorderTitle,
 		"PreviewBorderTitle":  c.PreviewBorderTitle,
+		"InputBorder":         c.InputBorder,
+		"WorkspaceTileBorder": c.WorkspaceTileBorder,
+		"AgentTileBorder":     c.AgentTileBorder,
+		"WorkspaceTileTitle":  c.WorkspaceTileTitle,
+		"AgentTileTitle":      c.AgentTileTitle,
 	}
 	for k, w := range want {
 		if got[k] != w {

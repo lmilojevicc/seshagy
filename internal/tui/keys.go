@@ -49,7 +49,6 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "esc":
 			m.inputMode = modeNormal
 			m.renameInput.Blur()
-			m.status = "rename cancelled"
 			return m, nil
 		case "enter":
 			newName := strings.TrimSpace(m.renameInput.Value())
@@ -67,7 +66,6 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, renameAgentCmd(m.mux, target, oldName, session, "")
 			}
 			if newName == "" || oldName == "" || newName == oldName {
-				m.status = "rename cancelled"
 				return m, nil
 			}
 			switch kind {
@@ -76,7 +74,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			case sessionmgr.KindAgent:
 				return m, renameAgentCmd(m.mux, target, oldName, session, newName)
 			default:
-				m.status = "rename only applies to " + m.terms.SessionPlural + " and agents"
+				m.notify("rename only applies to "+m.terms.SessionPlural+" and agents", sevWarning)
 				return m, nil
 			}
 		case "ctrl+c":
@@ -125,7 +123,6 @@ func (m Model) handleActionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "enter":
 		return m.activateSelected()
 	case "r", "ctrl+r":
-		m.status = "refreshing"
 		if len(m.items) == 0 {
 			m.loading = true
 		}
@@ -141,13 +138,8 @@ func (m Model) handleActionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.agentsCurrentOnly = !m.agentsCurrentOnly
-		switch {
-		case m.agentsCurrentOnly && m.currentSession == "":
-			m.status = "agents: not in a " + m.terms.BackendName + " " + m.terms.SessionNoun
-		case m.agentsCurrentOnly:
-			m.status = "agents: " + m.currentSessionLabel()
-		default:
-			m.status = "agents: all " + m.terms.SessionPlural
+		if m.agentsCurrentOnly && m.currentSession == "" {
+			m.notify("agents: not in a "+m.terms.BackendName+" "+m.terms.SessionNoun, sevWarning)
 		}
 		m.clampCursor()
 		return m, m.previewForSelection()
@@ -156,11 +148,6 @@ func (m Model) handleActionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.agentsStateFilter = nextAgentStateFilter(m.agentsStateFilter)
-		if m.agentsStateFilter == "" {
-			m.status = "agents: all states"
-		} else {
-			m.status = "agents: " + string(m.agentsStateFilter)
-		}
 		m.clampCursor()
 		return m, m.previewForSelection()
 	case "/":
@@ -182,14 +169,12 @@ func (m Model) handleActionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.previewForSelection()
 	case "m":
 		m.openInputModePrompt(true)
-		m.status = "change input mode"
 		return m, nil
 	case "?":
 		m.showHelp = !m.showHelp
 		return m, nil
 	case "h":
 		m.openInstallMenu(false)
-		m.status = "install menu"
 		return m, nil
 	case "a", "ctrl+a":
 		return m.switchSource(sessionmgr.ModeAll)
@@ -252,14 +237,12 @@ func (m Model) handleTypeFirstKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.prefixArmed {
 		m.prefixArmed = false
 		if m.isPrefixKey(msg) {
-			m.status = "prefix cancelled"
 			return m, nil
 		}
 		return m.handleActionKey(msg)
 	}
 	if m.isPrefixKey(msg) {
 		m.prefixArmed = true
-		m.status = "prefix active: next key is an action"
 		return m, nil
 	}
 	if isUnprefixedNavigationKey(msg) {
@@ -274,7 +257,6 @@ func (m Model) handleTypeFirstKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if isPrintableKey(msg) {
 		return m.appendFilterText(string(msg.Runes))
 	}
-	m.status = "press " + m.config.PrefixKey() + " before actions"
 	return m, nil
 }
 
@@ -309,7 +291,6 @@ func (m Model) appendFilterText(text string) (tea.Model, tea.Cmd) {
 	m.query += text
 	m.searchInput.SetValue(m.query)
 	m.clampCursor()
-	m.status = "filter: " + m.query
 	return m, m.previewForSelection()
 }
 
@@ -321,11 +302,6 @@ func (m Model) deleteFilterRune() (tea.Model, tea.Cmd) {
 	m.query = string(runes[:len(runes)-1])
 	m.searchInput.SetValue(m.query)
 	m.clampCursor()
-	if m.query == "" {
-		m.status = "filter cleared"
-	} else {
-		m.status = "filter: " + m.query
-	}
 	return m, m.previewForSelection()
 }
 
@@ -336,7 +312,6 @@ func (m Model) clearFilterText() (tea.Model, tea.Cmd) {
 	m.query = ""
 	m.searchInput.SetValue("")
 	m.cursor = 0
-	m.status = "filter cleared"
 	return m, m.previewForSelection()
 }
 
@@ -398,7 +373,6 @@ func (m Model) handleSetupKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m Model) cancelInputModePrompt() (tea.Model, tea.Cmd) {
 	m.setup.active = false
 	m.setup.manual = false
-	m.status = "input mode change cancelled"
 	return m, nil
 }
 
@@ -450,13 +424,11 @@ func (m Model) closeInstallMenu() (tea.Model, tea.Cmd) {
 		cfg := m.config
 		cfg.Setup.InstallMenuSeen = true
 		if err := appconfig.Save(cfg); err != nil {
-			m.err = err
-			m.status = err.Error()
+			m.notify(err.Error(), sevError)
 			return m, nil
 		}
 		m.config = cfg
 	}
-	m.status = "install menu closed"
 	var refresh tea.Cmd
 	m, refresh = m.beginRefresh(m.source, true)
 	return m, refresh
@@ -470,18 +442,16 @@ func (m Model) applyTypeFirstSetup(enabled bool) (tea.Model, tea.Cmd) {
 	}
 	cfg.Setup.TypeFirstPromptSeen = true
 	if err := appconfig.Save(cfg); err != nil {
-		m.err = err
-		m.status = err.Error()
+		m.notify(err.Error(), sevError)
 		return m, nil
 	}
 	m.config = cfg
 	m.setup.active = false
 	m.setup.manual = false
-	m.err = nil
 	if enabled {
-		m.status = "type-first mode enabled"
+		m.notify("type-first mode enabled", sevInfo)
 	} else {
-		m.status = "classic input mode selected"
+		m.notify("classic input mode selected", sevInfo)
 	}
 	return m, nil
 }
@@ -495,7 +465,6 @@ func (m Model) switchSource(source sessionmgr.SourceMode) (tea.Model, tea.Cmd) {
 	} else {
 		m.items = nil
 		m.loading = true
-		m.status = "loading " + source.DisplayNames(m.terms).List
 	}
 	var refresh tea.Cmd
 	m, refresh = m.beginRefresh(source, false)
@@ -505,16 +474,14 @@ func (m Model) switchSource(source sessionmgr.SourceMode) (tea.Model, tea.Cmd) {
 func (m Model) activateSelected() (tea.Model, tea.Cmd) {
 	item, ok := m.selectedItem()
 	if !ok {
-		m.status = "nothing selected"
 		return m, nil
 	}
 	switch item.Kind {
 	case sessionmgr.KindSession:
-		m.status = "attaching " + item.Name
 		return m, attachCmd(m.mux, item)
 	case sessionmgr.KindAgent:
 		if item.Session == "" || item.Window == "" || item.PaneID == "" {
-			m.status = "cannot focus agent (missing pane info)"
+			m.notify("cannot focus agent (missing pane info)", sevInfo)
 			return m, nil
 		}
 		// Flip done→idle before focusing: the user is visiting the pane. Run
@@ -523,10 +490,9 @@ func (m Model) activateSelected() (tea.Model, tea.Cmd) {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 		_, _ = m.mux.MarkAgentVisited(ctx, item.PaneID)
-		m.status = fmt.Sprintf("focusing %s on %s", item.DisplayName(), item.Location)
+		m.notify(fmt.Sprintf("focusing %s on %s", item.DisplayName(), item.Location), sevInfo)
 		return m, focusAgentCmd(m.mux, item)
 	case sessionmgr.KindZoxide, sessionmgr.KindFD:
-		m.status = "creating " + m.terms.SessionNoun + " from " + item.Path
 		return m, createSessionCmd(m.mux, item.Path)
 	default:
 		return m, nil
@@ -536,15 +502,17 @@ func (m Model) activateSelected() (tea.Model, tea.Cmd) {
 func (m Model) deleteSelected() (tea.Model, tea.Cmd) {
 	item, ok := m.selectedItem()
 	if !ok {
-		m.status = "nothing selected"
 		return m, nil
 	}
 	switch item.Kind {
 	case sessionmgr.KindSession:
-		m.status = m.terms.KillVerb + " " + m.terms.SessionNoun + " " + item.Name
+		if m.killInFlight {
+			return m, nil
+		}
+		m.killInFlight = true
 		return m, deleteSessionCmd(m.mux, item)
 	default:
-		m.status = "delete only applies to " + m.terms.SessionPlural
+		m.notify("delete only applies to "+m.terms.SessionPlural, sevWarning)
 		return m, nil
 	}
 }
@@ -552,7 +520,6 @@ func (m Model) deleteSelected() (tea.Model, tea.Cmd) {
 func (m Model) startRename() (tea.Model, tea.Cmd) {
 	item, ok := m.selectedItem()
 	if !ok {
-		m.status = "nothing selected"
 		return m, nil
 	}
 	switch item.Kind {
@@ -563,7 +530,6 @@ func (m Model) startRename() (tea.Model, tea.Cmd) {
 		m.renameTarget = item.ActionTarget()
 		m.renameInput.SetValue("")
 		m.renameInput.Focus()
-		m.status = "renaming " + item.Name
 		return m, textinput.Blink
 	case sessionmgr.KindAgent:
 		m.inputMode = modeRename
@@ -573,10 +539,9 @@ func (m Model) startRename() (tea.Model, tea.Cmd) {
 		m.renameTarget = item.ActionTarget() // herdr rename targets the pane id
 		m.renameInput.SetValue(item.DisplayName())
 		m.renameInput.Focus()
-		m.status = "renaming agent " + item.AgentName
 		return m, textinput.Blink
 	default:
-		m.status = "rename only applies to " + m.terms.SessionPlural + " and agents"
+		m.notify("rename only applies to "+m.terms.SessionPlural+" and agents", sevWarning)
 		return m, nil
 	}
 }
@@ -586,25 +551,22 @@ func (m Model) startYazi() (tea.Model, tea.Cmd) {
 	defer cancel()
 	inPopup, err := m.checkPopup(ctx)
 	if err != nil {
-		m.status = fmt.Sprintf("checking %s popup: %v", m.terms.BackendName, err)
-		m.err = err
+		m.notify(fmt.Sprintf("checking %s popup: %v", m.terms.BackendName, err), sevError)
 		return m, nil
 	}
 	if inPopup {
 		err := fmt.Errorf("cannot open yazi inside a %s popup", m.terms.BackendName)
-		m.status = err.Error()
-		m.err = err
+		m.notify(err.Error(), sevError)
 		return m, nil
 	}
 	file, err := os.CreateTemp("", "seshagy-yazi-*")
 	if err != nil {
-		m.status = err.Error()
-		m.err = err
+		m.notify(err.Error(), sevError)
 		return m, nil
 	}
 	path := file.Name()
 	_ = file.Close()
-	m.status = "opening yazi"
+	m.notify("opening yazi", sevInfo)
 	return m, tea.ExecProcess(sessionmgr.RunYaziCommand(path), func(err error) tea.Msg {
 		defer os.Remove(path)
 		if err != nil {

@@ -16,11 +16,27 @@ import (
 
 type inputMode int
 
+type notifSev int
+
 const (
 	modeNormal inputMode = iota
 	modeSearch
 	modeRename
 )
+
+const (
+	sevInfo notifSev = iota
+	sevWarning
+	sevError
+)
+
+type notification struct {
+	text string
+	sev  notifSev
+	at   time.Time
+}
+
+const spinnerFrames = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 
 type Model struct {
 	styles styles
@@ -47,13 +63,14 @@ type Model struct {
 	renameSession string
 	inputMode     inputMode
 
-	preview     string
-	previewKey  string
-	showPreview bool
-	showHelp    bool
-	loading     bool
-	status      string
-	err         error
+	preview       string
+	previewKey    string
+	showPreview   bool
+	showHelp      bool
+	loading       bool
+	spinnerFrame  int
+	spinnerActive bool
+	notifications []notification
 
 	agentsCurrentOnly bool
 	currentSession    string
@@ -71,6 +88,11 @@ type Model struct {
 	ephemeral        bool
 	herdrPaneID      string
 	herdrWorkspaceID string
+
+	// killInFlight suppresses the ephemeral focus-loss dismissal while a
+	// session/workspace kill (x) is in flight, so the close's refocus doesn't
+	// quit seshagy before the focus-restore inside KillSession can land.
+	killInFlight bool
 
 	setup          setupPrompt
 	installMenu    installMenuState
@@ -108,7 +130,16 @@ type previewMsg struct {
 	err     error
 }
 
+type actionKind string
+
+const (
+	actionKill        actionKind = "kill"
+	actionRename      actionKind = "rename"
+	actionAgentRename actionKind = "agentRename"
+)
+
 type actionDoneMsg struct {
+	kind   actionKind
 	status string
 	err    error
 }
@@ -154,13 +185,17 @@ func New(opts ...Option) Model {
 	rename.Placeholder = "new name"
 	rename.Prompt = "rename > "
 	rename.CharLimit = 128
+	showPreview := true
+	if cfg.TUI.Preview != nil {
+		showPreview = *cfg.TUI.Preview
+	}
 	m := Model{
 		styles:          stylesFromConfig(cfg),
 		config:          cfg,
 		mux:             mux,
 		terms:           mux.Terms(),
 		source:          cfg.DefaultSource(),
-		showPreview:     true,
+		showPreview:     showPreview,
 		showHelp:        true,
 		searchInput:     search,
 		renameInput:     rename,
@@ -170,12 +205,12 @@ func New(opts ...Option) Model {
 		checkPopup:      mux.InMultiplexerPopup,
 		setup:           setupPrompt{cursor: 1},
 		loading:         true,
+		spinnerActive:   true,
 	}
 	m.refreshGen[m.source] = 1
 	m.inflightRefresh[m.source] = 1
 	if cfgErr != nil {
-		m.err = cfgErr
-		m.status = cfgErr.Error()
+		m.notify(cfgErr.Error(), sevError)
 	}
 	for _, opt := range opts {
 		opt(&m)
@@ -197,11 +232,27 @@ func (m Model) Init() tea.Cmd {
 		startupInstallMenuCmd(m.config),
 		refreshCatalogsCmd(m.config),
 		tickCmd(),
+		notificationTickCmd(),
+		spinnerTickCmd(),
+	}
+	// Keep the ModeAll cache warm so the overview hero band shows correct
+	// counts even when another source tab is active on launch.
+	if m.source != sessionmgr.ModeAll {
+		if _, cmd := m.beginRefresh(sessionmgr.ModeAll, false); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	}
 	if m.ephemeral {
 		cmds = append(cmds, ephemeralTickCmd())
 	}
 	return tea.Batch(cmds...)
+}
+
+func (m *Model) notify(text string, sev notifSev) {
+	m.notifications = append(m.notifications, notification{text: text, sev: sev, at: time.Now()})
+	if len(m.notifications) > 3 {
+		m.notifications = m.notifications[len(m.notifications)-3:]
+	}
 }
 
 func (m *Model) clampCursor() {
@@ -341,13 +392,6 @@ func sortedCounts(items []sessionmgr.Item) map[sessionmgr.Kind]int {
 	return counts
 }
 
-func plural(n int) string {
-	if n == 1 {
-		return ""
-	}
-	return "s"
-}
-
 func min(a, b int) int {
 	if a < b {
 		return a
@@ -360,6 +404,18 @@ func max(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// clampVal clamps v to the inclusive [lo, hi] range. If hi <= lo, only the
+// lower bound is enforced (v is floored at lo but not capped).
+func clampVal(v, lo, hi int) int {
+	if v < lo {
+		return lo
+	}
+	if hi > lo && v > hi {
+		return hi
+	}
+	return v
 }
 
 func clampText(s string, w int) string {

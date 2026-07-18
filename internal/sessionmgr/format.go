@@ -108,6 +108,19 @@ func (set IconSet) ForAgentState(state AgentState) IconStyle {
 	if style.ASCII == "" {
 		style.ASCII = defaults.ASCII
 	}
+	// Resolve the display mode into the shown value, mirroring IconSet.For for
+	// kind icons: the glyph in icon mode, the ASCII label in text mode, nothing
+	// when hidden. Without this, call sites reading the resolved value (the
+	// format/JSON action line and the overview legend) always fell back to the
+	// glyph and ignored mode="text" / agent_state_mode="inherit".
+	switch {
+	case set.AgentStateHidden():
+		style.Text = ""
+	case set.AgentStateUsesIcons():
+		style.Text = style.Icon
+	default:
+		style.Text = style.ASCII
+	}
 	return style
 }
 
@@ -247,13 +260,13 @@ func colorIcon(kind Kind, icons IconSet) string {
 
 func agentStateGlyph(state AgentState, icons IconSet) string {
 	style := icons.ForAgentState(state)
-	if style.Icon == "" {
+	if style.Text == "" {
 		return ""
 	}
 	if style.Color == "" {
-		return style.Icon
+		return style.Text
 	}
-	return fmt.Sprintf("\x1b[%sm%s\x1b[0m", ansiColorSequence(style.Color), style.Icon)
+	return fmt.Sprintf("\x1b[%sm%s\x1b[0m", ansiColorSequence(style.Color), style.Text)
 }
 
 func joinNonEmpty(parts ...string) string {

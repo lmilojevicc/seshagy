@@ -3,3 +3,4 @@
 *.test
 .pi-subagents/
 .pi-subagents/
+.serena/

@@ -10,7 +10,6 @@ import (
 
 type palette struct {
 	bg       lipgloss.TerminalColor
-	bgAlt    lipgloss.TerminalColor
 	fg       lipgloss.TerminalColor
 	muted    lipgloss.TerminalColor
 	border   lipgloss.TerminalColor
@@ -26,29 +25,37 @@ type palette struct {
 type styles struct {
 	p palette
 
-	app           lipgloss.Style
-	tabActive     lipgloss.Style
-	tabInactive   lipgloss.Style
-	itemName      lipgloss.Style
-	pane          lipgloss.Style
-	panePopup     lipgloss.Style
-	paneList      lipgloss.Style
-	paneDetail    lipgloss.Style
-	panePreview   lipgloss.Style
-	listTitle     lipgloss.TerminalColor
-	metadataTitle lipgloss.TerminalColor
-	previewTitle  lipgloss.TerminalColor
-	title         lipgloss.Style
-	muted         lipgloss.Style
-	emphasis      lipgloss.Style
-	key           lipgloss.Style
-	selectedBG    lipgloss.Style
-	bar           lipgloss.Style
-	status        lipgloss.Style
-	success       lipgloss.Style
-	info          lipgloss.Style
-	warning       lipgloss.Style
-	danger        lipgloss.Style
+	app                lipgloss.Style
+	chipActive         lipgloss.Style
+	chipIdle           lipgloss.Style
+	itemName           lipgloss.Style
+	pane               lipgloss.Style
+	panePopup          lipgloss.Style
+	paneInput          lipgloss.Style
+	paneList           lipgloss.Style
+	paneDetail         lipgloss.Style
+	panePreview        lipgloss.Style
+	listTitle          lipgloss.TerminalColor
+	metadataTitle      lipgloss.TerminalColor
+	previewTitle       lipgloss.TerminalColor
+	tileWorkspace      lipgloss.Style
+	tileAgent          lipgloss.Style
+	tileSources        lipgloss.Style
+	tileHelp           lipgloss.Style
+	workspaceTileTitle lipgloss.TerminalColor
+	agentTileTitle     lipgloss.TerminalColor
+	sourcesTileTitle   lipgloss.TerminalColor
+	helpTileTitle      lipgloss.TerminalColor
+	title              lipgloss.Style
+	muted              lipgloss.Style
+	emphasis           lipgloss.Style
+	key                lipgloss.Style
+	selectedBG         lipgloss.Style
+	bar                lipgloss.Style
+	success            lipgloss.Style
+	info               lipgloss.Style
+	warning            lipgloss.Style
+	danger             lipgloss.Style
 }
 
 func defaultStyles() styles {
@@ -64,7 +71,6 @@ func stylesFromConfig(cfg appconfig.Config) styles {
 	// instead of painting a fixed Catppuccin surface over it.
 	p := palette{
 		bg:       lipgloss.NoColor{},
-		bgAlt:    lipgloss.NoColor{},
 		fg:       lipgloss.NoColor{},
 		muted:    lipgloss.Color("8"),
 		border:   lipgloss.Color("8"),
@@ -91,8 +97,15 @@ func stylesFromConfig(cfg appconfig.Config) styles {
 
 	s := styles{p: p}
 	s.app = lipgloss.NewStyle().Foreground(p.fg).Background(p.bg)
-	s.tabActive = lipgloss.NewStyle().Foreground(activeTab).Bold(true)
-	s.tabInactive = lipgloss.NewStyle().Foreground(inactiveTab)
+	// Source-tab chips: active is the active_tab color (bold, padded), idle a
+	// muted padded chip. Reuses active_tab/inactive_tab colors (no new tokens).
+	s.chipActive = lipgloss.NewStyle().
+		Foreground(activeTab).
+		Bold(true).
+		Padding(0, 1)
+	s.chipIdle = lipgloss.NewStyle().
+		Foreground(inactiveTab).
+		Padding(0, 1)
 	s.itemName = lipgloss.NewStyle().Foreground(p.fg)
 	s.pane = lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
@@ -111,13 +124,29 @@ func stylesFromConfig(cfg appconfig.Config) styles {
 	s.listTitle = themeColor(colors.ListBorderTitle, listBorder)
 	s.metadataTitle = themeColor(colors.MetadataBorderTitle, metadataBorder)
 	s.previewTitle = themeColor(colors.PreviewBorderTitle, previewBorder)
+	// Search/rename input popup border matches the dashboard tiles by default
+	// (inherits the base border via config normalization) but stays themeable.
+	inputBorder := themeColor(colors.InputBorder, border)
+	s.paneInput = s.pane.BorderForeground(inputBorder)
+	// Overview hero tiles.
+	workspaceTileBorder := themeColor(colors.WorkspaceTileBorder, border)
+	agentTileBorder := themeColor(colors.AgentTileBorder, border)
+	s.tileWorkspace = s.pane.BorderForeground(workspaceTileBorder)
+	s.tileAgent = s.pane.BorderForeground(agentTileBorder)
+	s.workspaceTileTitle = themeColor(colors.WorkspaceTileTitle, popupTitle)
+	s.agentTileTitle = themeColor(colors.AgentTileTitle, popupTitle)
+	// SOURCES tile wraps the tab chips; reuses the base border + popup title.
+	s.tileSources = s.pane
+	s.sourcesTileTitle = popupTitle
+	// HELP tile wraps the footer keycaps; same base border + popup title.
+	s.tileHelp = s.pane
+	s.helpTileTitle = popupTitle
 	s.title = lipgloss.NewStyle().Foreground(popupTitle).Bold(true)
 	s.muted = lipgloss.NewStyle().Foreground(muted)
 	s.emphasis = lipgloss.NewStyle().Foreground(accent).Bold(true)
 	s.key = lipgloss.NewStyle().Foreground(key).Bold(true)
 	s.selectedBG = lipgloss.NewStyle().Reverse(true)
 	s.bar = lipgloss.NewStyle().Foreground(accent)
-	s.status = lipgloss.NewStyle().Foreground(p.fg).Background(p.bgAlt).Padding(0, 1)
 	s.success = lipgloss.NewStyle().Foreground(success).Bold(true)
 	s.info = lipgloss.NewStyle().Foreground(info).Bold(true)
 	s.warning = lipgloss.NewStyle().Foreground(warning).Bold(true)

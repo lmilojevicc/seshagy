@@ -46,6 +46,7 @@ type Config struct {
 type TUIConfig struct {
 	InputStyle    string `toml:"input_style"    json:"input_style"`
 	DimBackground *bool  `toml:"dim_background" json:"dim_background"`
+	Preview       *bool  `toml:"preview"        json:"preview"`
 }
 
 type SourcesConfig struct {
@@ -81,6 +82,13 @@ type ThemeColorsConfig struct {
 	ListBorderTitle     string `toml:"list_border_title"     json:"list_border_title"`
 	MetadataBorderTitle string `toml:"metadata_border_title" json:"metadata_border_title"`
 	PreviewBorderTitle  string `toml:"preview_border_title"  json:"preview_border_title"`
+	InputBorder         string `toml:"input_border"          json:"input_border"`
+
+	// Overview hero tiles (workspaces + agents).
+	WorkspaceTileBorder string `toml:"workspace_tile_border" json:"workspace_tile_border"`
+	WorkspaceTileTitle  string `toml:"workspace_tile_title"  json:"workspace_tile_title"`
+	AgentTileBorder     string `toml:"agent_tile_border"     json:"agent_tile_border"`
+	AgentTileTitle      string `toml:"agent_tile_title"      json:"agent_tile_title"`
 }
 
 type IconsConfig struct {
@@ -183,7 +191,11 @@ func Default() Config {
 			FD:         IconConfig{Icon: sessionmgr.IconFD + " ", Label: "F", Color: "11"},
 		},
 		TypeFirst: TypeFirstConfig{Enabled: false, Prefix: DefaultPrefix},
-		TUI:       TUIConfig{InputStyle: InputStylePopup, DimBackground: ptrBool(true)},
+		TUI: TUIConfig{
+			InputStyle:    InputStylePopup,
+			DimBackground: ptrBool(true),
+			Preview:       ptrBool(true),
+		},
 	}
 }
 
@@ -272,6 +284,9 @@ func (c *Config) Normalize() {
 	if c.TUI.DimBackground == nil {
 		c.TUI.DimBackground = ptrBool(true)
 	}
+	if c.TUI.Preview == nil {
+		c.TUI.Preview = ptrBool(true)
+	}
 }
 
 func normalizeThemeColors(colors *ThemeColorsConfig, defaults ThemeColorsConfig) {
@@ -337,6 +352,25 @@ func normalizeThemeColors(colors *ThemeColorsConfig, defaults ThemeColorsConfig)
 	}
 	if strings.TrimSpace(colors.PreviewBorderTitle) == "" {
 		colors.PreviewBorderTitle = colors.PreviewBorder
+	}
+	// Search/rename input popup border defaults to the base border so it matches
+	// the dashboard tiles out of the box while staying independently themeable.
+	if strings.TrimSpace(colors.InputBorder) == "" {
+		colors.InputBorder = colors.Border
+	}
+	// Overview hero tiles inherit border / popup_title so the default look is
+	// unchanged unless themed.
+	if strings.TrimSpace(colors.WorkspaceTileBorder) == "" {
+		colors.WorkspaceTileBorder = colors.Border
+	}
+	if strings.TrimSpace(colors.AgentTileBorder) == "" {
+		colors.AgentTileBorder = colors.Border
+	}
+	if strings.TrimSpace(colors.WorkspaceTileTitle) == "" {
+		colors.WorkspaceTileTitle = colors.PopupTitle
+	}
+	if strings.TrimSpace(colors.AgentTileTitle) == "" {
+		colors.AgentTileTitle = colors.PopupTitle
 	}
 }
 

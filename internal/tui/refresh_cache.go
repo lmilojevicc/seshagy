@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"fmt"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -43,19 +42,32 @@ func (m Model) cacheFresh(mode sessionmgr.SourceMode) bool {
 	return time.Since(entry.fetchedAt) < cacheTTL(mode)
 }
 
+// overviewItems returns the ModeAll item list used by the top overview hero
+// band, so its counts stay correct regardless of the active source tab. The
+// active tab's own list (m.items) is used directly when ModeAll is active;
+// otherwise the warmed ModeAll cache is read. Returns nil before the first
+// ModeAll load completes (the hero hides itself in that case).
+func (m Model) overviewItems() []sessionmgr.Item {
+	if m.source == sessionmgr.ModeAll {
+		return m.items
+	}
+	entry, ok := m.cacheEntry(sessionmgr.ModeAll)
+	if !ok {
+		return nil
+	}
+	return entry.items
+}
+
 func (m Model) applyCacheEntry(mode sessionmgr.SourceMode) Model {
 	entry, ok := m.cacheEntry(mode)
 	if !ok {
 		return m
 	}
 	m.items = entry.items
-	m.err = entry.err
 	if entry.err != nil {
-		m.status = entry.err.Error()
+		m.notify(entry.err.Error(), sevError)
 	} else if entry.warning != "" {
-		m.status = entry.warning
-	} else {
-		m.status = fmt.Sprintf("loaded %d item%s", len(entry.items), plural(len(entry.items)))
+		m.notify(entry.warning, sevWarning)
 	}
 	m.clampCursor()
 	return m
@@ -109,7 +121,12 @@ func (m Model) beginRefresh(source sessionmgr.SourceMode, force bool) (Model, te
 	m.refreshGen[source]++
 	gen := m.refreshGen[source]
 	m.inflightRefresh[source] = gen
-	return m, refreshCmd(m.mux, source, gen, m.config.LoadOptions())
+	refresh := refreshCmd(m.mux, source, gen, m.config.LoadOptions())
+	if m.spinnerActive {
+		return m, refresh
+	}
+	m.spinnerActive = true
+	return m, tea.Batch(refresh, spinnerTickCmd())
 }
 
 func (m Model) finishRefresh(source sessionmgr.SourceMode, gen uint64) Model {
@@ -127,8 +144,13 @@ func (m Model) refreshInflight(mode sessionmgr.SourceMode) bool {
 	return m.inflightRefresh[mode] != 0
 }
 
-func (m Model) backgroundRefreshing() bool {
-	return m.refreshInflight(m.source) && !m.loading
+func (m Model) anyRefreshInflight() bool {
+	for _, gen := range m.inflightRefresh {
+		if gen != 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func (m Model) handleRefreshMsg(msg refreshMsg) (Model, tea.Cmd) {
@@ -144,18 +166,14 @@ func (m Model) handleRefreshMsg(msg refreshMsg) (Model, tea.Cmd) {
 
 	m.loading = false
 	if msg.err != nil {
-		m.err = msg.err
-		m.status = msg.err.Error()
+		m.notify(msg.err.Error(), sevError)
 		return m, nil
 	}
-	m.err = nil
 	m.items = msg.items
 	m.currentSession = msg.currentSession
 	m.clampCursor()
 	if msg.warning != "" {
-		m.status = msg.warning
-	} else {
-		m.status = fmt.Sprintf("loaded %d item%s", len(msg.items), plural(len(msg.items)))
+		m.notify(msg.warning, sevWarning)
 	}
 	return m, m.previewForSelection()
 }

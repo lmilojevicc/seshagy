@@ -159,6 +159,20 @@ func TestInvalidateCachesOnAttachDone(t *testing.T) {
 	}
 }
 
+func TestBeginRefreshStartsSpinnerTick(t *testing.T) {
+	m := New()
+	m.spinnerActive = false
+	m.inflightRefresh = map[sessionmgr.SourceMode]uint64{}
+
+	got, cmd := m.beginRefresh(sessionmgr.ModeZoxide, false)
+	if !got.spinnerActive {
+		t.Fatal("beginRefresh did not activate spinner")
+	}
+	if cmd == nil {
+		t.Fatal("beginRefresh did not schedule refresh and spinner commands")
+	}
+}
+
 func TestBeginRefreshCoalescesInflight(t *testing.T) {
 	m := New()
 	m.inflightRefresh = map[sessionmgr.SourceMode]uint64{
@@ -171,17 +185,6 @@ func TestBeginRefreshCoalescesInflight(t *testing.T) {
 	}
 	if model.inflightRefresh[sessionmgr.ModeZoxide] != 1 {
 		t.Fatalf("inflight gen = %d, want 1", model.inflightRefresh[sessionmgr.ModeZoxide])
-	}
-}
-
-func TestBackgroundRefreshingFooterState(t *testing.T) {
-	m := New()
-	m.loading = false
-	m.inflightRefresh = map[sessionmgr.SourceMode]uint64{
-		m.source: 1,
-	}
-	if !m.backgroundRefreshing() {
-		t.Fatal("backgroundRefreshing = false, want true")
 	}
 }
 
@@ -242,8 +245,8 @@ func TestHandleRefreshMsgStoresErrorInCache(t *testing.T) {
 	if !ok || !errors.Is(entry.err, loadErr) {
 		t.Fatalf("cache err = %v, ok=%v", entry.err, ok)
 	}
-	if got.err == nil || got.err.Error() != "load failed" {
-		t.Fatalf("model err = %v", got.err)
+	if text := latestNotificationText(got); text != "load failed" {
+		t.Fatalf("notification = %q, want load failed", text)
 	}
 }
 
@@ -261,8 +264,11 @@ func TestHandleRefreshMsgSetsStatusFromWarning(t *testing.T) {
 		items:   testItems("session-a", "session-b"),
 		warning: warn,
 	})
-	if got.status != warn {
-		t.Fatalf("status = %q, want warning %q", got.status, warn)
+	if text := latestNotificationText(got); text != warn {
+		t.Fatalf("notification = %q, want warning %q", text, warn)
+	}
+	if sev := latestNotificationSeverity(got); sev != sevWarning {
+		t.Fatalf("severity = %v, want sevWarning", sev)
 	}
 	entry, ok := got.cache[sessionmgr.ModeSessions]
 	if !ok || entry.warning != warn {
@@ -284,7 +290,55 @@ func TestSwitchSourceAppliesCachedWarningStatus(t *testing.T) {
 
 	model, _ := m.switchSource(sessionmgr.ModeZoxide)
 	got := model.(Model)
-	if got.status != warn {
-		t.Fatalf("status = %q, want cached warning %q", got.status, warn)
+	if text := latestNotificationText(got); text != warn {
+		t.Fatalf("notification = %q, want cached warning %q", text, warn)
+	}
+	if sev := latestNotificationSeverity(got); sev != sevWarning {
+		t.Fatalf("severity = %v, want sevWarning", sev)
+	}
+}
+
+// TestTickWarmsModeAllForOverview verifies the tick handler kicks off a
+// background ModeAll refresh (for the overview hero counts) even when the
+// active source tab is something else and already fresh.
+func TestTickWarmsModeAllForOverview(t *testing.T) {
+	m := New()
+	m.source = sessionmgr.ModeSessions
+	// Active source is fresh; ModeAll cache is absent (stale).
+	m.cache = map[sessionmgr.SourceMode]modeCache{
+		sessionmgr.ModeSessions: {items: testItems("s1"), fetchedAt: time.Now()},
+	}
+
+	model, _ := m.Update(tickMsg(time.Now()))
+	got := model.(Model)
+	if got.inflightRefresh[sessionmgr.ModeAll] == 0 {
+		t.Fatal("tick did not start a background ModeAll refresh for the overview")
+	}
+}
+
+// TestOverviewItemsReadsModeAllCache verifies overviewItems returns the warmed
+// ModeAll cache when another tab is active, m.items when ModeAll is active,
+// and nil before any ModeAll load.
+func TestOverviewItemsReadsModeAllCache(t *testing.T) {
+	m := New()
+	m.source = sessionmgr.ModeSessions
+	if got := m.overviewItems(); got != nil {
+		t.Fatalf("overviewItems before cache = %v, want nil", got)
+	}
+
+	cached := testItems("ws")
+	m.cache = map[sessionmgr.SourceMode]modeCache{
+		sessionmgr.ModeAll: {items: cached, fetchedAt: time.Now()},
+	}
+	if got := m.overviewItems(); len(got) != len(cached) {
+		t.Fatalf("overviewItems = %d items, want %d (ModeAll cache)", len(got), len(cached))
+	}
+
+	// When ModeAll is the active tab, m.items is used directly.
+	m.source = sessionmgr.ModeAll
+	m.items = testItems("active")
+	got := m.overviewItems()
+	if len(got) != len(m.items) {
+		t.Fatalf("overviewItems in ModeAll = %d, want m.items %d", len(got), len(m.items))
 	}
 }

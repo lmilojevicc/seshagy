@@ -52,8 +52,13 @@ func TestHandleKeyRenameModeCancelAndSubmit(t *testing.T) {
 
 	model, cmd := m.handleKey(keyMsg("esc"))
 	got := model.(Model)
-	if got.inputMode != modeNormal || got.status != "rename cancelled" || cmd != nil {
-		t.Fatalf("rename esc = mode:%v status:%q cmd:%v", got.inputMode, got.status, cmd)
+	if got.inputMode != modeNormal || len(got.notifications) != 0 || cmd != nil {
+		t.Fatalf(
+			"rename esc = mode:%v notifications:%#v cmd:%v",
+			got.inputMode,
+			got.notifications,
+			cmd,
+		)
 	}
 
 	m.inputMode = modeRename
@@ -61,8 +66,13 @@ func TestHandleKeyRenameModeCancelAndSubmit(t *testing.T) {
 	m.renameInput.SetValue("   ")
 	model, cmd = m.handleKey(enterMsg())
 	got = model.(Model)
-	if got.inputMode != modeNormal || got.status != "rename cancelled" || cmd != nil {
-		t.Fatalf("empty rename = mode:%v status:%q cmd:%v", got.inputMode, got.status, cmd)
+	if got.inputMode != modeNormal || len(got.notifications) != 0 || cmd != nil {
+		t.Fatalf(
+			"empty rename = mode:%v notifications:%#v cmd:%v",
+			got.inputMode,
+			got.notifications,
+			cmd,
+		)
 	}
 
 	m.inputMode = modeRename
@@ -83,15 +93,20 @@ func TestDeleteSelectedSession(t *testing.T) {
 	}
 	model, cmd := m.deleteSelected()
 	got := model.(Model)
-	if got.status != "killing session demo" || cmd == nil {
-		t.Fatalf("session delete = status:%q cmd:%v", got.status, cmd)
+	if !got.killInFlight || len(got.notifications) != 0 || cmd == nil {
+		t.Fatalf(
+			"session delete = inFlight:%v notifications:%#v cmd:%v",
+			got.killInFlight,
+			got.notifications,
+			cmd,
+		)
 	}
 
 	m.items = nil
 	model, cmd = m.deleteSelected()
 	got = model.(Model)
-	if got.status != "nothing selected" || cmd != nil {
-		t.Fatalf("empty delete = status:%q cmd:%v", got.status, cmd)
+	if len(got.notifications) != 0 || cmd != nil {
+		t.Fatalf("empty delete = notifications:%#v cmd:%v", got.notifications, cmd)
 	}
 }
 
@@ -146,8 +161,8 @@ func TestActivateSelectedAgentFocusesPane(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("activateSelected on agent returned nil cmd")
 	}
-	if !strings.Contains(got.status, "focusing pi on seshagy:1.2") {
-		t.Fatalf("status = %q, want 'focusing pi on seshagy:1.2'", got.status)
+	if text := latestNotificationText(got); !strings.Contains(text, "focusing pi on seshagy:1.2") {
+		t.Fatalf("notification = %q, want 'focusing pi on seshagy:1.2'", text)
 	}
 }
 
@@ -168,8 +183,8 @@ func TestActivateSelectedAgentMissingPaneInfoNoOps(t *testing.T) {
 	if cmd != nil {
 		t.Fatal("activateSelected on malformed agent should return nil cmd")
 	}
-	if !strings.Contains(got.status, "cannot focus") {
-		t.Fatalf("status = %q, want 'cannot focus'", got.status)
+	if text := latestNotificationText(got); !strings.Contains(text, "cannot focus") {
+		t.Fatalf("notification = %q, want 'cannot focus'", text)
 	}
 }
 
@@ -181,8 +196,13 @@ func TestHandleActionKeyDeleteAndRename(t *testing.T) {
 
 	model, cmd := m.handleActionKey(keyMsg("x"))
 	got := model.(Model)
-	if got.status != "killing session demo" || cmd == nil {
-		t.Fatalf("x = status:%q cmd:%v", got.status, cmd)
+	if !got.killInFlight || len(got.notifications) != 0 || cmd == nil {
+		t.Fatalf(
+			"x = inFlight:%v notifications:%#v cmd:%v",
+			got.killInFlight,
+			got.notifications,
+			cmd,
+		)
 	}
 
 	model, cmd = m.handleActionKey(keyMsg("R"))
@@ -202,14 +222,24 @@ func TestClearFilterTextAndDeleteFilterRune(t *testing.T) {
 
 	model, cmd := m.deleteFilterRune()
 	got := model.(Model)
-	if got.query != "a" || got.status != "filter: a" || cmd == nil {
-		t.Fatalf("delete rune = query:%q status:%q cmd:%v", got.query, got.status, cmd)
+	if got.query != "a" || len(got.notifications) != 0 || cmd == nil {
+		t.Fatalf(
+			"delete rune = query:%q notifications:%#v cmd:%v",
+			got.query,
+			got.notifications,
+			cmd,
+		)
 	}
 
 	model, cmd = got.clearFilterText()
 	got = model.(Model)
-	if got.query != "" || got.status != "filter cleared" || cmd == nil {
-		t.Fatalf("clear filter = query:%q status:%q cmd:%v", got.query, got.status, cmd)
+	if got.query != "" || len(got.notifications) != 0 || cmd == nil {
+		t.Fatalf(
+			"clear filter = query:%q notifications:%#v cmd:%v",
+			got.query,
+			got.notifications,
+			cmd,
+		)
 	}
 
 	model, cmd = got.deleteFilterRune()
@@ -226,8 +256,12 @@ func TestHandleActionKeyRefreshToggleHelpAndPreview(t *testing.T) {
 
 	model, cmd := m.handleActionKey(keyMsg("r"))
 	got := model.(Model)
-	if got.status != "refreshing" || cmd == nil {
-		t.Fatalf("refresh = status:%q cmd:%v", got.status, cmd)
+	if len(got.notifications) != 0 || cmd == nil {
+		t.Fatalf(
+			"refresh = notifications:%#v cmd:%v, want no toast and a command",
+			got.notifications,
+			cmd,
+		)
 	}
 
 	model, cmd = got.handleActionKey(keyMsg("p"))
@@ -291,22 +325,116 @@ func TestHandleActionKeyActivateSelectedKinds(t *testing.T) {
 	m.items = []sessionmgr.Item{{Kind: sessionmgr.KindSession, Name: "demo"}}
 	model, cmd := m.handleActionKey(enterMsg())
 	got := model.(Model)
-	if got.status != "attaching demo" || cmd == nil {
-		t.Fatalf("session enter = status:%q cmd:%v", got.status, cmd)
+	if len(got.notifications) != 0 || cmd == nil {
+		t.Fatalf("session enter = notifications:%#v cmd:%v", got.notifications, cmd)
 	}
 
 	m.items = []sessionmgr.Item{{Kind: sessionmgr.KindZoxide, Path: "/tmp/demo"}}
 	model, cmd = m.handleActionKey(enterMsg())
 	got = model.(Model)
-	if got.status != "creating session from /tmp/demo" || cmd == nil {
-		t.Fatalf("zoxide enter = status:%q cmd:%v", got.status, cmd)
+	if len(got.notifications) != 0 || cmd == nil {
+		t.Fatalf("zoxide enter = notifications:%#v cmd:%v", got.notifications, cmd)
 	}
 
 	m.items = nil
 	model, cmd = m.handleActionKey(enterMsg())
 	got = model.(Model)
-	if got.status != "nothing selected" || cmd != nil {
-		t.Fatalf("empty enter = status:%q cmd:%v", got.status, cmd)
+	if len(got.notifications) != 0 || cmd != nil {
+		t.Fatalf("empty enter = notifications:%#v cmd:%v", got.notifications, cmd)
+	}
+}
+
+func TestRemovedToastsAreGone(t *testing.T) {
+	tests := []struct {
+		name    string
+		prepare func(*Model)
+		action  func(Model) tea.Model
+	}{
+		{
+			name: "type-first filter keystroke",
+			prepare: func(m *Model) {
+				m.config.TypeFirst.Enabled = true
+				m.items = testKeyItems("api")
+			},
+			action: func(m Model) tea.Model {
+				model, _ := m.handleKey(keyMsg("a"))
+				return model
+			},
+		},
+		{
+			name:    "activate empty list",
+			prepare: func(*Model) {},
+			action: func(m Model) tea.Model {
+				model, _ := m.handleActionKey(enterMsg())
+				return model
+			},
+		},
+		{
+			name: "start rename",
+			prepare: func(m *Model) {
+				m.items = testKeyItems("demo")
+			},
+			action: func(m Model) tea.Model {
+				model, _ := m.startRename()
+				return model
+			},
+		},
+		{
+			name: "start attach",
+			prepare: func(m *Model) {
+				m.items = testKeyItems("demo")
+			},
+			action: func(m Model) tea.Model {
+				model, _ := m.activateSelected()
+				return model
+			},
+		},
+		{
+			name: "start kill",
+			prepare: func(m *Model) {
+				m.items = testKeyItems("demo")
+			},
+			action: func(m Model) tea.Model {
+				model, _ := m.deleteSelected()
+				return model
+			},
+		},
+		{
+			name: "start create",
+			prepare: func(m *Model) {
+				m.items = []sessionmgr.Item{{Kind: sessionmgr.KindZoxide, Path: "/tmp/demo"}}
+			},
+			action: func(m Model) tea.Model {
+				model, _ := m.activateSelected()
+				return model
+			},
+		},
+		{
+			name:    "startup mode prompt",
+			prepare: func(*Model) {},
+			action: func(m Model) tea.Model {
+				model, _ := m.Update(setupMsg{prompt: true})
+				return model
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			m := newTestModel(t)
+			tc.prepare(&m)
+			m.notify("existing", sevWarning)
+			before := len(m.notifications)
+
+			got := tc.action(m).(Model)
+			if len(got.notifications) != before || latestNotificationText(got) != "existing" {
+				t.Fatalf(
+					"notifications changed: before=%d after=%#v",
+					before,
+					got.notifications,
+				)
+			}
+		})
 	}
 }
 
@@ -314,8 +442,13 @@ func TestHandleActionKeyModePrompt(t *testing.T) {
 	m := newTestModel(t)
 	model, cmd := m.handleActionKey(keyMsg("m"))
 	got := model.(Model)
-	if !got.setup.active || got.status != "change input mode" || cmd != nil {
-		t.Fatalf("mode prompt = active:%v status:%q cmd:%v", got.setup.active, got.status, cmd)
+	if !got.setup.active || len(got.notifications) != 0 || cmd != nil {
+		t.Fatalf(
+			"mode prompt = active:%v notifications:%#v cmd:%v",
+			got.setup.active,
+			got.notifications,
+			cmd,
+		)
 	}
 }
 
@@ -328,8 +461,18 @@ func TestStartYaziBlockedInsidePopup(t *testing.T) {
 	if cmd != nil {
 		t.Fatalf("blocked startYazi should not exec, cmd=%v", cmd)
 	}
-	if got.err == nil || !strings.Contains(got.status, "cannot open yazi inside a tmux popup") {
-		t.Fatalf("blocked startYazi = status:%q err:%v", got.status, got.err)
+	if text := latestNotificationText(
+		got,
+	); !strings.Contains(
+		text,
+		"cannot open yazi inside a tmux popup",
+	) ||
+		latestNotificationSeverity(got) != sevError {
+		t.Fatalf(
+			"blocked startYazi = notification:%q severity:%v",
+			text,
+			latestNotificationSeverity(got),
+		)
 	}
 }
 
@@ -339,18 +482,64 @@ func TestStartYaziOutsidePopup(t *testing.T) {
 
 	model, cmd := m.startYazi()
 	got := model.(Model)
-	if cmd == nil || got.status != "opening yazi" {
-		t.Fatalf("start yazi = status:%q cmd:%v", got.status, cmd)
+	if text := latestNotificationText(got); cmd == nil || text != "opening yazi" {
+		t.Fatalf("start yazi = notification:%q cmd:%v", text, cmd)
 	}
 }
 
-func TestDeleteSelectedUnsupportedKind(t *testing.T) {
-	m := newTestModel(t)
-	m.items = []sessionmgr.Item{{Kind: sessionmgr.KindZoxide, Path: "/tmp/demo"}}
-	model, cmd := m.deleteSelected()
-	got := model.(Model)
-	if got.status != "delete only applies to sessions" || cmd != nil {
-		t.Fatalf("zoxide delete = status:%q cmd:%v", got.status, cmd)
+func TestDeleteNonSessionItemWarns(t *testing.T) {
+	for _, kind := range []sessionmgr.Kind{
+		sessionmgr.KindAgent,
+		sessionmgr.KindZoxide,
+		sessionmgr.KindFD,
+	} {
+		t.Run(string(kind), func(t *testing.T) {
+			m := newTestModel(t)
+			m.items = []sessionmgr.Item{{Kind: kind, AgentName: "pi", Path: "/tmp/project"}}
+
+			model, cmd := m.handleActionKey(keyMsg("x"))
+			got := model.(Model)
+			if text := latestNotificationText(
+				got,
+			); text != "delete only applies to sessions" ||
+				cmd != nil {
+				t.Fatalf("delete = notification:%q cmd:%v", text, cmd)
+			}
+			if sev := latestNotificationSeverity(got); sev != sevWarning {
+				t.Fatalf("delete severity = %v, want sevWarning", sev)
+			}
+		})
+	}
+}
+
+func TestRenameNonRenameableItemWarns(t *testing.T) {
+	const want = "rename only applies to sessions and agents"
+	for _, tt := range []struct {
+		name string
+		run  func(Model) (tea.Model, tea.Cmd)
+	}{
+		{name: "start", run: func(m Model) (tea.Model, tea.Cmd) {
+			m.items = []sessionmgr.Item{{Kind: sessionmgr.KindFD, Path: "/tmp/project"}}
+			return m.startRename()
+		}},
+		{name: "submit", run: func(m Model) (tea.Model, tea.Cmd) {
+			m.inputMode = modeRename
+			m.renameKind = sessionmgr.KindFD
+			m.renameFrom = "old"
+			m.renameInput.SetValue("new")
+			return m.handleKey(enterMsg())
+		}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			model, cmd := tt.run(newTestModel(t))
+			got := model.(Model)
+			if text := latestNotificationText(got); text != want || cmd != nil {
+				t.Fatalf("rename = notification:%q cmd:%v", text, cmd)
+			}
+			if sev := latestNotificationSeverity(got); sev != sevWarning {
+				t.Fatalf("rename severity = %v, want sevWarning", sev)
+			}
+		})
 	}
 }
 
@@ -381,8 +570,9 @@ func TestRenameAgentEmptyInputClearsLabel(t *testing.T) {
 	if !ok {
 		t.Fatalf("cmd msg = %T, want actionDoneMsg", msg)
 	}
-	if done.err != nil || !strings.Contains(done.status, "cleared agent alias") {
-		t.Fatalf("action = status:%q err:%v", done.status, done.err)
+	if done.kind != actionAgentRename || done.err != nil ||
+		!strings.Contains(done.status, "cleared agent alias") {
+		t.Fatalf("action = kind:%q status:%q err:%v", done.kind, done.status, done.err)
 	}
 
 	store := sessionmgr.LoadAgentLabels()
@@ -568,52 +758,51 @@ func (c *captureRenameMux) MarkAgentVisited(context.Context, string) (bool, erro
 }
 func (c *captureRenameMux) MarkActiveDoneAgentsIdle(context.Context, []sessionmgr.Item) {}
 
-func TestAgentsScopeStatusTmuxByteIdentical(t *testing.T) {
+func TestAgentsScopeWarningTmuxByteIdentical(t *testing.T) {
 	m := newTestModel(t)
 	m.source = sessionmgr.ModeAgents
-
-	// Not in a session → toggle to current-only → "agents: not in a tmux session"
 	m.agentsCurrentOnly = false
 	m.currentSession = ""
+
 	model, _ := m.handleActionKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("o")})
 	m = model.(Model)
-	if m.status != "agents: not in a tmux session" {
-		t.Fatalf("status = %q, want \"agents: not in a tmux session\"", m.status)
+	if text := latestNotificationText(m); text != "agents: not in a tmux session" {
+		t.Fatalf("notification = %q, want \"agents: not in a tmux session\"", text)
 	}
 
-	// Toggle to all → "agents: all sessions"
+	before := len(m.notifications)
 	model, _ = m.handleActionKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("o")})
 	m = model.(Model)
-	if m.status != "agents: all sessions" {
-		t.Fatalf("status = %q, want \"agents: all sessions\"", m.status)
+	if len(m.notifications) != before {
+		t.Fatalf("all-sessions scope added notification: %#v", m.notifications)
 	}
 }
 
-// TestAgentsScopeStatusHerdrTerms verifies herdr vocabulary in agents scope.
-func TestAgentsScopeStatusHerdrTerms(t *testing.T) {
+// TestAgentsScopeWarningHerdrTerms verifies herdr vocabulary in the retained warning.
+func TestAgentsScopeWarningHerdrTerms(t *testing.T) {
 	m := newTestModel(t)
 	m.terms = sessionmgr.HerdrTerms()
 	m.source = sessionmgr.ModeAgents
-
 	m.agentsCurrentOnly = false
 	m.currentSession = ""
+
 	model, _ := m.handleActionKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("o")})
 	m = model.(Model)
-	if m.status != "agents: not in a herdr workspace" {
-		t.Fatalf("status = %q, want \"agents: not in a herdr workspace\"", m.status)
+	if text := latestNotificationText(m); text != "agents: not in a herdr workspace" {
+		t.Fatalf("notification = %q, want \"agents: not in a herdr workspace\"", text)
 	}
 
+	before := len(m.notifications)
 	model, _ = m.handleActionKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("o")})
 	m = model.(Model)
-	if m.status != "agents: all workspaces" {
-		t.Fatalf("status = %q, want \"agents: all workspaces\"", m.status)
+	if len(m.notifications) != before {
+		t.Fatalf("all-workspaces scope added notification: %#v", m.notifications)
 	}
 }
 
-// TestAgentsScopeStatusHerdrShowsWorkspaceLabel proves the 'o' status shows
-// the resolved workspace label (from agent item Location), not the raw opaque
-// workspace id like "wB".
-func TestAgentsScopeStatusHerdrShowsWorkspaceLabel(t *testing.T) {
+// TestCurrentSessionLabelHerdrShowsWorkspaceLabel proves the persistent agents
+// scope title resolves a workspace label instead of showing an opaque id.
+func TestCurrentSessionLabelHerdrShowsWorkspaceLabel(t *testing.T) {
 	m := newTestModel(t)
 	m.terms = sessionmgr.HerdrTerms()
 	m.source = sessionmgr.ModeAgents
@@ -625,23 +814,14 @@ func TestAgentsScopeStatusHerdrShowsWorkspaceLabel(t *testing.T) {
 		Location:  "frontend", // resolved workspace label
 	}}
 	m.currentSession = "wB"
-	m.agentsCurrentOnly = false
 
-	model, _ := m.handleActionKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("o")})
-	m = model.(Model)
-	if m.status != "agents: frontend" {
-		t.Fatalf("status = %q, want \"agents: frontend\" (label, not id)", m.status)
+	if label := m.currentSessionLabel(); label != "frontend" {
+		t.Fatalf("currentSessionLabel = %q, want \"frontend\"", label)
 	}
-	// Falls back to the raw id when no matching agent item is loaded.
-	m2 := newTestModel(t)
-	m2.terms = sessionmgr.HerdrTerms()
-	m2.source = sessionmgr.ModeAgents
-	m2.currentSession = "wB"
-	m2.agentsCurrentOnly = false
-	model2, _ := m2.handleActionKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("o")})
-	m2 = model2.(Model)
-	if m2.status != "agents: wB" {
-		t.Fatalf("fallback status = %q, want \"agents: wB\"", m2.status)
+
+	m.items = nil
+	if label := m.currentSessionLabel(); label != "wB" {
+		t.Fatalf("fallback currentSessionLabel = %q, want \"wB\"", label)
 	}
 }
 
@@ -708,5 +888,43 @@ func TestTabCyclesSectionsInTypeFirstMode(t *testing.T) {
 			m.prefixArmed,
 			m.query,
 		)
+	}
+}
+
+// TestDeleteSelectedSetsKillInFlight verifies that pressing x on a session
+// arms killInFlight so the ephemeral focus-loss poll is suppressed while
+// KillSession (and its focus-restore) runs. Non-session deletes must not arm.
+func TestDeleteSelectedSetsKillInFlight(t *testing.T) {
+	m := newTestModel(t)
+	m.items = []sessionmgr.Item{{Kind: sessionmgr.KindSession, Name: "demo"}}
+	model, cmd := m.deleteSelected()
+	got := model.(Model)
+	if !got.killInFlight {
+		t.Fatal("killInFlight not set after session delete")
+	}
+	if cmd == nil {
+		t.Fatal("expected deleteSessionCmd after session delete")
+	}
+
+	// Unsupported kind must not arm the flag.
+	m2 := newTestModel(t)
+	m2.items = []sessionmgr.Item{{Kind: sessionmgr.KindZoxide, Name: "z"}}
+	model2, _ := m2.deleteSelected()
+	if model2.(Model).killInFlight {
+		t.Fatal("killInFlight should not be set for non-session delete")
+	}
+}
+
+func TestDeleteSelectedDoesNotStartOverlappingKill(t *testing.T) {
+	m := newTestModel(t)
+	m.items = []sessionmgr.Item{{Kind: sessionmgr.KindSession, Name: "demo"}}
+	m.killInFlight = true
+
+	model, cmd := m.deleteSelected()
+	if !model.(Model).killInFlight {
+		t.Fatal("overlapping delete cleared killInFlight")
+	}
+	if cmd != nil {
+		t.Fatal("overlapping delete started another kill command")
 	}
 }

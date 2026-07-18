@@ -163,7 +163,11 @@ func deleteSessionCmd(mux sessionmgr.Multiplexer, item sessionmgr.Item) tea.Cmd 
 		err := mux.KillSession(ctx, item.ActionTarget())
 		verbPast := mux.Terms().KillVerbPast
 		noun := mux.Terms().SessionNoun
-		return actionDoneMsg{status: verbPast + " " + noun + " " + item.Name, err: err}
+		return actionDoneMsg{
+			kind:   actionKill,
+			status: verbPast + " " + noun + " " + item.Name,
+			err:    err,
+		}
 	}
 }
 
@@ -173,6 +177,7 @@ func renameCmd(mux sessionmgr.Multiplexer, target, displayName, newName string) 
 		defer cancel()
 		err := mux.RenameSession(ctx, target, newName)
 		return actionDoneMsg{
+			kind:   actionRename,
 			status: fmt.Sprintf("renamed %s to %s", displayName, newName),
 			err:    err,
 		}
@@ -197,7 +202,11 @@ func renameAgentCmd(
 		if displayName == "" {
 			verb = "cleared agent alias"
 		}
-		return actionDoneMsg{status: fmt.Sprintf("%s %s", verb, agentType), err: err}
+		return actionDoneMsg{
+			kind:   actionAgentRename,
+			status: fmt.Sprintf("%s %s", verb, agentType),
+			err:    err,
+		}
 	}
 }
 
