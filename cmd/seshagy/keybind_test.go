@@ -55,7 +55,7 @@ func TestInstallTmuxKeybindFreshConfig(t *testing.T) {
 	path := writeTempConfig(t, "")
 	t.Setenv("TMUX_CONF_PATH", path)
 
-	if err := installTmuxKeybind("s", tmuxModePopup); err != nil {
+	if err := installTmuxKeybind("s", tmuxModePopup, false); err != nil {
 		t.Fatalf("install: %v", err)
 	}
 	got := readConfig(t, path)
@@ -72,7 +72,7 @@ func TestInstallTmuxKeybindAppendsToExistingContent(t *testing.T) {
 	path := writeTempConfig(t, "set -g mouse on\n")
 	t.Setenv("TMUX_CONF_PATH", path)
 
-	if err := installTmuxKeybind("s", tmuxModePopup); err != nil {
+	if err := installTmuxKeybind("s", tmuxModePopup, false); err != nil {
 		t.Fatalf("install: %v", err)
 	}
 	got := readConfig(t, path)
@@ -88,10 +88,10 @@ func TestInstallTmuxKeybindIsIdempotentAndReplacesKey(t *testing.T) {
 	path := writeTempConfig(t, "")
 	t.Setenv("TMUX_CONF_PATH", path)
 
-	if err := installTmuxKeybind("s", tmuxModePopup); err != nil {
+	if err := installTmuxKeybind("s", tmuxModePopup, false); err != nil {
 		t.Fatal(err)
 	}
-	if err := installTmuxKeybind("f", tmuxModePopup); err != nil {
+	if err := installTmuxKeybind("f", tmuxModePopup, false); err != nil {
 		t.Fatal(err)
 	}
 	got := readConfig(t, path)
@@ -111,7 +111,7 @@ func TestUninstallTmuxKeybindRemovesBlock(t *testing.T) {
 	path := writeTempConfig(t, "set -g mouse on\n")
 	t.Setenv("TMUX_CONF_PATH", path)
 
-	if err := installTmuxKeybind("s", tmuxModePopup); err != nil {
+	if err := installTmuxKeybind("s", tmuxModePopup, false); err != nil {
 		t.Fatal(err)
 	}
 	if err := uninstallTmuxKeybind(); err != nil {
@@ -158,7 +158,7 @@ func TestInstallTmuxKeybindPrefersExistingXDGConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := installTmuxKeybind("s", tmuxModePopup); err != nil {
+	if err := installTmuxKeybind("s", tmuxModePopup, false); err != nil {
 		t.Fatalf("install: %v", err)
 	}
 	// Binding must be in the XDG file.
@@ -181,7 +181,7 @@ func TestInstallTmuxKeybindFallsBackToLegacyPath(t *testing.T) {
 	t.Setenv("TMUX_CONFIG_DIR", "")
 	t.Setenv("XDG_CONFIG_HOME", "")
 
-	if err := installTmuxKeybind("s", tmuxModePopup); err != nil {
+	if err := installTmuxKeybind("s", tmuxModePopup, false); err != nil {
 		t.Fatalf("install: %v", err)
 	}
 	legacy := filepath.Join(home, ".tmux.conf")
@@ -203,7 +203,7 @@ func TestInstallTmuxKeybindHonorsTMUX_CONFIG_DIR(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := installTmuxKeybind("s", tmuxModePopup); err != nil {
+	if err := installTmuxKeybind("s", tmuxModePopup, false); err != nil {
 		t.Fatalf("install: %v", err)
 	}
 	got := readConfig(t, conf)
@@ -229,7 +229,7 @@ func TestInstallTmuxKeybindHonorsXDGConfig_HOME(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := installTmuxKeybind("s", tmuxModePopup); err != nil {
+	if err := installTmuxKeybind("s", tmuxModePopup, false); err != nil {
 		t.Fatalf("install: %v", err)
 	}
 	got := readConfig(t, xdgConf)
@@ -250,7 +250,7 @@ func TestTmuxBindLineModes(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(string(tc.mode), func(t *testing.T) {
-			line := tmuxBindLine("s", tc.mode)
+			line := tmuxBindLine("s", tc.mode, false)
 			if !strings.Contains(line, tc.contains) {
 				t.Fatalf("mode %s: line %q missing %q", tc.mode, line, tc.contains)
 			}
@@ -262,6 +262,44 @@ func TestTmuxBindLineModes(t *testing.T) {
 			// was the original bug).
 			if strings.Contains(line, "run-shell") {
 				t.Fatalf("mode %s: must not use run-shell (no TTY): %q", tc.mode, line)
+			}
+		})
+	}
+}
+
+func TestRunKeybindTmuxPersistentAndDefaultModes(t *testing.T) {
+	modes := []tmuxLaunchMode{
+		tmuxModePopup,
+		tmuxModeWindow,
+		tmuxModePane,
+		tmuxModeZoomed,
+	}
+	for _, mode := range modes {
+		t.Run(string(mode), func(t *testing.T) {
+			path := writeTempConfig(t, "")
+			t.Setenv("TMUX_CONF_PATH", path)
+
+			if err := runKeybind([]string{
+				"install", "tmux", "--mode", string(mode), "--persistent",
+			}); err != nil {
+				t.Fatalf("persistent install: %v", err)
+			}
+			got := readConfig(t, path)
+			if !strings.Contains(got, "'seshagy'") {
+				t.Fatalf("persistent %s binding missing seshagy command\n%s", mode, got)
+			}
+			if strings.Contains(got, "--ephemeral") {
+				t.Fatalf("persistent %s binding contains --ephemeral\n%s", mode, got)
+			}
+
+			if err := runKeybind([]string{
+				"install", "tmux", "--mode", string(mode),
+			}); err != nil {
+				t.Fatalf("default reinstall: %v", err)
+			}
+			got = readConfig(t, path)
+			if !strings.Contains(got, "seshagy --ephemeral") {
+				t.Fatalf("default %s binding missing --ephemeral\n%s", mode, got)
 			}
 		})
 	}
@@ -282,7 +320,7 @@ func TestInstallTmuxKeybindWritesSelectedMode(t *testing.T) {
 	path := writeTempConfig(t, "")
 	t.Setenv("TMUX_CONF_PATH", path)
 
-	if err := installTmuxKeybind("s", tmuxModeWindow); err != nil {
+	if err := installTmuxKeybind("s", tmuxModeWindow, false); err != nil {
 		t.Fatalf("install window: %v", err)
 	}
 	got := readConfig(t, path)
@@ -311,6 +349,7 @@ func TestInstallHerdrKeybindFreshConfig(t *testing.T) {
 		herdrModePane,
 		defaultHerdrPopupWidth,
 		defaultHerdrPopupHeight,
+		false,
 	); err != nil {
 		t.Fatalf("install: %v", err)
 	}
@@ -345,6 +384,7 @@ func TestInstallHerdrKeybindAppendsToExistingKeys(t *testing.T) {
 		herdrModePane,
 		defaultHerdrPopupWidth,
 		defaultHerdrPopupHeight,
+		false,
 	); err != nil {
 		t.Fatalf("install: %v", err)
 	}
@@ -375,6 +415,7 @@ func TestInstallHerdrKeybindIsIdempotentAndReplacesKey(t *testing.T) {
 		herdrModePane,
 		defaultHerdrPopupWidth,
 		defaultHerdrPopupHeight,
+		false,
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -383,6 +424,7 @@ func TestInstallHerdrKeybindIsIdempotentAndReplacesKey(t *testing.T) {
 		herdrModePane,
 		defaultHerdrPopupWidth,
 		defaultHerdrPopupHeight,
+		false,
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -413,6 +455,7 @@ func TestUninstallHerdrKeybindRemovesBlock(t *testing.T) {
 		herdrModePane,
 		defaultHerdrPopupWidth,
 		defaultHerdrPopupHeight,
+		false,
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -493,7 +536,13 @@ func TestParseHerdrLaunchMode(t *testing.T) {
 }
 
 func TestHerdrBindBlockPopupEmitsPopupType(t *testing.T) {
-	block := herdrBindBlock("f", herdrModePopup, defaultHerdrPopupWidth, defaultHerdrPopupHeight)
+	block := herdrBindBlock(
+		"f",
+		herdrModePopup,
+		defaultHerdrPopupWidth,
+		defaultHerdrPopupHeight,
+		false,
+	)
 	if !strings.Contains(block, `type = "popup"`) {
 		t.Fatalf("popup mode missing type=popup\n%s", block)
 	}
@@ -513,13 +562,65 @@ func TestHerdrBindBlockPopupEmitsPopupType(t *testing.T) {
 }
 
 func TestHerdrBindBlockPaneEmitsPaneType(t *testing.T) {
-	block := herdrBindBlock("s", herdrModePane, defaultHerdrPopupWidth, defaultHerdrPopupHeight)
+	block := herdrBindBlock(
+		"s",
+		herdrModePane,
+		defaultHerdrPopupWidth,
+		defaultHerdrPopupHeight,
+		false,
+	)
 	if !strings.Contains(block, `type = "pane"`) {
 		t.Fatalf("pane mode missing type=pane\n%s", block)
 	}
 	// pane must not carry popup-only width/height.
 	if strings.Contains(block, `width = `) || strings.Contains(block, `height = `) {
 		t.Fatalf("pane block should not carry width/height\n%s", block)
+	}
+}
+
+func TestRunKeybindHerdrPersistentModesAndDefault(t *testing.T) {
+	stubHerdrVersion(t, "herdr 0.7.4\n", nil)
+	cases := []struct {
+		name       string
+		mode       herdrLaunchMode
+		persistent bool
+		command    string
+	}{
+		{name: "default pane", mode: herdrModePane, command: `command = "seshagy --ephemeral"`},
+		{name: "default popup", mode: herdrModePopup, command: `command = "seshagy --ephemeral"`},
+		{
+			name:       "persistent pane",
+			mode:       herdrModePane,
+			persistent: true,
+			command:    `command = "seshagy"`,
+		},
+		{
+			name:       "persistent popup",
+			mode:       herdrModePopup,
+			persistent: true,
+			command:    `command = "seshagy"`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := writeTempHerdrConfig(t, "")
+			t.Setenv("HERDR_CONFIG_PATH", path)
+			args := []string{"install", "herdr", "--mode", string(tc.mode)}
+			if tc.persistent {
+				args = append(args, "--persistent")
+			}
+
+			if err := runKeybind(args); err != nil {
+				t.Fatalf("install: %v", err)
+			}
+			got := readConfig(t, path)
+			if !strings.Contains(got, tc.command) {
+				t.Fatalf("binding missing %q\n%s", tc.command, got)
+			}
+			if tc.persistent && strings.Contains(got, "--ephemeral") {
+				t.Fatalf("persistent binding contains --ephemeral\n%s", got)
+			}
+		})
 	}
 }
 
@@ -542,6 +643,7 @@ func TestInstallHerdrKeybindPopupWritesPopupBinding(t *testing.T) {
 		herdrModePopup,
 		defaultHerdrPopupWidth,
 		defaultHerdrPopupHeight,
+		false,
 	); err != nil {
 		t.Fatalf("install: %v", err)
 	}
@@ -568,6 +670,7 @@ func TestInstallHerdrKeybindPopupFallsBackOnOldVersion(t *testing.T) {
 			herdrModePopup,
 			defaultHerdrPopupWidth,
 			defaultHerdrPopupHeight,
+			false,
 		)
 	})
 	if err != nil {
@@ -602,6 +705,7 @@ func TestInstallHerdrKeybindPopupHonoredWhenVersionUnknown(t *testing.T) {
 		herdrModePopup,
 		defaultHerdrPopupWidth,
 		defaultHerdrPopupHeight,
+		false,
 	); err != nil {
 		t.Fatalf("install: %v", err)
 	}
@@ -783,10 +887,11 @@ func TestInstallHerdrPopupMarkerLifecycle(t *testing.T) {
 		herdrModePane,
 		defaultHerdrPopupWidth,
 		defaultHerdrPopupHeight,
+		false,
 	); err != nil {
 		t.Fatal(err)
 	}
-	if err := installHerdrKeybind("f", herdrModePopup, "120", "60%"); err != nil {
+	if err := installHerdrKeybind("f", herdrModePopup, "120", "60%", true); err != nil {
 		t.Fatal(err)
 	}
 	got := readConfig(t, path)
@@ -796,13 +901,22 @@ func TestInstallHerdrPopupMarkerLifecycle(t *testing.T) {
 	if count := strings.Count(got, herdrBindMarkerEnd); count != 1 {
 		t.Fatalf("end marker count = %d, want 1\n%s", count, got)
 	}
-	for _, want := range []string{`key = "prefix+f"`, `type = "popup"`, `width = "120"`, `height = "60%"`} {
+	for _, want := range []string{
+		`key = "prefix+f"`,
+		`type = "popup"`,
+		`width = "120"`,
+		`height = "60%"`,
+		`command = "seshagy"`,
+	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("final popup binding missing %q\n%s", want, got)
 		}
 	}
 	if strings.Contains(got, `key = "prefix+s"`) || strings.Contains(got, `type = "pane"`) {
 		t.Fatalf("reinstall left old pane binding\n%s", got)
+	}
+	if strings.Contains(got, "--ephemeral") {
+		t.Fatalf("persistent reinstall contains --ephemeral\n%s", got)
 	}
 
 	if err := uninstallHerdrKeybind(); err != nil {

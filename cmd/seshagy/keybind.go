@@ -15,8 +15,7 @@ import (
 const defaultTmuxKey = "s"
 
 // tmuxLaunchMode picks the pane primitive that hosts seshagy. All four give
-// seshagy a real controlling TTY (unlike run-shell) and rely on the built-in
-// --ephemeral flag to dismiss when the user switches focus.
+// seshagy a real controlling TTY (unlike run-shell).
 type tmuxLaunchMode string
 
 const (
@@ -45,26 +44,30 @@ func parseTmuxLaunchMode(s string) (tmuxLaunchMode, error) {
 
 // tmuxBindLine is the binding for the chosen launch mode. Wrapped in a marker
 // block so reinstall/uninstall can find and replace it idempotently. Each mode
-// runs seshagy --ephemeral inside a primitive that provides a real TTY (the
-// flag then dismisses the pane when focus leaves).
+// runs seshagy inside a primitive that provides a real TTY. By default,
+// --ephemeral dismisses the pane when focus leaves.
 const (
 	tmuxBindMarkerBegin = "# >>> seshagy keybind >>>"
 	tmuxBindMarkerEnd   = "# <<< seshagy keybind <<<"
 )
 
-func tmuxBindLine(key string, mode tmuxLaunchMode) string {
+func tmuxBindLine(key string, mode tmuxLaunchMode, persistent bool) string {
 	// seshagy is found on PATH because new-window/split-window/
 	// display-popup inherit the tmux server's PATH (unlike run-shell, which
 	// uses a minimal PATH and was the source of the original launch failure).
 	cmd := "'seshagy --ephemeral'"
+	if persistent {
+		cmd = "'seshagy'"
+	}
 	switch mode {
 	case tmuxModePopup:
 		return fmt.Sprintf("bind-key %s display-popup -E -w 80%% -h 80%% %s", key, cmd)
 	case tmuxModeWindow:
 		return fmt.Sprintf("bind-key %s new-window -c '#{pane_current_path}' %s", key, cmd)
 	case tmuxModeZoomed:
-		// Split + zoom so seshagy fills the window; unzoom is automatic when the
-		// pane exits on focus-loss (--ephemeral).
+		// Split + zoom so seshagy fills the window. With --ephemeral, unzoom is
+		// automatic when the pane exits on focus-loss; persistent installs stay
+		// zoomed until the user explicitly quits seshagy.
 		return fmt.Sprintf("bind-key %s split-window -Z -c '#{pane_current_path}' %s", key, cmd)
 	case tmuxModePane:
 		return fmt.Sprintf("bind-key %s split-window -c '#{pane_current_path}' %s", key, cmd)
@@ -113,12 +116,20 @@ func parseHerdrLaunchMode(s string) (herdrLaunchMode, error) {
 }
 
 // herdrBindBlock returns the TOML [[keys.command]] block (with markers) that
-// wires prefix+<key> to launch seshagy with its built-in focus-loss dismissal.
-// "pane" (default) opens a temporary pane that closes on command exit; "popup"
-// (herdr 0.7.4+) opens a session-modal floating terminal whose dimensions
-// default to 80% of the terminal. The --ephemeral flag extends both to also
-// dismiss on focus-loss.
-func herdrBindBlock(key string, mode herdrLaunchMode, width, height string) string {
+// wires prefix+<key> to launch seshagy. "pane" (default) opens a temporary pane
+// that closes on command exit; "popup" (herdr 0.7.4+) opens a session-modal
+// floating terminal whose dimensions default to 80% of the terminal. Unless
+// persistent is set, --ephemeral also dismisses either mode on focus-loss.
+func herdrBindBlock(
+	key string,
+	mode herdrLaunchMode,
+	width, height string,
+	persistent bool,
+) string {
+	command := "seshagy --ephemeral"
+	if persistent {
+		command = "seshagy"
+	}
 	var body string
 	switch mode {
 	case herdrModePopup:
@@ -127,14 +138,14 @@ func herdrBindBlock(key string, mode herdrLaunchMode, width, height string) stri
   type = "popup"
   width = "%s"
   height = "%s"
-  command = "seshagy --ephemeral"
-  description = "seshagy session manager"`, key, width, height)
+  command = "%s"
+  description = "seshagy session manager"`, key, width, height, command)
 	default:
 		body = fmt.Sprintf(`[[keys.command]]
   key = "prefix+%s"
   type = "pane"
-  command = "seshagy --ephemeral"
-  description = "seshagy session manager"`, key)
+  command = "%s"
+  description = "seshagy session manager"`, key, command)
 	}
 	return fmt.Sprintf("%s\n%s\n%s", herdrBindMarkerBegin, body, herdrBindMarkerEnd)
 }
@@ -269,7 +280,12 @@ func resolveHerdrPopupMode(mode herdrLaunchMode) herdrLaunchMode {
 	return mode
 }
 
-func installHerdrKeybind(key string, mode herdrLaunchMode, width, height string) error {
+func installHerdrKeybind(
+	key string,
+	mode herdrLaunchMode,
+	width, height string,
+	persistent bool,
+) error {
 	mode = resolveHerdrPopupMode(mode)
 	path, err := herdrConfigPath()
 	if err != nil {
@@ -280,7 +296,7 @@ func installHerdrKeybind(key string, mode herdrLaunchMode, width, height string)
 	}
 	existing, _ := os.ReadFile(path)
 	content := string(existing)
-	block := herdrBindBlock(key, mode, width, height)
+	block := herdrBindBlock(key, mode, width, height, persistent)
 
 	if idx := strings.Index(content, herdrBindMarkerBegin); idx >= 0 {
 		end := strings.Index(content[idx:], herdrBindMarkerEnd)
@@ -392,7 +408,7 @@ func runKeybind(args []string) error {
 		return errors.New(
 			joinUsage(
 				"keybind",
-				"install <name> [--key <key>] [--mode <mode>] [--width <size>] [--height <size>] | uninstall <name>",
+				"install <name> [--key <key>] [--mode <mode>] [--width <size>] [--height <size>] [--persistent] | uninstall <name>",
 				"(tmux modes: popup|window|pane|pane-zoomed; herdr modes: pane|popup; size flags: herdr popup only)",
 			),
 		)
@@ -406,7 +422,7 @@ func runKeybind(args []string) error {
 					"keybind",
 					"install",
 					"<name>",
-					"[--key <key>] [--mode <mode>] [--width <size>] [--height <size>]",
+					"[--key <key>] [--mode <mode>] [--width <size>] [--height <size>] [--persistent]",
 					"(tmux: popup|window|pane|pane-zoomed; herdr: pane|popup; size flags: herdr popup only)",
 				),
 			)
@@ -418,6 +434,7 @@ func runKeybind(args []string) error {
 		height := defaultHerdrPopupHeight
 		widthSet := false
 		heightSet := false
+		persistent := false
 		for i := 1; i < len(rest); i++ {
 			switch rest[i] {
 			case "--key":
@@ -446,6 +463,8 @@ func runKeybind(args []string) error {
 				height = rest[i+1]
 				heightSet = true
 				i++
+			case "--persistent":
+				persistent = true
 			}
 		}
 		switch name {
@@ -455,7 +474,7 @@ func runKeybind(args []string) error {
 				return err
 			}
 			warnIgnoredPopupDimensions(name, modeStr, widthSet, heightSet)
-			return installTmuxKeybind(key, mode)
+			return installTmuxKeybind(key, mode, persistent)
 		case "herdr":
 			mode, err := parseHerdrLaunchMode(modeStr)
 			if err != nil {
@@ -468,6 +487,7 @@ func runKeybind(args []string) error {
 					mode,
 					defaultHerdrPopupWidth,
 					defaultHerdrPopupHeight,
+					persistent,
 				)
 			}
 			if err := validateHerdrPopupDimension("--width", width); err != nil {
@@ -476,7 +496,7 @@ func runKeybind(args []string) error {
 			if err := validateHerdrPopupDimension("--height", height); err != nil {
 				return err
 			}
-			return installHerdrKeybind(key, mode, width, height)
+			return installHerdrKeybind(key, mode, width, height, persistent)
 		default:
 			return fmt.Errorf(
 				"unknown keybind target: %q (only \"tmux\" and \"herdr\" are supported)",
@@ -527,7 +547,7 @@ func warnIgnoredPopupDimensions(target, mode string, widthSet, heightSet bool) {
 	)
 }
 
-func installTmuxKeybind(key string, mode tmuxLaunchMode) error {
+func installTmuxKeybind(key string, mode tmuxLaunchMode, persistent bool) error {
 	path, err := tmuxConfigPath()
 	if err != nil {
 		return fmt.Errorf("locate tmux config: %w", err)
@@ -553,11 +573,12 @@ func installTmuxKeybind(key string, mode tmuxLaunchMode) error {
 		block := tmuxBindMarkerBegin + "\n" + tmuxBindLine(
 			key,
 			mode,
+			persistent,
 		) + "\n" + tmuxBindMarkerEnd + "\n"
 		content = content[:lineStart] + block + content[lineEnd:]
 	} else {
 		block := "\n" + tmuxBindMarkerBegin + "\n" + tmuxBindLine(
-			key, mode,
+			key, mode, persistent,
 		) + "\n" + tmuxBindMarkerEnd + "\n"
 		if !strings.HasSuffix(content, "\n") && content != "" {
 			content += "\n"
