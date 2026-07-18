@@ -337,6 +337,7 @@ func TestParseAgentsPreservesStaleLifecycleBlocked(t *testing.T) {
 // without satisfying one of these, this test fails — forcing a conscious
 // decision.
 func TestEveryDiscoveredAgentHasIntegrationOrManifestOrIsAllowlisted(t *testing.T) {
+	isolateManifestCache(t)
 	// Agents that are discovered but rely on herdr hot-update for manifests.
 	// They have no bundled offline fallback and no hook integration.
 	hotUpdateOnly := map[string]bool{

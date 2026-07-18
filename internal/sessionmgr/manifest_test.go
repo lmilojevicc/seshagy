@@ -6,6 +6,7 @@ import (
 )
 
 func TestBundledManifestsCompile(t *testing.T) {
+	isolateManifestCache(t)
 	for _, name := range []string{"opencode", "cursor", "antigravity", "agy", "grok", "codex", "claude", "droid"} {
 		m, ok := manifestForAgent(name)
 		if !ok {
@@ -19,6 +20,7 @@ func TestBundledManifestsCompile(t *testing.T) {
 }
 
 func TestDetectManifestNoMatchIsIdle(t *testing.T) {
+	isolateManifestCache(t)
 	result := detectManifest("agy", manifestDetectionInput{
 		screen: "some random text\nwith no matching patterns",
 	})
@@ -31,6 +33,7 @@ func TestDetectManifestNoMatchIsIdle(t *testing.T) {
 }
 
 func TestDetectManifestBlockedStrict(t *testing.T) {
+	isolateManifestCache(t)
 	tests := []struct {
 		name   string
 		agent  string
@@ -73,6 +76,7 @@ func TestDetectManifestBlockedStrict(t *testing.T) {
 }
 
 func TestDetectManifestBlockedStrictRejectsNonMatching(t *testing.T) {
+	isolateManifestCache(t)
 	// A screen that doesn't match any permission pattern must NOT be blocked.
 	result := detectManifest("agy", manifestDetectionInput{
 		screen: "Generating response...\nSome output here",
@@ -83,6 +87,7 @@ func TestDetectManifestBlockedStrictRejectsNonMatching(t *testing.T) {
 }
 
 func TestDetectManifestWorking(t *testing.T) {
+	isolateManifestCache(t)
 	// antigravity spinner: braille chars + word ending in -ing
 	spinner := "⠋ Generating response\n"
 	result := detectManifest("agy", manifestDetectionInput{screen: spinner})
@@ -95,6 +100,7 @@ func TestDetectManifestWorking(t *testing.T) {
 }
 
 func TestDetectManifestWorkingOpencodeInterrupt(t *testing.T) {
+	isolateManifestCache(t)
 	screen := "esc to interrupt\n"
 	result := detectManifest("opencode", manifestDetectionInput{screen: screen})
 	if !result.Matched {

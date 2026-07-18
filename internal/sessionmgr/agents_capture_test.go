@@ -30,6 +30,7 @@ func TestHasFreshHookState(t *testing.T) {
 // authority agent (pi/opencode) with fresh hook state does NOT get captured
 // (hooks own the state; manifest suppressed).
 func TestApplyManifestFallbackSkipsLifecycleFreshHook(t *testing.T) {
+	isolateManifestCache(t)
 	ctx := context.Background()
 
 	var captureCalls int
@@ -66,6 +67,7 @@ func TestApplyManifestFallbackSkipsLifecycleFreshHook(t *testing.T) {
 // captured and overwritten when the screen matches a different state (the
 // ESC/approval-lag fix).
 func TestApplyManifestFallbackRunsForPartialHookAgentEvenWhenFresh(t *testing.T) {
+	isolateManifestCache(t)
 	ctx := context.Background()
 	freshPane := "%5"
 
@@ -112,6 +114,7 @@ func TestApplyManifestFallbackRunsForPartialHookAgentEvenWhenFresh(t *testing.T)
 // screen manifest has NO matching rule for a non-lifecycle agent, the fresh hook
 // state is preserved (not clobbered to idle).
 func TestApplyManifestFallbackNoMatchPreservesFreshHookState(t *testing.T) {
+	isolateManifestCache(t)
 	ctx := context.Background()
 	fake := NewStrictFakeTmux(t, nil).AllowPaneOptions()
 	fake.HandleOutput(func(args []string) bool {
@@ -140,6 +143,7 @@ func TestApplyManifestFallbackNoMatchPreservesFreshHookState(t *testing.T) {
 // TestApplyManifestFallbackRunsForLifecycleAgentWhenStale verifies that a
 // lifecycle-authority agent (pi) with STALE hook state falls back to manifest.
 func TestApplyManifestFallbackRunsForLifecycleAgentWhenStale(t *testing.T) {
+	isolateManifestCache(t)
 	ctx := context.Background()
 	var captured bool
 	fake := NewStrictFakeTmux(t, nil).AllowPaneOptions()
@@ -224,6 +228,7 @@ func TestParseOSCSequences(t *testing.T) {
 // indicator) is classified working via the osc_title_working rule — proving
 // OSC regions are now populated (previously always empty → dead rule).
 func TestApplyManifestFallbackCodexOSCTitleWorking(t *testing.T) {
+	isolateManifestCache(t)
 	ctx := context.Background()
 	fake := NewStrictFakeTmux(t, nil).AllowPaneOptions()
 	fake.HandleOutput(func(args []string) bool {
@@ -253,6 +258,7 @@ func TestApplyManifestFallbackCodexOSCTitleWorking(t *testing.T) {
 // containing BOTH a prompt-box ❯ line AND permission text must stay blocked
 // (NOT be overwritten to idle by the demoted live_prompt_box rule).
 func TestApplyManifestFallbackClaudeBlockedSurvivesIdleRule(t *testing.T) {
+	isolateManifestCache(t)
 	ctx := context.Background()
 	fake := NewStrictFakeTmux(t, nil).AllowPaneOptions()
 	fake.HandleOutput(func(args []string) bool {
@@ -285,6 +291,7 @@ func TestApplyManifestFallbackClaudeBlockedSurvivesIdleRule(t *testing.T) {
 }
 
 func TestApplyManifestFallbackSuppressesRecentlyReleased(t *testing.T) {
+	isolateManifestCache(t)
 	captureCalled := false
 	base := NewFakeTmux()
 	// Released 1 second ago — within the 10s suppression window.
@@ -318,6 +325,7 @@ func TestApplyManifestFallbackSuppressesRecentlyReleased(t *testing.T) {
 }
 
 func TestApplyManifestFallbackRunsAfterReleaseWindow(t *testing.T) {
+	isolateManifestCache(t)
 	base := NewFakeTmux()
 	// Released 30 seconds ago — past the 10s suppression window.
 	base.Set(
