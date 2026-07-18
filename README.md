@@ -147,11 +147,17 @@ seshagy integration install pi
 seshagy integration uninstall claude
 
 # Manual multiplexer wiring
-# herdr:
+# herdr modes: pane (default) | popup (herdr 0.7.4+)
 seshagy keybind install herdr --key f
+seshagy keybind install herdr --mode popup --width 80% --height 80%
 # tmux:
 seshagy keybind install tmux --mode popup
 ```
+
+Herdr popup `--width` and `--height` accept either terminal cell counts (for
+example, `120`) or percentages (for example, `80%`) and both default to `80%`.
+After installation, you can also edit `width`/`height` in the `[[keys.command]]`
+binding in `~/.config/herdr/config.toml`.
 
 ### Multiplexer Vocabulary
 

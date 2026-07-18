@@ -21,7 +21,9 @@ func (herdrBackend) Terms() Terms      { return HerdrTerms() }
 func (herdrBackend) InMultiplexer() bool { return os.Getenv("HERDR_ENV") == "1" }
 
 func (herdrBackend) InMultiplexerPopup(context.Context) (bool, error) {
-	return false, nil // no popup equivalent in v1
+	return false, nil // herdr 0.7.4+ added a popup keybind launch type, but
+	// seshagy cannot detect at runtime whether its own pane is a popup, so it
+	// reports false.
 }
 
 func (herdrBackend) CurrentSession(ctx context.Context) (string, error) {

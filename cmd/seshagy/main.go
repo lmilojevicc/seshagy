@@ -418,9 +418,12 @@ Usage:
                                   bind prefix+<key> (default: s) to launch
                                   seshagy as an ephemeral tmux window/popup
                                   (default mode: popup)
-  seshagy keybind install herdr [--key <key>]
+  seshagy keybind install herdr [--key <key>] [--mode pane|popup]
+                                  [--width <cells|percent>] [--height <cells|percent>]
                                   bind prefix+<key> (default: s) to launch
-                                  seshagy as an ephemeral herdr pane
+                                  seshagy as an ephemeral herdr pane/popup
+                                  (default: pane; popup needs herdr 0.7.4+;
+                                  popup size defaults to 80% × 80%)
   seshagy keybind uninstall tmux
                                   remove the seshagy tmux keybinding
   seshagy keybind uninstall herdr
