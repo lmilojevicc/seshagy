@@ -770,18 +770,35 @@ func TestVersionBefore(t *testing.T) {
 
 func TestResolveHerdrPopupModePrereleases(t *testing.T) {
 	cases := []struct {
-		version string
-		want    herdrLaunchMode
+		version         string
+		want            herdrLaunchMode
+		fallbackWarning bool
 	}{
-		{"0.7.4-rc1", herdrModePane},
-		{"0.7.5-rc1", herdrModePopup},
+		{"0.7.4-rc1", herdrModePane, true},
+		{"0.7.5-rc1", herdrModePopup, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.version, func(t *testing.T) {
 			stubHerdrVersion(t, "herdr "+tc.version+"\n", nil)
-			got := resolveHerdrPopupMode(herdrModePopup)
+			var got herdrLaunchMode
+			warning, err := captureOutput(t, &os.Stderr, func() error {
+				got = resolveHerdrPopupMode(herdrModePopup)
+				return nil
+			})
+			if err != nil {
+				t.Fatalf("capture popup resolution warning: %v", err)
+			}
 			if got != tc.want {
 				t.Fatalf("resolve popup for herdr %s = %s, want %s", tc.version, got, tc.want)
+			}
+			if tc.fallbackWarning {
+				for _, want := range []string{tc.version, ">= 0.7.4", "falling back to pane"} {
+					if !strings.Contains(warning, want) {
+						t.Fatalf("fallback warning %q missing %q", warning, want)
+					}
+				}
+			} else if warning != "" {
+				t.Fatalf("herdr %s emitted unexpected fallback warning: %q", tc.version, warning)
 			}
 		})
 	}
@@ -823,6 +840,9 @@ func TestRunKeybindPopupDimensionsRejectInvalidValues(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.flag+"="+tc.value, func(t *testing.T) {
+			path := writeTempHerdrConfig(t, "")
+			t.Setenv("HERDR_CONFIG_PATH", path)
+
 			err := runKeybind([]string{"install", "herdr", "--mode", "popup", tc.flag, tc.value})
 			if err == nil {
 				t.Fatalf("expected invalid %s %q to fail", tc.flag, tc.value)
@@ -923,12 +943,8 @@ func TestInstallHerdrPopupMarkerLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	got = readConfig(t, path)
-	if strings.Contains(got, herdrBindMarkerBegin) || strings.Contains(got, herdrBindMarkerEnd) ||
-		strings.Contains(got, `type = "popup"`) {
-		t.Fatalf("popup block remains after uninstall\n%s", got)
-	}
-	if !strings.Contains(got, "# unrelated config") {
-		t.Fatalf("uninstall removed unrelated config\n%s", got)
+	if strings.TrimSpace(got) != strings.TrimSpace(existing) {
+		t.Fatalf("config after uninstall differs from original\ngot:\n%s\nwant:\n%s", got, existing)
 	}
 }
 
