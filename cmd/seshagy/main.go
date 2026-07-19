@@ -414,13 +414,18 @@ Usage:
   seshagy config path [--json]    print config file path
   seshagy config show [--json]    print effective config
   seshagy config init [--force] [--json]
-  seshagy keybind install tmux [--key <key>] [--mode popup|window|pane|pane-zoomed]
+  seshagy keybind install tmux [--key <key>] [--mode popup|window|pane|pane-zoomed] [--persistent]
                                   bind prefix+<key> (default: s) to launch
-                                  seshagy as an ephemeral tmux window/popup
-                                  (default mode: popup)
-  seshagy keybind install herdr [--key <key>]
+                                  seshagy as a tmux window/popup
+                                  (default: popup with focus-loss auto-dismiss;
+                                  --persistent stays open until explicitly quit)
+  seshagy keybind install herdr [--key <key>] [--mode pane|popup] [--persistent]
+                                  [--width <cells|percent>] [--height <cells|percent>]
                                   bind prefix+<key> (default: s) to launch
-                                  seshagy as an ephemeral herdr pane
+                                  seshagy as a herdr pane/popup
+                                  (default: pane with focus-loss auto-dismiss;
+                                  --persistent stays open until explicitly quit;
+                                  popup needs herdr 0.7.4+ and defaults to 80% × 80%)
   seshagy keybind uninstall tmux
                                   remove the seshagy tmux keybinding
   seshagy keybind uninstall herdr

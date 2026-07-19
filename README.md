@@ -147,11 +147,24 @@ seshagy integration install pi
 seshagy integration uninstall claude
 
 # Manual multiplexer wiring
-# herdr:
+# herdr modes: pane (default) | popup (herdr 0.7.4+)
 seshagy keybind install herdr --key f
+seshagy keybind install herdr --mode popup --width 80% --height 80%
+seshagy keybind install herdr --mode popup --persistent
 # tmux:
 seshagy keybind install tmux --mode popup
+seshagy keybind install tmux --mode pane-zoomed --persistent
 ```
+
+By default, installed keybinds launch `seshagy --ephemeral` and auto-dismiss on
+focus loss. Pass `--persistent` when installing either a tmux or herdr keybind
+to launch `seshagy` without focus-loss auto-dismiss; it stays open until you
+explicitly quit with `q`.
+
+Herdr popup `--width` and `--height` accept either terminal cell counts (for
+example, `120`) or percentages (for example, `80%`) and both default to `80%`.
+After installation, you can also edit `width`/`height` in the `[[keys.command]]`
+binding in `~/.config/herdr/config.toml`.
 
 ### Multiplexer Vocabulary
 
