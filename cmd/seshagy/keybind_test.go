@@ -983,3 +983,45 @@ func TestRunKeybindRoutesModePerBackend(t *testing.T) {
 		t.Fatal("tmux --mode frobnicate should error")
 	}
 }
+
+// TestKeybindUsageBlock asserts the long keybind usage error renders as a
+// readable multi-line "synopsis + legend" block (issue #48), keeping the
+// "usage:" prefix that encodeJSONError keys off for code:"usage".
+func TestKeybindUsageBlock(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		// substring expected on a synopsis line.
+		synopsis string
+	}{
+		{"no subcommand", []string{}, "install <name> [options]"},
+		{"install no name", []string{"install"}, "install <name> [options]"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := runKeybind(tc.args)
+			if err == nil {
+				t.Fatalf("runKeybind(%v) expected usage error, got nil", tc.args)
+			}
+			msg := err.Error()
+			// "usage:" prefix must be intact (JSON code detection relies on it).
+			if !strings.HasPrefix(msg, "usage:") {
+				t.Fatalf("usage must start with %q, got %q", "usage:", msg)
+			}
+			// Must be multi-line.
+			if strings.Count(msg, "\n") < 2 {
+				t.Fatalf("usage must be multi-line, got %q", msg)
+			}
+			// Synopsis + legend sections present.
+			if !strings.Contains(msg, tc.synopsis) {
+				t.Fatalf("usage missing synopsis %q:\n%s", tc.synopsis, msg)
+			}
+			if !strings.Contains(msg, "options") || !strings.Contains(msg, "modes") {
+				t.Fatalf("usage missing options/modes legend:\n%s", msg)
+			}
+			if !strings.Contains(msg, "uninstall <name>") && tc.name == "no subcommand" {
+				t.Fatalf("no-subcommand usage must list uninstall form:\n%s", msg)
+			}
+		})
+	}
+}

@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/lmilojevicc/seshagy/internal/cli"
 )
 
 //go:embed assets/seshagy-agent-state.ts
@@ -478,9 +480,8 @@ func warnCodexFeatureFlag() {
 	configPath := filepath.Join(codexBase(), "config.toml")
 	data, err := os.ReadFile(configPath)
 	if err != nil {
-		fmt.Fprintf(
-			os.Stderr,
-			"seshagy: codex hooks require [features] hooks = true in %s; enable it and restart codex\n",
+		cli.Warnf(
+			"codex hooks require [features] hooks = true in %s; enable it and restart codex",
 			configPath,
 		)
 		return
@@ -488,8 +489,8 @@ func warnCodexFeatureFlag() {
 	if strings.Contains(string(data), "hooks = true") {
 		return
 	}
-	fmt.Fprintf(os.Stderr,
-		"seshagy: codex hooks require [features] hooks = true in %s; enable it and restart codex\n",
+	cli.Warnf(
+		"codex hooks require [features] hooks = true in %s; enable it and restart codex",
 		configPath)
 }
 

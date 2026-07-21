@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/lmilojevicc/seshagy/internal/cli"
 )
 
 const jsonSchemaVersion = 1
@@ -43,7 +45,7 @@ func encodeJSON(value any) error {
 	if err != nil {
 		return err
 	}
-	fmt.Println(string(data))
+	cli.Println(string(data))
 	return nil
 }
 
@@ -107,4 +109,30 @@ func modeUsage(flag string) string {
 
 func joinUsage(parts ...string) string {
 	return "usage: seshagy " + strings.Join(parts, " ")
+}
+
+// keybindOptions is the shared options legend for `seshagy keybind`.
+const keybindOptions = "--key <key>  --mode <mode>  --width <size>  --height <size>  --persistent"
+
+// keybindModes is the shared mode legend for `seshagy keybind`.
+const keybindModes = "tmux: popup|window|pane|pane-zoomed · herdr: pane|popup (size flags: herdr popup only)"
+
+// keybindUsage renders a readable multi-line usage block for `seshagy keybind`,
+// used when the subcommand or its <name> argument is missing. It keeps the
+// "usage:" prefix at the very start so encodeJSONError still classifies it as
+// code:"usage". forms is one or more synopsis forms (e.g. "install <name>",
+// "uninstall <name>"); the first is printed under "usage:", the rest indented
+// to align under the leading "seshagy".
+func keybindUsage(forms ...string) string {
+	var b strings.Builder
+	for i, f := range forms {
+		if i == 0 {
+			b.WriteString("usage: seshagy keybind " + f + "\n")
+		} else {
+			b.WriteString("       seshagy keybind " + f + "\n")
+		}
+	}
+	b.WriteString("\n  options  " + keybindOptions + "\n")
+	b.WriteString("  modes    " + keybindModes)
+	return b.String()
 }

@@ -8,6 +8,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/lmilojevicc/seshagy/internal/cli"
 	appconfig "github.com/lmilojevicc/seshagy/internal/config"
 	"github.com/lmilojevicc/seshagy/internal/integrations"
 	"github.com/lmilojevicc/seshagy/internal/sessionmgr"
@@ -21,12 +22,12 @@ func main() {
 	if err := run(args); err != nil {
 		if hasJSONFlag(args) {
 			if encErr := encodeJSONError(err); encErr != nil {
-				fmt.Fprintf(os.Stderr, "seshagy: %v\n", encErr)
+				cli.Errorf("%v", encErr)
 			}
 			os.Exit(1)
 			return
 		}
-		fmt.Fprintf(os.Stderr, "seshagy: %v\n", err)
+		cli.Errorf("%v", err)
 		os.Exit(1)
 	}
 }
@@ -54,7 +55,7 @@ func run(args []string) error {
 	defer cancel()
 	switch args[0] {
 	case "--help", "-h", "help":
-		fmt.Print(helpText())
+		cli.Help(os.Stdout, helpText())
 		return nil
 	case "--version", "version":
 		rest, jsonOutput := stripJSONFlag(args[1:])
@@ -64,7 +65,7 @@ func run(args []string) error {
 		if jsonOutput {
 			return encodeSuccess(map[string]string{"version": version})
 		}
-		fmt.Println(version)
+		cli.Println(version)
 		return nil
 	case "config":
 		return runConfig(args[1:])
@@ -149,6 +150,7 @@ func resolvePaneTarget(
 
 func runReportAgent(ctx context.Context, mux sessionmgr.Multiplexer, args []string) error {
 	fs := flag.NewFlagSet("--report-agent", flag.ContinueOnError)
+	fs.SetOutput(cli.Default.StderrWriter())
 	pane := fs.String("pane", "", "target pane id (e.g. %5)")
 	cwd := fs.String("cwd", "", "target by working directory (alternative to --pane)")
 	agent := fs.String("agent", "", "agent name")
@@ -187,17 +189,18 @@ func runReportAgent(ctx context.Context, mux sessionmgr.Multiplexer, args []stri
 		return encodeSuccess(map[string]any{"applied": applied})
 	}
 	if applied {
-		fmt.Printf("reported %s %s on %s\n", *agent, *state, resolved)
+		cli.Successf("reported %s %s on %s", *agent, *state, resolved)
 	} else if mux.Kind() == sessionmgr.BackendHerdr {
-		fmt.Printf("report ignored (herdr owns agent state)\n")
+		cli.Info("report ignored (herdr owns agent state)")
 	} else {
-		fmt.Printf("stale report ignored (seq %d)\n", *seq)
+		cli.Warnf("stale report ignored (seq %d)", *seq)
 	}
 	return nil
 }
 
 func runReleaseAgent(ctx context.Context, mux sessionmgr.Multiplexer, args []string) error {
 	fs := flag.NewFlagSet("--release-agent", flag.ContinueOnError)
+	fs.SetOutput(cli.Default.StderrWriter())
 	pane := fs.String("pane", "", "target pane id (e.g. %5)")
 	cwd := fs.String("cwd", "", "target by working directory (alternative to --pane)")
 	source := fs.String("source", "", "report source")
@@ -228,11 +231,11 @@ func runReleaseAgent(ctx context.Context, mux sessionmgr.Multiplexer, args []str
 		return encodeSuccess(map[string]any{"applied": applied})
 	}
 	if applied {
-		fmt.Printf("released agent state on %s\n", resolved)
+		cli.Successf("released agent state on %s", resolved)
 	} else if mux.Kind() == sessionmgr.BackendHerdr {
-		fmt.Printf("release ignored (herdr owns agent state)\n")
+		cli.Info("release ignored (herdr owns agent state)")
 	} else {
-		fmt.Printf("stale release ignored (seq %d)\n", *seq)
+		cli.Warnf("stale release ignored (seq %d)", *seq)
 	}
 	return nil
 }
@@ -250,7 +253,7 @@ func runIntegration(_ context.Context, args []string) error {
 		if err != nil {
 			return err
 		}
-		fmt.Printf("installed %s integration to %s\n", args[1], path)
+		cli.Successf("installed %s integration to %s", args[1], path)
 		return nil
 	case "uninstall":
 		if len(args) < 2 {
@@ -260,7 +263,7 @@ func runIntegration(_ context.Context, args []string) error {
 		if err != nil {
 			return err
 		}
-		fmt.Printf("uninstalled %s integration from %s\n", args[1], path)
+		cli.Successf("uninstalled %s integration from %s", args[1], path)
 		return nil
 	default:
 		return fmt.Errorf("unknown integration command: %q", args[0])
@@ -273,7 +276,7 @@ func runConfig(args []string) error {
 		if jsonOutput {
 			return encodeSuccess(map[string]string{"path": appconfig.Path()})
 		}
-		fmt.Println(appconfig.Path())
+		cli.Println(appconfig.Path())
 		return nil
 	}
 	switch rest[0] {
@@ -284,7 +287,7 @@ func runConfig(args []string) error {
 		if jsonOutput {
 			return encodeSuccess(map[string]string{"path": appconfig.Path()})
 		}
-		fmt.Println(appconfig.Path())
+		cli.Println(appconfig.Path())
 		return nil
 	case "show":
 		if len(rest) != 1 {
@@ -303,7 +306,7 @@ func runConfig(args []string) error {
 		if err != nil {
 			return err
 		}
-		fmt.Println(string(data))
+		cli.Println(string(data))
 		return nil
 	case "init":
 		force := len(rest) == 2 && rest[1] == "--force"
@@ -327,7 +330,7 @@ func runConfig(args []string) error {
 				"forced":  force,
 			})
 		}
-		fmt.Println(appconfig.Path())
+		cli.Println(appconfig.Path())
 		return nil
 	default:
 		return errors.New(joinUsage("config", "path|show|init", "[--force]", "[--json]"))
@@ -349,7 +352,7 @@ func printItems(
 		return err
 	}
 	if result.Warning != "" {
-		fmt.Fprintf(os.Stderr, "seshagy: warning: %s\n", result.Warning)
+		cli.Warnf("%s", result.Warning)
 	}
 	if jsonOutput {
 		return encodeSuccess(
@@ -358,7 +361,7 @@ func printItems(
 	}
 	icons := cfg.IconSet()
 	for _, item := range result.Items {
-		fmt.Println(sessionmgr.FormatLineWithIcons(item, icons))
+		cli.Println(sessionmgr.FormatLineWithIcons(item, icons))
 	}
 	return nil
 }

@@ -9,6 +9,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/lmilojevicc/seshagy/internal/cli"
 )
 
 // defaultTmuxKey is the default key seshagy binds in tmux.
@@ -272,9 +274,8 @@ func resolveHerdrPopupMode(mode herdrLaunchMode) herdrLaunchMode {
 		if v.prerelease != "" {
 			version += "-" + v.prerelease
 		}
-		fmt.Fprintf(os.Stderr,
-			"warning: herdr %s does not support popup mode (requires >= 0.7.4); "+
-				"falling back to pane\n", version)
+		cli.Warnf("herdr %s does not support popup mode (requires >= 0.7.4); "+
+			"falling back to pane", version)
 		return herdrModePane
 	}
 	return mode
@@ -322,11 +323,11 @@ func installHerdrKeybind(
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		return fmt.Errorf("write herdr config: %w", err)
 	}
-	fmt.Printf("installed herdr keybind: prefix+%s → seshagy (in %s)\n", key, path)
-	fmt.Println("reload with: herdr server reload-config")
+	cli.Successf("installed herdr keybind: prefix+%s → seshagy (in %s)", key, path)
+	cli.Info("reload with: herdr server reload-config")
 	if mode == herdrModePopup {
-		fmt.Printf(
-			"Popup size set to %s × %s. Adjust anytime by editing the binding in ~/.config/herdr/config.toml (width/height accept cells or %%).\n",
+		cli.Infof(
+			"Popup size set to %s × %s. Adjust anytime by editing the binding in ~/.config/herdr/config.toml (width/height accept cells or %%).",
 			width,
 			height,
 		)
@@ -342,7 +343,7 @@ func uninstallHerdrKeybind() error {
 	existing, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			fmt.Println("no herdr config found; nothing to uninstall")
+			cli.Info("no herdr config found; nothing to uninstall")
 			return nil
 		}
 		return fmt.Errorf("read herdr config: %w", err)
@@ -350,7 +351,7 @@ func uninstallHerdrKeybind() error {
 	content := string(existing)
 	idx := strings.Index(content, herdrBindMarkerBegin)
 	if idx < 0 {
-		fmt.Println("no seshagy keybind found; nothing to uninstall")
+		cli.Info("no seshagy keybind found; nothing to uninstall")
 		return nil
 	}
 	end := strings.Index(content[idx:], herdrBindMarkerEnd)
@@ -369,8 +370,8 @@ func uninstallHerdrKeybind() error {
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		return fmt.Errorf("write herdr config: %w", err)
 	}
-	fmt.Printf("uninstalled seshagy keybind from %s\n", path)
-	fmt.Println("reload with: herdr server reload-config")
+	cli.Successf("uninstalled seshagy keybind from %s", path)
+	cli.Info("reload with: herdr server reload-config")
 	return nil
 }
 
@@ -406,11 +407,7 @@ func tmuxConfigPath() (string, error) {
 func runKeybind(args []string) error {
 	if len(args) == 0 {
 		return errors.New(
-			joinUsage(
-				"keybind",
-				"install <name> [--key <key>] [--mode <mode>] [--width <size>] [--height <size>] [--persistent] | uninstall <name>",
-				"(tmux modes: popup|window|pane|pane-zoomed; herdr modes: pane|popup; size flags: herdr popup only)",
-			),
+			keybindUsage("install <name> [options]", "uninstall <name>"),
 		)
 	}
 	switch args[0] {
@@ -418,13 +415,7 @@ func runKeybind(args []string) error {
 		rest := args[1:]
 		if len(rest) == 0 || rest[0] == "" {
 			return errors.New(
-				joinUsage(
-					"keybind",
-					"install",
-					"<name>",
-					"[--key <key>] [--mode <mode>] [--width <size>] [--height <size>] [--persistent]",
-					"(tmux: popup|window|pane|pane-zoomed; herdr: pane|popup; size flags: herdr popup only)",
-				),
+				keybindUsage("install <name> [options]"),
 			)
 		}
 		name := rest[0]
@@ -538,9 +529,8 @@ func warnIgnoredPopupDimensions(target, mode string, widthSet, heightSet bool) {
 	if mode == "" {
 		mode = "default mode"
 	}
-	fmt.Fprintf(
-		os.Stderr,
-		"warning: %s only apply to herdr popup mode; ignoring for %s %s\n",
+	cli.Warnf(
+		"%s only apply to herdr popup mode; ignoring for %s %s",
 		strings.Join(flags, "/"),
 		target,
 		mode,
@@ -589,8 +579,8 @@ func installTmuxKeybind(key string, mode tmuxLaunchMode, persistent bool) error 
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		return fmt.Errorf("write tmux config: %w", err)
 	}
-	fmt.Printf("installed tmux keybind: prefix + %s → seshagy (in %s)\n", key, path)
-	fmt.Printf("reload with: tmux source-file %s\n", path)
+	cli.Successf("installed tmux keybind: prefix + %s → seshagy (in %s)", key, path)
+	cli.Infof("reload with: tmux source-file %s", path)
 	return nil
 }
 
@@ -602,7 +592,7 @@ func uninstallTmuxKeybind() error {
 	existing, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			fmt.Println("no tmux config found; nothing to uninstall")
+			cli.Info("no tmux config found; nothing to uninstall")
 			return nil
 		}
 		return fmt.Errorf("read tmux config: %w", err)
@@ -610,7 +600,7 @@ func uninstallTmuxKeybind() error {
 	content := string(existing)
 	idx := strings.Index(content, tmuxBindMarkerBegin)
 	if idx < 0 {
-		fmt.Println("no seshagy keybind found; nothing to uninstall")
+		cli.Info("no seshagy keybind found; nothing to uninstall")
 		return nil
 	}
 	end := strings.Index(content[idx:], tmuxBindMarkerEnd)
@@ -629,7 +619,7 @@ func uninstallTmuxKeybind() error {
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		return fmt.Errorf("write tmux config: %w", err)
 	}
-	fmt.Printf("uninstalled seshagy keybind from %s\n", path)
-	fmt.Printf("reload with: tmux source-file %s\n", path)
+	cli.Successf("uninstalled seshagy keybind from %s", path)
+	cli.Infof("reload with: tmux source-file %s", path)
 	return nil
 }

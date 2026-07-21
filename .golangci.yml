@@ -11,6 +11,7 @@ linters:
     - dupword
     - durationcheck
     - errorlint
+    - forbidigo
     - gocritic
     - misspell
     - nilerr
@@ -21,6 +22,12 @@ linters:
     - wastedassign
     - whitespace
   settings:
+    forbidigo:
+      forbid:
+        - pattern: '^fmt\.Print(f|ln)?$'
+          msg: "emit user-facing stdout via internal/cli (cli.Success/Info/Print); machine output via cli.Print/Println/Printf"
+        - pattern: '^fmt\.Fprint(f|ln)?$'
+          msg: "write stdout/stderr via internal/cli, not fmt.Fprint*(os.Stdout/os.Stderr); formatting into a non-CLI buffer (strings.Builder) needs //nolint:forbidigo"
     gocritic:
       disabled-checks:
         - ifElseChain
