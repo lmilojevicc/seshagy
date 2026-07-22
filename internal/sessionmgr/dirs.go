@@ -107,6 +107,7 @@ func ListDirectoryPreview(ctx context.Context, dir string, maxLines int) (string
 		if info != nil && !entry.IsDir() {
 			size = fmt.Sprintf("%8d", info.Size())
 		}
+		//nolint:forbidigo // formats into a strings.Builder buffer, not a stream
 		fmt.Fprintf(&b, "%s %-40s %s\n", kind, entry.Name(), size)
 	}
 	return limitLines(b.String(), maxLines), nil

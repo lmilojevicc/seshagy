@@ -172,7 +172,7 @@ func TestPrintItemsWritesWarningToStderr(t *testing.T) {
 	if err != nil {
 		t.Fatalf("printItems() error = %v", err)
 	}
-	if !strings.Contains(stderr, "seshagy: warning:") || !strings.Contains(stderr, "fd command") {
+	if !strings.Contains(stderr, "warning:") || !strings.Contains(stderr, "fd command") {
 		t.Fatalf("stderr = %q, want fd warning", stderr)
 	}
 }

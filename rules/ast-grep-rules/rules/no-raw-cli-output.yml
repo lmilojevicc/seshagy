@@ -1,0 +1,20 @@
+id: no-raw-cli-output
+language: Go
+severity: warning
+message: "Use internal/cli for CLI output instead of fmt.Print*/Fprint* (see AGENTS.md)."
+note: |
+  All user-facing stdout/stderr output goes through internal/cli so severity
+  styling, NO_COLOR/non-TTY handling, and stream routing stay consistent.
+    - Errors/warnings -> cli.Error / cli.Warn  (stderr, cargo-style colored prefix word)
+    - Success -> cli.Success (stdout, bold-green leading verb)
+    - Info/hints -> cli.Info (stdout, dimmed)
+    - Machine output (--json / --version / paths / TOML / list lines) -> cli.Print / cli.Println / cli.Printf (verbatim)
+  Formatting into a non-CLI buffer (strings.Builder) with fmt.Fprintf is fine.
+  The golangci-lint forbidigo rule is the CI gate for fmt.Print* and fmt.Fprint*;
+  this rule adds structural, dev-time diagnostics for literal os.Stdout/os.Stderr calls.
+rule:
+  any:
+    - kind: call_expression
+      regex: '^fmt\.(Print|Printf|Println)\('
+    - kind: call_expression
+      regex: '^fmt\.(Fprint|Fprintf|Fprintln)\(os\.(Stdout|Stderr)\b'

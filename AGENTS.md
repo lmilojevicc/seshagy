@@ -44,6 +44,10 @@ Go 1.26 is in `go.mod`. Runtime behavior expects a multiplexer (`tmux` or `herdr
 
 Use `mise run fmt` before submitting changes. Formatting uses `golangci-lint fmt`, `gofumpt`, `goimports`, `gci`, `golines`, and `yamlfmt`. Prefer small package-local helpers and existing domain terms: sessions, panes, agents, integrations, sources, and launch state. Export identifiers only when used across packages or by command-facing code.
 
+## CLI output
+
+All user-facing stdout/stderr output from `cmd/seshagy` and `internal/` MUST go through the `internal/cli` package (`cli.Error`/`Warn`/`Note` → stderr, `cli.Success`/`Info` → stdout, `cli.Print`/`Println`/`Printf` for verbatim machine-readable output like `--json`/`--version`/config paths/TOML/`--get-*` list lines). It applies cargo/rustc-style severity coloring (only the prefix word is colored) and auto-disables color for non-TTY streams or `NO_COLOR` (`CLICOLOR_FORCE` overrides). Never call `fmt.Print`/`Printf`/`Println` (implicit stdout) or `fmt.Fprint*` to `os.Stdout`/`os.Stderr` directly — the golangci-lint `forbidigo` rule in `.golangci.yml` fails CI on both, and the pi-lens ast-grep rule `no-raw-cli-output` flags them in the editor too. Formatting into a non-CLI buffer (`strings.Builder`) with `fmt.Fprintf` is allowed but needs a `//nolint:forbidigo` comment (it writes to a buffer, not a stream); `fmt.Sprintf` needs no exemption. The TUI (`internal/tui`) is out of scope — it renders via its own Bubble Tea/lipgloss theme.
+
 ## Testing Guidelines
 
 Add focused table-driven tests near the package being changed. Use names like `TestParseAgentsSkipsNonAgentsAndFormatsLocation` that describe behavior. `mise run verify` is the default check; use `mise run test:focused ./internal/sessionmgr ParseAgents` for narrow loops. Some `sessionmgr` tests create temporary tmux sessions and skip when `tmux` is unavailable.
