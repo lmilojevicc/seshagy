@@ -56,14 +56,15 @@ type Model struct {
 
 	prefixArmed bool
 
-	query         string
-	searchInput   textinput.Model
-	renameInput   textinput.Model
-	renameFrom    string
-	renameTarget  string
-	renameKind    sessionmgr.Kind
-	renameSession string
-	inputMode     inputMode
+	query           string
+	searchInput     textinput.Model
+	renameInput     textinput.Model
+	renameFrom      string
+	renameTarget    string
+	renameKind      sessionmgr.Kind
+	renameSession   string
+	renameAgentType string
+	inputMode       inputMode
 
 	preview       string
 	previewKey    string

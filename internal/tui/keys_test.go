@@ -44,46 +44,68 @@ func TestHandleKeySearchModeEscEnter(t *testing.T) {
 }
 
 func TestHandleKeyRenameModeCancelAndSubmit(t *testing.T) {
+	assertRenameReset := func(t *testing.T, got Model) {
+		t.Helper()
+		if got.inputMode != modeNormal || got.renameFrom != "" || got.renameTarget != "" ||
+			got.renameKind != "" || got.renameSession != "" || got.renameAgentType != "" {
+			t.Fatalf(
+				"rename state = mode:%v from:%q target:%q kind:%q session:%q agentType:%q",
+				got.inputMode,
+				got.renameFrom,
+				got.renameTarget,
+				got.renameKind,
+				got.renameSession,
+				got.renameAgentType,
+			)
+		}
+	}
+
 	m := newTestModel(t)
 	m.inputMode = modeRename
-	m.renameFrom = "demo"
-	m.renameInput.SetValue("demo")
+	m.renameFrom = "frontend"
+	m.renameTarget = "pane-1"
+	m.renameKind = sessionmgr.KindAgent
+	m.renameSession = "workspace-1"
+	m.renameAgentType = "pi"
+	m.renameInput.SetValue("frontend")
 	m.renameInput.Focus()
 
 	model, cmd := m.handleKey(keyMsg("esc"))
 	got := model.(Model)
-	if got.inputMode != modeNormal || len(got.notifications) != 0 || cmd != nil {
+	if len(got.notifications) != 0 || cmd != nil {
+		t.Fatalf("rename esc = notifications:%#v cmd:%v", got.notifications, cmd)
+	}
+	assertRenameReset(t, got)
+
+	// Starting a session rename after cancel must not inherit agent metadata.
+	got.items = []sessionmgr.Item{{Kind: sessionmgr.KindSession, Name: "demo"}}
+	model, _ = got.startRename()
+	m = model.(Model)
+	if m.renameSession != "" || m.renameAgentType != "" {
 		t.Fatalf(
-			"rename esc = mode:%v notifications:%#v cmd:%v",
-			got.inputMode,
-			got.notifications,
-			cmd,
+			"session rename inherited agent metadata: session:%q agentType:%q",
+			m.renameSession,
+			m.renameAgentType,
 		)
 	}
 
-	m.inputMode = modeRename
-	m.renameFrom = "demo"
 	m.renameInput.SetValue("   ")
 	model, cmd = m.handleKey(enterMsg())
 	got = model.(Model)
-	if got.inputMode != modeNormal || len(got.notifications) != 0 || cmd != nil {
-		t.Fatalf(
-			"empty rename = mode:%v notifications:%#v cmd:%v",
-			got.inputMode,
-			got.notifications,
-			cmd,
-		)
+	if len(got.notifications) != 0 || cmd != nil {
+		t.Fatalf("empty rename = notifications:%#v cmd:%v", got.notifications, cmd)
 	}
+	assertRenameReset(t, got)
 
-	m.inputMode = modeRename
-	m.renameFrom = "demo"
-	m.renameKind = sessionmgr.KindSession
+	model, _ = got.startRename()
+	m = model.(Model)
 	m.renameInput.SetValue("renamed")
 	model, cmd = m.handleKey(enterMsg())
 	got = model.(Model)
-	if got.inputMode != modeNormal || got.renameFrom != "" || cmd == nil {
-		t.Fatalf("rename submit = mode:%v renameFrom:%q cmd:%v", got.inputMode, got.renameFrom, cmd)
+	if cmd == nil {
+		t.Fatal("rename submit returned nil command")
 	}
+	assertRenameReset(t, got)
 }
 
 func TestDeleteSelectedSession(t *testing.T) {
@@ -554,7 +576,8 @@ func TestRenameAgentEmptyInputClearsLabel(t *testing.T) {
 	m := newTestModel(t)
 	m.inputMode = modeRename
 	m.renameKind = sessionmgr.KindAgent
-	m.renameFrom = "pi"
+	m.renameFrom = "frontend-bot"
+	m.renameAgentType = "pi"
 	m.renameSession = "seshagy"
 	m.renameInput.SetValue("")
 	m.renameInput.Focus()
@@ -687,6 +710,117 @@ func TestRenameAgentFlowThreadsPaneID(t *testing.T) {
 	}
 	if gotDisplay != "frontend" {
 		t.Fatalf("RenameAgent display = %q, want frontend", gotDisplay)
+	}
+}
+
+func TestRenameAgentAliasToCanonicalType(t *testing.T) {
+	var calls int
+	var gotItem sessionmgr.Item
+	var gotDisplay string
+	fake := &captureRenameMux{
+		onRename: func(it sessionmgr.Item, display string) error {
+			calls++
+			gotItem = it
+			gotDisplay = display
+			return nil
+		},
+	}
+
+	m := newTestModel(t)
+	m.mux = fake
+	m.items = []sessionmgr.Item{{
+		Kind:             sessionmgr.KindAgent,
+		AgentName:        "pi",
+		AgentDisplayName: "frontend",
+		PaneID:           "w1:p3",
+		Session:          "w1",
+	}}
+
+	model, _ := m.startRename()
+	got := model.(Model)
+	got.renameInput.SetValue("pi")
+	_, cmd := got.handleKey(enterMsg())
+	if cmd == nil {
+		t.Fatal("expected rename command from enter")
+	}
+	_ = cmd()
+
+	if calls != 1 {
+		t.Fatalf("RenameAgent calls = %d, want 1", calls)
+	}
+	if gotItem.PaneID != "w1:p3" || gotItem.AgentName != "pi" {
+		t.Fatalf("RenameAgent item = %+v, want pane w1:p3 and agent pi", gotItem)
+	}
+	if gotDisplay != "pi" {
+		t.Fatalf("RenameAgent display = %q, want pi", gotDisplay)
+	}
+}
+
+func TestRenameAgentUnchangedDisplayedAliasIsNoOp(t *testing.T) {
+	calls := 0
+	fake := &captureRenameMux{
+		onRename: func(sessionmgr.Item, string) error {
+			calls++
+			return nil
+		},
+	}
+
+	m := newTestModel(t)
+	m.mux = fake
+	m.items = []sessionmgr.Item{{
+		Kind:             sessionmgr.KindAgent,
+		AgentName:        "pi",
+		AgentDisplayName: "frontend",
+		PaneID:           "w1:p3",
+		Session:          "w1",
+	}}
+
+	model, _ := m.startRename()
+	got := model.(Model)
+	_, cmd := got.handleKey(enterMsg())
+	if cmd != nil {
+		_ = cmd()
+		t.Fatal("unchanged displayed alias returned a command")
+	}
+	if calls != 0 {
+		t.Fatalf("RenameAgent calls = %d, want 0", calls)
+	}
+}
+
+func TestRenameHerdrAgentWithoutCanonicalType(t *testing.T) {
+	var calls int
+	var gotItem sessionmgr.Item
+	fake := &captureRenameMux{
+		onRename: func(it sessionmgr.Item, _ string) error {
+			calls++
+			gotItem = it
+			return nil
+		},
+	}
+
+	m := newTestModel(t)
+	m.mux = fake
+	m.items = []sessionmgr.Item{{
+		Kind:             sessionmgr.KindAgent,
+		AgentDisplayName: "unclassified",
+		PaneID:           "opaque-pane-id",
+		Session:          "workspace-id",
+	}}
+
+	model, _ := m.startRename()
+	got := model.(Model)
+	got.renameInput.SetValue("frontend")
+	_, cmd := got.handleKey(enterMsg())
+	if cmd == nil {
+		t.Fatal("expected herdr rename command without a canonical agent type")
+	}
+	_ = cmd()
+
+	if calls != 1 {
+		t.Fatalf("RenameAgent calls = %d, want 1", calls)
+	}
+	if gotItem.PaneID != "opaque-pane-id" || gotItem.AgentName != "" {
+		t.Fatalf("RenameAgent item = %+v, want pane target and empty agent type", gotItem)
 	}
 }
 
