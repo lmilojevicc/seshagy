@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"log/slog"
 	"sort"
 	"strings"
 	"time"
@@ -42,8 +43,9 @@ type Model struct {
 	styles styles
 	config appconfig.Config
 
-	mux   sessionmgr.Multiplexer
-	terms sessionmgr.Terms
+	mux    sessionmgr.Multiplexer
+	terms  sessionmgr.Terms
+	logger *slog.Logger
 
 	width  int
 	height int
@@ -165,18 +167,62 @@ type setupMsg struct {
 	err    error
 }
 
-// Option configures a Model at construction time.
-type Option func(*Model)
+type options struct {
+	config     *appconfig.Config
+	startupErr error
+	mux        sessionmgr.Multiplexer
+	logger     *slog.Logger
+	ephemeral  bool
+}
+
+// Option configures dependencies before a Model is constructed.
+type Option func(*options)
+
+func WithConfig(cfg appconfig.Config) Option {
+	return func(opts *options) { opts.config = &cfg }
+}
+
+func WithStartupError(err error) Option {
+	return func(opts *options) { opts.startupErr = err }
+}
+
+func WithMultiplexer(mux sessionmgr.Multiplexer) Option {
+	return func(opts *options) { opts.mux = mux }
+}
+
+func WithLogger(logger *slog.Logger) Option {
+	return func(opts *options) { opts.logger = logger }
+}
 
 // WithEphemeral enables the focus-loss dismissal poll so the dashboard exits
 // when its hosting pane/window/session loses focus (--ephemeral).
 func WithEphemeral(b bool) Option {
-	return func(m *Model) { m.ephemeral = b }
+	return func(opts *options) { opts.ephemeral = b }
 }
 
-func New(opts ...Option) Model {
-	cfg, cfgErr := appconfig.Load()
-	mux := sessionmgr.Detect()
+func New(optionFns ...Option) Model {
+	settings := options{}
+	for _, option := range optionFns {
+		option(&settings)
+	}
+	cfg, cfgErr := appconfig.Config{}, settings.startupErr
+	if settings.config != nil {
+		cfg = *settings.config
+	} else {
+		var err error
+		cfg, err = appconfig.Load()
+		if cfgErr == nil {
+			cfgErr = err
+		}
+	}
+	mux := settings.mux
+	if mux == nil {
+		mux = sessionmgr.Detect()
+	}
+	logger := settings.logger
+	if logger == nil {
+		logger = slog.New(slog.DiscardHandler)
+	}
 	search := textinput.New()
 	search.Placeholder = "filter sessions, directories"
 	search.Prompt = "/ "
@@ -194,6 +240,7 @@ func New(opts ...Option) Model {
 		config:          cfg,
 		mux:             mux,
 		terms:           mux.Terms(),
+		logger:          logger,
 		source:          cfg.DefaultSource(),
 		showPreview:     showPreview,
 		showHelp:        true,
@@ -206,14 +253,12 @@ func New(opts ...Option) Model {
 		setup:           setupPrompt{cursor: 1},
 		loading:         true,
 		spinnerActive:   true,
+		ephemeral:       settings.ephemeral,
 	}
 	m.refreshGen[m.source] = 1
 	m.inflightRefresh[m.source] = 1
 	if cfgErr != nil {
 		m.notify(cfgErr.Error(), sevError)
-	}
-	for _, opt := range opts {
-		opt(&m)
 	}
 	return m
 }

@@ -403,116 +403,126 @@ func tmuxConfigPath() (string, error) {
 	return filepath.Join(home, ".tmux.conf"), nil
 }
 
-// runKeybind dispatches `seshagy keybind <cmd>`.
-func runKeybind(args []string) error {
+type keybindCommand struct {
+	action     string
+	target     string
+	key        string
+	modeText   string
+	tmuxMode   tmuxLaunchMode
+	herdrMode  herdrLaunchMode
+	width      string
+	height     string
+	widthSet   bool
+	heightSet  bool
+	persistent bool
+}
+
+func parseKeybindCommand(args []string) (keybindCommand, error) {
 	if len(args) == 0 {
-		return errors.New(
+		return keybindCommand{}, errors.New(
 			keybindUsage("install <name> [options]", "uninstall <name>"),
 		)
 	}
-	switch args[0] {
-	case "install":
-		rest := args[1:]
-		if len(rest) == 0 || rest[0] == "" {
-			return errors.New(
-				keybindUsage("install <name> [options]"),
+	if args[0] == "uninstall" {
+		if len(args) < 2 || args[1] == "" {
+			return keybindCommand{}, errors.New(joinUsage("keybind", "uninstall", "<name>"))
+		}
+		if args[1] != "tmux" && args[1] != "herdr" {
+			return keybindCommand{}, fmt.Errorf(
+				"unknown keybind target: %q (only \"tmux\" and \"herdr\" are supported)",
+				args[1],
 			)
 		}
-		name := rest[0]
-		key := defaultTmuxKey
-		modeStr := ""
-		width := defaultHerdrPopupWidth
-		height := defaultHerdrPopupHeight
-		widthSet := false
-		heightSet := false
-		persistent := false
-		for i := 1; i < len(rest); i++ {
-			switch rest[i] {
+		return keybindCommand{action: "uninstall", target: args[1]}, nil
+	}
+	if args[0] != "install" {
+		return keybindCommand{}, fmt.Errorf("unknown keybind command: %q", args[0])
+	}
+	if len(args) < 2 || args[1] == "" {
+		return keybindCommand{}, errors.New(keybindUsage("install <name> [options]"))
+	}
+	cmd := keybindCommand{
+		action: "install", target: args[1], key: defaultTmuxKey,
+		width: defaultHerdrPopupWidth, height: defaultHerdrPopupHeight,
+	}
+	for i := 2; i < len(args); i++ {
+		switch args[i] {
+		case "--key", "--mode", "--width", "--height":
+			if i+1 >= len(args) {
+				return keybindCommand{}, fmt.Errorf("%s requires a value", args[i])
+			}
+			value := args[i+1]
+			switch args[i] {
 			case "--key":
-				if i+1 >= len(rest) {
-					return errors.New("--key requires a value")
-				}
-				key = rest[i+1]
-				i++
+				cmd.key = value
 			case "--mode":
-				if i+1 >= len(rest) {
-					return errors.New("--mode requires a value")
-				}
-				modeStr = rest[i+1]
-				i++
+				cmd.modeText = value
 			case "--width":
-				if i+1 >= len(rest) {
-					return errors.New("--width requires a value")
-				}
-				width = rest[i+1]
-				widthSet = true
-				i++
+				cmd.width, cmd.widthSet = value, true
 			case "--height":
-				if i+1 >= len(rest) {
-					return errors.New("--height requires a value")
-				}
-				height = rest[i+1]
-				heightSet = true
-				i++
-			case "--persistent":
-				persistent = true
+				cmd.height, cmd.heightSet = value, true
 			}
+			i++
+		case "--persistent":
+			cmd.persistent = true
 		}
-		switch name {
-		case "tmux":
-			mode, err := parseTmuxLaunchMode(modeStr)
-			if err != nil {
-				return err
+	}
+	var err error
+	switch cmd.target {
+	case "tmux":
+		cmd.tmuxMode, err = parseTmuxLaunchMode(cmd.modeText)
+	case "herdr":
+		cmd.herdrMode, err = parseHerdrLaunchMode(cmd.modeText)
+		if err == nil && cmd.herdrMode == herdrModePopup {
+			if err = validateHerdrPopupDimension("--width", cmd.width); err == nil {
+				err = validateHerdrPopupDimension("--height", cmd.height)
 			}
-			warnIgnoredPopupDimensions(name, modeStr, widthSet, heightSet)
-			return installTmuxKeybind(key, mode, persistent)
-		case "herdr":
-			mode, err := parseHerdrLaunchMode(modeStr)
-			if err != nil {
-				return err
-			}
-			if mode != herdrModePopup {
-				warnIgnoredPopupDimensions(name, string(mode), widthSet, heightSet)
-				return installHerdrKeybind(
-					key,
-					mode,
-					defaultHerdrPopupWidth,
-					defaultHerdrPopupHeight,
-					persistent,
-				)
-			}
-			if err := validateHerdrPopupDimension("--width", width); err != nil {
-				return err
-			}
-			if err := validateHerdrPopupDimension("--height", height); err != nil {
-				return err
-			}
-			return installHerdrKeybind(key, mode, width, height, persistent)
-		default:
-			return fmt.Errorf(
-				"unknown keybind target: %q (only \"tmux\" and \"herdr\" are supported)",
-				name,
-			)
-		}
-	case "uninstall":
-		rest := args[1:]
-		if len(rest) == 0 || rest[0] == "" {
-			return errors.New(joinUsage("keybind", "uninstall", "<name>"))
-		}
-		switch rest[0] {
-		case "tmux":
-			return uninstallTmuxKeybind()
-		case "herdr":
-			return uninstallHerdrKeybind()
-		default:
-			return fmt.Errorf(
-				"unknown keybind target: %q (only \"tmux\" and \"herdr\" are supported)",
-				rest[0],
-			)
 		}
 	default:
-		return fmt.Errorf("unknown keybind command: %q", args[0])
+		return keybindCommand{}, fmt.Errorf(
+			"unknown keybind target: %q (only \"tmux\" and \"herdr\" are supported)",
+			cmd.target,
+		)
 	}
+	return cmd, err
+}
+
+func executeKeybind(cmd keybindCommand) error {
+	if cmd.action == "uninstall" {
+		if cmd.target == "tmux" {
+			return uninstallTmuxKeybind()
+		}
+		return uninstallHerdrKeybind()
+	}
+	if cmd.target == "tmux" {
+		warnIgnoredPopupDimensions(cmd.target, cmd.modeText, cmd.widthSet, cmd.heightSet)
+		return installTmuxKeybind(cmd.key, cmd.tmuxMode, cmd.persistent)
+	}
+	if cmd.herdrMode != herdrModePopup {
+		warnIgnoredPopupDimensions(
+			cmd.target,
+			string(cmd.herdrMode),
+			cmd.widthSet,
+			cmd.heightSet,
+		)
+		return installHerdrKeybind(
+			cmd.key,
+			cmd.herdrMode,
+			defaultHerdrPopupWidth,
+			defaultHerdrPopupHeight,
+			cmd.persistent,
+		)
+	}
+	return installHerdrKeybind(cmd.key, cmd.herdrMode, cmd.width, cmd.height, cmd.persistent)
+}
+
+// runKeybind dispatches `seshagy keybind <cmd>`.
+func runKeybind(args []string) error {
+	cmd, err := parseKeybindCommand(args)
+	if err != nil {
+		return err
+	}
+	return executeKeybind(cmd)
 }
 
 func warnIgnoredPopupDimensions(target, mode string, widthSet, heightSet bool) {

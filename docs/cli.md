@@ -56,7 +56,29 @@ seshagy integration uninstall <name>
 seshagy config path
 seshagy config show
 seshagy config init [--force]
+seshagy diagnostics [--json]
 ```
+
+## Diagnostic logs and bug reports
+
+`seshagy diagnostics` reports the effective logging level, backend/runtime
+metadata, and concrete local log paths. Its `--json` form keeps expanded paths
+redacted (`path_redacted: true`) so the metadata is safer to attach to an
+issue. Neither form opens, truncates, locks, prunes, bundles, or uploads logs.
+
+To capture a reproduction:
+
+```sh
+SESHAGY_LOG_LEVEL=debug seshagy
+seshagy diagnostics
+```
+
+Reproduce the problem, exit cleanly, inspect the JSONL file named by
+`diagnostics`, and attach it only if comfortable. Then unset the environment
+variable (or set `[log].level = "off"`) and delete the file. Logs remain local
+and are not automatically redacted; debug records can contain opaque
+multiplexer pane/workspace identifiers. See [configuration.md](configuration.md)
+for file, cap, retention, and locking details.
 
 ## Install menu integrations
 

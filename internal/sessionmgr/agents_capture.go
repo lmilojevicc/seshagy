@@ -3,10 +3,12 @@ package sessionmgr
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
 	"github.com/lmilojevicc/seshagy/internal/integrations"
+	"github.com/lmilojevicc/seshagy/internal/logging"
 )
 
 // parseOSCSequences extracts the most-recent OSC window title and progress
@@ -133,26 +135,38 @@ func shouldRunManifest(item Item) bool {
 // screen can correct stale hook state (ESC/approval-lag fix). One capture per
 // pane per sweep (cache).
 func ApplyManifestFallback(ctx context.Context, items []Item) {
+	logger := logging.Default()
+	enabled := logger.Enabled(ctx, slog.LevelDebug)
+	started := time.Time{}
+	if enabled {
+		started = time.Now()
+	}
 	cache := make(manifestCaptureCache)
+	skipped, matched, changed, warnings := 0, 0, 0, 0
 	for i := range items {
 		item := items[i]
 		if item.AgentName == "" || item.Kind != KindAgent {
+			skipped++
 			continue
 		}
 		if !shouldRunManifest(item) {
+			skipped++
 			continue
 		}
 		if _, ok := manifestForAgent(item.AgentName); !ok {
+			skipped++
 			continue
 		}
 		// Suppress manifest for a short window after a release to prevent
 		// capture-pane from visually resurrecting a just-released pane whose
 		// screen may still match a working/blocked rule.
 		if isRecentlyReleased(ctx, item.PaneID) {
+			skipped++
 			continue
 		}
 		screen, err := captureAgentPaneCached(ctx, cache, item.PaneID, manifestCaptureLines)
 		if err != nil {
+			warnings++
 			continue
 		}
 		title, progress := parseOSCSequences(screen)
@@ -162,11 +176,52 @@ func ApplyManifestFallback(ctx context.Context, items []Item) {
 			oscProgress: progress,
 		})
 		if result.SkipStateUpdate {
+			skipped++
 			continue
 		}
 		if result.Matched {
+			matched++
+			previous := items[i].AgentState
 			items[i].AgentState = result.State
+			if previous != result.State {
+				changed++
+				if !enabled {
+					continue
+				}
+				logging.LogAttrs(
+					ctx,
+					logger,
+					slog.LevelDebug,
+					logging.EventManifestStateChange,
+					logging.ComponentManifest,
+					slog.String("pane_id", item.PaneID),
+					slog.String("agent_type", item.AgentName),
+					slog.String(
+						"previous_state",
+						string(previous),
+					),
+					slog.String("state", string(result.State)),
+				)
+			}
 		}
+	}
+	if enabled {
+		logging.LogAttrs(
+			ctx,
+			logger,
+			slog.LevelDebug,
+			logging.EventManifestSweep,
+			logging.ComponentManifest,
+			slog.Int("item_count", len(items)),
+			slog.Int("skipped_count", skipped),
+			slog.Int("matched_count", matched),
+			slog.Int("changed_count", changed),
+			slog.Int(
+				"warning_count",
+				warnings,
+			),
+			slog.Int64("duration_ms", time.Since(started).Milliseconds()),
+		)
 	}
 }
 

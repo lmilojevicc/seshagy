@@ -2,14 +2,18 @@
 package integrations
 
 import (
+	"context"
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/lmilojevicc/seshagy/internal/cli"
+	"github.com/lmilojevicc/seshagy/internal/logging"
 )
 
 //go:embed assets/seshagy-agent-state.ts
@@ -206,7 +210,9 @@ func LifecycleAuthorityFor(agentName string) bool {
 
 // Install writes the integration's hook/extension file to the agent's
 // configuration directory.
-func Install(name string) (string, error) {
+func Install(name string) (path string, err error) {
+	started := integrationLogStart()
+	defer func() { logIntegration(logging.EventIntegrationInstall, name, started, err) }()
 	integ, ok := integrations[name]
 	if !ok {
 		return "", fmt.Errorf("unknown integration: %s", name)
@@ -221,7 +227,7 @@ func Install(name string) (string, error) {
 		}
 		return path, nil
 	}
-	path, err := integ.InstallPath()
+	path, err = integ.InstallPath()
 	if err != nil {
 		return "", err
 	}
@@ -236,14 +242,16 @@ func Install(name string) (string, error) {
 
 // Uninstall removes seshagy-managed hook entries from an agent's hooks config
 // and deletes the installed shell script.
-func Uninstall(name string) (string, error) {
+func Uninstall(name string) (path string, err error) {
+	started := integrationLogStart()
+	defer func() { logIntegration(logging.EventIntegrationUninstall, name, started, err) }()
 	integ, ok := integrations[name]
 	if !ok {
 		return "", fmt.Errorf("unknown integration: %s", name)
 	}
 	if integ.ShellHook == nil {
 		// Asset-only integration (pi, opencode): remove the installed file.
-		path, err := integ.InstallPath()
+		path, err = integ.InstallPath()
 		if err != nil {
 			return "", err
 		}
@@ -263,6 +271,41 @@ func Uninstall(name string) (string, error) {
 		_ = os.Remove(scriptPath)
 	}
 	return configPath, nil
+}
+
+func integrationLogStart() time.Time {
+	ctx := context.Background()
+	logger := logging.Default()
+	if logger.Enabled(ctx, slog.LevelInfo) || logger.Enabled(ctx, slog.LevelError) {
+		return time.Now()
+	}
+	return time.Time{}
+}
+
+func logIntegration(event logging.Event, name string, started time.Time, err error) {
+	if started.IsZero() {
+		return
+	}
+	level, result := slog.LevelInfo, "success"
+	attrs := []slog.Attr{
+		slog.String("result", result),
+		slog.Int64("duration_ms", time.Since(started).Milliseconds()),
+	}
+	if _, ok := integrations[name]; ok {
+		attrs = append(attrs, slog.String("integration", name))
+	}
+	if err != nil {
+		level, result = slog.LevelError, "failed"
+		attrs[0] = slog.String("result", result)
+		attrs = append(attrs, slog.String("error_class", logging.ClassifyError(err)))
+	}
+	logging.LogAttrs(
+		context.Background(),
+		logging.Default(),
+		level,
+		event,
+		logging.ComponentIntegrations,
+		attrs...)
 }
 
 // installShellHook writes the shared script and merges the event hooks into the

@@ -2,10 +2,13 @@ package sessionmgr
 
 import (
 	"context"
+	"log/slog"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/lmilojevicc/seshagy/internal/logging"
 )
 
 // AgentReport carries a state update from a hook/extension to seshagy.
@@ -115,6 +118,7 @@ func ResolvePaneByCwd(ctx context.Context, cwd string) (string, error) {
 // state. Seq is written FIRST so a crash mid-write leaves the highest seq.
 func ReportAgent(ctx context.Context, opts AgentReport) (bool, error) {
 	applied := false
+	outcome := "stale"
 	err := withAgentPaneLock(opts.Pane, func() error {
 		existing, _ := showPaneOption(ctx, opts.Pane, "@seshagy_agent_seq")
 		existingSeq, parseErr := strconv.ParseInt(existing, 10, 64)
@@ -185,8 +189,22 @@ func ReportAgent(ctx context.Context, opts AgentReport) (bool, error) {
 			}
 		}
 		applied = true
+		outcome = "applied"
 		return nil
 	})
+	logger := logging.Default()
+	if err != nil && logger.Enabled(ctx, slog.LevelError) {
+		logging.LogAttrs(ctx, logger, slog.LevelError,
+			logging.EventAgentReportFailed, logging.ComponentAgents,
+			slog.String("backend", string(BackendTmux)), slog.String("result", "failed"),
+			slog.String("error_class", logging.ClassifyError(err)))
+	} else if err == nil && logger.Enabled(ctx, slog.LevelDebug) {
+		logging.LogAttrs(ctx, logger, slog.LevelDebug,
+			logging.EventAgentReport, logging.ComponentAgents,
+			slog.String("backend", string(BackendTmux)), slog.String("pane_id", opts.Pane),
+			slog.String("state", string(opts.State)), slog.Int64("seq", opts.Seq),
+			slog.String("result", outcome))
+	}
 	return applied, err
 }
 
@@ -204,6 +222,7 @@ func ReportAgent(ctx context.Context, opts AgentReport) (bool, error) {
 // seq is written LAST so a crash mid-release leaves the highest seq recorded.
 func ReleaseAgent(ctx context.Context, opts AgentRelease) (bool, error) {
 	applied := false
+	outcome := "stale"
 	err := withAgentPaneLock(opts.Pane, func() error {
 		existing, _ := showPaneOption(ctx, opts.Pane, "@seshagy_agent_seq")
 		existingSeq, parseErr := strconv.ParseInt(existing, 10, 64)
@@ -218,6 +237,7 @@ func ReleaseAgent(ctx context.Context, opts AgentRelease) (bool, error) {
 		// (never set) or matches the releaser, proceed as normal.
 		existingSource, _ := showPaneOption(ctx, opts.Pane, "@seshagy_agent_source")
 		if existingSource != "" && existingSource != opts.Source {
+			outcome = "cross_source"
 			return nil // cross-source / unidentified release — refuse to clear
 		}
 		// Tombstone: unset all state-bearing options except @seshagy_agent_seq.
@@ -251,8 +271,21 @@ func ReleaseAgent(ctx context.Context, opts AgentRelease) (bool, error) {
 			return err
 		}
 		applied = true
+		outcome = "applied"
 		return nil
 	})
+	logger := logging.Default()
+	if err != nil && logger.Enabled(ctx, slog.LevelError) {
+		logging.LogAttrs(ctx, logger, slog.LevelError,
+			logging.EventAgentReleaseFailed, logging.ComponentAgents,
+			slog.String("backend", string(BackendTmux)), slog.String("result", "failed"),
+			slog.String("error_class", logging.ClassifyError(err)))
+	} else if err == nil && logger.Enabled(ctx, slog.LevelDebug) {
+		logging.LogAttrs(ctx, logger, slog.LevelDebug,
+			logging.EventAgentRelease, logging.ComponentAgents,
+			slog.String("backend", string(BackendTmux)), slog.String("pane_id", opts.Pane),
+			slog.Int64("seq", opts.Seq), slog.String("result", outcome))
+	}
 	return applied, err
 }
 

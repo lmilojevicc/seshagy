@@ -1,10 +1,13 @@
 package tui
 
 import (
+	"context"
+	"log/slog"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/lmilojevicc/seshagy/internal/logging"
 	"github.com/lmilojevicc/seshagy/internal/sessionmgr"
 )
 
@@ -155,6 +158,15 @@ func (m Model) anyRefreshInflight() bool {
 
 func (m Model) handleRefreshMsg(msg refreshMsg) (Model, tea.Cmd) {
 	if m.inflightRefresh == nil || msg.gen != m.inflightRefresh[msg.source] {
+		ctx := context.Background()
+		if m.logger.Enabled(ctx, slog.LevelDebug) {
+			logging.LogAttrs(ctx, m.logger, slog.LevelDebug,
+				logging.EventTUIRefreshStale, logging.ComponentTUI,
+				slog.String("source", msg.source.Names().ConfigToken),
+				slog.Int64("generation", int64(msg.gen)),
+				slog.Int64("current_generation", int64(m.refreshGen[msg.source])),
+			)
+		}
 		return m, nil
 	}
 	m = m.finishRefresh(msg.source, msg.gen)

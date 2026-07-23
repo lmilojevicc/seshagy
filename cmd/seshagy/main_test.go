@@ -33,6 +33,8 @@ func cliTestEnv(t *testing.T) {
 	// the tmux backend regardless of the real environment.
 	t.Setenv("TMUX", "/tmp/fake-tmux-sock,12345,0")
 	t.Setenv("HERDR_ENV", "")
+	t.Setenv("SESHAGY_LOG_LEVEL", "")
+	t.Setenv("SESHAGY_LOG_FILE", "")
 }
 
 func manifestTestDirs(t *testing.T) {
@@ -77,6 +79,70 @@ func TestRunRoutingErrors(t *testing.T) {
 		if err := run(args); err == nil {
 			t.Fatalf("run(%v) expected error, got nil", args)
 		}
+	}
+}
+
+func TestMalformedAgentFlagsPreserveStderrUsageWithoutOpeningLog(t *testing.T) {
+	cliTestEnv(t)
+	t.Setenv("SESHAGY_LOG_LEVEL", "debug")
+
+	tests := []struct {
+		name         string
+		command      string
+		descriptions []string
+	}{
+		{
+			name:    "report",
+			command: "--report-agent",
+			descriptions: []string{
+				"agent name",
+				"target by working directory (alternative to --pane)",
+				"JSON output",
+				"optional status message",
+				"target pane id (e.g. %5)",
+				"monotonic sequence number",
+				"optional agent session id",
+				"report source",
+				"agent state",
+			},
+		},
+		{
+			name:    "release",
+			command: "--release-agent",
+			descriptions: []string{
+				"target by working directory (alternative to --pane)",
+				"JSON output",
+				"target pane id (e.g. %5)",
+				"monotonic sequence number",
+				"report source",
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			logPath := filepath.Join(t.TempDir(), tt.name+".jsonl")
+			t.Setenv("SESHAGY_LOG_FILE", logPath)
+			stderr, err := captureStderr(t, func() error {
+				return run([]string{tt.command, "--bogus"})
+			})
+			if err == nil {
+				t.Fatal("malformed flag unexpectedly succeeded")
+			}
+			for _, want := range append([]string{
+				"flag provided but not defined: -bogus",
+				"Usage of " + tt.command + ":",
+			}, tt.descriptions...) {
+				if !strings.Contains(stderr, want) {
+					t.Errorf("stderr missing %q:\n%s", want, stderr)
+				}
+			}
+			if count := strings.Count(stderr, "Usage of "+tt.command+":"); count != 1 {
+				t.Errorf("usage count = %d, want 1:\n%s", count, stderr)
+			}
+			if _, statErr := os.Stat(logPath); !os.IsNotExist(statErr) {
+				t.Fatalf("malformed flags touched log path: %v", statErr)
+			}
+		})
 	}
 }
 

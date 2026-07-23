@@ -953,3 +953,23 @@ func TestWorkspaceIconDefaults(t *testing.T) {
 		t.Fatalf("overridden workspace = %+v", overridden.Workspace)
 	}
 }
+
+func TestLogConfigDefaultsAndPreservesInvalidLevel(t *testing.T) {
+	cfg := Default()
+	if cfg.Log.Level != "off" || cfg.Log.File != "" {
+		t.Fatalf("log defaults = %#v", cfg.Log)
+	}
+	cfg.Log = LogConfig{Level: "  VERBOSE  ", File: "  ./debug.jsonl  "}
+	cfg.Normalize()
+	if cfg.Log.Level != "verbose" || cfg.Log.File != "./debug.jsonl" {
+		t.Fatalf("normalized log config = %#v", cfg.Log)
+	}
+	data, err := Marshal(Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "[log]") ||
+		!strings.Contains(string(data), `level = "off"`) {
+		t.Fatalf("marshaled config missing log section:\n%s", data)
+	}
+}

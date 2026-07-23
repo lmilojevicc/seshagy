@@ -40,6 +40,13 @@ type Config struct {
 	Setup       SetupConfig       `toml:"setup"       json:"setup"`
 	Agents      AgentsConfig      `toml:"agents"      json:"agents"`
 	TUI         TUIConfig         `toml:"tui"         json:"tui"`
+	Log         LogConfig         `toml:"log"         json:"log"`
+}
+
+// LogConfig controls opt-in, file-only structured diagnostics.
+type LogConfig struct {
+	Level string `toml:"level" json:"level"`
+	File  string `toml:"file"  json:"file"`
 }
 
 // TUIConfig holds TUI-only rendering toggles.
@@ -191,6 +198,7 @@ func Default() Config {
 			FD:         IconConfig{Icon: sessionmgr.IconFD + " ", Label: "F", Color: "11"},
 		},
 		TypeFirst: TypeFirstConfig{Enabled: false, Prefix: DefaultPrefix},
+		Log:       LogConfig{Level: "off"},
 		TUI: TUIConfig{
 			InputStyle:    InputStylePopup,
 			DimBackground: ptrBool(true),
@@ -280,6 +288,11 @@ func (c *Config) Normalize() {
 	if strings.TrimSpace(c.TypeFirst.Prefix) == "" {
 		c.TypeFirst.Prefix = DefaultPrefix
 	}
+	c.Log.Level = strings.ToLower(strings.TrimSpace(c.Log.Level))
+	if c.Log.Level == "" {
+		c.Log.Level = "off"
+	}
+	c.Log.File = strings.TrimSpace(c.Log.File)
 	c.TUI.InputStyle = normalizeInputStyle(c.TUI.InputStyle)
 	if c.TUI.DimBackground == nil {
 		c.TUI.DimBackground = ptrBool(true)

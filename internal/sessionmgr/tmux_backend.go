@@ -40,7 +40,10 @@ func (tmuxBackend) CreateSessionFromDir(ctx context.Context, dir string) (Item, 
 }
 
 func (tmuxBackend) KillSession(ctx context.Context, target string) error {
-	return KillSession(ctx, target)
+	started := sessionKillStart(ctx)
+	err := KillSession(ctx, target)
+	logSessionKill(ctx, BackendTmux, started, err)
+	return err
 }
 
 func (tmuxBackend) RenameSession(ctx context.Context, target, newName string) error {
