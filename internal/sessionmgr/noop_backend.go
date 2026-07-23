@@ -28,7 +28,12 @@ func (noopBackend) HasSession(context.Context, string) (bool, error) { return fa
 func (noopBackend) CreateSessionFromDir(context.Context, string) (Item, bool, error) {
 	return Item{}, false, errNoBackend
 }
-func (noopBackend) KillSession(context.Context, string) error           { return errNoBackend }
+
+func (noopBackend) KillSession(ctx context.Context, _ string) error {
+	started := sessionKillStart(ctx)
+	logSessionKill(ctx, BackendNone, started, errNoBackend)
+	return errNoBackend
+}
 func (noopBackend) RenameSession(context.Context, string, string) error { return errNoBackend }
 func (noopBackend) CaptureSession(context.Context, string, int) (string, error) {
 	return "", nil

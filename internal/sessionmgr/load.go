@@ -2,7 +2,11 @@ package sessionmgr
 
 import (
 	"context"
+	"log/slog"
 	"strings"
+	"time"
+
+	"github.com/lmilojevicc/seshagy/internal/logging"
 )
 
 type SourceMode int
@@ -46,7 +50,44 @@ func LoadWithBackend(
 	mux Multiplexer,
 	mode SourceMode,
 	opts LoadOptions,
-) (LoadResult, error) {
+) (result LoadResult, err error) {
+	logger := logging.Default()
+	logOutcome := logger.Enabled(ctx, slog.LevelDebug) || logger.Enabled(ctx, slog.LevelError)
+	started := time.Time{}
+	warningCount := 0
+	if logOutcome {
+		started = time.Now()
+		defer func() {
+			attrs := []slog.Attr{
+				slog.String("backend", string(mux.Kind())),
+				slog.String("source", mode.Names().ConfigToken),
+				slog.Int64("duration_ms", time.Since(started).Milliseconds()),
+			}
+			if err != nil {
+				attrs = append(attrs, slog.String("error_class", logging.ClassifyError(err)))
+				logging.LogAttrs(
+					ctx,
+					logger,
+					slog.LevelError,
+					logging.EventSourceLoadFailed,
+					logging.ComponentSession,
+					attrs...)
+				return
+			}
+			attrs = append(
+				attrs,
+				slog.Int("item_count", len(result.Items)),
+				slog.Int("warning_count", warningCount),
+			)
+			logging.LogAttrs(
+				ctx,
+				logger,
+				slog.LevelDebug,
+				logging.EventSourceLoad,
+				logging.ComponentSession,
+				attrs...)
+		}()
+	}
 	runManifest := mux.Kind() == BackendTmux && opts.ManifestFallback
 	switch mode {
 	case ModeSessions:
@@ -86,10 +127,14 @@ func LoadWithBackend(
 		zoxide, err := ListZoxideDirs(ctx)
 		if err != nil {
 			warnings = append(warnings, err.Error())
+			warningCount++
+			logSourceDegraded(ctx, logger, mux.Kind(), "zoxide", err)
 		}
 		fd, err := ListFDirsWithCommand(ctx, opts.FDCommand)
 		if err != nil {
 			warnings = append(warnings, err.Error())
+			warningCount++
+			logSourceDegraded(ctx, logger, mux.Kind(), "fd", err)
 		}
 		out = append(out, sessions...)
 		out = append(out, zoxide...)
@@ -97,6 +142,8 @@ func LoadWithBackend(
 		agents, err := mux.ListAgents(ctx, "")
 		if err != nil {
 			warnings = append(warnings, err.Error())
+			warningCount++
+			logSourceDegraded(ctx, logger, mux.Kind(), "agents", err)
 		}
 		if err == nil && runManifest {
 			ApplyManifestFallback(ctx, agents)
@@ -104,4 +151,30 @@ func LoadWithBackend(
 		out = append(out, agents...)
 		return LoadResult{Items: out, Warning: strings.Join(warnings, "; ")}, nil
 	}
+}
+
+func logSourceDegraded(
+	ctx context.Context,
+	logger *slog.Logger,
+	backend BackendKind,
+	source string,
+	err error,
+) {
+	if !logger.Enabled(ctx, slog.LevelWarn) {
+		return
+	}
+	logging.LogAttrs(
+		ctx,
+		logger,
+		slog.LevelWarn,
+		logging.EventSourceLoadDegraded,
+		logging.ComponentSession,
+		slog.String("backend", string(backend)),
+		slog.String("source", "all"),
+		slog.String(
+			"failed_source",
+			source,
+		),
+		slog.String("error_class", logging.ClassifyError(err)),
+	)
 }

@@ -100,20 +100,18 @@ body:
         Strongly encouraged! Please paste the output of:
 
         ```
-        seshagy version
-        seshagy config show
-        seshagy integration status
+        seshagy diagnostics --json
         tmux -V
         ```
 
-        Note: `seshagy config show` may include theme/icons settings — feel free to redact any sensitive paths.
+        `diagnostics --json` redacts log paths, but still includes version, OS/architecture, backend, and file-status metadata. Review it before sharing.
       render: shell
 
   - type: textarea
     id: logs
     attributes:
       label: Relevant logs / error output
-      description: stderr output, panic traces, or anything else that looks relevant.
+      description: If you enabled debug logging, inspect the JSONL first and attach it only if comfortable; logs are local and never uploaded automatically. Otherwise include stderr output, panic traces, or anything else relevant.
       render: shell
 
   - type: checkboxes

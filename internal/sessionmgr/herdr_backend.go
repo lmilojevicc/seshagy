@@ -3,10 +3,14 @@ package sessionmgr
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
+
+	"github.com/lmilojevicc/seshagy/internal/logging"
 )
 
 // herdrBackend implements Multiplexer against the herdr CLI. seshagy runs
@@ -133,17 +137,50 @@ func (b herdrBackend) CreateSessionFromDir(
 }
 
 func (herdrBackend) KillSession(ctx context.Context, target string) error {
+	started := sessionKillStart(ctx)
 	if err := herdrRun(ctx, "workspace", "close", target); err != nil {
-		return fmt.Errorf("herdr workspace close: %w", err)
+		wrapped := fmt.Errorf("herdr workspace close: %w", err)
+		logSessionKill(ctx, BackendHerdr, started, wrapped)
+		return wrapped
 	}
 	// herdr workspace close refocuses the client onto another workspace.
 	// Restore focus to the workspace seshagy runs in so the user isn't moved —
 	// unless they just closed that workspace themselves. Best-effort: the
 	// close already succeeded. (No query between close and focus — fastest
 	// restore, least flicker.)
-	if cur, err := (herdrBackend{}).CurrentSession(ctx); err == nil && cur != "" && cur != target {
-		_ = herdrRun(ctx, "workspace", "focus", cur)
+	logger := logging.Default()
+	focusEnabled := logger.Enabled(ctx, slog.LevelDebug) || logger.Enabled(ctx, slog.LevelWarn)
+	focusStarted := time.Time{}
+	if focusEnabled {
+		focusStarted = time.Now()
 	}
+	cur, currentErr := (herdrBackend{}).CurrentSession(ctx)
+	if currentErr != nil || cur == "" || cur == target {
+		if focusEnabled {
+			logging.LogAttrs(ctx, logger, slog.LevelDebug,
+				logging.EventSessionFocusRestore, logging.ComponentSession,
+				slog.String("result", "skipped"),
+				slog.Int64("duration_ms", time.Since(focusStarted).Milliseconds()))
+		}
+	} else {
+		focusErr := herdrRun(ctx, "workspace", "focus", cur)
+		if focusEnabled {
+			level, result := slog.LevelDebug, "success"
+			attrs := []slog.Attr{
+				slog.String("result", result),
+				slog.Int64("duration_ms", time.Since(focusStarted).Milliseconds()),
+				slog.String("workspace_id", cur),
+			}
+			if focusErr != nil {
+				level, result = slog.LevelWarn, "failed"
+				attrs[0] = slog.String("result", result)
+				attrs = append(attrs, slog.String("error_class", logging.ClassifyError(focusErr)))
+			}
+			logging.LogAttrs(ctx, logger, level,
+				logging.EventSessionFocusRestore, logging.ComponentSession, attrs...)
+		}
+	}
+	logSessionKill(ctx, BackendHerdr, started, nil)
 	return nil
 }
 
@@ -428,13 +465,37 @@ func (herdrBackend) ResolvePaneByCwd(
 
 // --- Suppression no-ops: herdr owns agent state ---
 
-func (herdrBackend) ReportAgent(context.Context, AgentReport) (bool, error) {
+func (herdrBackend) ReportAgent(ctx context.Context, report AgentReport) (bool, error) {
 	// herdr owns agent state; seshagy does not report under herdr.
+	logger := logging.Default()
+	if logger.Enabled(ctx, slog.LevelDebug) {
+		logging.LogAttrs(
+			ctx,
+			logger,
+			slog.LevelDebug,
+			logging.EventAgentReport,
+			logging.ComponentAgents,
+			slog.String(
+				"backend",
+				string(BackendHerdr),
+			),
+			slog.String("state", string(report.State)),
+			slog.Int64("seq", report.Seq),
+			slog.String("result", "ignored_backend"),
+		)
+	}
 	return false, nil
 }
 
-func (herdrBackend) ReleaseAgent(context.Context, AgentRelease) (bool, error) {
+func (herdrBackend) ReleaseAgent(ctx context.Context, release AgentRelease) (bool, error) {
 	// herdr owns agent state; seshagy does not report under herdr.
+	logger := logging.Default()
+	if logger.Enabled(ctx, slog.LevelDebug) {
+		logging.LogAttrs(ctx, logger, slog.LevelDebug,
+			logging.EventAgentRelease, logging.ComponentAgents,
+			slog.String("backend", string(BackendHerdr)), slog.Int64("seq", release.Seq),
+			slog.String("result", "ignored_backend"))
+	}
 	return false, nil
 }
 

@@ -111,7 +111,36 @@ catalog_url = ""           # defaults to the herdr public catalog when empty
 input_style = "popup"        # popup | cmdline
 dim_background = true         # dim the list behind the popup (popup mode only)
 preview = true                # show the preview pane on start (toggle at runtime with p)
+
+[log]
+level = "off"                 # off | debug | info | warn | error
+file = ""                     # empty: create a per-run file under XDG state
 ```
+
+### Diagnostic logging
+
+Logging is off by default. Enable it for a reproduction with TOML or a one-run
+environment override:
+
+```sh
+SESHAGY_LOG_LEVEL=debug seshagy
+```
+
+Non-empty `SESHAGY_LOG_LEVEL` and `SESHAGY_LOG_FILE` values override TOML. A
+file path alone does not enable logging. Default logs are private JSONL files
+under `$XDG_STATE_HOME/seshagy/log/` (normally
+`~/.local/state/seshagy/log/`), limited to 25 MiB each; seshagy targets the
+newest 10 matching files and skips live locked files, so concurrent runs may
+temporarily exceed 10. A relative explicit `file` is resolved from the process
+working directory. Explicit files are locked and truncated for each run,
+tightened to mode `0600`, and never pruned.
+A busy explicit file causes startup to fail rather than corrupting it.
+
+Run `seshagy diagnostics` to locate logs and see the collection workflow.
+`diagnostics --json` omits expanded paths for safer issue attachment. Logs are
+never uploaded automatically and are not guaranteed to be free of identifying
+multiplexer IDs; inspect the file before sharing, then disable logging and
+delete it when finished.
 
 The default `order` lists tabs left→right (`agents` last). `current-agents` is
 not a tab; it is a CLI-only scope (`--get-current-session-agents`), reachable in
