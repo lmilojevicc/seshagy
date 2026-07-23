@@ -39,6 +39,34 @@ func (herdrBackend) CurrentSession(ctx context.Context) (string, error) {
 	return pane.WorkspaceID, nil
 }
 
+func herdrFocusedWorkspace(ctx context.Context) (string, error) {
+	out, err := herdrOutput(ctx, "workspace", "list")
+	if err != nil {
+		return "", fmt.Errorf("herdr workspace list: %w", err)
+	}
+	workspaces, err := parseHerdrWorkspaces(out)
+	if err != nil {
+		return "", err
+	}
+	focused := ""
+	for _, workspace := range workspaces {
+		if !workspace.Focused {
+			continue
+		}
+		if workspace.WorkspaceID == "" {
+			return "", fmt.Errorf("focused herdr workspace has no id")
+		}
+		if focused != "" && focused != workspace.WorkspaceID {
+			return "", fmt.Errorf("multiple focused herdr workspaces")
+		}
+		focused = workspace.WorkspaceID
+	}
+	if focused == "" {
+		return "", fmt.Errorf("no focused herdr workspace")
+	}
+	return focused, nil
+}
+
 func (herdrBackend) ListSessions(ctx context.Context) ([]Item, error) {
 	out, err := herdrOutput(ctx, "workspace", "list")
 	if err != nil {
@@ -133,16 +161,18 @@ func (b herdrBackend) CreateSessionFromDir(
 }
 
 func (herdrBackend) KillSession(ctx context.Context, target string) error {
+	focused, err := herdrFocusedWorkspace(ctx)
+	if err != nil {
+		return fmt.Errorf("find focused herdr workspace: %w", err)
+	}
 	if err := herdrRun(ctx, "workspace", "close", target); err != nil {
 		return fmt.Errorf("herdr workspace close: %w", err)
 	}
 	// herdr workspace close refocuses the client onto another workspace.
-	// Restore focus to the workspace seshagy runs in so the user isn't moved —
-	// unless they just closed that workspace themselves. Best-effort: the
-	// close already succeeded. (No query between close and focus — fastest
-	// restore, least flicker.)
-	if cur, err := (herdrBackend{}).CurrentSession(ctx); err == nil && cur != "" && cur != target {
-		_ = herdrRun(ctx, "workspace", "focus", cur)
+	// Restore the authoritative pre-close focus unless that workspace was the
+	// target. Best-effort: the close already succeeded.
+	if focused != target {
+		_ = herdrRun(ctx, "workspace", "focus", focused)
 	}
 	return nil
 }
