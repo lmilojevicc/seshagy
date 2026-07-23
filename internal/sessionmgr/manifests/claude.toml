@@ -1,7 +1,7 @@
 id = "claude"
-version = "2026.06.26.1"
+version = "2026.07.23.1"
 min_engine_version = 2
-updated_at = "2026-06-26T00:00:00Z"
+updated_at = "2026-07-23T00:00:00Z"
 aliases = ["claude-code"]
 
 [[rules]]
@@ -11,6 +11,17 @@ priority = 1100
 region = "osc_title"
 visible_working = true
 regex = ['^[\x{2800}-\x{28FF}] ']
+
+[[rules]]
+id = "btw_overlay_working"
+state = "working"
+priority = 975
+region = "bottom_non_empty_lines(5)"
+visible_working = true
+line_regex = [
+  '^\s*/btw(?:\s|$)',
+  '(?i)esc to close\s*$',
+]
 
 [[rules]]
 id = "transcript_viewer"
@@ -56,22 +67,27 @@ state = "unknown"
 priority = 970
 region = "whole_recent"
 skip_state_update = true
-any = [
-  { contains = ["do you want to proceed?"] },
-  { contains = ["would you like to"] },
-  { contains = ["tab to amend"] },
-  { contains = ["ctrl+e to explain"] },
-  { contains = ["waiting for permission"] },
-  { contains = ["do you want to allow this connection?"] },
-  { contains = ["review your answers"] },
-  { contains = ["skip interview"] },
-  { contains = ["run a dynamic workflow?"] },
+all = [
+  { any = [
+    { contains = ["do you want to proceed?"] },
+    { contains = ["would you like to"] },
+    { contains = ["waiting for permission"] },
+    { contains = ["do you want to allow this connection?"] },
+    { contains = ["review your answers"] },
+    { contains = ["run a dynamic workflow?"] },
+  ] },
+  { any = [
+    { contains = ["esc to cancel"] },
+    { contains = ["tab to amend"] },
+    { contains = ["ctrl+e to explain"] },
+    { contains = ["skip interview"] },
+  ] },
 ]
 
 [[rules]]
 id = "live_prompt_box"
 state = "idle"
-priority = 200
+priority = 950
 region = "prompt_box_body"
 visible_idle = true
 line_regex = ['^\s*❯']

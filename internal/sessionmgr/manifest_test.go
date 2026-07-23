@@ -1,8 +1,11 @@
 package sessionmgr
 
 import (
+	"slices"
 	"strings"
 	"testing"
+
+	"github.com/BurntSushi/toml"
 )
 
 func TestBundledManifestsCompile(t *testing.T) {
@@ -16,6 +19,129 @@ func TestBundledManifestsCompile(t *testing.T) {
 		if len(m.rules) == 0 {
 			t.Errorf("manifest %q has no rules", name)
 		}
+	}
+}
+
+func TestBundledClaudeManifestContract(t *testing.T) {
+	isolateManifestCache(t)
+	data, err := manifestFS.ReadFile("manifests/claude.toml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest agentManifest
+	if _, err := toml.Decode(string(data), &manifest); err != nil {
+		t.Fatal(err)
+	}
+
+	if manifest.Version != "2026.07.23.1" {
+		t.Fatalf("version = %q, want 2026.07.23.1", manifest.Version)
+	}
+	if manifest.UpdatedAt != "2026-07-23T00:00:00Z" {
+		t.Fatalf("updated_at = %q, want 2026-07-23T00:00:00Z", manifest.UpdatedAt)
+	}
+
+	type ruleContract struct {
+		id       string
+		priority int
+	}
+	wantRules := []ruleContract{
+		{"osc_title_working", 1100},
+		{"btw_overlay_working", 975},
+		{"transcript_viewer", 1000},
+		{"live_blocked_form", 980},
+		{"dynamic_workflow_prompt", 980},
+		{"permission_active_guard", 970},
+		{"live_prompt_box", 950},
+		{"model_picker_menu", 900},
+		{"bash_permission_prompt", 850},
+		{"generic_permission_prompt", 840},
+		{"legacy_no_prompt_blocker", 300},
+		{"osc_title_idle", 250},
+		{"osc_progress_idle", 250},
+	}
+	gotRules := make([]ruleContract, 0, len(manifest.Rules))
+	byID := make(map[string]manifestRule, len(manifest.Rules))
+	for _, rule := range manifest.Rules {
+		gotRules = append(gotRules, ruleContract{rule.ID, rule.Priority})
+		byID[rule.ID] = rule
+	}
+	if !slices.Equal(gotRules, wantRules) {
+		t.Fatalf("rules = %#v, want %#v", gotRules, wantRules)
+	}
+
+	btw := byID["btw_overlay_working"]
+	if btw.State != "working" || btw.Region != "bottom_non_empty_lines(5)" ||
+		!btw.VisibleWorking ||
+		!slices.Equal(btw.LineRegex, []string{`^\s*/btw(?:\s|$)`, `(?i)esc to close\s*$`}) {
+		t.Fatalf("btw_overlay_working changed: %+v", btw)
+	}
+
+	guard := byID["permission_active_guard"]
+	wantPermissionEvidence := []string{
+		"do you want to proceed?",
+		"would you like to",
+		"waiting for permission",
+		"do you want to allow this connection?",
+		"review your answers",
+		"run a dynamic workflow?",
+	}
+	wantActiveControls := []string{
+		"esc to cancel",
+		"tab to amend",
+		"ctrl+e to explain",
+		"skip interview",
+	}
+	if guard.State != "unknown" || guard.Region != "whole_recent" || !guard.SkipStateUpdate ||
+		len(guard.All) != 2 || len(guard.Any) != 0 {
+		t.Fatalf("permission_active_guard changed: %+v", guard)
+	}
+	for index, want := range [][]string{wantPermissionEvidence, wantActiveControls} {
+		group := guard.All[index]
+		got := make([]string, 0, len(group.Any))
+		if len(group.All) != 0 || len(group.Not) != 0 || len(group.Contains) != 0 ||
+			len(group.Regex) != 0 || len(group.LineRegex) != 0 {
+			t.Fatalf("permission guard group %d changed: %+v", index, group)
+		}
+		for _, gate := range group.Any {
+			if len(gate.Contains) != 1 {
+				t.Fatalf(
+					"permission guard group %d gate = %+v, want one contains matcher",
+					index,
+					gate,
+				)
+			}
+			got = append(got, gate.Contains[0])
+		}
+		if !slices.Equal(got, want) {
+			t.Fatalf("permission guard group %d = %#v, want %#v", index, got, want)
+		}
+	}
+
+	prompt := byID["live_prompt_box"]
+	wantPromptExclusions := []string{
+		"enter to select",
+		"esc to cancel",
+		"tab/arrow keys",
+		"arrow keys to navigate",
+		"↑/↓ to navigate",
+		"do you want to proceed?",
+		"would you like to",
+		"tab to amend",
+		"ctrl+e to explain",
+		"review your answers",
+		"skip interview",
+		"do you want to allow this connection?",
+	}
+	gotPromptExclusions := make([]string, 0, len(prompt.Not))
+	for _, gate := range prompt.Not {
+		if len(gate.Contains) != 1 {
+			t.Fatalf("live prompt exclusion = %+v, want one contains matcher", gate)
+		}
+		gotPromptExclusions = append(gotPromptExclusions, gate.Contains[0])
+	}
+	if prompt.State != "idle" || prompt.Region != "prompt_box_body" || !prompt.VisibleIdle ||
+		!slices.Equal(gotPromptExclusions, wantPromptExclusions) {
+		t.Fatalf("live_prompt_box changed: %+v", prompt)
 	}
 }
 

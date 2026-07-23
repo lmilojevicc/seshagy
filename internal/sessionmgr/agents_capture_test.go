@@ -2,6 +2,7 @@ package sessionmgr
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -253,40 +254,249 @@ func TestApplyManifestFallbackCodexOSCTitleWorking(t *testing.T) {
 	}
 }
 
-// TestApplyManifestFallbackClaudeBlockedSurvivesIdleRule is the regression for
-// blocker #2: a claude pane with fresh hook `blocked` and a captured screen
-// containing BOTH a prompt-box ❯ line AND permission text must stay blocked
-// (NOT be overwritten to idle by the demoted live_prompt_box rule).
-func TestApplyManifestFallbackClaudeBlockedSurvivesIdleRule(t *testing.T) {
-	isolateManifestCache(t)
-	ctx := context.Background()
+const (
+	claudeActivePermissionScreen = "│ do you want to proceed?              │\n" +
+		"│ esc to cancel                       │\n" +
+		"│ tab to amend                        │\n" +
+		"│ ❯ 1. Yes                            │\n" +
+		"│   2. No                             │\n" +
+		"─\n" +
+		"❯ \n" +
+		"─\n"
+	claudeResolvedPromptScreen = "Claude finished the previous action.\n" +
+		"─\n" +
+		"❯ \n" +
+		"─\n"
+	claudeKnownBadCachedManifest = `id = "claude"
+version = "2026.07.13.1"
+min_engine_version = 2
+updated_at = "2026-07-13T00:00:00Z"
+aliases = ["claude-code"]
+
+[[rules]]
+id = "known_bad_cache_marker"
+state = "unknown"
+priority = 1
+region = "whole_recent"
+skip_state_update = true
+contains = ["known bad cache marker"]
+
+[[rules]]
+id = "live_prompt_box"
+state = "idle"
+priority = 950
+region = "prompt_box_body"
+visible_idle = true
+line_regex = ['^\s*❯']
+
+[[rules]]
+id = "bash_permission_prompt"
+state = "blocked"
+priority = 850
+region = "whole_recent"
+visible_blocker = true
+contains = ["do you want to proceed?", "tab to amend"]
+line_regex = ['(?i)^\s*│?\s*❯?\s*1\.\s*yes\b']
+`
+	claudeCorrectedCachedManifest = `id = "claude"
+version = "2026.07.23.2"
+min_engine_version = 2
+updated_at = "2026-07-23T00:00:01Z"
+aliases = ["claude-code"]
+
+[[rules]]
+id = "corrected_cache_marker"
+state = "unknown"
+priority = 1
+region = "whole_recent"
+skip_state_update = true
+contains = ["corrected cache marker"]
+
+[[rules]]
+id = "permission_active_guard"
+state = "unknown"
+priority = 970
+region = "whole_recent"
+skip_state_update = true
+all = [
+  { any = [
+    { contains = ["do you want to proceed?"] },
+    { contains = ["would you like to"] },
+    { contains = ["waiting for permission"] },
+    { contains = ["do you want to allow this connection?"] },
+    { contains = ["review your answers"] },
+    { contains = ["run a dynamic workflow?"] },
+  ] },
+  { any = [
+    { contains = ["esc to cancel"] },
+    { contains = ["tab to amend"] },
+    { contains = ["ctrl+e to explain"] },
+    { contains = ["skip interview"] },
+  ] },
+]
+
+[[rules]]
+id = "live_prompt_box"
+state = "idle"
+priority = 950
+region = "prompt_box_body"
+visible_idle = true
+line_regex = ['^\s*❯']
+not = [
+  { contains = ["do you want to proceed?"] },
+  { contains = ["would you like to"] },
+  { contains = ["tab to amend"] },
+  { contains = ["ctrl+e to explain"] },
+  { contains = ["review your answers"] },
+  { contains = ["skip interview"] },
+  { contains = ["do you want to allow this connection?"] },
+]
+`
+)
+
+func installCachedClaudeManifest(t *testing.T, fixture string) {
+	t.Helper()
+	cacheDir, err := cachedManifestDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustMkdirAll(t, cacheDir)
+	mustWriteFile(t, filepath.Join(cacheDir, "claude.toml"), fixture)
+	ReloadManifests()
+}
+
+func manifestHasRule(manifest *compiledManifest, ruleID string) bool {
+	for _, rule := range manifest.rules {
+		if rule.id == ruleID {
+			return true
+		}
+	}
+	return false
+}
+
+func claudeResolvedPermissionScreen(staleTranscript string) string {
+	return staleTranscript + "\n─\n❯ \n─\n"
+}
+
+func applyClaudeScreen(t *testing.T, screen string) AgentState {
+	t.Helper()
 	fake := NewStrictFakeTmux(t, nil).AllowPaneOptions()
 	fake.HandleOutput(func(args []string) bool {
 		return len(args) >= 1 && args[0] == "capture-pane"
-	}, func(_ context.Context, args ...string) ([]byte, error) {
-		// Screen contains a horizontal-rule prompt box with a ❯ cursor AND
-		// permission wording. The live_prompt_box idle rule must NOT win.
-		return []byte("│ do you want to proceed?              │\n" +
-			"│ esc to cancel                       │\n" +
-			"│ tab to amend                        │\n" +
-			"─\n" +
-			"❯ \n" +
-			"─\n"), nil
+	}, func(_ context.Context, _ ...string) ([]byte, error) {
+		return []byte(screen), nil
 	})
 	fake.Install(t)
 
-	items := []Item{
+	items := []Item{{
+		Kind:         KindAgent,
+		AgentName:    "claude",
+		PaneID:       "%54",
+		AgentState:   AgentBlocked,
+		AgentUpdated: time.Now(),
+	}}
+	ApplyManifestFallback(context.Background(), items)
+	return items[0].AgentState
+}
+
+func TestClaudeManifestKnownBadCacheCannotShadowBundle(t *testing.T) {
+	isolateManifestCache(t)
+	installCachedClaudeManifest(t, claudeKnownBadCachedManifest)
+
+	manifest, ok := manifestForAgent("claude")
+	if !ok {
+		t.Fatal("claude manifest not found")
+	}
+	if manifestHasRule(manifest, "known_bad_cache_marker") {
+		t.Fatal("known-bad cached 2026.07.13.1 shadowed corrected bundle")
+	}
+	if !manifestHasRule(manifest, "btw_overlay_working") {
+		t.Fatal("corrected bundled winner lost btw_overlay_working")
+	}
+	result := detectManifest("claude", manifestDetectionInput{screen: claudeActivePermissionScreen})
+	if result.RuleID != "permission_active_guard" || !result.SkipStateUpdate {
+		t.Fatalf("active permission result = %+v, want permission_active_guard skip", result)
+	}
+	if got := applyClaudeScreen(t, claudeActivePermissionScreen); got != AgentBlocked {
+		t.Fatalf("fresh blocked state became %s with known-bad cache present", got)
+	}
+}
+
+func TestClaudeManifestResolvedPermissionTranscriptClearsBlocked(t *testing.T) {
+	isolateManifestCache(t)
+
+	tests := []struct {
+		name       string
+		transcript string
+	}{
 		{
-			Kind:         KindAgent,
-			AgentName:    "claude",
-			PaneID:       "%1",
-			AgentState:   AgentBlocked, // fresh hook says blocked
-			AgentUpdated: time.Now(),   // fresh
+			name:       "would like to",
+			transcript: "The earlier output asked: would you like to continue?",
+		},
+		{name: "proceed", transcript: "The resolved request said: do you want to proceed?"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			screen := claudeResolvedPermissionScreen(tt.transcript)
+			result := detectManifest("claude", manifestDetectionInput{screen: screen})
+			if result.RuleID != "live_prompt_box" || result.SkipStateUpdate ||
+				result.State != AgentIdle {
+				t.Fatalf("resolved permission result = %+v, want live_prompt_box idle", result)
+			}
+			if got := applyClaudeScreen(t, screen); got != AgentIdle {
+				t.Fatalf("fresh partial-hook blocked state did not clear to idle: got %s", got)
+			}
+		})
+	}
+}
+
+func TestClaudeManifestNewerCorrectedCacheWins(t *testing.T) {
+	isolateManifestCache(t)
+	installCachedClaudeManifest(t, claudeCorrectedCachedManifest)
+
+	manifest, ok := manifestForAgent("claude")
+	if !ok {
+		t.Fatal("claude manifest not found")
+	}
+	if !manifestHasRule(manifest, "corrected_cache_marker") {
+		t.Fatal("newer corrected cached 2026.07.23.2 did not win")
+	}
+	result := detectManifest("claude", manifestDetectionInput{screen: claudeActivePermissionScreen})
+	if result.RuleID != "permission_active_guard" || !result.SkipStateUpdate {
+		t.Fatalf("active permission result = %+v, want permission_active_guard skip", result)
+	}
+	if got := applyClaudeScreen(t, claudeActivePermissionScreen); got != AgentBlocked {
+		t.Fatalf("fresh blocked state became %s with corrected cache winner", got)
+	}
+}
+
+func TestClaudeManifestCorrectedWinnerClearsResolvedPrompt(t *testing.T) {
+	isolateManifestCache(t)
+	installCachedClaudeManifest(t, claudeCorrectedCachedManifest)
+
+	tests := []struct {
+		name   string
+		screen string
+	}{
+		{name: "plain prompt", screen: claudeResolvedPromptScreen},
+		{
+			name: "stale permission wording",
+			screen: claudeResolvedPermissionScreen(
+				"The earlier output asked: would you like to continue?",
+			),
 		},
 	}
-	ApplyManifestFallback(ctx, items)
-	if items[0].AgentState != AgentBlocked {
-		t.Fatalf("claude blocked clobbered to %s by idle rule", items[0].AgentState)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := detectManifest("claude", manifestDetectionInput{screen: tt.screen})
+			if result.RuleID != "live_prompt_box" || result.SkipStateUpdate ||
+				result.State != AgentIdle {
+				t.Fatalf("resolved prompt result = %+v, want live_prompt_box idle", result)
+			}
+			if got := applyClaudeScreen(t, tt.screen); got != AgentIdle {
+				t.Fatalf("fresh partial-hook blocked state did not clear to idle: got %s", got)
+			}
+		})
 	}
 }
 
