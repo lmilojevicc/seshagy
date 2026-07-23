@@ -47,8 +47,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.inputMode == modeRename {
 		switch msg.String() {
 		case "esc":
-			m.inputMode = modeNormal
-			m.renameInput.Blur()
+			m.resetRename()
 			return m, nil
 		case "enter":
 			newName := strings.TrimSpace(m.renameInput.Value())
@@ -56,23 +55,25 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			kind := m.renameKind
 			session := m.renameSession
 			target := m.renameTarget
-			m.inputMode = modeNormal
-			m.renameInput.Blur()
-			m.renameFrom = ""
-			m.renameTarget = ""
-			m.renameSession = ""
-			m.renameKind = ""
-			if newName == "" && kind == sessionmgr.KindAgent {
-				return m, renameAgentCmd(m.mux, target, oldName, session, "")
-			}
-			if newName == "" || oldName == "" || newName == oldName {
+			agentType := m.renameAgentType
+			m.resetRename()
+			if kind != sessionmgr.KindAgent && (newName == "" || oldName == "") {
 				return m, nil
 			}
 			switch kind {
 			case sessionmgr.KindSession:
+				if newName == oldName {
+					return m, nil
+				}
 				return m, renameCmd(m.mux, target, oldName, newName)
 			case sessionmgr.KindAgent:
-				return m, renameAgentCmd(m.mux, target, oldName, session, newName)
+				if newName == "" {
+					return m, renameAgentCmd(m.mux, target, agentType, session, "")
+				}
+				if newName == oldName {
+					return m, nil
+				}
+				return m, renameAgentCmd(m.mux, target, agentType, session, newName)
 			default:
 				m.notify("rename only applies to "+m.terms.SessionPlural+" and agents", sevWarning)
 				return m, nil
@@ -89,6 +90,16 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleTypeFirstKey(msg)
 	}
 	return m.handleActionKey(msg)
+}
+
+func (m *Model) resetRename() {
+	m.inputMode = modeNormal
+	m.renameInput.Blur()
+	m.renameFrom = ""
+	m.renameTarget = ""
+	m.renameSession = ""
+	m.renameKind = ""
+	m.renameAgentType = ""
 }
 
 func (m Model) handleActionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -534,7 +545,8 @@ func (m Model) startRename() (tea.Model, tea.Cmd) {
 	case sessionmgr.KindAgent:
 		m.inputMode = modeRename
 		m.renameKind = item.Kind
-		m.renameFrom = item.AgentName
+		m.renameFrom = item.DisplayName()
+		m.renameAgentType = item.AgentName
 		m.renameSession = item.Session
 		m.renameTarget = item.ActionTarget() // herdr rename targets the pane id
 		m.renameInput.SetValue(item.DisplayName())
