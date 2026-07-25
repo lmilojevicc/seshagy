@@ -8,6 +8,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/muesli/termenv"
 
 	appconfig "github.com/lmilojevicc/seshagy/internal/config"
 	"github.com/lmilojevicc/seshagy/internal/sessionmgr"
@@ -165,6 +166,73 @@ func TestFooterCmdlineShowsTextInputInTile(t *testing.T) {
 	}
 }
 
+func TestInputLinePreservesPlaceholderUnicodeScrollingAndCursorBlink(t *testing.T) {
+	prevProfile := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prevProfile) })
+
+	m := newTestModel(t)
+	m.inputMode = modeSearch
+
+	placeholder := sessionmgr.StripANSI(m.renderInputLine(40))
+	if !strings.Contains(placeholder, "/ filter sessions, directories") {
+		t.Fatalf("search placeholder changed: %q", placeholder)
+	}
+
+	m.searchInput.SetValue("αβ你好omega")
+	m.searchInput.SetCursor(4)
+	m.searchInput.Focus()
+	unicodeRaw := m.renderInputLine(40)
+	unicodeLine := sessionmgr.StripANSI(unicodeRaw)
+	if !strings.Contains(unicodeLine, "αβ你好omega") {
+		t.Fatalf("Unicode input changed: %q", unicodeLine)
+	}
+	if !strings.Contains(unicodeRaw, "\x1b[7mo\x1b[0m") {
+		t.Fatalf("Unicode cursor is not rendered on rune at position 4: %q", unicodeRaw)
+	}
+	if width := lipgloss.Width(unicodeRaw); width > 40 {
+		t.Fatalf("Unicode input width = %d, want at most 40: %q", width, unicodeLine)
+	}
+
+	model, _ := m.Update(tea.WindowSizeMsg{Width: 32, Height: 12})
+	m = model.(Model)
+	m.inputMode = modeSearch
+	m.searchInput.SetValue("prefix-" + strings.Repeat("x", 40) + "-tail")
+	m.searchInput.CursorEnd()
+	m.searchInput.Focus()
+	longLine := sessionmgr.StripANSI(m.renderInputLine(18))
+	if want := "/ xxxxxxxxxxxxxxx…"; longLine != want {
+		t.Fatalf("long input viewport = %q, want current clipped output %q", longLine, want)
+	}
+	if width := lipgloss.Width(longLine); width > 18 {
+		t.Fatalf("long input width = %d, want at most 18: %q", width, longLine)
+	}
+
+	m.searchInput.SetValue("abc")
+	m.searchInput.SetCursor(1)
+	m.searchInput.Cursor.Blink = false
+	visibleCursor := m.renderInputLine(20)
+	m.searchInput.Cursor.Blink = true
+	hiddenCursor := m.renderInputLine(20)
+	if visibleCursor == hiddenCursor {
+		t.Fatalf("cursor blink states rendered identically: %q", visibleCursor)
+	}
+	if sessionmgr.StripANSI(visibleCursor) != sessionmgr.StripANSI(hiddenCursor) {
+		t.Fatalf(
+			"cursor blink changed input text: visible=%q hidden=%q",
+			sessionmgr.StripANSI(visibleCursor),
+			sessionmgr.StripANSI(hiddenCursor),
+		)
+	}
+	if !strings.Contains(visibleCursor, "\x1b[7m") || strings.Contains(hiddenCursor, "\x1b[7m") {
+		t.Fatalf(
+			"cursor reverse-video state changed: visible=%q hidden=%q",
+			visibleCursor,
+			hiddenCursor,
+		)
+	}
+}
+
 func TestCmdlineInputStyleHasFieldsetTitle(t *testing.T) {
 	for _, tt := range []struct {
 		name  string
@@ -289,12 +357,23 @@ func TestViewPreservesInlineInputAtHeightBoundaries(t *testing.T) {
 					m.searchInput.SetValue("typed-value")
 					m.renameInput.SetValue("typed-value")
 
-					view := sessionmgr.StripANSI(m.View())
-					if !strings.Contains(view, "typed-value") {
-						t.Fatalf("typed value missing at height %d\n%s", height, view)
+					view := m.View()
+					clean := sessionmgr.StripANSI(view)
+					if height == 1 {
+						want := m.renderInputLine(safeWidth(m.width))
+						if view != want {
+							t.Fatalf(
+								"height-one view differs from input line: got=%q want=%q",
+								sessionmgr.StripANSI(view),
+								sessionmgr.StripANSI(want),
+							)
+						}
+					}
+					if !strings.Contains(clean, "typed-value") {
+						t.Fatalf("typed value missing at height %d\n%s", height, clean)
 					}
 					if got := lipgloss.Height(view); got > height {
-						t.Fatalf("view height = %d, terminal height = %d\n%s", got, height, view)
+						t.Fatalf("view height = %d, terminal height = %d\n%s", got, height, clean)
 					}
 				})
 			}

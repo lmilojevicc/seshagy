@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -58,6 +59,105 @@ func TestViewRendersDashboardChromeAndRows(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Fatalf("View() missing %q\n%s", want, out)
 		}
+	}
+}
+
+func TestPreviewDisabledOmitsSideColumnAndCapture(t *testing.T) {
+	baseConfig := appconfig.Default()
+	on := true
+	baseConfig.TUI.Preview = &on
+
+	newModel := func(cfg appconfig.Config) Model {
+		m := New(
+			WithConfig(cfg),
+			WithMultiplexer(sessionmgr.NewTmuxBackend()),
+		)
+		m.width, m.height = 120, 32
+		m.loading = false
+		m.source = sessionmgr.ModeSessions
+		m.items = []sessionmgr.Item{{
+			Kind: sessionmgr.KindSession,
+			Name: "demo",
+			Path: "/tmp/demo",
+		}}
+		return m
+	}
+
+	enabled := newModel(baseConfig)
+	enabledBody := sessionmgr.StripANSI(enabled.renderBody(20))
+	for _, want := range []string{"demo · tmux session", "Preview · demo"} {
+		if !strings.Contains(enabledBody, want) {
+			t.Fatalf("preview-enabled body missing %q\n%s", want, enabledBody)
+		}
+	}
+
+	off := false
+	configDisabled := baseConfig
+	configDisabled.TUI.Preview = &off
+	for _, tt := range []struct {
+		name  string
+		model Model
+	}{
+		{name: "config disabled", model: newModel(configDisabled)},
+		{name: "toggle disabled", model: func() Model {
+			m := newModel(baseConfig)
+			m.showPreview = false
+			return m
+		}()},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			body := tt.model.renderBody(20)
+			want := tt.model.renderListPane(safeWidth(tt.model.width), 20)
+			if body != want {
+				t.Fatalf(
+					"preview-disabled body differs from full-width list pane\ngot:\n%s\nwant:\n%s",
+					sessionmgr.StripANSI(body),
+					sessionmgr.StripANSI(want),
+				)
+			}
+			if cmd := tt.model.previewForSelection(); cmd != nil {
+				t.Fatal("preview-disabled model scheduled capture work")
+			}
+		})
+	}
+}
+
+func TestPreviewErrorRetainsDangerStyleInFinalFrame(t *testing.T) {
+	prevProfile := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prevProfile) })
+
+	cfg := appconfig.Default()
+	cfg.Theme.Colors.Danger = "#8a1020"
+	m := New(
+		WithConfig(cfg),
+		WithMultiplexer(sessionmgr.NewTmuxBackend()),
+	)
+	m.width, m.height = 120, 32
+	m.loading = false
+	m.source = sessionmgr.ModeSessions
+	m.items = []sessionmgr.Item{{Kind: sessionmgr.KindSession, Name: "alpha"}}
+	m.cursor = 0
+
+	model, cmd := m.Update(previewMsg{key: m.selectedKey(), err: errors.New("preview failed")})
+	got := model.(Model)
+	if cmd != nil {
+		t.Fatalf("preview error command = %v, want nil", cmd)
+	}
+
+	dangerStyled := got.styles.danger.Render("preview failed")
+	var errorLine string
+	for _, line := range strings.Split(got.View(), "\n") {
+		if strings.Contains(sessionmgr.StripANSI(line), "preview failed") {
+			errorLine = line
+			break
+		}
+	}
+	if errorLine == "" {
+		t.Fatalf("final frame missing preview error\n%s", got.View())
+	}
+	if !strings.Contains(errorLine, dangerStyled) {
+		t.Fatalf("preview error line missing danger-styled text %q: %q", dangerStyled, errorLine)
 	}
 }
 
@@ -1885,6 +1985,42 @@ func TestTmuxTermsByteIdenticalStrings(t *testing.T) {
 	}
 }
 
+func TestHerdrAgentsCollectionTitleUsesLabelThenOpaqueFallback(t *testing.T) {
+	m := newTestModel(t)
+	m.terms = sessionmgr.HerdrTerms()
+	m.source = sessionmgr.ModeAgents
+	m.agentsCurrentOnly = true
+	m.currentSession = "workspace-opaque-id"
+	m.items = []sessionmgr.Item{{
+		Kind:      sessionmgr.KindAgent,
+		Name:      "pi",
+		AgentName: "pi",
+		Session:   "workspace-opaque-id",
+		Location:  "frontend",
+	}}
+
+	resolved := sessionmgr.StripANSI(m.renderListPane(70, 12))
+	resolvedTitle := strings.Split(resolved, "\n")[0]
+	if !strings.Contains(resolvedTitle, "Agents (1 · frontend)") {
+		t.Fatalf("Agents collection title missing resolved workspace label\n%s", resolved)
+	}
+	if strings.Contains(resolvedTitle, "workspace-opaque-id") {
+		t.Fatalf(
+			"Agents collection title leaks opaque workspace id with resolved label\n%s",
+			resolved,
+		)
+	}
+
+	m.items = nil
+	fallback := sessionmgr.StripANSI(m.renderListPane(70, 12))
+	if !strings.Contains(
+		strings.Split(fallback, "\n")[0],
+		"Agents (0 · workspace-opaque-id)",
+	) {
+		t.Fatalf("Agents collection title missing opaque workspace fallback\n%s", fallback)
+	}
+}
+
 // TestHerdrTermsRenderedStrings verifies the herdr vocabulary appears when the
 // model uses herdr terms.
 func TestHerdrTermsRenderedStrings(t *testing.T) {
@@ -1932,9 +2068,9 @@ func TestHerdrAgentDetailShowsTabLabel(t *testing.T) {
 		Kind:      sessionmgr.KindAgent,
 		Name:      "pi",
 		AgentName: "pi",
-		Session:   "w1",
-		Window:    "w1:t2",
-		PaneID:    "w1:p1",
+		Session:   "workspace-opaque-id",
+		Window:    "tab-opaque-id",
+		PaneID:    "pane-opaque-id",
 		Location:  "proj",
 		TabLabel:  "logs",
 	}}
@@ -1944,9 +2080,11 @@ func TestHerdrAgentDetailShowsTabLabel(t *testing.T) {
 	if !strings.Contains(clean, "tab") || !strings.Contains(clean, "logs") {
 		t.Fatalf("agent detail missing tab label 'logs'\n%s", clean)
 	}
-	// The opaque tab id must NOT leak.
-	if strings.Contains(clean, "w1:t2") {
-		t.Fatalf("agent detail leaks opaque tab id\n%s", clean)
+	// Opaque workspace, tab, and pane ids must NOT leak from Details.
+	for _, opaque := range []string{"workspace-opaque-id", "tab-opaque-id", "pane-opaque-id"} {
+		if strings.Contains(clean, opaque) {
+			t.Fatalf("agent detail leaks opaque id %q\n%s", opaque, clean)
+		}
 	}
 }
 
@@ -2427,6 +2565,56 @@ func TestRenderTopRowNarrowWidthCollapsesToSourcesOnly(t *testing.T) {
 	}
 	if strings.Contains(out, "AGENTS") || strings.Contains(out, "SESSIONS") {
 		t.Fatalf("narrow header did not collapse overview tiles\n%s", out)
+	}
+}
+
+func TestNotificationsRenderExactlyOnceAcrossApplicationSurfaces(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		width    int
+		height   int
+		activate func(*Model)
+	}{
+		{name: "normal", width: 120, height: 32, activate: func(*Model) {}},
+		{name: "setup", width: 120, height: 32, activate: func(m *Model) {
+			m.setup.active = true
+		}},
+		{name: "install", width: 120, height: 32, activate: func(m *Model) {
+			m.openInstallMenu(false)
+		}},
+		{name: "popup input", width: 120, height: 32, activate: func(m *Model) {
+			m.inputMode = modeSearch
+			m.searchInput.SetValue("query")
+			m.searchInput.Focus()
+		}},
+		{name: "inline input", width: 120, height: 32, activate: func(m *Model) {
+			m.config.TUI.InputStyle = appconfig.InputStyleCmdline
+			m.inputMode = modeSearch
+			m.searchInput.SetValue("query")
+			m.searchInput.Focus()
+		}},
+		{name: "constrained inline input", width: 24, height: 4, activate: func(m *Model) {
+			m.config.TUI.InputStyle = appconfig.InputStylePopup
+			m.inputMode = modeSearch
+			m.searchInput.SetValue("query")
+			m.searchInput.Focus()
+		}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			m := newTestModel(t)
+			m.width, m.height = tt.width, tt.height
+			m.loading = false
+			m.showPreview = false
+			m.source = sessionmgr.ModeSessions
+			m.items = []sessionmgr.Item{{Kind: sessionmgr.KindSession, Name: "demo"}}
+			tt.activate(&m)
+			m.notify("toast", sevWarning)
+
+			out := sessionmgr.StripANSI(m.View())
+			if count := strings.Count(out, "toast"); count != 1 {
+				t.Fatalf("notification count = %d, want exactly 1\n%s", count, out)
+			}
+		})
 	}
 }
 
