@@ -9,6 +9,9 @@ type layoutView struct {
 	Collection collectionView
 	Search     searchView
 	Actions    actionsView
+	Overview   *overviewView
+	Details    *detailsView
+	Preview    *previewView
 }
 
 type frameView struct {
@@ -138,6 +141,75 @@ type actionHintView struct {
 	Key       string
 	Label     string
 	Available bool
+}
+
+type overviewState uint8
+
+const (
+	overviewLoading overviewState = iota
+	overviewEmpty
+	overviewWarning
+	overviewError
+	overviewReady
+)
+
+type overviewAgentCountsView struct {
+	Working int
+	Blocked int
+	Done    int
+	Idle    int
+	Unknown int
+}
+
+type overviewView struct {
+	State    overviewState
+	Sessions int
+	Agents   overviewAgentCountsView
+	Warning  string
+	Error    string
+}
+
+type detailsState uint8
+
+const (
+	detailsNoSelection detailsState = iota
+	detailsReady
+)
+
+type detailFieldView struct {
+	Label     string
+	Value     string
+	Indicator indicatorView
+}
+
+type detailsView struct {
+	State  detailsState
+	Title  string
+	Fields []detailFieldView
+}
+
+type previewState uint8
+
+const (
+	previewLoading previewState = iota
+	previewEmpty
+	previewError
+	previewReady
+)
+
+type previewAnchor uint8
+
+const (
+	previewAnchorTop previewAnchor = iota
+	previewAnchorBottom
+)
+
+type previewView struct {
+	State   previewState
+	Title   string
+	Content string
+	Error   string
+	Anchor  previewAnchor
 }
 
 // layoutNeeds contains only optional semantic projections or controller-owned

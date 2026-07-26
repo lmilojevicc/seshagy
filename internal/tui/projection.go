@@ -8,13 +8,17 @@ import (
 	"github.com/lmilojevicc/seshagy/internal/sessionmgr"
 )
 
-func (m Model) projectLayout(_ layoutNeeds) layoutView {
-	return m.projectLayoutAt(time.Now())
+func (m Model) projectLayout(needs layoutNeeds) layoutView {
+	return m.projectLayoutAtWithNeeds(time.Now(), needs)
 }
 
 func (m Model) projectLayoutAt(now time.Time) layoutView {
+	return m.projectLayoutAtWithNeeds(now, layoutNeeds{})
+}
+
+func (m Model) projectLayoutAtWithNeeds(now time.Time, needs layoutNeeds) layoutView {
 	visible := m.visibleItems()
-	return layoutView{
+	view := layoutView{
 		Frame:   frameView{Width: m.width, Height: m.height},
 		Sources: m.projectSources(visible),
 		Collection: m.projectCollection(
@@ -24,6 +28,16 @@ func (m Model) projectLayoutAt(now time.Time) layoutView {
 		Search:  m.projectSearch(),
 		Actions: m.projectActions(),
 	}
+	if needs.Overview {
+		view.Overview = m.projectOverview()
+	}
+	if needs.Details {
+		view.Details = m.projectDetails(now)
+	}
+	if needs.Preview && m.showPreview {
+		view.Preview = m.projectPreview()
+	}
+	return view
 }
 
 func (m Model) projectSources(visible []sessionmgr.Item) sourcesView {
@@ -118,6 +132,183 @@ func (m Model) projectCollection(visible []sessionmgr.Item, now time.Time) colle
 	case len(visible) == 0:
 		view.State = collectionEmpty
 		view.EmptyMessage = "no items"
+	}
+	return view
+}
+
+func (m Model) projectOverview() *overviewView {
+	view := &overviewView{State: overviewLoading}
+	var (
+		items []sessionmgr.Item
+		entry modeCache
+		known bool
+	)
+	if m.source == sessionmgr.ModeAll {
+		items = m.items
+		entry, known = m.cacheEntry(sessionmgr.ModeAll)
+		if m.loading && len(items) == 0 {
+			return view
+		}
+	} else {
+		entry, known = m.cacheEntry(sessionmgr.ModeAll)
+		if !known {
+			return view
+		}
+		items = entry.items
+	}
+
+	stats := aggregateOverviewStats(items)
+	view.Sessions = stats.sessions
+	view.Agents = overviewAgentCountsView{
+		Working: stats.agents[sessionmgr.AgentWorking],
+		Blocked: stats.agents[sessionmgr.AgentBlocked],
+		Done:    stats.agents[sessionmgr.AgentDone],
+		Idle:    stats.agents[sessionmgr.AgentIdle],
+		Unknown: stats.agents[sessionmgr.AgentUnknown],
+	}
+	switch {
+	case known && entry.err != nil:
+		view.State = overviewError
+		view.Error = entry.err.Error()
+	case known && entry.warning != "":
+		view.State = overviewWarning
+		view.Warning = entry.warning
+	case len(items) == 0:
+		view.State = overviewEmpty
+	default:
+		view.State = overviewReady
+	}
+	return view
+}
+
+func (m Model) projectDetails(now time.Time) *detailsView {
+	view := &detailsView{State: detailsNoSelection, Title: "Details"}
+	item, ok := m.selectedItem()
+	if !ok {
+		return view
+	}
+	view.State = detailsReady
+	view.Title = m.projectDetailsTitle(item)
+	icons := m.config.IconSet()
+	switch item.Kind {
+	case sessionmgr.KindSession:
+		attached, attachedIndicator := projectAttachedDetail(icons, item.Attached)
+		view.Fields = []detailFieldView{
+			{Label: "path", Value: sessionmgr.ContractHome(item.Path)},
+			{
+				Label: "attached", Value: attached,
+				Indicator: attachedIndicator,
+			},
+			{Label: m.terms.WindowPlural, Value: fmt.Sprint(item.Windows)},
+		}
+		if item.Panes > 0 {
+			view.Fields = append(view.Fields, detailFieldView{
+				Label: m.terms.PanePlural, Value: fmt.Sprint(item.Panes),
+			})
+		}
+		if !item.Activity.IsZero() {
+			view.Fields = append(view.Fields, detailFieldView{
+				Label: "activity", Value: agoAt(item.Activity, now),
+			})
+		}
+		if !item.Created.IsZero() {
+			view.Fields = append(view.Fields, detailFieldView{
+				Label: "created", Value: agoAt(item.Created, now),
+			})
+		}
+	case sessionmgr.KindZoxide, sessionmgr.KindFD:
+		view.Fields = []detailFieldView{
+			{Label: "path", Value: item.Path},
+			{
+				Label: "enter",
+				Value: "create/switch " + m.terms.BackendName + " " + m.terms.SessionNoun,
+			},
+		}
+	case sessionmgr.KindAgent:
+		view.Fields = []detailFieldView{
+			{
+				Label: "state", Value: agentStateText(item.AgentState),
+				Indicator: projectAgentStateIndicator(icons, item.AgentState),
+			},
+			{Label: "location", Value: item.Location},
+		}
+		if m.terms.BackendName != "herdr" {
+			view.Fields = append(view.Fields, detailFieldView{
+				Label: m.terms.SessionNoun, Value: item.Session,
+			})
+		}
+		if item.TabLabel != "" {
+			view.Fields = append(view.Fields, detailFieldView{
+				Label: m.terms.WindowNoun, Value: item.TabLabel,
+			})
+		}
+		view.Fields = append(view.Fields, detailFieldView{
+			Label: "path", Value: sessionmgr.ContractHome(item.Path),
+		})
+	}
+	return view
+}
+
+func projectAttachedDetail(icons sessionmgr.IconSet, attached bool) (string, indicatorView) {
+	indicator := projectTmuxStateIndicator(icons, attached)
+	if indicator.Mode == displayHidden {
+		if attached {
+			return "yes", indicator
+		}
+		return "no", indicator
+	}
+	label := indicator.Label
+	if label == "" {
+		if attached {
+			label = "attached"
+		} else {
+			label = "detached"
+		}
+	}
+	return label, indicator
+}
+
+func (m Model) projectDetailsTitle(item sessionmgr.Item) string {
+	switch item.Kind {
+	case sessionmgr.KindSession:
+		return item.Name + " · " + m.terms.BackendName + " " + m.terms.SessionNoun
+	case sessionmgr.KindAgent:
+		return item.DisplayName() + " · agent"
+	case sessionmgr.KindZoxide, sessionmgr.KindFD:
+		return sessionmgr.SessionNameFromDir(item.Path) + " · " +
+			string(item.Kind) + " directory"
+	default:
+		return item.DisplayName()
+	}
+}
+
+func (m Model) projectPreview() *previewView {
+	view := &previewView{
+		State:   previewLoading,
+		Title:   "Preview",
+		Content: m.preview,
+		Error:   m.previewError,
+		Anchor:  previewAnchorTop,
+	}
+	item, selected := m.selectedItem()
+	if selected {
+		view.Title = "Preview · " + item.DisplayName()
+		if isTailPreviewKind(item.Kind) {
+			view.Anchor = previewAnchorBottom
+		}
+	}
+	switch {
+	case selected && m.previewKey != "" && m.previewKey != item.Key():
+		view.State = previewLoading
+	case m.previewError != "":
+		view.State = previewError
+		view.Content = ""
+	case m.preview == noPreviewAvailableText:
+		view.State = previewEmpty
+	case m.preview == "":
+		view.State = previewLoading
+	default:
+		view.State = previewReady
 	}
 	return view
 }

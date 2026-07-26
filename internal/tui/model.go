@@ -67,6 +67,7 @@ type Model struct {
 	inputMode       inputMode
 
 	preview       string
+	previewError  string
 	previewKey    string
 	showPreview   bool
 	showHelp      bool

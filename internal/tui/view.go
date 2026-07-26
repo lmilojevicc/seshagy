@@ -976,7 +976,9 @@ func (m Model) renderPreviewPane(width, height int) string {
 		title = "Preview · " + item.DisplayName()
 	}
 	content := m.preview
-	if content == "" {
+	if m.previewError != "" {
+		content = s.danger.Render(m.previewError)
+	} else if content == "" {
 		content = s.muted.Render("preview loading…")
 	}
 	lines := []string{}
