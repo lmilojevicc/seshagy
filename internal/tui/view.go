@@ -49,7 +49,7 @@ func (m Model) View() string {
 func (m Model) renderNormalSurface() string {
 	spec := m.layoutSpec()
 	view := m.projectLayout(spec.needs)
-	theme := defaultRenderTheme{styles: m.styles, icons: m.config.IconSet()}
+	theme := layoutRenderTheme{styles: m.styles, icons: m.config.IconSet()}
 	footer := m.renderShellFooter(view.Actions)
 	view.Frame.ContentHeight = max(1, m.height-lipgloss.Height(footer))
 	dashboard := spec.render(view, theme)
@@ -355,10 +355,7 @@ func isTailPreviewKind(kind sessionmgr.Kind) bool {
 func (m Model) renderShellFooter(actions actionsView) string {
 	footerWidth := safeWidth(m.width)
 	helpTile := renderDefaultActionsTile(actions, m.styles, footerWidth)
-	popupSuppressed := m.config.TUI.InputStyle == appconfig.InputStylePopup &&
-		(m.width < 34 || m.height < 5)
-	if (m.inputMode == modeSearch || m.inputMode == modeRename) &&
-		(m.config.TUI.InputStyle == appconfig.InputStyleCmdline || popupSuppressed) {
+	if m.inlineInputActive() {
 		inputTile := m.renderInlineInputTile()
 		if m.height > 0 && m.height < 5 {
 			return inputTile

@@ -9,9 +9,9 @@ import (
 	"github.com/lmilojevicc/seshagy/internal/sessionmgr"
 )
 
-// defaultRenderTheme is the immutable presentation input used by the default
-// dashboard composition. It contains no controller or backend behavior.
-type defaultRenderTheme struct {
+// layoutRenderTheme is the immutable presentation input used by layout
+// compositions. It contains no controller or backend behavior.
+type layoutRenderTheme struct {
 	styles styles
 	icons  sessionmgr.IconSet
 }
@@ -23,7 +23,9 @@ type renderedDashboard struct {
 
 // renderDefault composes the current default dashboard from value-only state.
 // The shared shell renders Actions/TextEntry and joins the final frame.
-func renderDefault(view layoutView, theme defaultRenderTheme) renderedDashboard {
+var _ renderLayout = renderDefault
+
+func renderDefault(view layoutView, theme layoutRenderTheme) renderedDashboard {
 	header := renderDefaultHeader(view, theme)
 	bodyHeight := max(1, view.Frame.ContentHeight-lipgloss.Height(header))
 	return renderedDashboard{
@@ -32,7 +34,7 @@ func renderDefault(view layoutView, theme defaultRenderTheme) renderedDashboard 
 	}
 }
 
-func renderDefaultHeader(view layoutView, theme defaultRenderTheme) string {
+func renderDefaultHeader(view layoutView, theme layoutRenderTheme) string {
 	usableW := safeWidth(view.Frame.Width)
 	if view.Overview == nil || view.Overview.Items == 0 || view.Frame.Height < 14 {
 		return renderDefaultSourcesTile(view.Sources, theme.styles, usableW)
@@ -172,7 +174,7 @@ func defaultTopRowWidths(
 	sources sourcesView,
 	usableW int,
 	stats overviewStats,
-	theme defaultRenderTheme,
+	theme layoutRenderTheme,
 ) (sourcesW, agentW, workspaceW int, ok bool) {
 	const gap = 1
 	workspaceCompact := clampVal(22, 16, usableW/6)
@@ -283,7 +285,7 @@ func defaultAgentChipRowFitted(
 	return strings.Join(parts, sep)
 }
 
-func renderDefaultBody(view layoutView, theme defaultRenderTheme, height int) string {
+func renderDefaultBody(view layoutView, theme layoutRenderTheme, height int) string {
 	usableW := safeWidth(view.Frame.Width)
 	gap := 2
 	if view.Preview == nil || view.Frame.Width < previewMinWidth {
@@ -308,7 +310,7 @@ func renderDefaultBody(view layoutView, theme defaultRenderTheme, height int) st
 
 func renderDefaultCollection(
 	view layoutView,
-	theme defaultRenderTheme,
+	theme layoutRenderTheme,
 	width, height int,
 ) string {
 	s := theme.styles
@@ -406,7 +408,7 @@ func defaultSelectedRow(rows []rowView) int {
 	return 0
 }
 
-func renderDefaultRow(row rowView, width int, theme defaultRenderTheme) string {
+func renderDefaultRow(row rowView, width int, theme layoutRenderTheme) string {
 	s := theme.styles
 	prefix := "  "
 	if row.Selected {
@@ -421,7 +423,7 @@ func renderDefaultRow(row rowView, width int, theme defaultRenderTheme) string {
 	return line
 }
 
-func defaultRowParts(row rowView, theme defaultRenderTheme) (string, string) {
+func defaultRowParts(row rowView, theme layoutRenderTheme) (string, string) {
 	s := theme.styles
 	switch row.Kind {
 	case rowKind(sessionmgr.KindSession):
@@ -505,7 +507,7 @@ func renderDefaultAgentIndicator(
 
 func renderDefaultRightPane(
 	view layoutView,
-	theme defaultRenderTheme,
+	theme layoutRenderTheme,
 	width, height int,
 ) string {
 	const (
@@ -526,7 +528,7 @@ func renderDefaultRightPane(
 
 func renderDefaultDetails(
 	view *detailsView,
-	theme defaultRenderTheme,
+	theme layoutRenderTheme,
 	width, height int,
 ) string {
 	title := "Details"
@@ -547,7 +549,7 @@ func renderDefaultDetails(
 	)
 }
 
-func defaultDetailLines(view *detailsView, theme defaultRenderTheme) []string {
+func defaultDetailLines(view *detailsView, theme layoutRenderTheme) []string {
 	s := theme.styles
 	if view == nil || view.State != detailsReady {
 		return []string{s.muted.Render("select an item")}
@@ -598,7 +600,7 @@ func renderDefaultDetailIndicator(s styles, field detailFieldView) string {
 
 func renderDefaultPreview(
 	view *previewView,
-	theme defaultRenderTheme,
+	theme layoutRenderTheme,
 	width, height int,
 ) string {
 	s := theme.styles

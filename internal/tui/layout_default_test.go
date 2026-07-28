@@ -16,8 +16,8 @@ func defaultTestView(m Model) layoutView {
 	return m.projectLayout(layoutNeeds{Overview: true, Details: true, Preview: true})
 }
 
-func defaultTestTheme(m Model) defaultRenderTheme {
-	return defaultRenderTheme{styles: m.styles, icons: m.config.IconSet()}
+func defaultTestTheme(m Model) layoutRenderTheme {
+	return layoutRenderTheme{styles: m.styles, icons: m.config.IconSet()}
 }
 
 func defaultTestDetails(m Model, item sessionmgr.Item) *detailsView {

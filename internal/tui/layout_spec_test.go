@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +14,20 @@ import (
 
 var noOptionalTestLayout = layoutSpec{
 	render: renderDefault,
+}
+
+type countingPreviewMux struct {
+	sessionmgr.Multiplexer
+	captures int
+}
+
+func (m *countingPreviewMux) CaptureSession(
+	context.Context,
+	string,
+	int,
+) (string, error) {
+	m.captures++
+	return "captured preview", nil
 }
 
 func TestDefaultLayoutSpec(t *testing.T) {
@@ -170,6 +185,43 @@ func TestLayoutNeedsDoNotGateSharedControllerBehavior(t *testing.T) {
 	}
 }
 
+func TestLayoutNeedsGatePreviewCaptureThroughWindowSizeUpdate(t *testing.T) {
+	for _, tt := range []struct {
+		name        string
+		layout      layoutSpec
+		wantCommand bool
+		wantCapture int
+	}{
+		{name: "default", layout: defaultLayout, wantCommand: true, wantCapture: 1},
+		{name: "no optional", layout: noOptionalTestLayout},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			mux := &countingPreviewMux{Multiplexer: sessionmgr.NewNoopBackend()}
+			m := New(WithConfig(appconfig.Default()), WithMultiplexer(mux))
+			m.layout = tt.layout
+			m.loading = false
+			m.source = sessionmgr.ModeSessions
+			m.items = []sessionmgr.Item{{
+				Kind: sessionmgr.KindSession,
+				Name: "demo",
+			}}
+
+			_, cmd := m.Update(tea.WindowSizeMsg{Width: 120, Height: 32})
+			if (cmd != nil) != tt.wantCommand {
+				t.Fatalf("WindowSize command present = %v, want %v", cmd != nil, tt.wantCommand)
+			}
+			if cmd != nil {
+				if msg := cmd(); msg == nil {
+					t.Fatal("preview command returned nil message")
+				}
+			}
+			if mux.captures != tt.wantCapture {
+				t.Fatalf("CaptureSession calls = %d, want %d", mux.captures, tt.wantCapture)
+			}
+		})
+	}
+}
+
 func TestActiveModeAllRefreshDoesNotRequireOverview(t *testing.T) {
 	m := New(
 		WithConfig(appconfig.Default()),
@@ -192,7 +244,7 @@ func TestActiveModeAllRefreshDoesNotRequireOverview(t *testing.T) {
 func TestLayoutRenderDispatchUsesActiveSpecAndDefaultFallback(t *testing.T) {
 	called := 0
 	custom := layoutSpec{
-		render: func(view layoutView, _ defaultRenderTheme) renderedDashboard {
+		render: func(view layoutView, _ layoutRenderTheme) renderedDashboard {
 			called++
 			return renderedDashboard{Header: "custom-header", Body: "custom-body"}
 		},

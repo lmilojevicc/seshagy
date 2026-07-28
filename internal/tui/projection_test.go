@@ -600,6 +600,33 @@ func commonActionHints(activate bool) []actionHintView {
 	}
 }
 
+func TestLayoutRenderThemeContainsOnlyApprovedPresentationFields(t *testing.T) {
+	themeType := reflect.TypeOf(layoutRenderTheme{})
+	want := []struct {
+		name string
+		typ  reflect.Type
+	}{
+		{name: "styles", typ: reflect.TypeOf(styles{})},
+		{name: "icons", typ: reflect.TypeOf(sessionmgr.IconSet{})},
+	}
+	if themeType.NumField() != len(want) {
+		t.Fatalf("layoutRenderTheme has %d fields, want %d", themeType.NumField(), len(want))
+	}
+	for i, fieldWant := range want {
+		field := themeType.Field(i)
+		if field.Name != fieldWant.name || field.Type != fieldWant.typ {
+			t.Fatalf(
+				"layoutRenderTheme field %d = %s %v, want %s %v",
+				i,
+				field.Name,
+				field.Type,
+				fieldWant.name,
+				fieldWant.typ,
+			)
+		}
+	}
+}
+
 func TestLayoutProjectionTypesExcludeControllerBackendAndMutableSurfaces(t *testing.T) {
 	forbidden := map[reflect.Type]string{
 		reflect.TypeOf(Model{}):              "Model",

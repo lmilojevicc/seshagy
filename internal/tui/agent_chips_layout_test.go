@@ -311,7 +311,7 @@ func TestTopRowWidthsRebalance(t *testing.T) {
 				defaultTestView(m).Sources,
 				usableW,
 				stats,
-				defaultRenderTheme{styles: m.styles, icons: icons},
+				layoutRenderTheme{styles: m.styles, icons: icons},
 			)
 			if !ok {
 				t.Fatalf("w=%d: expected three-tile layout, got collapse", width)
@@ -367,7 +367,7 @@ func TestTopRowWidthsTextModeFullLabelsAtWideWidth(t *testing.T) {
 		defaultTestView(m).Sources,
 		usableW,
 		stats,
-		defaultRenderTheme{styles: m.styles, icons: icons},
+		layoutRenderTheme{styles: m.styles, icons: icons},
 	)
 	if !ok {
 		t.Fatalf("w=120 text: expected three-tile layout, got collapse")
@@ -411,7 +411,7 @@ func TestTopRowWidthsCollapseThresholdUnchanged(t *testing.T) {
 					defaultTestView(m).Sources,
 					safeWidth(width),
 					stats,
-					defaultRenderTheme{styles: m.styles, icons: icons},
+					layoutRenderTheme{styles: m.styles, icons: icons},
 				); ok {
 					t.Fatalf("%s w=%d: expected collapse, got three-tile layout", mode, width)
 				}

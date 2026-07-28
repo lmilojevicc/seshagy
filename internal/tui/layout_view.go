@@ -231,7 +231,7 @@ type layoutNeeds struct {
 	Preview  bool
 }
 
-type renderLayout func(layoutView, defaultRenderTheme) renderedDashboard
+type renderLayout func(layoutView, layoutRenderTheme) renderedDashboard
 
 type layoutSpec struct {
 	render renderLayout
