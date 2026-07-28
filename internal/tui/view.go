@@ -47,11 +47,12 @@ func (m Model) View() string {
 }
 
 func (m Model) renderNormalSurface() string {
-	view := m.projectLayout(layoutNeeds{Overview: true, Details: true, Preview: true})
+	spec := m.layoutSpec()
+	view := m.projectLayout(spec.needs)
 	theme := defaultRenderTheme{styles: m.styles, icons: m.config.IconSet()}
 	footer := m.renderShellFooter(view.Actions)
 	view.Frame.ContentHeight = max(1, m.height-lipgloss.Height(footer))
-	dashboard := renderDefault(view, theme)
+	dashboard := spec.render(view, theme)
 	if m.inlineInputActive() {
 		inputTile := m.renderInlineInputTile()
 		if m.height == 1 {

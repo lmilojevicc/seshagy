@@ -230,3 +230,19 @@ type layoutNeeds struct {
 	Details  bool
 	Preview  bool
 }
+
+type renderLayout func(layoutView, defaultRenderTheme) renderedDashboard
+
+type layoutSpec struct {
+	render renderLayout
+	needs  layoutNeeds
+}
+
+var defaultLayout = layoutSpec{
+	render: renderDefault,
+	needs: layoutNeeds{
+		Overview: true,
+		Details:  true,
+		Preview:  true,
+	},
+}

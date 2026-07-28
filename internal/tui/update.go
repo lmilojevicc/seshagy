@@ -62,9 +62,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.cacheFresh(m.source) {
 			// Even when the active source is fresh, keep the ModeAll cache warm
-			// so the overview hero counts stay current on other tabs.
+			// when the active layout requests Overview on another tab.
 			cmds := []tea.Cmd{tea.Tick(interval, func(t time.Time) tea.Msg { return tickMsg(t) })}
-			if !m.cacheFresh(sessionmgr.ModeAll) {
+			if m.needsOverviewWarm() && !m.cacheFresh(sessionmgr.ModeAll) {
 				var mc tea.Cmd
 				m, mc = m.beginRefresh(sessionmgr.ModeAll, false)
 				if mc != nil {
@@ -79,7 +79,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmd,
 			tea.Tick(interval, func(t time.Time) tea.Msg { return tickMsg(t) }),
 		}
-		if !m.cacheFresh(sessionmgr.ModeAll) {
+		if m.needsOverviewWarm() && !m.cacheFresh(sessionmgr.ModeAll) {
 			var mc tea.Cmd
 			m, mc = m.beginRefresh(sessionmgr.ModeAll, false)
 			if mc != nil {
