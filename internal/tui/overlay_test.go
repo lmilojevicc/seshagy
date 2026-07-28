@@ -123,7 +123,7 @@ func TestFooterCmdlineShowsTextInputInTile(t *testing.T) {
 	// HELP tile (3 lines). The textinput sits on the tile's content line.
 	m.inputMode = modeSearch
 	m.searchInput.SetValue("my-project")
-	footer := sessionmgr.StripANSI(m.renderFooter())
+	footer := sessionmgr.StripANSI(m.renderShellFooter(m.projectActions()))
 	lines := strings.Split(footer, "\n")
 	if len(lines) != 6 {
 		t.Fatalf("footer lines = %d, want 6 (SEARCH tile + HELP tile)\n%s", len(lines), footer)
@@ -142,7 +142,7 @@ func TestFooterCmdlineShowsTextInputInTile(t *testing.T) {
 	m.inputMode = modeRename
 	m.renameFrom = "old-name"
 	m.renameInput.SetValue("new-name")
-	footer = sessionmgr.StripANSI(m.renderFooter())
+	footer = sessionmgr.StripANSI(m.renderShellFooter(m.projectActions()))
 	lines = strings.Split(footer, "\n")
 	if len(lines) != 6 {
 		t.Fatalf(
@@ -174,7 +174,7 @@ func TestInputLinePreservesPlaceholderUnicodeScrollingAndCursorBlink(t *testing.
 	m := newTestModel(t)
 	m.inputMode = modeSearch
 
-	placeholder := sessionmgr.StripANSI(m.renderInputLine(40))
+	placeholder := sessionmgr.StripANSI(renderInputOnly(m.projectInputChrome(40)))
 	if !strings.Contains(placeholder, "/ filter sessions, directories") {
 		t.Fatalf("search placeholder changed: %q", placeholder)
 	}
@@ -182,7 +182,7 @@ func TestInputLinePreservesPlaceholderUnicodeScrollingAndCursorBlink(t *testing.
 	m.searchInput.SetValue("αβ你好omega")
 	m.searchInput.SetCursor(4)
 	m.searchInput.Focus()
-	unicodeRaw := m.renderInputLine(40)
+	unicodeRaw := renderInputOnly(m.projectInputChrome(40))
 	unicodeLine := sessionmgr.StripANSI(unicodeRaw)
 	if !strings.Contains(unicodeLine, "αβ你好omega") {
 		t.Fatalf("Unicode input changed: %q", unicodeLine)
@@ -200,7 +200,7 @@ func TestInputLinePreservesPlaceholderUnicodeScrollingAndCursorBlink(t *testing.
 	m.searchInput.SetValue("prefix-" + strings.Repeat("x", 40) + "-tail")
 	m.searchInput.CursorEnd()
 	m.searchInput.Focus()
-	longLine := sessionmgr.StripANSI(m.renderInputLine(18))
+	longLine := sessionmgr.StripANSI(renderInputOnly(m.projectInputChrome(18)))
 	if want := "/ xxxxxxxxxxxxxxx…"; longLine != want {
 		t.Fatalf("long input viewport = %q, want current clipped output %q", longLine, want)
 	}
@@ -211,9 +211,9 @@ func TestInputLinePreservesPlaceholderUnicodeScrollingAndCursorBlink(t *testing.
 	m.searchInput.SetValue("abc")
 	m.searchInput.SetCursor(1)
 	m.searchInput.Cursor.Blink = false
-	visibleCursor := m.renderInputLine(20)
+	visibleCursor := renderInputOnly(m.projectInputChrome(20))
 	m.searchInput.Cursor.Blink = true
-	hiddenCursor := m.renderInputLine(20)
+	hiddenCursor := renderInputOnly(m.projectInputChrome(20))
 	if visibleCursor == hiddenCursor {
 		t.Fatalf("cursor blink states rendered identically: %q", visibleCursor)
 	}
@@ -360,7 +360,7 @@ func TestViewPreservesInlineInputAtHeightBoundaries(t *testing.T) {
 					view := m.View()
 					clean := sessionmgr.StripANSI(view)
 					if height == 1 {
-						want := m.renderInputLine(safeWidth(m.width))
+						want := renderInputOnly(m.projectInputChrome(safeWidth(m.width)))
 						if view != want {
 							t.Fatalf(
 								"height-one view differs from input line: got=%q want=%q",
@@ -406,7 +406,7 @@ func TestPopupStyleDoesNotRenderDuplicateInlineInputAtPopupSize(t *testing.T) {
 	m.inputMode = modeSearch
 	m.searchInput.SetValue("popup-query")
 
-	footer := sessionmgr.StripANSI(m.renderFooter())
+	footer := sessionmgr.StripANSI(m.renderShellFooter(m.projectActions()))
 	if strings.Contains(footer, "SEARCH") || strings.Contains(footer, "popup-query") {
 		t.Fatalf("popup-capable footer must not duplicate the SEARCH input\n%s", footer)
 	}

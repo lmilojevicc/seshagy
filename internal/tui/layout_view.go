@@ -15,19 +15,21 @@ type layoutView struct {
 }
 
 type frameView struct {
-	Width  int
-	Height int
+	Width         int
+	Height        int
+	ContentHeight int
 }
 
 type sourceID string
 
 type sourcesView struct {
-	Entries      []sourceEntryView
-	VisibleCount int
-	TotalCount   int
-	Loading      bool
-	Refreshing   bool
-	SpinnerFrame int
+	Entries        []sourceEntryView
+	VisibleCount   int
+	TotalCount     int
+	ShowTotalCount bool
+	Loading        bool
+	Refreshing     bool
+	SpinnerFrame   int
 }
 
 type sourceEntryView struct {
@@ -53,6 +55,7 @@ const (
 type collectionView struct {
 	Source           sourceID
 	Title            string
+	SessionPlural    string
 	Rows             []rowView
 	State            collectionState
 	VisibleCount     int
@@ -95,13 +98,11 @@ type agentRowView struct {
 	DisplayName string
 	State       string
 	Indicator   indicatorView
-	Activity    string
 	Location    string
 }
 
 type directoryRowView struct {
-	Source sourceID
-	Path   string
+	Path string
 }
 
 type rowView struct {
@@ -122,18 +123,15 @@ const (
 )
 
 type searchView struct {
-	Mode        searchModeView
-	Query       string
-	Editing     bool
-	Prompt      string
-	Placeholder string
-	Prefix      string
+	Mode    searchModeView
+	Query   string
+	Editing bool
 }
 
 type actionsView struct {
 	Expanded    bool
-	PrefixArmed bool
 	Prefix      string
+	PrefixArmed bool
 	Hints       []actionHintView
 }
 
@@ -148,7 +146,6 @@ type overviewState uint8
 const (
 	overviewLoading overviewState = iota
 	overviewEmpty
-	overviewWarning
 	overviewError
 	overviewReady
 )
@@ -163,6 +160,7 @@ type overviewAgentCountsView struct {
 
 type overviewView struct {
 	State    overviewState
+	Items    int
 	Sessions int
 	Agents   overviewAgentCountsView
 	Warning  string
@@ -176,10 +174,21 @@ const (
 	detailsReady
 )
 
+type detailIndicatorKind uint8
+
+const (
+	detailIndicatorNone detailIndicatorKind = iota
+	detailIndicatorAttached
+	detailIndicatorAgentState
+)
+
 type detailFieldView struct {
-	Label     string
-	Value     string
-	Indicator indicatorView
+	Label         string
+	Value         string
+	Indicator     indicatorView
+	IndicatorKind detailIndicatorKind
+	Attached      bool
+	AgentState    string
 }
 
 type detailsView struct {
@@ -206,6 +215,7 @@ const (
 
 type previewView struct {
 	State   previewState
+	Pending bool
 	Title   string
 	Content string
 	Error   string

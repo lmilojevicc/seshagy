@@ -84,7 +84,9 @@ func TestPreviewDisabledOmitsSideColumnAndCapture(t *testing.T) {
 	}
 
 	enabled := newModel(baseConfig)
-	enabledBody := sessionmgr.StripANSI(enabled.renderBody(20))
+	enabledBody := sessionmgr.StripANSI(
+		renderDefaultBody(defaultTestView(enabled), defaultTestTheme(enabled), 20),
+	)
 	for _, want := range []string{"demo · tmux session", "Preview · demo"} {
 		if !strings.Contains(enabledBody, want) {
 			t.Fatalf("preview-enabled body missing %q\n%s", want, enabledBody)
@@ -106,8 +108,13 @@ func TestPreviewDisabledOmitsSideColumnAndCapture(t *testing.T) {
 		}()},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			body := tt.model.renderBody(20)
-			want := tt.model.renderListPane(safeWidth(tt.model.width), 20)
+			body := renderDefaultBody(defaultTestView(tt.model), defaultTestTheme(tt.model), 20)
+			want := renderDefaultCollection(
+				defaultTestView(tt.model),
+				defaultTestTheme(tt.model),
+				safeWidth(tt.model.width),
+				20,
+			)
 			if body != want {
 				t.Fatalf(
 					"preview-disabled body differs from full-width list pane\ngot:\n%s\nwant:\n%s",
@@ -419,7 +426,9 @@ func TestConfiguredSourceOrderAndDefault(t *testing.T) {
 	if m.source != sessionmgr.ModeZoxide {
 		t.Fatalf("New() source = %v, want configured zoxide", m.source)
 	}
-	out := sessionmgr.StripANSI(m.renderSourcesTile(safeWidth(m.width)))
+	out := sessionmgr.StripANSI(
+		renderDefaultSourcesTile(defaultTestView(m).Sources, m.styles, safeWidth(m.width)),
+	)
 	for _, want := range []string{"1 Sessions", "2 Zoxide", "3 fd", "4 All"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("configured tabs missing %q\n%s", want, out)
@@ -462,7 +471,9 @@ func TestRenderTabsChipStyle(t *testing.T) {
 		t.Fatal("chipIdle must NOT have Reverse")
 	}
 
-	clean := sessionmgr.StripANSI(m.renderSourcesTile(safeWidth(m.width)))
+	clean := sessionmgr.StripANSI(
+		renderDefaultSourcesTile(defaultTestView(m).Sources, m.styles, safeWidth(m.width)),
+	)
 
 	// Pipe separator present.
 	if !strings.Contains(clean, "|") {
@@ -486,7 +497,9 @@ func TestSourcesCountSpinnerWhenInflight(t *testing.T) {
 	m.loading = false
 	m.inflightRefresh = map[sessionmgr.SourceMode]uint64{}
 
-	idle := sessionmgr.StripANSI(m.renderSourcesTile(safeWidth(m.width)))
+	idle := sessionmgr.StripANSI(
+		renderDefaultSourcesTile(defaultTestView(m).Sources, m.styles, safeWidth(m.width)),
+	)
 	for _, frame := range spinnerFrames {
 		if strings.ContainsRune(idle, frame) {
 			t.Fatalf("idle SOURCES tile contains spinner %q\n%s", frame, idle)
@@ -494,14 +507,18 @@ func TestSourcesCountSpinnerWhenInflight(t *testing.T) {
 	}
 
 	m.inflightRefresh[m.source] = 1
-	inflight := sessionmgr.StripANSI(m.renderSourcesTile(safeWidth(m.width)))
+	inflight := sessionmgr.StripANSI(
+		renderDefaultSourcesTile(defaultTestView(m).Sources, m.styles, safeWidth(m.width)),
+	)
 	if !strings.ContainsRune(inflight, []rune(spinnerFrames)[0]) {
 		t.Fatalf("inflight SOURCES tile missing spinner\n%s", inflight)
 	}
 
 	m.inflightRefresh = map[sessionmgr.SourceMode]uint64{}
 	m.loading = true
-	loading := sessionmgr.StripANSI(m.renderSourcesTile(safeWidth(m.width)))
+	loading := sessionmgr.StripANSI(
+		renderDefaultSourcesTile(defaultTestView(m).Sources, m.styles, safeWidth(m.width)),
+	)
 	if !strings.ContainsRune(loading, []rune(spinnerFrames)[0]) {
 		t.Fatalf("loading SOURCES tile missing spinner\n%s", loading)
 	}
@@ -531,7 +548,9 @@ func TestRenderTabsChipQueryCount(t *testing.T) {
 		{Kind: sessionmgr.KindSession, Name: "app"},
 	}
 	m.query = "ap"
-	clean := sessionmgr.StripANSI(m.renderSourcesTile(safeWidth(m.width)))
+	clean := sessionmgr.StripANSI(
+		renderDefaultSourcesTile(defaultTestView(m).Sources, m.styles, safeWidth(m.width)),
+	)
 	// 2 matches (api, app) out of 3 total.
 	if !strings.Contains(clean, "2/3") {
 		t.Fatalf("chip row missing filtered count '2/3'\n%s", clean)
@@ -547,7 +566,11 @@ func TestRenderTabsChipFitsNarrowWidth(t *testing.T) {
 			model, _ := m.Update(tea.WindowSizeMsg{Width: width, Height: 24})
 			m = model.(Model)
 			m.items = make([]sessionmgr.Item, 100)
-			line := m.renderSourcesTile(safeWidth(m.width))
+			line := renderDefaultSourcesTile(
+				defaultTestView(m).Sources,
+				m.styles,
+				safeWidth(m.width),
+			)
 			clean := sessionmgr.StripANSI(line)
 			if w := lipgloss.Width(clean); w > safeWidth(width) {
 				t.Fatalf(
@@ -604,7 +627,14 @@ func TestConfiguredASCIIIconsRenderInTUI(t *testing.T) {
 
 func TestDefaultIconsRenderWithConfiguredDisplaySpacing(t *testing.T) {
 	m := newTestModel(t)
-	sessionPrimary, _ := m.rowParts(sessionmgr.Item{Kind: sessionmgr.KindSession, Name: "demo"})
+	sessionPrimary, _ := defaultRowParts(
+		m.projectRow(
+			sessionmgr.Item{Kind: sessionmgr.KindSession, Name: "demo"},
+			false,
+			time.Now(),
+		),
+		defaultTestTheme(m),
+	)
 	if got := sessionmgr.StripANSI(sessionPrimary); got != sessionmgr.IconSession+" ◌ demo" {
 		t.Fatalf("default session icon spacing = %q, want one space after icon", got)
 	}
@@ -623,7 +653,7 @@ func TestCustomTmuxStateIconInList(t *testing.T) {
 		Name:     "demo",
 		Attached: true,
 	}
-	primary, _ := m.rowParts(item)
+	primary, _ := defaultRowParts(m.projectRow(item, false, time.Now()), defaultTestTheme(m))
 	if got := sessionmgr.StripANSI(primary); !strings.Contains(got, "★ demo") {
 		t.Fatalf("custom attached icon list row = %q, want ★ demo", got)
 	}
@@ -636,12 +666,14 @@ func TestTmuxStateModeNoneHidesListPrefix(t *testing.T) {
 	m.config = cfg
 
 	item := sessionmgr.Item{Kind: sessionmgr.KindSession, Name: "demo", Attached: true}
-	primary, _ := m.rowParts(item)
+	primary, _ := defaultRowParts(m.projectRow(item, false, time.Now()), defaultTestTheme(m))
 	if got := sessionmgr.StripANSI(primary); got != sessionmgr.IconSession+" demo" {
 		t.Fatalf("tmux_state=none list row = %q, want session icon + name only", got)
 	}
 
-	detail := sessionmgr.StripANSI(strings.Join(m.detailLines(item), "\n"))
+	detail := sessionmgr.StripANSI(
+		strings.Join(defaultDetailLines(defaultTestDetails(m, item), defaultTestTheme(m)), "\n"),
+	)
 	if !strings.Contains(detail, "attached  yes") {
 		t.Fatalf("tmux_state=none detail should show plain yes\n%s", detail)
 	}
@@ -663,7 +695,7 @@ func TestCustomTmuxStateLabelInTextMode(t *testing.T) {
 		Name:     "demo",
 		Attached: true,
 	}
-	primary, _ := m.rowParts(item)
+	primary, _ := defaultRowParts(m.projectRow(item, false, time.Now()), defaultTestTheme(m))
 	if got := sessionmgr.StripANSI(primary); !strings.Contains(got, "[live] demo") {
 		t.Fatalf("custom attached label list row = %q, want [live] demo", got)
 	}
@@ -680,7 +712,7 @@ func TestAgentStateTextModeShowsLabelInList(t *testing.T) {
 		AgentName:  "pi",
 		AgentState: sessionmgr.AgentWorking,
 	}
-	primary, _ := m.rowParts(item)
+	primary, _ := defaultRowParts(m.projectRow(item, false, time.Now()), defaultTestTheme(m))
 	got := sessionmgr.StripANSI(primary)
 	if !strings.Contains(got, "[working]") {
 		t.Fatalf("text mode agent row = %q, want [working] label", got)
@@ -700,7 +732,7 @@ func TestAgentStateChipsTextModeShowsLabels(t *testing.T) {
 	stats := overviewStats{
 		agents: map[sessionmgr.AgentState]int{sessionmgr.AgentWorking: 2},
 	}
-	out := sessionmgr.StripANSI(m.agentChips(icons, stats, 80))
+	out := sessionmgr.StripANSI(defaultAgentChips(m.styles, icons, stats, 80))
 	for _, label := range []string{"idle", "working", "blocked", "done", "unknown"} {
 		if !strings.Contains(out, label) {
 			t.Fatalf("text mode agent chips missing label %q\n%s", label, out)
@@ -725,7 +757,9 @@ func TestAgentStateDetailTextModeShowsLabelOnly(t *testing.T) {
 		AgentState: sessionmgr.AgentWorking,
 		Location:   "demo:1",
 	}
-	detail := sessionmgr.StripANSI(strings.Join(m.detailLines(item), "\n"))
+	detail := sessionmgr.StripANSI(
+		strings.Join(defaultDetailLines(defaultTestDetails(m, item), defaultTestTheme(m)), "\n"),
+	)
 	if !strings.Contains(detail, "working") {
 		t.Fatalf("text mode agent detail missing state label\n%s", detail)
 	}
@@ -888,7 +922,7 @@ func TestStartupSetupPromptSavesTypeFirstChoice(t *testing.T) {
 		t.Fatalf("startupSetupCmd after saved choice = %#v, %v", afterMsg, ok)
 	}
 	m.width = 100
-	out := sessionmgr.StripANSI(m.renderFooter())
+	out := sessionmgr.StripANSI(m.renderShellFooter(m.projectActions()))
 	// type-first mode is reflected via its help keys (not a status indicator).
 	if !strings.Contains(out, "type filter") {
 		t.Fatalf("footer should show type-first help after setup\n%s", out)
@@ -1101,7 +1135,7 @@ func TestShortHeightDoesNotTruncateFooter(t *testing.T) {
 				t.Fatalf("View() height = %d, terminal height = %d", got, m.height)
 			}
 			lines := strings.Split(sessionmgr.StripANSI(view), "\n")
-			footerH := lipgloss.Height(m.renderFooter())
+			footerH := lipgloss.Height(m.renderShellFooter(m.projectActions()))
 			if len(lines) < footerH {
 				t.Fatalf("View() has %d lines, footer needs %d", len(lines), footerH)
 			}
@@ -1136,11 +1170,13 @@ func TestShortHeightRightPanePreservesPreviewFloorAndCapsDetail(t *testing.T) {
 			m.preview = "one\ntwo\nthree\nfour"
 
 			bodyH := terminalH - lipgloss.Height(
-				m.renderTopRow(),
+				renderDefaultHeader(defaultTestView(m), defaultTestTheme(m)),
 			) - lipgloss.Height(
-				m.renderFooter(),
+				m.renderShellFooter(m.projectActions()),
 			)
-			right := sessionmgr.StripANSI(m.renderRightPane(56, bodyH))
+			right := sessionmgr.StripANSI(
+				renderDefaultRightPane(defaultTestView(m), defaultTestTheme(m), 56, bodyH),
+			)
 			lines := strings.Split(right, "\n")
 			previewTop := -1
 			for i, line := range lines {
@@ -1354,13 +1390,13 @@ func TestPrefixBadgeShownWhenArmed(t *testing.T) {
 	m.width = 180
 	m.config.TypeFirst.Enabled = true
 
-	without := sessionmgr.StripANSI(m.renderFooter())
+	without := sessionmgr.StripANSI(m.renderShellFooter(m.projectActions()))
 	if strings.Contains(without, "PREFIX") {
 		t.Fatalf("unarmed HELP tile contains PREFIX badge\n%s", without)
 	}
 
 	m.prefixArmed = true
-	with := sessionmgr.StripANSI(m.renderFooter())
+	with := sessionmgr.StripANSI(m.renderShellFooter(m.projectActions()))
 	if !strings.Contains(with, "PREFIX") {
 		t.Fatalf("armed HELP tile missing PREFIX badge\n%s", with)
 	}
@@ -1376,7 +1412,12 @@ func TestListBottomBorderShowsFilterQuery(t *testing.T) {
 	}
 	m.query = "api"
 
-	lines := strings.Split(sessionmgr.StripANSI(m.renderListPane(60, 12)), "\n")
+	lines := strings.Split(
+		sessionmgr.StripANSI(
+			renderDefaultCollection(defaultTestView(m), defaultTestTheme(m), 60, 12),
+		),
+		"\n",
+	)
 	top, bottom := lines[0], lines[len(lines)-1]
 	if strings.Contains(top, "· api") {
 		t.Fatalf("type-first list title should not embed query: %q", top)
@@ -1386,7 +1427,12 @@ func TestListBottomBorderShowsFilterQuery(t *testing.T) {
 	}
 
 	m.inputMode = modeSearch
-	lines = strings.Split(sessionmgr.StripANSI(m.renderListPane(60, 12)), "\n")
+	lines = strings.Split(
+		sessionmgr.StripANSI(
+			renderDefaultCollection(defaultTestView(m), defaultTestTheme(m), 60, 12),
+		),
+		"\n",
+	)
 	bottom = lines[len(lines)-1]
 	if strings.Contains(bottom, "api") {
 		t.Fatalf("active search should not put query on bottom border: %q", bottom)
@@ -1404,7 +1450,12 @@ func TestClassicSearchDoesNotRenderQueryOnListBottomBorder(t *testing.T) {
 	}
 	m.query = "api"
 
-	lines := strings.Split(sessionmgr.StripANSI(m.renderListPane(60, 12)), "\n")
+	lines := strings.Split(
+		sessionmgr.StripANSI(
+			renderDefaultCollection(defaultTestView(m), defaultTestTheme(m), 60, 12),
+		),
+		"\n",
+	)
 	top, bottom := lines[0], lines[len(lines)-1]
 	if !strings.Contains(top, "1/2 match") {
 		t.Fatalf("classic search list title missing match count: %q", top)
@@ -1426,7 +1477,7 @@ func TestFooterIsHelpOnlyByDefault(t *testing.T) {
 	m.notify("loaded 1171 items", sevInfo)
 	m.showHelp = true
 
-	footer := m.renderFooter()
+	footer := m.renderShellFooter(m.projectActions())
 	clean := sessionmgr.StripANSI(footer)
 	lines := strings.Split(clean, "\n")
 	if len(lines) != 3 {
@@ -1463,7 +1514,7 @@ func TestFooterIsHelpOnlyByDefault(t *testing.T) {
 	m.config.TUI.InputStyle = appconfig.InputStyleCmdline
 	m.inputMode = modeSearch
 	m.searchInput.SetValue("proj")
-	cl := strings.Split(sessionmgr.StripANSI(m.renderFooter()), "\n")
+	cl := strings.Split(sessionmgr.StripANSI(m.renderShellFooter(m.projectActions())), "\n")
 	if len(cl) != 6 {
 		t.Fatalf(
 			"cmdline search footer should have SEARCH tile + HELP tile (6 lines), got %d\n%s",
@@ -1592,7 +1643,7 @@ func TestFooterHelpShowsSourceAndModeKeys(t *testing.T) {
 
 	// Default All tab: universal keys plus the sessions/all-only keys; the
 	// agents-only keys are omitted.
-	out := sessionmgr.StripANSI(m.renderFooter())
+	out := sessionmgr.StripANSI(m.renderShellFooter(m.projectActions()))
 	for _, want := range []string{"m mode", "r refresh", "R rename", "x kill", "y yazi", "p preview"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("All-tab footer should mention %q\n%s", want, out)
@@ -1606,7 +1657,7 @@ func TestFooterHelpShowsSourceAndModeKeys(t *testing.T) {
 
 	// Agents tab swaps in the agents-only keys and drops the sessions-only ones.
 	m.source = sessionmgr.ModeAgents
-	out = sessionmgr.StripANSI(m.renderFooter())
+	out = sessionmgr.StripANSI(m.renderShellFooter(m.projectActions()))
 	for _, want := range []string{"o this session", "s filter state", "R rename", "m mode", "r refresh"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("Agents-tab footer should mention %q\n%s", want, out)
@@ -1622,13 +1673,13 @@ func TestFooterHelpShowsSourceAndModeKeys(t *testing.T) {
 	m.source = sessionmgr.ModeAll
 	m.config.TypeFirst.Enabled = true
 	m.config.TypeFirst.Prefix = appconfig.DefaultPrefix
-	out = sessionmgr.StripANSI(m.renderFooter())
+	out = sessionmgr.StripANSI(m.renderShellFooter(m.projectActions()))
 	if !strings.Contains(out, "ctrl+x m mode") {
 		t.Fatalf("type-first footer should mention prefixed mode key\n%s", out)
 	}
 
 	m.prefixArmed = true
-	out = sessionmgr.StripANSI(m.renderFooter())
+	out = sessionmgr.StripANSI(m.renderShellFooter(m.projectActions()))
 	for _, want := range []string{"m mode", "r refresh", "x kill"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("prefix-armed footer should mention %q\n%s", want, out)
@@ -1666,7 +1717,9 @@ func TestRenderPreviewPaneBottomAnchoredForTmuxCaptureKinds(t *testing.T) {
 				Created:  time.Now(),
 			}}
 			m.preview = content
-			out := sessionmgr.StripANSI(m.renderPreviewPane(60, 8))
+			out := sessionmgr.StripANSI(
+				renderDefaultPreview(m.projectPreview(), defaultTestTheme(m), 60, 8),
+			)
 			if tt.wantLast && !strings.Contains(out, "line09") {
 				t.Fatalf("%s: preview should contain last line\n%s", tt.name, out)
 			}
@@ -1909,7 +1962,7 @@ func TestRowPartsItemNameIgnoresActiveTabColor(t *testing.T) {
 		m := newTestModel(t)
 		m.config = cfg
 		m.styles = stylesFromConfig(cfg) // propagate active_tab into styles
-		primary, _ := m.rowParts(item)
+		primary, _ := defaultRowParts(m.projectRow(item, false, time.Now()), defaultTestTheme(m))
 		return primary
 	}
 
@@ -1955,7 +2008,7 @@ func TestTmuxTermsByteIdenticalStrings(t *testing.T) {
 		Windows: 3,
 	}}
 	m.cursor = 0
-	detail := m.renderDetailPane(60, 10)
+	detail := renderDefaultDetails(m.projectDetails(time.Now()), defaultTestTheme(m), 60, 10)
 	clean := sessionmgr.StripANSI(detail)
 	if !strings.Contains(clean, "tmux session") {
 		t.Fatalf("session detail missing 'tmux session'\n%s", clean)
@@ -1967,7 +2020,7 @@ func TestTmuxTermsByteIdenticalStrings(t *testing.T) {
 	// Directory detail: "create/switch tmux session"
 	m.items = []sessionmgr.Item{{Kind: sessionmgr.KindFD, Path: "/tmp/foo"}}
 	m.cursor = 0
-	detail = m.renderDetailPane(60, 10)
+	detail = renderDefaultDetails(m.projectDetails(time.Now()), defaultTestTheme(m), 60, 10)
 	clean = sessionmgr.StripANSI(detail)
 	if !strings.Contains(clean, "create/switch tmux session") {
 		t.Fatalf("dir detail missing 'create/switch tmux session'\n%s", clean)
@@ -1978,7 +2031,7 @@ func TestTmuxTermsByteIdenticalStrings(t *testing.T) {
 		{Kind: sessionmgr.KindAgent, Name: "pi", PaneID: "%1", Session: "demo"},
 	}
 	m.cursor = 0
-	detail = m.renderDetailPane(60, 10)
+	detail = renderDefaultDetails(m.projectDetails(time.Now()), defaultTestTheme(m), 60, 10)
 	clean = sessionmgr.StripANSI(detail)
 	if !strings.Contains(clean, "session") {
 		t.Fatalf("agent detail missing 'session' key\n%s", clean)
@@ -1999,7 +2052,9 @@ func TestHerdrAgentsCollectionTitleUsesLabelThenOpaqueFallback(t *testing.T) {
 		Location:  "frontend",
 	}}
 
-	resolved := sessionmgr.StripANSI(m.renderListPane(70, 12))
+	resolved := sessionmgr.StripANSI(
+		renderDefaultCollection(defaultTestView(m), defaultTestTheme(m), 70, 12),
+	)
 	resolvedTitle := strings.Split(resolved, "\n")[0]
 	if !strings.Contains(resolvedTitle, "Agents (1 · frontend)") {
 		t.Fatalf("Agents collection title missing resolved workspace label\n%s", resolved)
@@ -2012,7 +2067,9 @@ func TestHerdrAgentsCollectionTitleUsesLabelThenOpaqueFallback(t *testing.T) {
 	}
 
 	m.items = nil
-	fallback := sessionmgr.StripANSI(m.renderListPane(70, 12))
+	fallback := sessionmgr.StripANSI(
+		renderDefaultCollection(defaultTestView(m), defaultTestTheme(m), 70, 12),
+	)
 	if !strings.Contains(
 		strings.Split(fallback, "\n")[0],
 		"Agents (0 · workspace-opaque-id)",
@@ -2040,7 +2097,7 @@ func TestHerdrTermsRenderedStrings(t *testing.T) {
 		Panes:   5,
 	}}
 	m.cursor = 0
-	detail := m.renderDetailPane(60, 10)
+	detail := renderDefaultDetails(m.projectDetails(time.Now()), defaultTestTheme(m), 60, 10)
 	clean := sessionmgr.StripANSI(detail)
 	if !strings.Contains(clean, "herdr workspace") {
 		t.Fatalf("session detail missing 'herdr workspace'\n%s", clean)
@@ -2075,7 +2132,7 @@ func TestHerdrAgentDetailShowsTabLabel(t *testing.T) {
 		TabLabel:  "logs",
 	}}
 	m.cursor = 0
-	detail := m.renderDetailPane(60, 12)
+	detail := renderDefaultDetails(m.projectDetails(time.Now()), defaultTestTheme(m), 60, 12)
 	clean := sessionmgr.StripANSI(detail)
 	if !strings.Contains(clean, "tab") || !strings.Contains(clean, "logs") {
 		t.Fatalf("agent detail missing tab label 'logs'\n%s", clean)
@@ -2105,7 +2162,7 @@ func TestSessionDetailShowsPanesAndTimestampsWhenSet(t *testing.T) {
 		Activity: time.Now().Add(-time.Hour),
 	}}
 	m.cursor = 0
-	detail := m.renderDetailPane(60, 14)
+	detail := renderDefaultDetails(m.projectDetails(time.Now()), defaultTestTheme(m), 60, 14)
 	clean := sessionmgr.StripANSI(detail)
 	for _, want := range []string{"panes", "activity", "created"} {
 		if !strings.Contains(clean, want) {
@@ -2129,7 +2186,7 @@ func TestSessionDetailHidesPanesAndTimestampsWhenZero(t *testing.T) {
 		// Panes, Activity, Created intentionally zero.
 	}}
 	m.cursor = 0
-	detail := m.renderDetailPane(60, 14)
+	detail := renderDefaultDetails(m.projectDetails(time.Now()), defaultTestTheme(m), 60, 14)
 	clean := sessionmgr.StripANSI(detail)
 	for _, unwanted := range []string{"panes", "activity", "created"} {
 		if strings.Contains(clean, unwanted) {
@@ -2314,7 +2371,9 @@ func TestListPreviewDetailTitlesOnBorder(t *testing.T) {
 	m.source = sessionmgr.ModeAll
 
 	// List: ModeAll summary lives on the top border line.
-	listOut := sessionmgr.StripANSI(m.renderListPane(60, 16))
+	listOut := sessionmgr.StripANSI(
+		renderDefaultCollection(defaultTestView(m), defaultTestTheme(m), 60, 16),
+	)
 	listTop := strings.Split(listOut, "\n")[0]
 	if !strings.HasPrefix(listTop, "╭") || !strings.HasSuffix(listTop, "╮") {
 		t.Fatalf("list top line is not a border edge: %q", listTop)
@@ -2324,7 +2383,9 @@ func TestListPreviewDetailTitlesOnBorder(t *testing.T) {
 	}
 
 	// Detail: name · kind on the border; body's first non-blank line is a kv.
-	detailOut := sessionmgr.StripANSI(m.renderDetailPane(60, 14))
+	detailOut := sessionmgr.StripANSI(
+		renderDefaultDetails(m.projectDetails(time.Now()), defaultTestTheme(m), 60, 14),
+	)
 	detailTop := strings.Split(detailOut, "\n")[0]
 	if !strings.HasPrefix(detailTop, "╭") {
 		t.Fatalf("detail top line is not a border edge: %q", detailTop)
@@ -2343,7 +2404,9 @@ func TestListPreviewDetailTitlesOnBorder(t *testing.T) {
 
 	// Preview: 'Preview · name' on the border.
 	m.preview = "hello world"
-	previewOut := sessionmgr.StripANSI(m.renderPreviewPane(60, 12))
+	previewOut := sessionmgr.StripANSI(
+		renderDefaultPreview(m.projectPreview(), defaultTestTheme(m), 60, 12),
+	)
 	previewTop := strings.Split(previewOut, "\n")[0]
 	if !strings.HasPrefix(previewTop, "╭") {
 		t.Fatalf("preview top line is not a border edge: %q", previewTop)
@@ -2398,9 +2461,9 @@ func TestPaneTitlesUsePerPaneColors(t *testing.T) {
 		"preview":  sgrPrefix(s.previewTitle),
 	}
 	outs := map[string]string{
-		"list":     m.renderListPane(60, 16),
-		"metadata": m.renderDetailPane(60, 14),
-		"preview":  m.renderPreviewPane(60, 12),
+		"list":     renderDefaultCollection(defaultTestView(m), defaultTestTheme(m), 60, 16),
+		"metadata": renderDefaultDetails(m.projectDetails(time.Now()), defaultTestTheme(m), 60, 14),
+		"preview":  renderDefaultPreview(m.projectPreview(), defaultTestTheme(m), 60, 12),
 	}
 	for _, pane := range []string{"list", "metadata", "preview"} {
 		top := strings.Split(outs[pane], "\n")[0]
@@ -2432,7 +2495,7 @@ func TestRenderTopRowShowsAllTiles(t *testing.T) {
 		}, fetchedAt: time.Now()},
 	}
 
-	header := m.renderTopRow()
+	header := renderDefaultHeader(defaultTestView(m), defaultTestTheme(m))
 	out := sessionmgr.StripANSI(header)
 	// All three tiles share the single header row.
 	for _, want := range []string{"SOURCES", "AGENTS", "SESSIONS"} {
@@ -2463,7 +2526,7 @@ func TestRenderTopRowSourcesOnlyWhenHidden(t *testing.T) {
 	m.width, m.height = 120, 32
 	m.source = sessionmgr.ModeSessions
 	// No ModeAll cache yet.
-	out := sessionmgr.StripANSI(m.renderTopRow())
+	out := sessionmgr.StripANSI(renderDefaultHeader(defaultTestView(m), defaultTestTheme(m)))
 	if !strings.Contains(out, "SOURCES") {
 		t.Fatalf("header should always show SOURCES\n%s", out)
 	}
@@ -2478,7 +2541,7 @@ func TestRenderTopRowSourcesOnlyWhenHidden(t *testing.T) {
 		}, fetchedAt: time.Now()},
 	}
 	m.height = 10
-	out = sessionmgr.StripANSI(m.renderTopRow())
+	out = sessionmgr.StripANSI(renderDefaultHeader(defaultTestView(m), defaultTestTheme(m)))
 	if !strings.Contains(out, "SOURCES") {
 		t.Fatalf("header should still show SOURCES when short\n%s", out)
 	}
@@ -2501,7 +2564,7 @@ func TestRenderTopRowKeepsSourceSpinnerInThreeTileLayout(t *testing.T) {
 	}
 	m.inflightRefresh = map[sessionmgr.SourceMode]uint64{m.source: 1}
 
-	header := m.renderTopRow()
+	header := renderDefaultHeader(defaultTestView(m), defaultTestTheme(m))
 	out := sessionmgr.StripANSI(header)
 	if !strings.Contains(out, "AGENTS") || !strings.Contains(out, "SESSIONS") {
 		t.Fatalf("expected real three-tile header\n%s", out)
@@ -2531,7 +2594,7 @@ func TestRenderTopRowNarrowBoundariesFitOrCollapseCleanly(t *testing.T) {
 			}
 			m.inflightRefresh = map[sessionmgr.SourceMode]uint64{m.source: 1}
 
-			header := m.renderTopRow()
+			header := renderDefaultHeader(defaultTestView(m), defaultTestTheme(m))
 			out := sessionmgr.StripANSI(header)
 			for i, line := range strings.Split(header, "\n") {
 				if got := lipgloss.Width(line); got > safeWidth(width) {
@@ -2559,7 +2622,7 @@ func TestRenderTopRowNarrowWidthCollapsesToSourcesOnly(t *testing.T) {
 		}, fetchedAt: time.Now()},
 	}
 
-	out := sessionmgr.StripANSI(m.renderTopRow())
+	out := sessionmgr.StripANSI(renderDefaultHeader(defaultTestView(m), defaultTestTheme(m)))
 	if !strings.Contains(out, "SOURCES") {
 		t.Fatalf("narrow header missing SOURCES tile\n%s", out)
 	}
@@ -2656,7 +2719,7 @@ func TestRenderTopRowAgentStatesLegend(t *testing.T) {
 			{Kind: sessionmgr.KindSession, Name: "demo"},
 		}, fetchedAt: time.Now()},
 	}
-	out := sessionmgr.StripANSI(m.renderTopRow())
+	out := sessionmgr.StripANSI(renderDefaultHeader(defaultTestView(m), defaultTestTheme(m)))
 	if !strings.Contains(out, "AGENTS") {
 		t.Fatalf("header missing AGENTS tile title\n%s", out)
 	}
@@ -2686,7 +2749,7 @@ func TestAgentChipsCountUsesIconColor(t *testing.T) {
 	stats := overviewStats{
 		agents: map[sessionmgr.AgentState]int{sessionmgr.AgentWorking: 3},
 	}
-	out := m.agentChips(icons, stats, 80)
+	out := defaultAgentChips(m.styles, icons, stats, 80)
 
 	// TrueColor escape for #ff0000. The glyph and the count are each rendered
 	// via renderAgentStateStyled with the working color, so it appears >=2 times.

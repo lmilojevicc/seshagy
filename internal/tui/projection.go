@@ -19,7 +19,11 @@ func (m Model) projectLayoutAt(now time.Time) layoutView {
 func (m Model) projectLayoutAtWithNeeds(now time.Time, needs layoutNeeds) layoutView {
 	visible := m.visibleItems()
 	view := layoutView{
-		Frame:   frameView{Width: m.width, Height: m.height},
+		Frame: frameView{
+			Width:         m.width,
+			Height:        m.height,
+			ContentHeight: m.height,
+		},
 		Sources: m.projectSources(visible),
 		Collection: m.projectCollection(
 			visible,
@@ -56,12 +60,13 @@ func (m Model) projectSources(visible []sessionmgr.Item) sourcesView {
 		})
 	}
 	return sourcesView{
-		Entries:      entries,
-		VisibleCount: len(visible),
-		TotalCount:   len(m.items),
-		Loading:      m.loading,
-		Refreshing:   m.refreshInflight(m.source),
-		SpinnerFrame: m.spinnerFrame,
+		Entries:        entries,
+		VisibleCount:   len(visible),
+		TotalCount:     len(m.items),
+		ShowTotalCount: m.query != "",
+		Loading:        m.loading,
+		Refreshing:     m.refreshInflight(m.source),
+		SpinnerFrame:   m.spinnerFrame,
 	}
 }
 
@@ -89,6 +94,7 @@ func (m Model) projectCollection(visible []sessionmgr.Item, now time.Time) colle
 	view := collectionView{
 		Source:         projectionSourceID(m.source),
 		Title:          m.source.DisplayNames(m.terms).Title,
+		SessionPlural:  m.terms.SessionPlural,
 		Rows:           rows,
 		State:          collectionReady,
 		VisibleCount:   len(visible),
@@ -111,11 +117,17 @@ func (m Model) projectCollection(visible []sessionmgr.Item, now time.Time) colle
 		}
 	}
 
-	entry, cached := m.cacheEntry(m.source)
+	if len(visible) == 0 {
+		view.EmptyMessage = "no items"
+		if m.query != "" {
+			view.EmptyMessage = "no matches for " + m.query
+		}
+	}
 	if m.loading && len(visible) == 0 {
 		view.State = collectionLoading
 		return view
 	}
+	entry, cached := m.cacheEntry(m.source)
 	if cached {
 		view.Warning = entry.warning
 	}
@@ -125,13 +137,8 @@ func (m Model) projectCollection(visible []sessionmgr.Item, now time.Time) colle
 		view.Error = entry.err.Error()
 	case len(visible) == 0 && m.collectionFilterActive():
 		view.State = collectionFilteredEmpty
-		view.EmptyMessage = "no items"
-		if m.query != "" {
-			view.EmptyMessage = "no matches for " + m.query
-		}
 	case len(visible) == 0:
 		view.State = collectionEmpty
-		view.EmptyMessage = "no items"
 	}
 	return view
 }
@@ -158,6 +165,7 @@ func (m Model) projectOverview() *overviewView {
 	}
 
 	stats := aggregateOverviewStats(items)
+	view.Items = len(items)
 	view.Sessions = stats.sessions
 	view.Agents = overviewAgentCountsView{
 		Working: stats.agents[sessionmgr.AgentWorking],
@@ -166,13 +174,13 @@ func (m Model) projectOverview() *overviewView {
 		Idle:    stats.agents[sessionmgr.AgentIdle],
 		Unknown: stats.agents[sessionmgr.AgentUnknown],
 	}
+	if known {
+		view.Warning = entry.warning
+	}
 	switch {
 	case known && entry.err != nil:
 		view.State = overviewError
 		view.Error = entry.err.Error()
-	case known && entry.warning != "":
-		view.State = overviewWarning
-		view.Warning = entry.warning
 	case len(items) == 0:
 		view.State = overviewEmpty
 	default:
@@ -196,8 +204,11 @@ func (m Model) projectDetails(now time.Time) *detailsView {
 		view.Fields = []detailFieldView{
 			{Label: "path", Value: sessionmgr.ContractHome(item.Path)},
 			{
-				Label: "attached", Value: attached,
-				Indicator: attachedIndicator,
+				Label:         "attached",
+				Value:         attached,
+				Indicator:     attachedIndicator,
+				IndicatorKind: detailIndicatorAttached,
+				Attached:      item.Attached,
 			},
 			{Label: m.terms.WindowPlural, Value: fmt.Sprint(item.Windows)},
 		}
@@ -225,10 +236,14 @@ func (m Model) projectDetails(now time.Time) *detailsView {
 			},
 		}
 	case sessionmgr.KindAgent:
+		state := sessionmgr.NormalizeAgentState(string(item.AgentState))
 		view.Fields = []detailFieldView{
 			{
-				Label: "state", Value: agentStateText(item.AgentState),
-				Indicator: projectAgentStateIndicator(icons, item.AgentState),
+				Label:         "state",
+				Value:         agentStateText(state),
+				Indicator:     projectAgentStateIndicator(icons, state),
+				IndicatorKind: detailIndicatorAgentState,
+				AgentState:    string(state),
 			},
 			{Label: "location", Value: item.Location},
 		}
@@ -293,13 +308,12 @@ func (m Model) projectPreview() *previewView {
 	item, selected := m.selectedItem()
 	if selected {
 		view.Title = "Preview · " + item.DisplayName()
+		view.Pending = m.previewKey != "" && m.previewKey != item.Key()
 		if isTailPreviewKind(item.Kind) {
 			view.Anchor = previewAnchorBottom
 		}
 	}
 	switch {
-	case selected && m.previewKey != "" && m.previewKey != item.Key():
-		view.State = previewLoading
 	case m.previewError != "":
 		view.State = previewError
 		view.Content = ""
@@ -336,28 +350,18 @@ func (m Model) projectRow(item sessionmgr.Item, selected bool, now time.Time) ro
 			Activity: agoAt(item.Activity, now),
 		}
 	case sessionmgr.KindZoxide, sessionmgr.KindFD:
-		row.Directory = directoryRowView{
-			Source: projectionSourceID(sourceForDirectoryKind(item.Kind)),
-			Path:   item.Path,
-		}
+		row.Directory = directoryRowView{Path: item.Path}
 	case sessionmgr.KindAgent:
+		state := sessionmgr.NormalizeAgentState(string(item.AgentState))
 		row.Agent = agentRowView{
 			Name:        item.AgentName,
 			DisplayName: item.DisplayName(),
-			State:       string(item.AgentState),
-			Indicator:   projectAgentStateIndicator(icons, item.AgentState),
-			Activity:    agoAt(item.AgentUpdated, now),
+			State:       string(state),
+			Indicator:   projectAgentStateIndicator(icons, state),
 			Location:    item.Location,
 		}
 	}
 	return row
-}
-
-func sourceForDirectoryKind(kind sessionmgr.Kind) sessionmgr.SourceMode {
-	if kind == sessionmgr.KindZoxide {
-		return sessionmgr.ModeZoxide
-	}
-	return sessionmgr.ModeFD
 }
 
 func projectKindIndicator(icons sessionmgr.IconSet, kind sessionmgr.Kind) indicatorView {
@@ -433,20 +437,18 @@ func (m Model) projectSearch() searchView {
 		mode = searchTypeFirst
 	}
 	return searchView{
-		Mode:        mode,
-		Query:       m.query,
-		Editing:     m.inputMode == modeSearch,
-		Prompt:      m.searchInput.Prompt,
-		Placeholder: m.searchInput.Placeholder,
-		Prefix:      m.config.PrefixKey(),
+		Mode:    mode,
+		Query:   m.query,
+		Editing: m.inputMode == modeSearch,
 	}
 }
 
 func (m Model) projectActions() actionsView {
+	prefix := m.config.PrefixKey()
 	view := actionsView{
 		Expanded:    m.showHelp,
+		Prefix:      prefix,
 		PrefixArmed: m.prefixArmed,
-		Prefix:      m.config.PrefixKey(),
 	}
 	if !m.showHelp {
 		view.Hints = []actionHintView{{Key: "?", Label: "help", Available: true}}
@@ -455,27 +457,18 @@ func (m Model) projectActions() actionsView {
 	if m.config.TypeFirst.Enabled && !m.prefixArmed {
 		view.Hints = []actionHintView{
 			{Key: "type", Label: "filter", Available: true},
-			{Key: m.config.PrefixKey(), Label: "actions", Available: true},
-			{Key: m.config.PrefixKey() + " m", Label: "mode", Available: true},
+			{Key: prefix, Label: "actions", Available: true},
+			{Key: prefix + " m", Label: "mode", Available: true},
 			{Key: "backspace", Label: "edit", Available: true},
 		}
 		return view
 	}
 
-	selected, selectedOK := m.selectedItem()
-	canActivate := selectedOK
-	if selectedOK && selected.Kind == sessionmgr.KindAgent {
-		canActivate = selected.Session != "" && selected.Window != "" && selected.PaneID != ""
-	}
-	canRename := selectedOK &&
-		(selected.Kind == sessionmgr.KindSession || selected.Kind == sessionmgr.KindAgent)
-	canDelete := selectedOK && selected.Kind == sessionmgr.KindSession && !m.killInFlight
-
 	view.Hints = []actionHintView{
 		{Key: "?", Label: "help", Available: true},
 		{Key: "tab/⇧+tab", Label: "sections", Available: true},
 		{Key: "q", Label: "quit", Available: true},
-		{Key: "enter", Label: "attach/create/focus", Available: canActivate},
+		{Key: "enter", Label: "attach/create/focus", Available: m.activateAvailable()},
 		{Key: "/", Label: "filter", Available: true},
 		{Key: "r", Label: "refresh", Available: true},
 		{Key: "p", Label: "preview", Available: true},
@@ -486,14 +479,39 @@ func (m Model) projectActions() actionsView {
 		view.Hints = append(view.Hints,
 			actionHintView{Key: "o", Label: "this session", Available: true},
 			actionHintView{Key: "s", Label: "filter state", Available: true},
-			actionHintView{Key: "R", Label: "rename", Available: canRename},
+			actionHintView{Key: "R", Label: "rename", Available: m.renameAvailable()},
 		)
 	} else {
 		view.Hints = append(view.Hints,
-			actionHintView{Key: "R", Label: "rename", Available: canRename},
-			actionHintView{Key: "x", Label: "kill", Available: canDelete},
+			actionHintView{Key: "R", Label: "rename", Available: m.renameAvailable()},
+			actionHintView{Key: "x", Label: "kill", Available: m.deleteAvailable()},
 			actionHintView{Key: "y", Label: "yazi", Available: true},
 		)
 	}
 	return view
+}
+
+func (m Model) activateAvailable() bool {
+	item, ok := m.selectedItem()
+	if !ok {
+		return false
+	}
+	switch item.Kind {
+	case sessionmgr.KindSession, sessionmgr.KindZoxide, sessionmgr.KindFD:
+		return true
+	case sessionmgr.KindAgent:
+		return item.Session != "" && item.Window != "" && item.PaneID != ""
+	default:
+		return false
+	}
+}
+
+func (m Model) renameAvailable() bool {
+	item, ok := m.selectedItem()
+	return ok && (item.Kind == sessionmgr.KindSession || item.Kind == sessionmgr.KindAgent)
+}
+
+func (m Model) deleteAvailable() bool {
+	item, ok := m.selectedItem()
+	return ok && item.Kind == sessionmgr.KindSession && !m.killInFlight
 }

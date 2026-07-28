@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -70,7 +71,7 @@ func TestAgentChipsTextModeFitsTileWidthAndKeepsAllStates(t *testing.T) {
 	// produces (compact glyph width ~22 up to the full-label width ~47).
 	for _, innerW := range []int{22, 25, 30, 36, 43, 47, 60} {
 		t.Run(fmt.Sprintf("inner%d", innerW), func(t *testing.T) {
-			row := m.agentChips(icons, stats, innerW)
+			row := defaultAgentChips(m.styles, icons, stats, innerW)
 			if w := lipgloss.Width(row); w > innerW {
 				t.Fatalf(
 					"innerW=%d: agent chips width %d overflows tile (%q)",
@@ -112,12 +113,17 @@ func TestAgentChipsCompactsWideCountsWithoutDroppingChips(t *testing.T) {
 		sessionmgr.AgentUnknown: 5555,
 	}}
 
-	_, agentW, _, ok := m.topRowWidths(safeWidth(90), stats, m.config.IconSet())
+	_, agentW, _, ok := defaultTopRowWidths(
+		defaultTestView(m).Sources,
+		safeWidth(90),
+		stats,
+		defaultTestTheme(m),
+	)
 	if !ok {
 		t.Fatal("w=90: expected three-tile allocation")
 	}
 	innerW := agentW - 4
-	row := m.agentChips(m.config.IconSet(), stats, innerW)
+	row := defaultAgentChips(m.styles, m.config.IconSet(), stats, innerW)
 	if width := lipgloss.Width(row); width > innerW {
 		t.Fatalf(
 			"compacted row width %d > allocated inner width %d (%q)",
@@ -147,7 +153,7 @@ func TestAgentChipsTextModeFullLabelsAtWideWidth(t *testing.T) {
 	icons := m.config.IconSet()
 	stats := overviewStats{agents: map[sessionmgr.AgentState]int{}}
 
-	row := sessionmgr.StripANSI(m.agentChips(icons, stats, 80))
+	row := sessionmgr.StripANSI(defaultAgentChips(m.styles, icons, stats, 80))
 	for _, label := range []string{"idle", "working", "blocked", "done", "unknown"} {
 		if !strings.Contains(row, label) {
 			t.Fatalf("wide text-mode legend should show full label %q\n%s", label, row)
@@ -163,7 +169,9 @@ func TestAgentOverviewTileTextModeNotCollapsed(t *testing.T) {
 	for _, width := range []int{120, 100, 90} {
 		t.Run(fmt.Sprintf("w%d", width), func(t *testing.T) {
 			m := textModeModel(t, width, 32)
-			top := sessionmgr.StripANSI(m.renderTopRow())
+			top := sessionmgr.StripANSI(
+				renderDefaultHeader(defaultTestView(m), defaultTestTheme(m)),
+			)
 			lines := strings.Split(top, "\n")
 
 			if !strings.Contains(top, "AGENTS") {
@@ -186,7 +194,12 @@ func TestAgentOverviewTileTextModeNotCollapsed(t *testing.T) {
 				}
 			}
 			stats := aggregateOverviewStats(m.items)
-			sourcesW, agentW, _, ok := m.topRowWidths(safe, stats, m.config.IconSet())
+			sourcesW, agentW, _, ok := defaultTopRowWidths(
+				defaultTestView(m).Sources,
+				safe,
+				stats,
+				defaultTestTheme(m),
+			)
 			if !ok {
 				t.Fatalf("w=%d: expected three-tile allocation", width)
 			}
@@ -229,7 +242,9 @@ func TestAgentOverviewCollapseIsModeIndependent(t *testing.T) {
 						AgentState: sessionmgr.AgentWorking,
 					},
 				}
-				top := sessionmgr.StripANSI(m.renderTopRow())
+				top := sessionmgr.StripANSI(
+					renderDefaultHeader(defaultTestView(m), defaultTestTheme(m)),
+				)
 				if strings.Contains(top, "AGENTS") {
 					t.Fatalf(
 						"%s w=%d: expected SOURCES-only collapse, but AGENTS tile present\n%s",
@@ -292,7 +307,12 @@ func TestTopRowWidthsRebalance(t *testing.T) {
 				{Kind: sessionmgr.KindAgent, AgentState: sessionmgr.AgentWorking},
 			})
 			icons := m.config.IconSet()
-			sourcesW, agentW, wsW, ok := m.topRowWidths(usableW, stats, icons)
+			sourcesW, agentW, wsW, ok := defaultTopRowWidths(
+				defaultTestView(m).Sources,
+				usableW,
+				stats,
+				defaultRenderTheme{styles: m.styles, icons: icons},
+			)
 			if !ok {
 				t.Fatalf("w=%d: expected three-tile layout, got collapse", width)
 			}
@@ -343,12 +363,17 @@ func TestTopRowWidthsTextModeFullLabelsAtWideWidth(t *testing.T) {
 		{Kind: sessionmgr.KindAgent, AgentState: sessionmgr.AgentWorking},
 	})
 	icons := m.config.IconSet()
-	sourcesW, agentW, wsW, ok := m.topRowWidths(usableW, stats, icons)
+	sourcesW, agentW, wsW, ok := defaultTopRowWidths(
+		defaultTestView(m).Sources,
+		usableW,
+		stats,
+		defaultRenderTheme{styles: m.styles, icons: icons},
+	)
 	if !ok {
 		t.Fatalf("w=120 text: expected three-tile layout, got collapse")
 	}
 	// The AGENTS inner width holds the full single-space legend without ellipsis.
-	fullLegend := lipgloss.Width(m.agentChipRow(icons, stats, 0, " "))
+	fullLegend := lipgloss.Width(defaultAgentChipRow(m.styles, icons, stats, 0, " "))
 	if agentW-4 < fullLegend {
 		t.Fatalf(
 			"w=120 text: AGENTS inner %d < full legend %d (labels truncated)",
@@ -382,7 +407,12 @@ func TestTopRowWidthsCollapseThresholdUnchanged(t *testing.T) {
 					{Kind: sessionmgr.KindAgent, AgentState: sessionmgr.AgentWorking},
 				})
 				icons := m.config.IconSet()
-				if _, _, _, ok := m.topRowWidths(safeWidth(width), stats, icons); ok {
+				if _, _, _, ok := defaultTopRowWidths(
+					defaultTestView(m).Sources,
+					safeWidth(width),
+					stats,
+					defaultRenderTheme{styles: m.styles, icons: icons},
+				); ok {
 					t.Fatalf("%s w=%d: expected collapse, got three-tile layout", mode, width)
 				}
 			})
@@ -418,12 +448,17 @@ func TestAgentOverviewIconModeRendersGlyphs(t *testing.T) {
 				sessionmgr.AgentIdle:    4,
 				sessionmgr.AgentUnknown: 5,
 			}}
-			_, agentW, _, ok := m.topRowWidths(safeWidth(width), stats, m.config.IconSet())
+			_, agentW, _, ok := defaultTopRowWidths(
+				defaultTestView(m).Sources,
+				safeWidth(width),
+				stats,
+				defaultTestTheme(m),
+			)
 			if !ok {
 				t.Fatalf("w=%d: expected icon-mode three-tile allocation", width)
 			}
-			want := m.agentChipRow(m.config.IconSet(), stats, 0, "  ")
-			got := m.agentChips(m.config.IconSet(), stats, agentW-4)
+			want := defaultAgentChipRow(m.styles, m.config.IconSet(), stats, 0, "  ")
+			got := defaultAgentChips(m.styles, m.config.IconSet(), stats, agentW-4)
 			if got != want {
 				t.Fatalf(
 					"w=%d: fitted icon row differs from canonical row\nwant raw: %q\n got raw: %q",
@@ -433,7 +468,9 @@ func TestAgentOverviewIconModeRendersGlyphs(t *testing.T) {
 				)
 			}
 
-			top := sessionmgr.StripANSI(m.renderTopRow())
+			top := sessionmgr.StripANSI(
+				renderDefaultHeader(defaultTestView(m), defaultTestTheme(m)),
+			)
 			lines := strings.Split(top, "\n")
 			if !strings.Contains(top, "AGENTS") {
 				t.Fatalf("w=%d: icon mode AGENTS tile missing\n%s", width, top)
@@ -473,12 +510,16 @@ func TestAgentStateTextModeListAndDetailNoTruncation(t *testing.T) {
 		Location:   "demo:1.1",
 	}
 
-	row := sessionmgr.StripANSI(m.renderRow(item, false, 60))
+	row := sessionmgr.StripANSI(
+		renderDefaultRow(m.projectRow(item, false, time.Now()), 60, defaultTestTheme(m)),
+	)
 	if !strings.Contains(row, "[working]") {
 		t.Fatalf("text-mode agent list row missing full [working] label\n%s", row)
 	}
 
-	detail := sessionmgr.StripANSI(strings.Join(m.detailLines(item), "\n"))
+	detail := sessionmgr.StripANSI(
+		strings.Join(defaultDetailLines(defaultTestDetails(m, item), defaultTestTheme(m)), "\n"),
+	)
 	if !strings.Contains(detail, "working") {
 		t.Fatalf("text-mode agent detail missing full working label\n%s", detail)
 	}

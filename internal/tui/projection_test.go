@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -23,10 +22,6 @@ func TestProjectLayoutSourcesPreservesConfiguredMembershipOrderAndLabels(t *test
 	m.source = sessionmgr.ModeAgents
 	m.items = []sessionmgr.Item{{Kind: sessionmgr.KindAgent}, {Kind: sessionmgr.KindAgent}}
 	m.loading = false
-	m.inflightRefresh = map[sessionmgr.SourceMode]uint64{sessionmgr.ModeFD: 4}
-	m.cache = map[sessionmgr.SourceMode]modeCache{
-		sessionmgr.ModeAll: {items: []sessionmgr.Item{{Kind: sessionmgr.KindSession}}},
-	}
 
 	got := m.projectLayout(layoutNeeds{}).Sources
 	wantIDs := []sourceID{"agents", "sessions", "all", "zoxide", "fd"}
@@ -55,14 +50,32 @@ func TestProjectLayoutSourcesPreservesConfiguredMembershipOrderAndLabels(t *test
 	if got.VisibleCount != 2 || got.TotalCount != 2 {
 		t.Fatalf("source counts = %d/%d, want 2/2", got.VisibleCount, got.TotalCount)
 	}
-	if !got.Entries[2].CountKnown || got.Entries[2].Count != 1 {
-		t.Fatalf("cached All count = %#v, want known count 1", got.Entries[2])
+	if got.ShowTotalCount {
+		t.Fatal("source projection shows total count without a text query")
 	}
-	if got.Entries[3].ID != "zoxide" || got.Entries[3].CountKnown {
-		t.Fatalf("unavailable Zoxide source removed or marked loaded: %#v", got.Entries[3])
+	m.query = "agent"
+	if queried := m.projectLayout(layoutNeeds{}).Sources; !queried.ShowTotalCount {
+		t.Fatal("source projection hides total count with an active text query")
 	}
-	if got.Entries[4].ID != "fd" || !got.Entries[4].Refreshing {
-		t.Fatalf("unavailable fd source removed or lost refresh state: %#v", got.Entries[4])
+	if got.Entries[3].ID != "zoxide" || got.Entries[4].ID != "fd" {
+		t.Fatalf("unavailable directory sources removed: %#v", got.Entries)
+	}
+	if !got.Entries[0].CountKnown || got.Entries[0].Count != 2 {
+		t.Fatalf("active source availability facts = %#v, want known count 2", got.Entries[0])
+	}
+	if got.Entries[3].CountKnown || got.Entries[4].CountKnown {
+		t.Fatalf("uncached directory source counts marked known: %#v", got.Entries)
+	}
+	m.cache = map[sessionmgr.SourceMode]modeCache{
+		sessionmgr.ModeZoxide: {items: []sessionmgr.Item{{Kind: sessionmgr.KindZoxide}}},
+	}
+	m.inflightRefresh[sessionmgr.ModeFD] = 7
+	available := m.projectLayout(layoutNeeds{}).Sources
+	if !available.Entries[3].CountKnown || available.Entries[3].Count != 1 {
+		t.Fatalf("cached zoxide availability facts = %#v", available.Entries[3])
+	}
+	if !available.Entries[4].Refreshing {
+		t.Fatalf("fd refresh fact = %#v, want refreshing", available.Entries[4])
 	}
 	for _, entry := range got.Entries {
 		if entry.ID == "current-agents" {
@@ -99,8 +112,7 @@ func TestProjectRowsExposeSemanticFieldsAcrossDisplayModes(t *testing.T) {
 		},
 		{
 			Kind: sessionmgr.KindAgent, AgentName: "pi", AgentDisplayName: "reviewer",
-			AgentState: sessionmgr.AgentWorking, AgentUpdated: now.Add(-45 * time.Second),
-			Location: "workspace:1",
+			AgentState: sessionmgr.AgentWorking, Location: "workspace:1",
 		},
 		{Kind: sessionmgr.KindZoxide, Path: "/src/zoxide"},
 		{Kind: sessionmgr.KindFD, Path: "/src/fd"},
@@ -201,7 +213,7 @@ func TestProjectRowsExposeSemanticFieldsAcrossDisplayModes(t *testing.T) {
 			agent := rows[2]
 			if agent.Label != "reviewer" || agent.Agent.Name != "pi" ||
 				agent.Agent.DisplayName != "reviewer" || agent.Agent.State != "working" ||
-				agent.Agent.Activity != "45s" || agent.Agent.Location != "workspace:1" {
+				agent.Agent.Location != "workspace:1" {
 				t.Fatalf("agent semantics = %#v", agent)
 			}
 			if agent.Agent.Indicator.Mode != tt.wantStateMode {
@@ -209,8 +221,8 @@ func TestProjectRowsExposeSemanticFieldsAcrossDisplayModes(t *testing.T) {
 			}
 			assertIndicatorValue(t, agent.Agent.Indicator, tt.wantAgentValue)
 
-			if rows[3].Directory != (directoryRowView{Source: "zoxide", Path: "/src/zoxide"}) ||
-				rows[4].Directory != (directoryRowView{Source: "fd", Path: "/src/fd"}) {
+			if rows[3].Directory != (directoryRowView{Path: "/src/zoxide"}) ||
+				rows[4].Directory != (directoryRowView{Path: "/src/fd"}) {
 				t.Fatalf("directory semantics = %#v / %#v", rows[3], rows[4])
 			}
 		})
@@ -235,11 +247,10 @@ func TestProjectAgentRowsPreserveEveryState(t *testing.T) {
 	} {
 		m.items = []sessionmgr.Item{{
 			Kind: sessionmgr.KindAgent, AgentName: "pi", AgentState: tt.state,
-			AgentUpdated: now.Add(-time.Minute), Location: "workspace:1",
+			Location: "workspace:1",
 		}}
 		row := m.projectLayoutAt(now).Collection.Rows[0]
-		if row.Agent.State != string(tt.state) || row.Agent.Activity != "1m" ||
-			row.Agent.Location != "workspace:1" {
+		if row.Agent.State != string(tt.state) || row.Agent.Location != "workspace:1" {
 			t.Fatalf("state %q semantics = %#v", tt.state, row.Agent)
 		}
 		if row.Agent.Indicator != (indicatorView{
@@ -378,6 +389,35 @@ func appendProjectedStrings(value reflect.Value, b *strings.Builder) {
 	}
 }
 
+func TestProjectLayoutCollectionDiagnosticsAndLoadingPrecedence(t *testing.T) {
+	base := New(WithConfig(appconfig.Default()), WithMultiplexer(sessionmgr.NewTmuxBackend()))
+	base.source = sessionmgr.ModeFD
+	base.loading = false
+	base.items = nil
+	base.cache = map[sessionmgr.SourceMode]modeCache{
+		sessionmgr.ModeFD: {
+			warning: "partial fd warning",
+			err:     testProjectionError("fd failed"),
+		},
+	}
+
+	failed := base.projectLayout(layoutNeeds{}).Collection
+	if failed.State != collectionError || failed.Warning != "partial fd warning" ||
+		failed.Error != "fd failed" {
+		t.Fatalf("collection diagnostics = %#v", failed)
+	}
+
+	base.loading = true
+	loading := base.projectLayout(layoutNeeds{}).Collection
+	if loading.State != collectionLoading || loading.Warning != "" || loading.Error != "" {
+		t.Fatalf("loading leaked stale diagnostics = %#v", loading)
+	}
+}
+
+type testProjectionError string
+
+func (e testProjectionError) Error() string { return string(e) }
+
 func TestProjectLayoutCollectionStatesAndAgentScope(t *testing.T) {
 	base := New(WithConfig(appconfig.Default()), WithMultiplexer(sessionmgr.NewHerdrBackend()))
 	base.source = sessionmgr.ModeAgents
@@ -403,32 +443,10 @@ func TestProjectLayoutCollectionStatesAndAgentScope(t *testing.T) {
 		mutate    func(*Model)
 		wantState collectionState
 		wantEmpty string
-		wantWarn  string
-		wantError string
 	}{
 		{
-			name: "zero-item loading", wantState: collectionLoading,
+			name: "zero-item loading", wantState: collectionLoading, wantEmpty: "no items",
 			mutate: func(m *Model) { m.loading = true; m.items = nil },
-		},
-		{
-			name: "zero-item loading suppresses stale warning", wantState: collectionLoading,
-			mutate: func(m *Model) {
-				m.loading = true
-				m.items = nil
-				m.cache = map[sessionmgr.SourceMode]modeCache{
-					sessionmgr.ModeAgents: {warning: "stale partial load"},
-				}
-			},
-		},
-		{
-			name: "zero-item loading suppresses stale error", wantState: collectionLoading,
-			mutate: func(m *Model) {
-				m.loading = true
-				m.items = nil
-				m.cache = map[sessionmgr.SourceMode]modeCache{
-					sessionmgr.ModeAgents: {err: errors.New("stale load failure")},
-				}
-			},
 		},
 		{
 			name: "empty", wantState: collectionEmpty, wantEmpty: "no items",
@@ -439,40 +457,19 @@ func TestProjectLayoutCollectionStatesAndAgentScope(t *testing.T) {
 			wantEmpty: "no matches for missing",
 			mutate:    func(m *Model) { m.query = "missing" },
 		},
-		{
-			name: "warning", wantState: collectionReady, wantWarn: "partial load",
-			mutate: func(m *Model) {
-				m.cache = map[sessionmgr.SourceMode]modeCache{
-					sessionmgr.ModeAgents: {warning: "partial load"},
-				}
-			},
-		},
-		{
-			name: "error", wantState: collectionError, wantError: "load failed",
-			mutate: func(m *Model) {
-				m.cache = map[sessionmgr.SourceMode]modeCache{
-					sessionmgr.ModeAgents: {err: errors.New("load failed")},
-				}
-			},
-		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			m := base
 			m.cache = nil
 			tt.mutate(&m)
 			got := m.projectLayout(layoutNeeds{}).Collection
-			if got.State != tt.wantState || got.EmptyMessage != tt.wantEmpty ||
-				got.Warning != tt.wantWarn || got.Error != tt.wantError {
+			if got.State != tt.wantState || got.EmptyMessage != tt.wantEmpty {
 				t.Fatalf(
-					"collection state = (%v, %q, %q, %q), want (%v, %q, %q, %q)",
+					"collection state = (%v, %q), want (%v, %q)",
 					got.State,
 					got.EmptyMessage,
-					got.Warning,
-					got.Error,
 					tt.wantState,
 					tt.wantEmpty,
-					tt.wantWarn,
-					tt.wantError,
 				)
 			}
 		})
@@ -489,19 +486,30 @@ func TestProjectLayoutSearchAndActionsPreserveSharedSemantics(t *testing.T) {
 
 	classic := m.projectLayout(layoutNeeds{})
 	if classic.Search != (searchView{
-		Mode: searchClassic, Query: "needle", Editing: true, Prompt: "/ ",
-		Placeholder: "filter sessions, directories", Prefix: "ctrl+x",
+		Mode: searchClassic, Query: "needle", Editing: true,
 	}) {
 		t.Fatalf("classic search projection = %#v", classic.Search)
 	}
 	wantClassic := commonActionHints(true)
 	wantClassic = append(wantClassic,
-		actionHintView{Key: "R", Label: "rename", Available: false},
-		actionHintView{Key: "x", Label: "kill", Available: false},
+		actionHintView{Key: "R", Label: "rename"},
+		actionHintView{Key: "x", Label: "kill"},
 		actionHintView{Key: "y", Label: "yazi", Available: true},
 	)
+	if classic.Actions.Prefix != m.config.PrefixKey() {
+		t.Fatalf(
+			"classic Actions prefix = %q, want %q",
+			classic.Actions.Prefix,
+			m.config.PrefixKey(),
+		)
+	}
 	if !reflect.DeepEqual(classic.Actions.Hints, wantClassic) {
 		t.Fatalf("classic Actions = %#v, want %#v", classic.Actions.Hints, wantClassic)
+	}
+	if !hintAvailable(classic.Actions.Hints, "enter") ||
+		hintAvailable(classic.Actions.Hints, "R") ||
+		hintAvailable(classic.Actions.Hints, "x") {
+		t.Fatalf("fd-selected action eligibility = %#v", classic.Actions.Hints)
 	}
 
 	m.source = sessionmgr.ModeAgents
@@ -519,11 +527,14 @@ func TestProjectLayoutSearchAndActionsPreserveSharedSemantics(t *testing.T) {
 	if !reflect.DeepEqual(agents.Hints, wantAgents) {
 		t.Fatalf("Agents Actions = %#v, want %#v", agents.Hints, wantAgents)
 	}
+	if !hintAvailable(agents.Hints, "enter") || !hintAvailable(agents.Hints, "R") {
+		t.Fatalf("valid agent action eligibility = %#v", agents.Hints)
+	}
 
 	m.showHelp = false
 	collapsed := m.projectLayout(layoutNeeds{}).Actions
 	wantCollapsed := actionsView{
-		Expanded: false, PrefixArmed: false, Prefix: "ctrl+x",
+		Expanded: false, Prefix: m.config.PrefixKey(), PrefixArmed: false,
 		Hints: []actionHintView{{Key: "?", Label: "help", Available: true}},
 	}
 	if !reflect.DeepEqual(collapsed, wantCollapsed) {
@@ -535,11 +546,11 @@ func TestProjectLayoutSearchAndActionsPreserveSharedSemantics(t *testing.T) {
 	m.config.TypeFirst.Prefix = "ctrl+g"
 	m.prefixArmed = false
 	typeFirst := m.projectLayout(layoutNeeds{})
-	if typeFirst.Search.Mode != searchTypeFirst || typeFirst.Search.Prefix != "ctrl+g" {
+	if typeFirst.Search.Mode != searchTypeFirst {
 		t.Fatalf("type-first search = %#v", typeFirst.Search)
 	}
 	wantTypeFirst := actionsView{
-		Expanded: true, PrefixArmed: false, Prefix: "ctrl+g",
+		Expanded: true, Prefix: "ctrl+g", PrefixArmed: false,
 		Hints: []actionHintView{
 			{Key: "type", Label: "filter", Available: true},
 			{Key: "ctrl+g", Label: "actions", Available: true},
@@ -554,7 +565,7 @@ func TestProjectLayoutSearchAndActionsPreserveSharedSemantics(t *testing.T) {
 	m.prefixArmed = true
 	armed := m.projectLayout(layoutNeeds{}).Actions
 	wantArmed := actionsView{
-		Expanded: true, PrefixArmed: true, Prefix: "ctrl+g",
+		Expanded: true, Prefix: "ctrl+g", PrefixArmed: true,
 		Hints: append(commonActionHints(true),
 			actionHintView{Key: "o", Label: "this session", Available: true},
 			actionHintView{Key: "s", Label: "filter state", Available: true},
@@ -566,56 +577,8 @@ func TestProjectLayoutSearchAndActionsPreserveSharedSemantics(t *testing.T) {
 	}
 }
 
-func TestProjectActionsAvailabilityFollowsSelectedKind(t *testing.T) {
-	m := New(WithConfig(appconfig.Default()), WithMultiplexer(sessionmgr.NewTmuxBackend()))
-	m.loading = false
-	m.source = sessionmgr.ModeAll
-	for _, tt := range []struct {
-		name       string
-		item       sessionmgr.Item
-		enter      bool
-		rename     bool
-		deleteItem bool
-	}{
-		{
-			name: "session", item: sessionmgr.Item{Kind: sessionmgr.KindSession, Name: "s"},
-			enter: true, rename: true, deleteItem: true,
-		},
-		{
-			name: "directory", item: sessionmgr.Item{Kind: sessionmgr.KindFD, Path: "/src"},
-			enter: true,
-		},
-		{
-			name: "valid agent",
-			item: sessionmgr.Item{
-				Kind: sessionmgr.KindAgent, AgentName: "pi", Session: "s", Window: "w", PaneID: "%1",
-			},
-			enter: true, rename: true,
-		},
-		{
-			name:   "incomplete agent",
-			item:   sessionmgr.Item{Kind: sessionmgr.KindAgent, AgentName: "pi"},
-			rename: true,
-		},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			m.items = []sessionmgr.Item{tt.item}
-			actions := m.projectLayout(layoutNeeds{}).Actions
-			for key, want := range map[string]bool{
-				"enter": tt.enter,
-				"R":     tt.rename,
-				"x":     tt.deleteItem,
-			} {
-				if got := actionAvailability(actions, key); got != want {
-					t.Errorf("%s availability = %v, want %v: %#v", key, got, want, actions.Hints)
-				}
-			}
-		})
-	}
-}
-
-func actionAvailability(actions actionsView, key string) bool {
-	for _, hint := range actions.Hints {
+func hintAvailable(hints []actionHintView, key string) bool {
+	for _, hint := range hints {
 		if hint.Key == key {
 			return hint.Available
 		}
@@ -623,12 +586,12 @@ func actionAvailability(actions actionsView, key string) bool {
 	return false
 }
 
-func commonActionHints(enter bool) []actionHintView {
+func commonActionHints(activate bool) []actionHintView {
 	return []actionHintView{
 		{Key: "?", Label: "help", Available: true},
 		{Key: "tab/⇧+tab", Label: "sections", Available: true},
 		{Key: "q", Label: "quit", Available: true},
-		{Key: "enter", Label: "attach/create/focus", Available: enter},
+		{Key: "enter", Label: "attach/create/focus", Available: activate},
 		{Key: "/", Label: "filter", Available: true},
 		{Key: "r", Label: "refresh", Available: true},
 		{Key: "p", Label: "preview", Available: true},

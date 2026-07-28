@@ -63,12 +63,12 @@ func TestProjectOverviewLifecycleAndCounts(t *testing.T) {
 	}
 
 	for _, tt := range []struct {
-		name       string
-		mutate     func(*Model)
-		wantState  overviewState
-		wantWarn   string
-		wantError  string
-		wantCounts bool
+		name        string
+		mutate      func(*Model)
+		wantState   overviewState
+		wantWarning string
+		wantError   string
+		wantCounts  bool
 	}{
 		{name: "pre-load", wantState: overviewLoading},
 		{
@@ -78,18 +78,18 @@ func TestProjectOverviewLifecycleAndCounts(t *testing.T) {
 			},
 		},
 		{
-			name: "warning", wantState: overviewWarning, wantWarn: "partial", wantCounts: true,
+			name: "warning", wantState: overviewReady, wantWarning: "partial overview",
 			mutate: func(m *Model) {
 				m.cache = map[sessionmgr.SourceMode]modeCache{
-					sessionmgr.ModeAll: {items: items, warning: "partial"},
+					sessionmgr.ModeAll: {items: items, warning: "partial overview"},
 				}
 			},
 		},
 		{
-			name: "error", wantState: overviewError, wantError: "failed",
+			name: "error", wantState: overviewError, wantError: "overview failed",
 			mutate: func(m *Model) {
 				m.cache = map[sessionmgr.SourceMode]modeCache{
-					sessionmgr.ModeAll: {err: errors.New("failed")},
+					sessionmgr.ModeAll: {err: testProjectionError("overview failed")},
 				}
 			},
 		},
@@ -110,18 +110,21 @@ func TestProjectOverviewLifecycleAndCounts(t *testing.T) {
 			}
 			beforeNotifications := len(m.notifications)
 			got := m.projectLayout(layoutNeeds{Overview: true}).Overview
-			if got == nil || got.State != tt.wantState || got.Warning != tt.wantWarn ||
-				got.Error != tt.wantError {
-				t.Fatalf(
-					"Overview = %#v, want state=%v warning=%q error=%q",
-					got,
-					tt.wantState,
-					tt.wantWarn,
-					tt.wantError,
-				)
+			if got == nil {
+				t.Fatal("requested Overview = nil")
 			}
 			if len(m.notifications) != beforeNotifications {
 				t.Fatal("Overview projection changed notification state")
+			}
+			if got.State != tt.wantState || got.Warning != tt.wantWarning ||
+				got.Error != tt.wantError {
+				t.Fatalf(
+					"Overview lifecycle = %#v, want state=%v warning=%q error=%q",
+					got,
+					tt.wantState,
+					tt.wantWarning,
+					tt.wantError,
+				)
 			}
 			if tt.wantCounts {
 				wantAgents := overviewAgentCountsView{
@@ -136,16 +139,6 @@ func TestProjectOverviewLifecycleAndCounts(t *testing.T) {
 				}
 			}
 		})
-	}
-
-	active := base
-	active.source = sessionmgr.ModeAll
-	active.loading = true
-	active.items = nil
-	if got := active.projectLayout(
-		layoutNeeds{Overview: true},
-	).Overview; got.State != overviewLoading {
-		t.Fatalf("active pre-load Overview = %#v, want loading", got)
 	}
 }
 
@@ -172,9 +165,11 @@ func TestProjectDetailsLifecycleKindsAndHerdrRedaction(t *testing.T) {
 	wantSessionFields := []detailFieldView{
 		{Label: "path", Value: "/home/test/demo"},
 		{
-			Label:     "attached",
-			Value:     "attached",
-			Indicator: projectTmuxStateIndicator(session.config.IconSet(), true),
+			Label:         "attached",
+			Value:         "attached",
+			Indicator:     projectTmuxStateIndicator(session.config.IconSet(), true),
+			IndicatorKind: detailIndicatorAttached,
+			Attached:      true,
 		},
 		{Label: "windows", Value: "2"},
 		{Label: "panes", Value: "3"},
@@ -298,21 +293,24 @@ func TestProjectPreviewLifecycleTitleAnchorAndWidthIndependence(t *testing.T) {
 	m.preview = "old capture"
 	m.previewKey = "session:other"
 	staleReady := m.projectLayout(layoutNeeds{Preview: true}).Preview
-	if staleReady.State != previewLoading || staleReady.Content != "old capture" {
+	if staleReady.State != previewReady || !staleReady.Pending ||
+		staleReady.Content != "old capture" {
 		t.Fatalf("selection-changing ready Preview = %#v", staleReady)
 	}
 
 	m.preview = ""
 	m.previewError = "old failure"
 	staleError := m.projectLayout(layoutNeeds{Preview: true}).Preview
-	if staleError.State != previewLoading || staleError.Error != "old failure" {
+	if staleError.State != previewError || !staleError.Pending ||
+		staleError.Error != "old failure" {
 		t.Fatalf("selection-changing error Preview = %#v", staleError)
 	}
 
 	m.preview = noPreviewAvailableText
 	m.previewError = ""
 	staleEmpty := m.projectLayout(layoutNeeds{Preview: true}).Preview
-	if staleEmpty.State != previewLoading || staleEmpty.Content != noPreviewAvailableText {
+	if staleEmpty.State != previewEmpty || !staleEmpty.Pending ||
+		staleEmpty.Content != noPreviewAvailableText {
 		t.Fatalf("selection-changing empty Preview = %#v", staleEmpty)
 	}
 
