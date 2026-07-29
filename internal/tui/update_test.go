@@ -3,7 +3,6 @@ package tui
 import (
 	"context"
 	"errors"
-	"strings"
 	"testing"
 	"time"
 
@@ -177,12 +176,17 @@ func TestUpdatePreviewMsgIgnoresStaleSelection(t *testing.T) {
 
 	model, cmd := m.Update(previewMsg{key: "session:other", preview: "stale"})
 	got := model.(Model)
-	if got.preview != "" || cmd != nil {
-		t.Fatalf("stale preview should be ignored: preview=%q cmd=%v", got.preview, cmd)
+	if got.preview != "" || got.previewError != "" || cmd != nil {
+		t.Fatalf(
+			"stale preview should be ignored: preview=%q error=%q cmd=%v",
+			got.preview,
+			got.previewError,
+			cmd,
+		)
 	}
 }
 
-func TestUpdatePreviewMsgErrorRendersDanger(t *testing.T) {
+func TestUpdatePreviewMsgStoresSemanticError(t *testing.T) {
 	m := New()
 	m.items = testUpdateItems("alpha")
 	m.cursor = 0
@@ -193,8 +197,12 @@ func TestUpdatePreviewMsgErrorRendersDanger(t *testing.T) {
 		err: previewErr,
 	})
 	got := model.(Model)
-	if !strings.Contains(got.preview, "preview failed") {
-		t.Fatalf("preview = %q, want danger-rendered error", got.preview)
+	if got.preview != "" || got.previewError != "preview failed" {
+		t.Fatalf(
+			"preview = %q error = %q, want semantic preview error",
+			got.preview,
+			got.previewError,
+		)
 	}
 	if got.previewKey != "session:alpha" || cmd != nil {
 		t.Fatalf("previewKey = %q cmd = %v", got.previewKey, cmd)

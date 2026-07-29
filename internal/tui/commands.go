@@ -103,6 +103,8 @@ func installIntegrationCmd(name, action string) tea.Cmd {
 	}
 }
 
+const noPreviewAvailableText = "no preview available"
+
 func previewCmd(mux sessionmgr.Multiplexer, item sessionmgr.Item) tea.Cmd {
 	key := item.Key()
 	return func() tea.Msg {
@@ -123,7 +125,7 @@ func previewCmd(mux sessionmgr.Multiplexer, item sessionmgr.Item) tea.Cmd {
 			preview, err = sessionmgr.ListDirectoryPreview(ctx, item.Path, 160)
 		}
 		if strings.TrimSpace(preview) == "" && err == nil {
-			preview = "no preview available"
+			preview = noPreviewAvailableText
 		}
 		return previewMsg{key: key, preview: preview, err: err}
 	}

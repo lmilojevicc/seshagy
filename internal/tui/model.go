@@ -42,6 +42,7 @@ const spinnerFrames = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 type Model struct {
 	styles styles
 	config appconfig.Config
+	layout layoutSpec
 
 	mux    sessionmgr.Multiplexer
 	terms  sessionmgr.Terms
@@ -67,6 +68,7 @@ type Model struct {
 	inputMode       inputMode
 
 	preview       string
+	previewError  string
 	previewKey    string
 	showPreview   bool
 	showHelp      bool
@@ -239,6 +241,7 @@ func New(optionFns ...Option) Model {
 	m := Model{
 		styles:          stylesFromConfig(cfg),
 		config:          cfg,
+		layout:          defaultLayout,
 		mux:             mux,
 		terms:           mux.Terms(),
 		logger:          logger,
@@ -281,9 +284,9 @@ func (m Model) Init() tea.Cmd {
 		notificationTickCmd(),
 		spinnerTickCmd(),
 	}
-	// Keep the ModeAll cache warm so the overview hero band shows correct
-	// counts even when another source tab is active on launch.
-	if m.source != sessionmgr.ModeAll {
+	// Keep the ModeAll cache warm when the active layout requests Overview,
+	// so its counts stay correct even when another source tab is active.
+	if m.needsOverviewWarm() {
 		if _, cmd := m.beginRefresh(sessionmgr.ModeAll, false); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
@@ -419,8 +422,23 @@ func (m Model) currentSessionLabel() string {
 	return m.currentSession
 }
 
+func (m Model) layoutSpec() layoutSpec {
+	if m.layout.render == nil {
+		return defaultLayout
+	}
+	return m.layout
+}
+
+func (m Model) needsOverviewWarm() bool {
+	return m.layoutSpec().needs.Overview && m.source != sessionmgr.ModeAll
+}
+
+func (m Model) previewEnabled() bool {
+	return m.layoutSpec().needs.Preview && m.showPreview
+}
+
 func (m Model) previewForSelection() tea.Cmd {
-	if !m.showPreview {
+	if !m.previewEnabled() {
 		return nil
 	}
 	item, ok := m.selectedItem()
