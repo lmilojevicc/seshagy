@@ -176,6 +176,14 @@ func (m Model) handleActionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, m.previewForSelection()
 		}
 	case "p", "alt+p":
+		if !m.previewAvailable() {
+			message := "preview is not available in this layout"
+			if id := m.layoutSpec().id; id != "" {
+				message = fmt.Sprintf("preview is not available in the %s layout", id)
+			}
+			m.notify(message, sevInfo)
+			return m, nil
+		}
 		m.showPreview = !m.showPreview
 		return m, m.previewForSelection()
 	case "m":
@@ -250,6 +258,9 @@ func (m Model) handleTypeFirstKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.isPrefixKey(msg) {
 			return m, nil
 		}
+		return m.handleActionKey(msg)
+	}
+	if msg.String() == "alt+p" {
 		return m.handleActionKey(msg)
 	}
 	if m.isPrefixKey(msg) {

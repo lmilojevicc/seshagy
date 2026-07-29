@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"sort"
 	"strings"
@@ -238,10 +239,12 @@ func New(optionFns ...Option) Model {
 	if cfg.TUI.Preview != nil {
 		showPreview = *cfg.TUI.Preview
 	}
+	layoutName := cfg.TUILayout()
+	layout, layoutKnown := resolveLayout(layoutName)
 	m := Model{
 		styles:          stylesFromConfig(cfg),
 		config:          cfg,
-		layout:          defaultLayout,
+		layout:          layout,
 		mux:             mux,
 		terms:           mux.Terms(),
 		logger:          logger,
@@ -263,6 +266,9 @@ func New(optionFns ...Option) Model {
 	m.inflightRefresh[m.source] = 1
 	if cfgErr != nil {
 		m.notify(cfgErr.Error(), sevError)
+	}
+	if !layoutKnown {
+		m.notify(fmt.Sprintf("unknown tui layout %q; using default", layoutName), sevWarning)
 	}
 	return m
 }
@@ -433,8 +439,12 @@ func (m Model) needsOverviewWarm() bool {
 	return m.layoutSpec().needs.Overview && m.source != sessionmgr.ModeAll
 }
 
+func (m Model) previewAvailable() bool {
+	return m.layoutSpec().needs.Preview
+}
+
 func (m Model) previewEnabled() bool {
-	return m.layoutSpec().needs.Preview && m.showPreview
+	return m.previewAvailable() && m.showPreview
 }
 
 func (m Model) previewForSelection() tea.Cmd {

@@ -269,3 +269,14 @@ var zenLayout = layoutSpec{
 		Overview: true,
 	},
 }
+
+func resolveLayout(name string) (layoutSpec, bool) {
+	switch layoutID(name) {
+	case "", layoutDefault:
+		return defaultLayout, true
+	case layoutZen:
+		return zenLayout, true
+	default:
+		return defaultLayout, false
+	}
+}
