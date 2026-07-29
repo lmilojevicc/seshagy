@@ -517,7 +517,269 @@ func TestZenActionsAndSharedInputPresentation(t *testing.T) {
 		t.Fatal("Zen cmdline input unexpectedly became a popup")
 	}
 	cmdlineFooter := sessionmgr.StripANSI(m.renderShellFooter(m.projectActions()))
-	if !strings.Contains(cmdlineFooter, "SEARCH") || !strings.Contains(cmdlineFooter, "needle") {
-		t.Fatalf("Zen cmdline input missing from shared footer\n%s", cmdlineFooter)
+	if strings.Contains(cmdlineFooter, "SEARCH") || !strings.Contains(cmdlineFooter, "/ needle") ||
+		!strings.Contains(cmdlineFooter, "enter to filter · esc to cancel") {
+		t.Fatalf("Zen cmdline input presentation changed\n%s", cmdlineFooter)
+	}
+	if strings.ContainsAny(cmdlineFooter, "╭╮╰╯") || lipgloss.Height(cmdlineFooter) != 3 {
+		t.Fatalf("Zen cmdline footer is bordered or has wrong height\n%s", cmdlineFooter)
+	}
+}
+
+func TestZenInlineInputUsesCenteredContentColumn(t *testing.T) {
+	previousProfile := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(previousProfile) })
+
+	for _, width := range []int{51, 120} {
+		for _, tt := range []struct {
+			name string
+			mode inputMode
+			line string
+			help string
+		}{
+			{
+				name: "search",
+				mode: modeSearch,
+				line: "/ needle",
+				help: "enter to filter · esc to cancel",
+			},
+			{
+				name: "rename",
+				mode: modeRename,
+				line: "old-name -> new-name",
+				help: "enter to rename · esc to cancel",
+			},
+		} {
+			t.Run(fmt.Sprintf("%s/%d", tt.name, width), func(t *testing.T) {
+				m := newTestModel(t)
+				m.layout = zenLayout
+				m.width, m.height = width, 20
+				m.inputMode = tt.mode
+				m.config.TUI.InputStyle = appconfig.InputStyleCmdline
+				m.renameFrom = "old-name"
+				m.searchInput.SetValue("needle")
+				m.renameInput.SetValue("new-name")
+
+				raw := m.renderInlineInputTile()
+				clean := sessionmgr.StripANSI(raw)
+				lines := strings.Split(clean, "\n")
+				if len(lines) != 2 {
+					t.Fatalf("Zen inline input lines = %d, want 2\n%s", len(lines), clean)
+				}
+				if strings.ContainsAny(clean, "╭╮╰╯") || strings.Contains(clean, "SEARCH") ||
+					strings.Contains(clean, "RENAME") {
+					t.Fatalf("Zen inline input gained Default chrome\n%s", clean)
+				}
+				if !strings.Contains(lines[0], tt.line) || !strings.Contains(lines[1], tt.help) {
+					t.Fatalf("Zen inline input content changed\n%s", clean)
+				}
+
+				usable := safeWidth(width)
+				contentWidth := zenContentWidthForUsable(usable)
+				outerLeft := (usable - contentWidth) / 2
+				for index, line := range lines {
+					leading := len(line) - len(strings.TrimLeft(line, " "))
+					if leading != outerLeft {
+						t.Fatalf(
+							"Zen inline line %d left offset = %d, want %d: %q",
+							index,
+							leading,
+							outerLeft,
+							line,
+						)
+					}
+					if got := lipgloss.Width(strings.TrimLeft(line, " ")); got > contentWidth {
+						t.Fatalf(
+							"Zen inline line %d width = %d, want <= %d: %q",
+							index,
+							got,
+							contentWidth,
+							line,
+						)
+					}
+				}
+				if !strings.Contains(raw, m.styles.muted.Render(tt.help)) {
+					t.Fatalf("Zen inline help is not muted: %q", raw)
+				}
+			})
+		}
+	}
+}
+
+func TestZenInlineInputSizesWidgetBeforeRendering(t *testing.T) {
+	previousProfile := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(previousProfile) })
+
+	m := newTestModel(t)
+	m.layout = zenLayout
+	m.width, m.height = 51, 20
+	m.inputMode = modeSearch
+	m.config.TUI.InputStyle = appconfig.InputStyleCmdline
+	m.searchInput.Width = 20
+	m.searchInput.SetValue("前置-" + strings.Repeat("界", 30) + "-tail")
+	m.searchInput.CursorEnd()
+	m.searchInput.Focus()
+	m.searchInput.Cursor.Blink = false
+
+	usable := safeWidth(m.width)
+	contentWidth := zenInputContentWidth(usable)
+	chrome := m.projectInputChrome(contentWidth)
+	raw := m.renderInlineInputTile()
+	clean := sessionmgr.StripANSI(raw)
+	firstLine := strings.Split(clean, "\n")[0]
+	if !strings.Contains(raw, chrome.Line) {
+		t.Fatalf("Zen inline input was not rendered from the width-specific widget: %q", raw)
+	}
+	if !strings.Contains(firstLine, "-tail") || strings.Contains(firstLine, "前置-") {
+		t.Fatalf("Zen inline input lost the active scrolled viewport: %q", firstLine)
+	}
+	if !strings.Contains(raw, "\x1b[7m") {
+		t.Fatalf("Zen inline input lost visible cursor state: %q", raw)
+	}
+	if !utf8.ValidString(raw) {
+		t.Fatalf("Zen inline input produced invalid UTF-8: %q", raw)
+	}
+	if got := lipgloss.Width(strings.TrimLeft(firstLine, " ")); got > contentWidth {
+		t.Fatalf("Zen inline input width = %d, want <= %d: %q", got, contentWidth, firstLine)
+	}
+}
+
+func TestZenInlineInputRoutesCmdlineAndConstrainedPopup(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		style  string
+		width  int
+		height int
+		mode   inputMode
+		value  string
+		help   string
+	}{
+		{
+			name: "cmdline-search", style: appconfig.InputStyleCmdline,
+			width: 120, height: 20, mode: modeSearch, value: "needle",
+			help: "enter to filter · esc to cancel",
+		},
+		{
+			name: "cmdline-rename", style: appconfig.InputStyleCmdline,
+			width: 51, height: 20, mode: modeRename, value: "new-name",
+			help: "enter to rename · esc to cancel",
+		},
+		{
+			name: "narrow-popup-fallback", style: appconfig.InputStylePopup,
+			width: 24, height: 12, mode: modeSearch, value: "needle",
+			help: "enter to filter · esc to cancel",
+		},
+		{
+			name: "short-popup-fallback", style: appconfig.InputStylePopup,
+			width: 80, height: 4, mode: modeRename, value: "new-name",
+			help: "enter to rename · esc to cancel",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			m := newTestModel(t)
+			m.layout = zenLayout
+			m.width, m.height = tt.width, tt.height
+			m.inputMode = tt.mode
+			m.config.TUI.InputStyle = tt.style
+			m.renameFrom = "old-name"
+			m.searchInput.SetValue(tt.value)
+			m.renameInput.SetValue(tt.value)
+
+			if !m.inlineInputActive() || m.inputPopupActive() {
+				t.Fatal("expected Zen input to use the shared inline path")
+			}
+			clean := sessionmgr.StripANSI(m.View())
+			helpWant := tt.help
+			if zenInputContentWidth(safeWidth(tt.width)) < lipgloss.Width(helpWant) {
+				helpWant = strings.Split(helpWant, " · ")[0]
+			}
+			if !strings.Contains(clean, tt.value) || !strings.Contains(clean, helpWant) {
+				t.Fatalf("Zen inline route lost input/help\n%s", clean)
+			}
+			if strings.Contains(clean, "SEARCH") || strings.Contains(clean, "RENAME") ||
+				strings.ContainsAny(clean, "╭╮╰╯") {
+				t.Fatalf("Zen inline route gained Default chrome\n%s", clean)
+			}
+		})
+	}
+}
+
+func TestZenNormalPopupPreservesSharedPresentation(t *testing.T) {
+	m := newTestModel(t)
+	m.layout = zenLayout
+	m.width, m.height = 80, 20
+	m.inputMode = modeSearch
+	m.config.TUI.InputStyle = appconfig.InputStylePopup
+	m.searchInput.SetValue("popup-query")
+
+	if !m.inputPopupActive() || m.inlineInputActive() {
+		t.Fatal("Zen changed the shared normal popup decision")
+	}
+	boxWidth := min(60, m.width-4)
+	contentWidth := max(1, boxWidth-4)
+	want := renderPopupInput(m.projectInputChrome(contentWidth), m.styles, boxWidth)
+	if got := m.renderInputPopup(); got != want {
+		t.Fatalf("Zen changed shared popup bytes\nwant: %q\n got: %q", want, got)
+	}
+	footer := sessionmgr.StripANSI(m.renderShellFooter(m.projectActions()))
+	if strings.Contains(footer, "popup-query") || strings.Contains(footer, "SEARCH") {
+		t.Fatalf("Zen normal popup leaked into inline footer\n%s", footer)
+	}
+}
+
+func TestZenInlineInputHeightBoundaries(t *testing.T) {
+	for _, height := range []int{1, 2, 3, 4, 5} {
+		t.Run(fmt.Sprint(height), func(t *testing.T) {
+			m := newTestModel(t)
+			m.layout = zenLayout
+			m.width, m.height = 80, height
+			m.inputMode = modeSearch
+			m.config.TUI.InputStyle = appconfig.InputStyleCmdline
+			m.searchInput.SetValue("typed-value")
+
+			view := m.View()
+			clean := sessionmgr.StripANSI(view)
+			if height == 1 {
+				want := renderInputOnly(m.projectInputChrome(safeWidth(m.width)))
+				if view != want {
+					t.Fatalf("height-one Zen input changed: got=%q want=%q", view, want)
+				}
+			} else if !strings.Contains(clean, "enter to filter · esc to cancel") {
+				t.Fatalf("height %d lost Zen inline help\n%s", height, clean)
+			}
+			if !strings.Contains(clean, "typed-value") {
+				t.Fatalf("height %d lost typed input\n%s", height, clean)
+			}
+			if strings.Contains(clean, "SEARCH") || strings.ContainsAny(clean, "╭╮╰╯") {
+				t.Fatalf("height %d gained Default input chrome\n%s", height, clean)
+			}
+			if height < 5 && strings.Contains(clean, "? help") {
+				t.Fatalf("height %d should prioritize input over Actions\n%s", height, clean)
+			}
+			if height == 5 && !strings.Contains(clean, "? help") {
+				t.Fatalf("height five should retain Zen Actions\n%s", clean)
+			}
+			if got := lipgloss.Height(view); got != height {
+				t.Fatalf("Zen inline view height = %d, want %d\n%s", got, height, clean)
+			}
+		})
+	}
+}
+
+func TestDefaultInlineInputRendererPreservesBytes(t *testing.T) {
+	m := newTestModel(t)
+	m.layout = defaultLayout
+	m.width, m.height = 80, 20
+	m.inputMode = modeSearch
+	m.config.TUI.InputStyle = appconfig.InputStyleCmdline
+	m.searchInput.SetValue("needle")
+
+	footerWidth := safeWidth(m.width)
+	contentWidth := max(1, footerWidth-4)
+	want := renderCmdlineInput(m.projectInputChrome(contentWidth), m.styles, footerWidth)
+	if got := m.renderInlineInputTile(); got != want {
+		t.Fatalf("Default inline input bytes changed\nwant: %q\n got: %q", want, got)
 	}
 }

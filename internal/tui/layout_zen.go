@@ -67,13 +67,18 @@ func zenContentWidthForUsable(usable int) int {
 }
 
 func zenPlaceContent(block string, frameWidth, contentWidth int) string {
+	usable := contentWidth
+	if frameWidth > 0 {
+		usable = safeWidth(frameWidth)
+	}
+	return zenPlaceUsableContent(block, usable, contentWidth)
+}
+
+func zenPlaceUsableContent(block string, usable, contentWidth int) string {
 	if block == "" {
 		return ""
 	}
-	left := 0
-	if frameWidth > 0 {
-		left = max(0, (safeWidth(frameWidth)-contentWidth)/2)
-	}
+	left := max(0, (usable-contentWidth)/2)
 	prefix := strings.Repeat(" ", left)
 	lines := strings.Split(block, "\n")
 	for index, line := range lines {

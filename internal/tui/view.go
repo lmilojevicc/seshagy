@@ -371,8 +371,16 @@ func (m Model) renderShellFooter(actions actionsView) string {
 
 func (m Model) renderInlineInputTile() string {
 	footerWidth := safeWidth(m.width)
-	contentWidth := max(1, footerWidth-4)
-	return renderCmdlineInput(
+	spec := m.layoutSpec()
+	contentWidth := defaultInputContentWidth(footerWidth)
+	if spec.inputContentWidth != nil {
+		contentWidth = spec.inputContentWidth(footerWidth)
+	}
+	renderInput := spec.renderInput
+	if renderInput == nil {
+		renderInput = renderCmdlineInput
+	}
+	return renderInput(
 		m.projectInputChrome(contentWidth),
 		m.styles,
 		footerWidth,

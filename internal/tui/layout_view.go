@@ -236,6 +236,10 @@ type renderLayout func(layoutView, layoutRenderTheme) renderedDashboard
 
 type renderLayoutActions func(actionsView, styles, int) string
 
+type renderLayoutInput func(inputChrome, styles, int) string
+
+type layoutInputWidth func(int) int
+
 type layoutID string
 
 const (
@@ -244,16 +248,20 @@ const (
 )
 
 type layoutSpec struct {
-	id            layoutID
-	render        renderLayout
-	renderActions renderLayoutActions
-	needs         layoutNeeds
+	id                layoutID
+	render            renderLayout
+	renderActions     renderLayoutActions
+	renderInput       renderLayoutInput
+	inputContentWidth layoutInputWidth
+	needs             layoutNeeds
 }
 
 var defaultLayout = layoutSpec{
-	id:            layoutDefault,
-	render:        renderDefault,
-	renderActions: renderDefaultActionsTile,
+	id:                layoutDefault,
+	render:            renderDefault,
+	renderActions:     renderDefaultActionsTile,
+	renderInput:       renderCmdlineInput,
+	inputContentWidth: defaultInputContentWidth,
 	needs: layoutNeeds{
 		Overview: true,
 		Details:  true,
@@ -262,9 +270,11 @@ var defaultLayout = layoutSpec{
 }
 
 var zenLayout = layoutSpec{
-	id:            layoutZen,
-	render:        renderZen,
-	renderActions: renderZenActionsLine,
+	id:                layoutZen,
+	render:            renderZen,
+	renderActions:     renderZenActionsLine,
+	renderInput:       renderZenInlineInput,
+	inputContentWidth: zenInputContentWidth,
 	needs: layoutNeeds{
 		Overview: true,
 	},

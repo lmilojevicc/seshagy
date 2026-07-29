@@ -32,7 +32,8 @@ func (m *countingPreviewMux) CaptureSession(
 
 func TestDefaultLayoutSpec(t *testing.T) {
 	if defaultLayout.id != layoutDefault || defaultLayout.render == nil ||
-		defaultLayout.renderActions == nil {
+		defaultLayout.renderActions == nil || defaultLayout.renderInput == nil ||
+		defaultLayout.inputContentWidth == nil {
 		t.Fatalf("defaultLayout contract is incomplete: %#v", defaultLayout)
 	}
 	want := layoutNeeds{Overview: true, Details: true, Preview: true}
@@ -42,7 +43,8 @@ func TestDefaultLayoutSpec(t *testing.T) {
 }
 
 func TestZenLayoutSpec(t *testing.T) {
-	if zenLayout.id != layoutZen || zenLayout.render == nil || zenLayout.renderActions == nil {
+	if zenLayout.id != layoutZen || zenLayout.render == nil || zenLayout.renderActions == nil ||
+		zenLayout.renderInput == nil || zenLayout.inputContentWidth == nil {
 		t.Fatalf("zenLayout contract is incomplete: %#v", zenLayout)
 	}
 	want := layoutNeeds{Overview: true}

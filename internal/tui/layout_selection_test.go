@@ -36,14 +36,16 @@ func TestResolveLayoutUsesClosedCanonicalSet(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got, known := resolveLayout(tt.input)
 			if got.id != tt.want || known != tt.known || got.render == nil ||
-				got.renderActions == nil {
+				got.renderActions == nil || got.renderInput == nil || got.inputContentWidth == nil {
 				t.Fatalf(
-					"resolveLayout(%q) = id:%q known:%v render:%v actions:%v, want id:%q known:%v",
+					"resolveLayout(%q) = id:%q known:%v render:%v actions:%v input:%v width:%v, want id:%q known:%v",
 					tt.input,
 					got.id,
 					known,
 					got.render != nil,
 					got.renderActions != nil,
+					got.renderInput != nil,
+					got.inputContentWidth != nil,
 					tt.want,
 					tt.known,
 				)

@@ -325,7 +325,7 @@ func TestTabBarSurvivesRefreshAtWidth51(t *testing.T) {
 	const width = 51
 	maxW := safeWidth(width)
 
-	m := New()
+	m := New(WithConfig(appconfig.Default()))
 	model, _ := m.Update(tea.WindowSizeMsg{Width: width, Height: 24})
 	m = model.(Model)
 	m.loading = false
