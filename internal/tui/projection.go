@@ -113,7 +113,8 @@ func (m Model) projectCollection(visible []sessionmgr.Item, now time.Time) colle
 			}
 		}
 		if m.agentsStateFilter != "" {
-			view.StateFilterLabel = "state: " + string(m.agentsStateFilter)
+			view.AgentStateFilter = string(m.agentsStateFilter)
+			view.StateFilterLabel = "state: " + view.AgentStateFilter
 		}
 	}
 

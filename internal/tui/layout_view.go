@@ -64,6 +64,7 @@ type collectionView struct {
 	AgentCount       int
 	DirectoryCount   int
 	ScopeLabel       string
+	AgentStateFilter string
 	StateFilterLabel string
 	EmptyMessage     string
 	Warning          string
@@ -233,16 +234,38 @@ type layoutNeeds struct {
 
 type renderLayout func(layoutView, layoutRenderTheme) renderedDashboard
 
+type renderLayoutActions func(actionsView, styles, int) string
+
+type layoutID string
+
+const (
+	layoutDefault layoutID = "default"
+	layoutZen     layoutID = "zen"
+)
+
 type layoutSpec struct {
-	render renderLayout
-	needs  layoutNeeds
+	id            layoutID
+	render        renderLayout
+	renderActions renderLayoutActions
+	needs         layoutNeeds
 }
 
 var defaultLayout = layoutSpec{
-	render: renderDefault,
+	id:            layoutDefault,
+	render:        renderDefault,
+	renderActions: renderDefaultActionsTile,
 	needs: layoutNeeds{
 		Overview: true,
 		Details:  true,
 		Preview:  true,
+	},
+}
+
+var zenLayout = layoutSpec{
+	id:            layoutZen,
+	render:        renderZen,
+	renderActions: renderZenActionsLine,
+	needs: layoutNeeds{
+		Overview: true,
 	},
 }

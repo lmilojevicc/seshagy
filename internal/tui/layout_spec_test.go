@@ -31,12 +31,38 @@ func (m *countingPreviewMux) CaptureSession(
 }
 
 func TestDefaultLayoutSpec(t *testing.T) {
-	if defaultLayout.render == nil {
-		t.Fatal("defaultLayout renderer is nil")
+	if defaultLayout.id != layoutDefault || defaultLayout.render == nil ||
+		defaultLayout.renderActions == nil {
+		t.Fatalf("defaultLayout contract is incomplete: %#v", defaultLayout)
 	}
 	want := layoutNeeds{Overview: true, Details: true, Preview: true}
 	if defaultLayout.needs != want {
 		t.Fatalf("defaultLayout needs = %#v, want %#v", defaultLayout.needs, want)
+	}
+}
+
+func TestZenLayoutSpec(t *testing.T) {
+	if zenLayout.id != layoutZen || zenLayout.render == nil || zenLayout.renderActions == nil {
+		t.Fatalf("zenLayout contract is incomplete: %#v", zenLayout)
+	}
+	want := layoutNeeds{Overview: true}
+	if zenLayout.needs != want {
+		t.Fatalf("zenLayout needs = %#v, want %#v", zenLayout.needs, want)
+	}
+
+	m := New(
+		WithConfig(appconfig.Default()),
+		WithMultiplexer(sessionmgr.NewNoopBackend()),
+	)
+	m.loading = false
+	m.items = []sessionmgr.Item{{Kind: sessionmgr.KindSession, Name: "demo"}}
+	view := m.projectLayout(zenLayout.needs)
+	if len(view.Sources.Entries) == 0 || len(view.Collection.Rows) != 1 ||
+		len(view.Actions.Hints) == 0 || view.Search.Mode != searchClassic {
+		t.Fatalf("Zen projection omitted mandatory surfaces: %#v", view)
+	}
+	if view.Overview == nil || view.Details != nil || view.Preview != nil {
+		t.Fatalf("Zen optional projections = %#v", view)
 	}
 }
 

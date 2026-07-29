@@ -25,6 +25,28 @@ func (m Model) projectInputChrome(available int) inputChrome {
 }
 
 func renderDefaultActionsTile(view actionsView, s styles, width int) string {
+	help := renderActionsHelp(view, s)
+	contentW := max(1, width-4)
+	return paneWithTitle(
+		s.tileHelp,
+		s.helpTileTitle,
+		clampText(help, contentW),
+		"HELP",
+		width,
+		0,
+	)
+}
+
+func renderZenActionsLine(view actionsView, s styles, width int) string {
+	usable := max(1, width)
+	contentWidth := zenContentWidthForUsable(usable)
+	help := clampStyledText(renderActionsHelp(view, s), contentWidth)
+	line := zenCenterText(help, contentWidth)
+	left := max(0, (usable-contentWidth)/2)
+	return strings.Repeat(" ", left) + line
+}
+
+func renderActionsHelp(view actionsView, s styles) string {
 	var help string
 	if !view.Expanded {
 		help = s.muted.Render("? help")
@@ -38,15 +60,7 @@ func renderDefaultActionsTile(view actionsView, s styles, width int) string {
 	if view.PrefixArmed {
 		help = s.warning.Bold(true).Render("PREFIX") + " " + help
 	}
-	contentW := max(1, width-4)
-	return paneWithTitle(
-		s.tileHelp,
-		s.helpTileTitle,
-		clampText(help, contentW),
-		"HELP",
-		width,
-		0,
-	)
+	return help
 }
 
 func renderPopupInput(chrome inputChrome, s styles, boxWidth int) string {

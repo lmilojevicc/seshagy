@@ -354,15 +354,19 @@ func isTailPreviewKind(kind sessionmgr.Kind) bool {
 
 func (m Model) renderShellFooter(actions actionsView) string {
 	footerWidth := safeWidth(m.width)
-	helpTile := renderDefaultActionsTile(actions, m.styles, footerWidth)
+	renderActions := m.layoutSpec().renderActions
+	if renderActions == nil {
+		renderActions = renderDefaultActionsTile
+	}
+	help := renderActions(actions, m.styles, footerWidth)
 	if m.inlineInputActive() {
 		inputTile := m.renderInlineInputTile()
 		if m.height > 0 && m.height < 5 {
 			return inputTile
 		}
-		return inputTile + "\n" + helpTile
+		return inputTile + "\n" + help
 	}
-	return helpTile
+	return help
 }
 
 func (m Model) renderInlineInputTile() string {

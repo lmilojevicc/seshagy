@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // titledTopEdge builds the top border line of a rounded pane at display width
@@ -83,18 +84,34 @@ func pad(line string, width int) string {
 	return line + strings.Repeat(" ", width-lipgloss.Width(line))
 }
 
+// clampStyledText truncates terminal output without splitting ANSI sequences,
+// UTF-8, or grapheme clusters. Use clampText before applying styles when
+// possible; this helper is the final width guard for already-rendered text.
+func clampStyledText(text string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	if ansi.StringWidth(text) <= width {
+		return text
+	}
+	return ansi.Truncate(text, width, "…")
+}
+
 // joinFrame stacks UI blocks without lipgloss.JoinVertical, which pads every
 // line to the widest line in the frame and can push the tab bar past the pane.
 func joinFrame(header, body, footer string, width, height int) string {
 	safeW := safeWidth(width)
 	lines := make([]string, 0, height)
 	appendBlock := func(block string) {
+		if block == "" {
+			return
+		}
 		for _, line := range strings.Split(block, "\n") {
 			if len(lines) >= height {
 				return
 			}
 			if lipgloss.Width(line) > safeW {
-				line = clampText(line, safeW)
+				line = clampStyledText(line, safeW)
 			}
 			lines = append(lines, line)
 		}
