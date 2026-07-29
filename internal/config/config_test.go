@@ -339,13 +339,17 @@ func TestTUILayoutDefaultWhenMissing(t *testing.T) {
 }
 
 func TestTUILayoutRoundTrip(t *testing.T) {
-	tests := map[string]string{
-		LayoutDefault: LayoutDefault,
-		LayoutZen:     LayoutZen,
-		" Future ":    "future",
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{input: LayoutDefault, want: LayoutDefault},
+		{input: LayoutZen, want: LayoutZen},
+		{input: " Future ", want: "future"},
 	}
-	for input, want := range tests {
-		t.Run(want, func(t *testing.T) {
+	for _, test := range tests {
+		t.Run(test.want, func(t *testing.T) {
+			input, want := test.input, test.want
 			t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 			cfg := Default()
 			cfg.TUI.Layout = input

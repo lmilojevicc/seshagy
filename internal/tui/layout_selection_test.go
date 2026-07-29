@@ -352,7 +352,7 @@ func TestZenPreviewEffectsStayDisabledAcrossSharedUpdatePaths(t *testing.T) {
 	if item, ok := m.selectedItem(); !ok || item.Name != "cached" {
 		t.Fatalf("source navigation did not select cached session: %#v, ok=%v", item, ok)
 	}
-	m = applyImmediateMessages(t, m, executeImmediateCommands(t, cmd))
+	applyImmediateMessages(t, m, executeImmediateCommands(t, cmd))
 
 	if mux.captures != 0 {
 		t.Fatalf("Zen shared update paths captured Preview %d times", mux.captures)
