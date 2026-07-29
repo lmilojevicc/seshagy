@@ -54,7 +54,13 @@ func TestDefaultLayoutMatchesPreRefactorFrames(t *testing.T) {
 
 func preRefactorBaselineModel(t *testing.T, width int) Model {
 	t.Helper()
+	return preRefactorBaselineModelWithLayout(t, width, appconfig.LayoutDefault)
+}
+
+func preRefactorBaselineModelWithLayout(t *testing.T, width int, layout string) Model {
+	t.Helper()
 	cfg := appconfig.Default()
+	cfg.TUI.Layout = layout
 	preview := true
 	cfg.TUI.Preview = &preview
 	m := New(
