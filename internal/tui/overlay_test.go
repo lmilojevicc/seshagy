@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
+	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -76,6 +78,62 @@ func TestOverlayYOffsetAndWideRunes(t *testing.T) {
 	}
 	if ansi.Strip(rows[1]) != "bZZb" {
 		t.Errorf("overlaid row1 = %q, want bZZb", ansi.Strip(rows[1]))
+	}
+}
+
+func TestOverlayPadsSparseBackgroundToRequestedColumn(t *testing.T) {
+	gray := "\x1b[38;5;242m"
+	reset := "\x1b[0m"
+	for _, tt := range []struct {
+		name string
+		bg   string
+		x    int
+		want string
+	}{
+		{name: "empty", bg: "", x: 4, want: "    XX"},
+		{name: "short", bg: "ab", x: 4, want: "ab  XX"},
+		{
+			name: "styled wide rune",
+			bg:   gray + "你" + reset,
+			x:    4,
+			want: "你  XX",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got := overlay(tt.bg, "XX", tt.x, 0)
+			if plain := ansi.Strip(got); plain != tt.want {
+				t.Fatalf("overlay = %q, want %q", plain, tt.want)
+			}
+			if width := lipgloss.Width(got); width != tt.x+2 {
+				t.Fatalf("overlay width = %d, want %d", width, tt.x+2)
+			}
+			if !utf8.ValidString(got) {
+				t.Fatalf("overlay produced invalid UTF-8: %q", got)
+			}
+			if tt.name == "styled wide rune" &&
+				!strings.Contains(got, reset+"  XX") {
+				t.Fatalf("background style leaked into padding or foreground: %q", got)
+			}
+		})
+	}
+}
+
+func TestOverlayPositionsAtStartBoundaryAndPastBackground(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		x    int
+		want string
+	}{
+		{name: "start", x: 0, want: "XXcdef"},
+		{name: "boundary", x: 6, want: "abcdefXX"},
+		{name: "past background", x: 8, want: "abcdef  XX"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got := overlay("abcdef", "XX", tt.x, 0)
+			if plain := ansi.Strip(got); plain != tt.want {
+				t.Fatalf("overlay = %q, want %q", plain, tt.want)
+			}
+		})
 	}
 }
 
@@ -413,5 +471,131 @@ func TestPopupStyleDoesNotRenderDuplicateInlineInputAtPopupSize(t *testing.T) {
 	view := sessionmgr.StripANSI(m.View())
 	if !strings.Contains(view, "SEARCH") || !strings.Contains(view, "popup-query") {
 		t.Fatalf("popup-capable view missing the SEARCH overlay\n%s", view)
+	}
+}
+
+func TestZenPopupStaysCenteredOnSparseBackground(t *testing.T) {
+	previousProfile := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(previousProfile) })
+
+	for _, tt := range []struct {
+		name    string
+		mode    inputMode
+		loading bool
+		title   string
+	}{
+		{name: "loading search", mode: modeSearch, loading: true, title: "SEARCH"},
+		{name: "empty rename", mode: modeRename, loading: false, title: "RENAME"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			m := newSparseZenOverlayModel()
+			m.loading = tt.loading
+			m.inputMode = tt.mode
+			m.renameFrom = "old-name"
+			m.searchInput.SetValue("needle")
+			m.renameInput.SetValue("new-name")
+
+			popup := m.renderInputPopup()
+			wantX := max(0, (m.width-lipgloss.Width(popup))/2)
+			wantY := max(0, (m.height-lipgloss.Height(popup))/2)
+			view := m.View()
+			lines := strings.Split(view, "\n")
+			assertTokenDisplayColumn(t, lines[wantY], "╭", wantX)
+			if clean := sessionmgr.StripANSI(view); !strings.Contains(clean, tt.title) {
+				t.Fatalf("Zen popup missing %s title\n%s", tt.title, clean)
+			}
+
+			dimmingOff := false
+			undimmed := m
+			undimmed.config.TUI.DimBackground = &dimmingOff
+			plainView := undimmed.View()
+			if sessionmgr.StripANSI(view) != sessionmgr.StripANSI(plainView) {
+				t.Fatalf("popup dimming changed visible layout")
+			}
+			if view == plainView || !strings.Contains(view, "\x1b[38;5;242m") {
+				t.Fatalf("Zen popup did not retain shared background dimming")
+			}
+		})
+	}
+}
+
+func TestZenPreviewUnavailableToastStaysRightAlignedOnSparseBackground(t *testing.T) {
+	previousProfile := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(previousProfile) })
+
+	m := newSparseZenOverlayModel()
+	m.config.TypeFirst.Enabled = true
+	model, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}, Alt: true})
+	if cmd != nil {
+		t.Fatalf("Zen Alt+P command = %v, want nil", cmd)
+	}
+	got := model.(Model)
+	if len(got.notifications) != 1 ||
+		got.notifications[0].text != "preview is not available in the zen layout" {
+		t.Fatalf("Zen Alt+P notifications = %#v", got.notifications)
+	}
+
+	toast := got.renderNotificationToast(time.Now())
+	toastWidth := lipgloss.Width(toast)
+	toastHeight := lipgloss.Height(toast)
+	wantX := max(0, got.width-toastWidth-3)
+	wantY := max(0, got.height-toastHeight-1)
+
+	withoutToast := got
+	withoutToast.notifications = nil
+	backgroundLines := strings.Split(withoutToast.View(), "\n")
+	if width := lipgloss.Width(backgroundLines[wantY]); width >= wantX {
+		t.Fatalf(
+			"test row is not sparse: background width = %d, toast x = %d",
+			width,
+			wantX,
+		)
+	}
+
+	view := got.View()
+	lines := strings.Split(view, "\n")
+	assertTokenDisplayColumn(t, lines[wantY], "╭", wantX)
+	if wantX+toastWidth != got.width-3 {
+		t.Fatalf(
+			"toast right edge = %d, want %d",
+			wantX+toastWidth,
+			got.width-3,
+		)
+	}
+	clean := sessionmgr.StripANSI(view)
+	if count := strings.Count(clean, "preview is not available in"); count != 1 {
+		t.Fatalf("Preview unavailable notice count = %d, want 1\n%s", count, clean)
+	}
+}
+
+func newSparseZenOverlayModel() Model {
+	cfg := appconfig.Default()
+	cfg.TUI.Layout = appconfig.LayoutZen
+	cfg.TUI.InputStyle = appconfig.InputStylePopup
+	dim := true
+	cfg.TUI.DimBackground = &dim
+	m := New(
+		WithConfig(cfg),
+		WithMultiplexer(sessionmgr.NewNoopBackend()),
+	)
+	m.width, m.height = 80, 20
+	m.loading = true
+	m.source = sessionmgr.ModeSessions
+	m.items = nil
+	m.notifications = nil
+	return m
+}
+
+func assertTokenDisplayColumn(t *testing.T, line, token string, want int) {
+	t.Helper()
+	clean := sessionmgr.StripANSI(line)
+	index := strings.Index(clean, token)
+	if index < 0 {
+		t.Fatalf("line missing token %q: %q", token, clean)
+	}
+	if got := lipgloss.Width(clean[:index]); got != want {
+		t.Fatalf("token %q column = %d, want %d: %q", token, got, want, clean)
 	}
 }
