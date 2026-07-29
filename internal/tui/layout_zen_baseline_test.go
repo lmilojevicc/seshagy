@@ -87,7 +87,7 @@ func TestMissingAndExplicitDefaultMatchExistingFrames(t *testing.T) {
 					t,
 					"testdata/default_"+tt.name+".golden.b64",
 				)
-				got := []byte(preRefactorBaselineModelWithLayout(t, tt.width, layout).View())
+				got := []byte(approvedDefaultBaselineModelWithLayout(t, tt.width, layout).View())
 				if !bytes.Equal(got, want) {
 					t.Fatalf(
 						"layout %q default %s frame changed\ngot %d bytes, want %d",

@@ -301,7 +301,7 @@ Default state glyphs and labels:
 | State   | `icon` | `label`   | `color` |
 | ------- | ------ | --------- | ------- |
 | working | `●`    | `working` | `10`    |
-| blocked | `◐`    | `blocked` | `11`    |
+| blocked | `∅`    | `blocked` | `9`     |
 | done    | `◉`    | `done`    | `14`    |
 | idle    | `○`    | `idle`    | `8`     |
 | unknown | `?`    | `unknown` | `8`     |
@@ -319,9 +319,9 @@ Example `[icons.agent_state]` (defaults from `seshagy config init`):
       label = "working"
       color = "10"
     [icons.agent_state.blocked]
-      icon = "◐"
+      icon = "∅"
       label = "blocked"
-      color = "11"
+      color = "9"
     [icons.agent_state.done]
       icon = "◉"
       label = "done"

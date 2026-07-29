@@ -14,11 +14,10 @@ import (
 	"github.com/lmilojevicc/seshagy/internal/sessionmgr"
 )
 
-// TestDefaultLayoutMatchesPreRefactorFrames compares complete raw frames
-// generated from main@4067ac3 before the projection/renderer cutover. The
-// fixtures were captured from a read-only git archive with the same fixed
-// model data and TrueColor profile used below.
-func TestDefaultLayoutMatchesPreRefactorFrames(t *testing.T) {
+// TestDefaultLayoutMatchesApprovedFrames compares complete raw frames. The
+// original fixtures were captured from main@4067ac3 before the projection and
+// renderer cutover; approved visual changes update only their affected bytes.
+func TestDefaultLayoutMatchesApprovedFrames(t *testing.T) {
 	previousProfile := lipgloss.ColorProfile()
 	lipgloss.SetColorProfile(termenv.TrueColor)
 	t.Cleanup(func() { lipgloss.SetColorProfile(previousProfile) })
@@ -39,10 +38,10 @@ func TestDefaultLayoutMatchesPreRefactorFrames(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			got := []byte(preRefactorBaselineModel(t, tt.width).View())
+			got := []byte(approvedDefaultBaselineModel(t, tt.width).View())
 			if !bytes.Equal(got, want) {
 				t.Fatalf(
-					"default %s frame differs from pre-refactor baseline\ngot %d bytes, want %d",
+					"default %s frame differs from approved baseline\ngot %d bytes, want %d",
 					tt.name,
 					len(got),
 					len(want),
@@ -52,12 +51,12 @@ func TestDefaultLayoutMatchesPreRefactorFrames(t *testing.T) {
 	}
 }
 
-func preRefactorBaselineModel(t *testing.T, width int) Model {
+func approvedDefaultBaselineModel(t *testing.T, width int) Model {
 	t.Helper()
-	return preRefactorBaselineModelWithLayout(t, width, appconfig.LayoutDefault)
+	return approvedDefaultBaselineModelWithLayout(t, width, appconfig.LayoutDefault)
 }
 
-func preRefactorBaselineModelWithLayout(t *testing.T, width int, layout string) Model {
+func approvedDefaultBaselineModelWithLayout(t *testing.T, width int, layout string) Model {
 	t.Helper()
 	cfg := appconfig.Default()
 	cfg.TUI.Layout = layout

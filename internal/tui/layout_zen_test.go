@@ -40,7 +40,7 @@ func zenTestView() layoutView {
 					Kind: rowKind(sessionmgr.KindAgent), Selected: true,
 					Agent: agentRowView{
 						DisplayName: "reviewer", State: "blocked", Location: "demo:1",
-						Indicator: indicatorView{Mode: displayIcon, Icon: "◐", Color: "11"},
+						Indicator: indicatorView{Mode: displayIcon, Icon: "∅", Color: "9"},
 					},
 				},
 				{
@@ -107,7 +107,7 @@ func TestZenHeaderUsesProjectedNavigationOverviewAndFilters(t *testing.T) {
 		1,
 		true,
 	)
-	wantActive := theme.styles.emphasis.Render("◐ 1 blocked")
+	wantActive := theme.styles.emphasis.Render("∅ 1 blocked")
 	if active != wantActive {
 		t.Fatalf("active blocked chip = %q, want %q", active, wantActive)
 	}
@@ -123,8 +123,51 @@ func TestZenHeaderUsesProjectedNavigationOverviewAndFilters(t *testing.T) {
 	}
 }
 
+func TestZenBlockedChipUsesBrightRedUnlessActive(t *testing.T) {
+	previousProfile := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(previousProfile) })
+
+	theme := zenTestTheme()
+	inactive := renderZenAgentStateChip(
+		theme.styles,
+		theme.icons,
+		sessionmgr.AgentBlocked,
+		1,
+		false,
+	)
+	if !strings.Contains(inactive, "\x1b[91m") {
+		t.Fatalf("inactive blocked chip missing bright-red SGR 91: %q", inactive)
+	}
+	if strings.Contains(inactive, "\x1b[93m") || strings.Contains(inactive, "\x1b[1m") {
+		t.Fatalf("inactive blocked chip uses old yellow or bold SGR: %q", inactive)
+	}
+
+	active := renderZenAgentStateChip(
+		theme.styles,
+		theme.icons,
+		sessionmgr.AgentBlocked,
+		1,
+		true,
+	)
+	if strings.Contains(active, "\x1b[91m") {
+		t.Fatalf("active blocked chip should use emphasis styling, got %q", active)
+	}
+	if want := theme.styles.emphasis.Render("∅ 1 blocked"); active != want {
+		t.Fatalf("active blocked chip = %q, want %q", active, want)
+	}
+}
+
 func TestZenOverviewPreservesAllFactsWhenWrapped(t *testing.T) {
 	view := zenTestView()
+	theme := zenTestTheme()
+	blockedIcon := theme.icons.ForAgentState(sessionmgr.AgentBlocked).Icon
+	if blockedIcon != "∅" {
+		t.Fatalf("default blocked icon = %q, want ∅", blockedIcon)
+	}
+	if width := lipgloss.Width(blockedIcon); width != 1 {
+		t.Fatalf("default blocked icon width = %d, want 1", width)
+	}
 	view.Overview.Sessions = 12
 	view.Overview.Agents = overviewAgentCountsView{
 		Working: 12,
@@ -135,12 +178,12 @@ func TestZenOverviewPreservesAllFactsWhenWrapped(t *testing.T) {
 	}
 	for _, width := range []int{40, 72, 88} {
 		t.Run(fmt.Sprint(width), func(t *testing.T) {
-			raw := renderZenOverview(view, zenTestTheme(), width)
+			raw := renderZenOverview(view, theme, width)
 			clean := sessionmgr.StripANSI(raw)
 			for _, fact := range []string{
 				"12 Sessions",
 				"12 working",
-				"23 blocked",
+				"∅ 23 blocked",
 				"34 done",
 				"45 idle",
 				"56 unknown",

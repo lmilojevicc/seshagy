@@ -624,6 +624,29 @@ func TestIconSetTmuxStateProjection(t *testing.T) {
 	}
 }
 
+func TestBlockedAgentStyleDefaultAndExplicitOverride(t *testing.T) {
+	cfg := Default()
+	if got := cfg.Icons.AgentState.Blocked.Icon; got != "∅" {
+		t.Fatalf("default blocked icon = %q, want ∅", got)
+	}
+	if got := cfg.Icons.AgentState.Blocked.Color; got != "9" {
+		t.Fatalf("default blocked color = %q, want 9", got)
+	}
+	projected := cfg.IconSet().ForAgentState(sessionmgr.AgentBlocked)
+	if projected.Icon != "∅" || projected.Color != "9" {
+		t.Fatalf("projected default blocked style = %#v, want icon ∅ color 9", projected)
+	}
+
+	// Previously generated configs may contain the old defaults explicitly.
+	// They remain valid user overrides rather than being silently migrated.
+	cfg.Icons.AgentState.Blocked.Icon = "◐"
+	cfg.Icons.AgentState.Blocked.Color = "11"
+	projected = cfg.IconSet().ForAgentState(sessionmgr.AgentBlocked)
+	if projected.Icon != "◐" || projected.Color != "11" {
+		t.Fatalf("explicit blocked style override = %#v, want icon ◐ color 11", projected)
+	}
+}
+
 func TestIconSetAgentStateProjection(t *testing.T) {
 	states := []sessionmgr.AgentState{
 		sessionmgr.AgentIdle,

@@ -241,7 +241,7 @@ func TestProjectAgentRowsPreserveEveryState(t *testing.T) {
 	}{
 		{state: sessionmgr.AgentIdle, icon: "○", color: "8"},
 		{state: sessionmgr.AgentWorking, icon: "●", color: "10"},
-		{state: sessionmgr.AgentBlocked, icon: "◐", color: "11"},
+		{state: sessionmgr.AgentBlocked, icon: "∅", color: "9"},
 		{state: sessionmgr.AgentDone, icon: "◉", color: "14"},
 		{state: sessionmgr.AgentUnknown, icon: "?", color: "8"},
 	} {

@@ -663,7 +663,7 @@ func projectTmuxStateStyles(states TmuxStatesConfig) sessionmgr.TmuxStateStyles 
 func defaultAgentStatesConfig() AgentStatesConfig {
 	return AgentStatesConfig{
 		Working: IconConfig{Icon: "●", Label: "working", Color: "10"},
-		Blocked: IconConfig{Icon: "◐", Label: "blocked", Color: "11"},
+		Blocked: IconConfig{Icon: "∅", Label: "blocked", Color: "9"},
 		Done:    IconConfig{Icon: "◉", Label: "done", Color: "14"},
 		Unknown: IconConfig{Icon: "?", Label: "unknown", Color: "8"},
 		Idle:    IconConfig{Icon: "○", Label: "idle", Color: "8"},

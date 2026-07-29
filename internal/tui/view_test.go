@@ -738,7 +738,7 @@ func TestAgentStateChipsTextModeShowsLabels(t *testing.T) {
 			t.Fatalf("text mode agent chips missing label %q\n%s", label, out)
 		}
 	}
-	for _, glyph := range []string{"\u25cf", "\u25d0", "\u25c9"} {
+	for _, glyph := range []string{"\u25cf", "\u2205", "\u25c9"} {
 		if strings.Contains(out, glyph) {
 			t.Fatalf("text mode agent chips should not show glyphs\n%s", out)
 		}
