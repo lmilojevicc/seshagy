@@ -29,6 +29,9 @@ const (
 
 	InputStylePopup   = "popup"
 	InputStyleCmdline = "cmdline"
+
+	LayoutDefault = "default"
+	LayoutZen     = "zen"
 )
 
 type Config struct {
@@ -49,8 +52,9 @@ type LogConfig struct {
 	File  string `toml:"file"  json:"file"`
 }
 
-// TUIConfig holds TUI-only rendering toggles.
+// TUIConfig holds TUI rendering settings.
 type TUIConfig struct {
+	Layout        string `toml:"layout"         json:"layout"`
 	InputStyle    string `toml:"input_style"    json:"input_style"`
 	DimBackground *bool  `toml:"dim_background" json:"dim_background"`
 	Preview       *bool  `toml:"preview"        json:"preview"`
@@ -200,6 +204,7 @@ func Default() Config {
 		TypeFirst: TypeFirstConfig{Enabled: false, Prefix: DefaultPrefix},
 		Log:       LogConfig{Level: "off"},
 		TUI: TUIConfig{
+			Layout:        LayoutDefault,
 			InputStyle:    InputStylePopup,
 			DimBackground: ptrBool(true),
 			Preview:       ptrBool(true),
@@ -293,6 +298,7 @@ func (c *Config) Normalize() {
 		c.Log.Level = "off"
 	}
 	c.Log.File = strings.TrimSpace(c.Log.File)
+	c.TUI.Layout = normalizeTUILayout(c.TUI.Layout)
 	c.TUI.InputStyle = normalizeInputStyle(c.TUI.InputStyle)
 	if c.TUI.DimBackground == nil {
 		c.TUI.DimBackground = ptrBool(true)
@@ -418,6 +424,12 @@ func (c Config) IconSet() sessionmgr.IconSet {
 			Color: c.Icons.FD.Color,
 		},
 	}
+}
+
+// TUILayout returns the normalized configured layout token. Unknown tokens are
+// preserved so the TUI can warn before falling back to the default layout.
+func (c Config) TUILayout() string {
+	return normalizeTUILayout(c.TUI.Layout)
 }
 
 func (c Config) PrefixKey() string {
@@ -578,6 +590,14 @@ func normalizeKindIcon(
 	}
 }
 
+func normalizeTUILayout(layout string) string {
+	layout = strings.ToLower(strings.TrimSpace(layout))
+	if layout == "" {
+		return LayoutDefault
+	}
+	return layout
+}
+
 func normalizeInputStyle(style string) string {
 	switch strings.ToLower(strings.TrimSpace(style)) {
 	case "", "popup", "floating", "float", "box", "centered":
@@ -643,7 +663,7 @@ func projectTmuxStateStyles(states TmuxStatesConfig) sessionmgr.TmuxStateStyles 
 func defaultAgentStatesConfig() AgentStatesConfig {
 	return AgentStatesConfig{
 		Working: IconConfig{Icon: "●", Label: "working", Color: "10"},
-		Blocked: IconConfig{Icon: "◐", Label: "blocked", Color: "11"},
+		Blocked: IconConfig{Icon: "∅", Label: "blocked", Color: "9"},
 		Done:    IconConfig{Icon: "◉", Label: "done", Color: "14"},
 		Unknown: IconConfig{Icon: "?", Label: "unknown", Color: "8"},
 		Idle:    IconConfig{Icon: "○", Label: "idle", Color: "8"},

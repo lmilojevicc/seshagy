@@ -25,9 +25,11 @@ func overlay(bg, fg string, x, y int) string {
 		bgLine := bgLines[bgIdx]
 		fgW := lipgloss.Width(fgLine)
 		// Left portion: first x visible columns of bg, ANSI styling preserved.
+		// Sparse layouts may emit a line shorter than x, so pad the remainder
+		// to keep the foreground anchored at the requested display column.
 		var left string
 		if x > 0 {
-			left = ansi.Truncate(bgLine, x, "")
+			left = pad(ansi.Truncate(bgLine, x, ""), x)
 		}
 		// Right portion: bg past column x+fgW, ANSI styling preserved.
 		var right string

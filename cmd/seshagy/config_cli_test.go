@@ -38,6 +38,9 @@ func TestRunConfigShowTextAndJSON(t *testing.T) {
 			Sources struct {
 				Default string `json:"default"`
 			} `json:"sources"`
+			TUI struct {
+				Layout string `json:"layout"`
+			} `json:"tui"`
 		} `json:"config"`
 	}
 	if err := json.Unmarshal([]byte(strings.TrimSpace(jsonOut)), &payload); err != nil {
@@ -48,6 +51,13 @@ func TestRunConfigShowTextAndJSON(t *testing.T) {
 	}
 	if payload.Config.Sources.Default != "all" {
 		t.Fatalf("config.sources.default = %q, want all", payload.Config.Sources.Default)
+	}
+	if payload.Config.TUI.Layout != appconfig.LayoutDefault {
+		t.Fatalf(
+			"config.tui.layout = %q, want %q",
+			payload.Config.TUI.Layout,
+			appconfig.LayoutDefault,
+		)
 	}
 }
 

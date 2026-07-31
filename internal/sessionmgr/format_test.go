@@ -50,6 +50,25 @@ func TestIconSetForUnknownAgentState(t *testing.T) {
 	}
 }
 
+func TestIconSetForBlockedAgentStateUsesCenteredDefault(t *testing.T) {
+	fallback := defaultAgentStateStyle(AgentBlocked)
+	if fallback.Icon != "∅" || fallback.ASCII != "blocked" || fallback.Color != "9" {
+		t.Fatalf("blocked fallback style = %#v, want icon ∅, label blocked, color 9", fallback)
+	}
+
+	// ForAgentState backfills only Icon and ASCII. An empty configured color
+	// deliberately remains empty so the TUI can use its semantic theme fallback.
+	style := IconSet{}.ForAgentState(AgentBlocked)
+	if style.Icon != "∅" || style.ASCII != "blocked" || style.Color != "" {
+		t.Fatalf("default blocked state style = %#v, want icon ∅, label blocked", style)
+	}
+
+	style = DefaultIconSet().ForAgentState(AgentBlocked)
+	if style.Icon != "∅" || style.ASCII != "blocked" || style.Color != "" {
+		t.Fatalf("default icon-set blocked style = %#v, want icon ∅, label blocked", style)
+	}
+}
+
 func TestParseActionLineWithIcons(t *testing.T) {
 	icons := DefaultIconSet()
 	tests := []struct {

@@ -82,18 +82,18 @@ _How does it work?_ `seshagy` supports both `tmux` and `herdr` backends with dif
 
 ## ⌨️ TUI Keybindings
 
-| Key                | Action                                        |
-| ------------------ | --------------------------------------------- |
-| `enter`            | Jump to session/directory or focus agent pane |
-| `j`/`k`, `↓`/`↑`   | Navigate list                                 |
-| `a`, `t`, `z`, `f` | Filter by: All / Sessions / Zoxide / fd       |
-| `o`                | Toggle agent scope (current session vs all)   |
-| `/`                | Filter list by typing                         |
-| `R`                | Rename selected session                       |
-| `x`                | Kill selected session or pane                 |
-| `h`                | Open agent integration install menu           |
-| `p`                | Toggle preview pane                           |
-| `q` / `esc`        | Quit                                          |
+| Key                         | Action                                        |
+| --------------------------- | --------------------------------------------- |
+| `enter`                     | Jump to session/directory or focus agent pane |
+| `j`/`k`, `↓`/`↑`            | Navigate list                                 |
+| `a`, `t`, `z`, `f`          | Filter by: All / Sessions / Zoxide / fd       |
+| `o`                         | Toggle agent scope (current session vs all)   |
+| `/`                         | Filter list by typing                         |
+| `R`                         | Rename selected session                       |
+| `x`                         | Kill selected session or pane                 |
+| `h`                         | Open agent integration install menu           |
+| `p` (`alt+p` in type-first) | Toggle Preview when the layout supports it    |
+| `q` / `esc`                 | Quit                                          |
 
 ---
 
@@ -124,7 +124,10 @@ From there, you can:
 - Theme each pane independently — list, metadata, and preview borders and titles are configurable under `[theme.colors]` (see `docs/configuration.md`).
 - Tweak `fd` commands.
 - Enable `type_first` mode to instantly filter lists by typing without prefix keys.
-- Toggle TUI styles (popup vs. cmdline) and layout order.
+- Choose the Default or Zen TUI layout and a shared popup or cmdline input style.
+- Reorder the source tabs.
+
+See the [configuration guide](docs/configuration.md#tui-layouts) for layout behavior and settings. In Zen, Preview is unavailable and its shortcut shows a brief notice instead of toggling a pane.
 
 ---
 

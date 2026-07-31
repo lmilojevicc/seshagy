@@ -108,14 +108,44 @@ manifest_fallback = true   # tmux only: capture-pane screen-rule backstop (defau
 catalog_url = ""           # defaults to the herdr public catalog when empty
 
 [tui]
-input_style = "popup"        # popup | cmdline
-dim_background = true         # dim the list behind the popup (popup mode only)
-preview = true                # show the preview pane on start (toggle at runtime with p)
+layout = "default"             # default | zen
+input_style = "popup"          # popup | cmdline
+dim_background = true           # dim the dashboard behind popup input (popup mode only)
+preview = true                  # enable Preview when the layout supports it
 
 [log]
 level = "off"                 # off | debug | info | warn | error
 file = ""                     # empty: create a per-run file under XDG state
 ```
+
+### TUI layouts
+
+Choose a built-in layout at startup with the flat `[tui]` setting:
+
+```toml
+[tui]
+layout = "default"             # default | zen
+preview = true
+input_style = "popup"          # popup | cmdline
+dim_background = true
+```
+
+Both layouts retain the shared Sources, Collection, Search, and Actions surfaces.
+Beyond those shared surfaces:
+
+- **Default** composes Overview, Details, and Preview.
+- **Zen** is centered and borderless and composes Overview only.
+
+`preview` is a global preference that takes effect only when the selected layout
+supports Preview. Selecting Zen leaves that preference unchanged, so switching
+the startup setting back to Default restores it. Pressing `p` (or `alt+p` in
+type-first mode) in Zen shows a brief unavailable notice and does not perform
+Preview capture work.
+
+The popup/cmdline `input_style` setting and popup `dim_background` behavior are
+shared by both layouts. Layout selection is read from configuration at startup;
+there is no runtime layout switch. An unknown layout value produces one warning
+and falls back to Default.
 
 ### Diagnostic logging
 
@@ -271,7 +301,7 @@ Default state glyphs and labels:
 | State   | `icon` | `label`   | `color` |
 | ------- | ------ | --------- | ------- |
 | working | `●`    | `working` | `10`    |
-| blocked | `◐`    | `blocked` | `11`    |
+| blocked | `∅`    | `blocked` | `9`     |
 | done    | `◉`    | `done`    | `14`    |
 | idle    | `○`    | `idle`    | `8`     |
 | unknown | `?`    | `unknown` | `8`     |
@@ -289,9 +319,9 @@ Example `[icons.agent_state]` (defaults from `seshagy config init`):
       label = "working"
       color = "10"
     [icons.agent_state.blocked]
-      icon = "◐"
+      icon = "∅"
       label = "blocked"
-      color = "11"
+      color = "9"
     [icons.agent_state.done]
       icon = "◉"
       label = "done"

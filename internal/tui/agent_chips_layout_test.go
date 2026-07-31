@@ -56,6 +56,51 @@ func displaySegment(line string, start, width int) string {
 	return ansi.Truncate(ansi.TruncateLeft(line, start, ""), width, "")
 }
 
+func TestBlockedAgentIconIsSingleCellAndFitsCompactChips(t *testing.T) {
+	previousProfile := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(previousProfile) })
+
+	m := newTestModel(t)
+	cfg := appconfig.Default()
+	m.config = cfg
+	icons := cfg.IconSet()
+	blockedStyle := icons.ForAgentState(sessionmgr.AgentBlocked)
+	if blockedStyle.Icon != "∅" {
+		t.Fatalf("default blocked icon = %q, want ∅", blockedStyle.Icon)
+	}
+	if blockedStyle.Color != "9" {
+		t.Fatalf("default blocked color = %q, want 9", blockedStyle.Color)
+	}
+	if width := lipgloss.Width(blockedStyle.Icon); width != 1 {
+		t.Fatalf("default blocked icon width = %d, want 1", width)
+	}
+
+	stats := statsWithDistinctCounts()
+	for _, innerW := range []int{22, 25, 30, 36, 43, 47, 60} {
+		row := defaultAgentChips(m.styles, icons, stats, innerW)
+		if width := lipgloss.Width(row); width > innerW {
+			t.Fatalf("innerW=%d: icon chips width %d overflows (%q)",
+				innerW, width, sessionmgr.StripANSI(row))
+		}
+		clean := sessionmgr.StripANSI(row)
+		if !strings.Contains(clean, "∅") {
+			t.Fatalf("innerW=%d: blocked chip missing from %q", innerW, clean)
+		}
+		if innerW >= 24 {
+			if !strings.Contains(clean, "∅ 12") {
+				t.Fatalf("innerW=%d: blocked chip count missing from %q", innerW, clean)
+			}
+			if !strings.Contains(row, "\x1b[91m") {
+				t.Fatalf("innerW=%d: blocked chip missing bright-red SGR 91 in %q", innerW, row)
+			}
+			if strings.Contains(row, "\x1b[93m") {
+				t.Fatalf("innerW=%d: blocked chip retained bright-yellow SGR 93 in %q", innerW, row)
+			}
+		}
+	}
+}
+
 // TestAgentChipsTextModeFitsTileWidthAndKeepsAllStates verifies the legend never
 // overflows its tile inner width (which would make lipgloss wrap it to a second
 // line and break the top row) while still representing all five states.

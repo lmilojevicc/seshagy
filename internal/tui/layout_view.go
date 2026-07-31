@@ -64,6 +64,7 @@ type collectionView struct {
 	AgentCount       int
 	DirectoryCount   int
 	ScopeLabel       string
+	AgentStateFilter string
 	StateFilterLabel string
 	EmptyMessage     string
 	Warning          string
@@ -233,16 +234,59 @@ type layoutNeeds struct {
 
 type renderLayout func(layoutView, layoutRenderTheme) renderedDashboard
 
+type renderLayoutActions func(actionsView, styles, int) string
+
+type renderLayoutInput func(inputChrome, styles, int) string
+
+type layoutInputWidth func(int) int
+
+type layoutID string
+
+const (
+	layoutDefault layoutID = "default"
+	layoutZen     layoutID = "zen"
+)
+
 type layoutSpec struct {
-	render renderLayout
-	needs  layoutNeeds
+	id                layoutID
+	render            renderLayout
+	renderActions     renderLayoutActions
+	renderInput       renderLayoutInput
+	inputContentWidth layoutInputWidth
+	needs             layoutNeeds
 }
 
 var defaultLayout = layoutSpec{
-	render: renderDefault,
+	id:                layoutDefault,
+	render:            renderDefault,
+	renderActions:     renderDefaultActionsTile,
+	renderInput:       renderCmdlineInput,
+	inputContentWidth: defaultInputContentWidth,
 	needs: layoutNeeds{
 		Overview: true,
 		Details:  true,
 		Preview:  true,
 	},
+}
+
+var zenLayout = layoutSpec{
+	id:                layoutZen,
+	render:            renderZen,
+	renderActions:     renderZenActionsLine,
+	renderInput:       renderZenInlineInput,
+	inputContentWidth: zenInputContentWidth,
+	needs: layoutNeeds{
+		Overview: true,
+	},
+}
+
+func resolveLayout(name string) (layoutSpec, bool) {
+	switch layoutID(name) {
+	case "", layoutDefault:
+		return defaultLayout, true
+	case layoutZen:
+		return zenLayout, true
+	default:
+		return defaultLayout, false
+	}
 }

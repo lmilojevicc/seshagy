@@ -113,7 +113,8 @@ func (m Model) projectCollection(visible []sessionmgr.Item, now time.Time) colle
 			}
 		}
 		if m.agentsStateFilter != "" {
-			view.StateFilterLabel = "state: " + string(m.agentsStateFilter)
+			view.AgentStateFilter = string(m.agentsStateFilter)
+			view.StateFilterLabel = "state: " + view.AgentStateFilter
 		}
 	}
 
@@ -471,10 +472,16 @@ func (m Model) projectActions() actionsView {
 		{Key: "enter", Label: "attach/create/focus", Available: m.activateAvailable()},
 		{Key: "/", Label: "filter", Available: true},
 		{Key: "r", Label: "refresh", Available: true},
-		{Key: "p", Label: "preview", Available: true},
-		{Key: "m", Label: "mode", Available: true},
-		{Key: "h", Label: "install", Available: true},
 	}
+	if m.previewAvailable() {
+		view.Hints = append(view.Hints, actionHintView{
+			Key: "p", Label: "preview", Available: true,
+		})
+	}
+	view.Hints = append(view.Hints,
+		actionHintView{Key: "m", Label: "mode", Available: true},
+		actionHintView{Key: "h", Label: "install", Available: true},
+	)
 	if m.source == sessionmgr.ModeAgents {
 		view.Hints = append(view.Hints,
 			actionHintView{Key: "o", Label: "this session", Available: true},

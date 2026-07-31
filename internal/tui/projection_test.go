@@ -241,7 +241,7 @@ func TestProjectAgentRowsPreserveEveryState(t *testing.T) {
 	}{
 		{state: sessionmgr.AgentIdle, icon: "○", color: "8"},
 		{state: sessionmgr.AgentWorking, icon: "●", color: "10"},
-		{state: sessionmgr.AgentBlocked, icon: "◐", color: "11"},
+		{state: sessionmgr.AgentBlocked, icon: "∅", color: "9"},
 		{state: sessionmgr.AgentDone, icon: "◉", color: "14"},
 		{state: sessionmgr.AgentUnknown, icon: "?", color: "8"},
 	} {
@@ -424,6 +424,7 @@ func TestProjectLayoutCollectionStatesAndAgentScope(t *testing.T) {
 	base.loading = false
 	base.agentsCurrentOnly = true
 	base.currentSession = "workspace-opaque-id"
+	base.agentsStateFilter = sessionmgr.AgentBlocked
 	base.items = []sessionmgr.Item{{
 		Kind: sessionmgr.KindAgent, Session: "workspace-opaque-id", Location: "Frontend",
 	}}
@@ -432,6 +433,15 @@ func TestProjectLayoutCollectionStatesAndAgentScope(t *testing.T) {
 	if resolved.ScopeLabel != "Frontend" {
 		t.Fatalf("resolved scope = %q, want Frontend", resolved.ScopeLabel)
 	}
+	if resolved.AgentStateFilter != "blocked" || resolved.StateFilterLabel != "state: blocked" {
+		t.Fatalf("agent state filter semantics = %#v", resolved)
+	}
+	base.source = sessionmgr.ModeSessions
+	if other := base.projectLayout(layoutNeeds{}).Collection; other.AgentStateFilter != "" {
+		t.Fatalf("non-Agent collection leaked state filter: %#v", other)
+	}
+	base.source = sessionmgr.ModeAgents
+	base.agentsStateFilter = ""
 	base.items[0].Location = ""
 	fallback := base.projectLayout(layoutNeeds{}).Collection
 	if fallback.ScopeLabel != "workspace-opaque-id" {

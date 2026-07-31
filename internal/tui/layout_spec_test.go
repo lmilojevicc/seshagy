@@ -31,12 +31,40 @@ func (m *countingPreviewMux) CaptureSession(
 }
 
 func TestDefaultLayoutSpec(t *testing.T) {
-	if defaultLayout.render == nil {
-		t.Fatal("defaultLayout renderer is nil")
+	if defaultLayout.id != layoutDefault || defaultLayout.render == nil ||
+		defaultLayout.renderActions == nil || defaultLayout.renderInput == nil ||
+		defaultLayout.inputContentWidth == nil {
+		t.Fatalf("defaultLayout contract is incomplete: %#v", defaultLayout)
 	}
 	want := layoutNeeds{Overview: true, Details: true, Preview: true}
 	if defaultLayout.needs != want {
 		t.Fatalf("defaultLayout needs = %#v, want %#v", defaultLayout.needs, want)
+	}
+}
+
+func TestZenLayoutSpec(t *testing.T) {
+	if zenLayout.id != layoutZen || zenLayout.render == nil || zenLayout.renderActions == nil ||
+		zenLayout.renderInput == nil || zenLayout.inputContentWidth == nil {
+		t.Fatalf("zenLayout contract is incomplete: %#v", zenLayout)
+	}
+	want := layoutNeeds{Overview: true}
+	if zenLayout.needs != want {
+		t.Fatalf("zenLayout needs = %#v, want %#v", zenLayout.needs, want)
+	}
+
+	m := New(
+		WithConfig(appconfig.Default()),
+		WithMultiplexer(sessionmgr.NewNoopBackend()),
+	)
+	m.loading = false
+	m.items = []sessionmgr.Item{{Kind: sessionmgr.KindSession, Name: "demo"}}
+	view := m.projectLayout(zenLayout.needs)
+	if len(view.Sources.Entries) == 0 || len(view.Collection.Rows) != 1 ||
+		len(view.Actions.Hints) == 0 || view.Search.Mode != searchClassic {
+		t.Fatalf("Zen projection omitted mandatory surfaces: %#v", view)
+	}
+	if view.Overview == nil || view.Details != nil || view.Preview != nil {
+		t.Fatalf("Zen optional projections = %#v", view)
 	}
 }
 
@@ -113,22 +141,11 @@ func TestLayoutNeedsGateOptionalPreparationOnly(t *testing.T) {
 	if cmd := m.previewForSelection(); cmd != nil {
 		t.Fatal("no-optional layout scheduled preview capture")
 	}
-	m.showPreview = false
-	model, cmd := m.handleActionKey(keyMsg("p"))
-	got := model.(Model)
-	if !got.showPreview || cmd != nil {
-		t.Fatalf(
-			"no-optional preview toggle = show:%v cmd:%v, want shared toggle without capture",
-			got.showPreview,
-			cmd,
-		)
-	}
-
 	m.cache = map[sessionmgr.SourceMode]modeCache{
 		sessionmgr.ModeSessions: {items: m.items, fetchedAt: time.Now()},
 	}
-	model, _ = m.Update(tickMsg(time.Now()))
-	got = model.(Model)
+	model, _ := m.Update(tickMsg(time.Now()))
+	got := model.(Model)
 	if got.inflightRefresh[sessionmgr.ModeAll] != 0 {
 		t.Fatal("no-optional tick started background ModeAll refresh")
 	}
@@ -136,6 +153,7 @@ func TestLayoutNeedsGateOptionalPreparationOnly(t *testing.T) {
 	m.inflightRefresh = map[sessionmgr.SourceMode]uint64{}
 	m.refreshGen = map[sessionmgr.SourceMode]uint64{}
 	m.cache = nil
+	var cmd tea.Cmd
 	model, cmd = m.switchSource(sessionmgr.ModeFD)
 	got = model.(Model)
 	if got.source != sessionmgr.ModeFD || got.inflightRefresh[sessionmgr.ModeFD] == 0 ||
@@ -185,26 +203,35 @@ func TestLayoutNeedsDoNotGateSharedControllerBehavior(t *testing.T) {
 	}
 }
 
-func TestLayoutNeedsGatePreviewCaptureThroughWindowSizeUpdate(t *testing.T) {
+func TestLayoutAndPreferenceGatePreviewCaptureThroughWindowSizeUpdate(t *testing.T) {
 	for _, tt := range []struct {
-		name        string
-		layout      layoutSpec
-		wantCommand bool
-		wantCapture int
+		name          string
+		layout        string
+		preview       bool
+		wantAvailable bool
+		wantCommand   bool
+		wantCapture   int
 	}{
-		{name: "default", layout: defaultLayout, wantCommand: true, wantCapture: 1},
-		{name: "no optional", layout: noOptionalTestLayout},
+		{name: "default enabled", layout: appconfig.LayoutDefault, preview: true, wantAvailable: true, wantCommand: true, wantCapture: 1},
+		{name: "default disabled", layout: appconfig.LayoutDefault, preview: false, wantAvailable: true},
+		{name: "Zen enabled preference", layout: appconfig.LayoutZen, preview: true},
+		{name: "Zen disabled preference", layout: appconfig.LayoutZen, preview: false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
+			cfg := appconfig.Default()
+			cfg.TUI.Layout = tt.layout
+			cfg.TUI.Preview = &tt.preview
 			mux := &countingPreviewMux{Multiplexer: sessionmgr.NewNoopBackend()}
-			m := New(WithConfig(appconfig.Default()), WithMultiplexer(mux))
-			m.layout = tt.layout
+			m := New(WithConfig(cfg), WithMultiplexer(mux))
 			m.loading = false
 			m.source = sessionmgr.ModeSessions
 			m.items = []sessionmgr.Item{{
 				Kind: sessionmgr.KindSession,
 				Name: "demo",
 			}}
+			if m.previewAvailable() != tt.wantAvailable {
+				t.Fatalf("previewAvailable = %v, want %v", m.previewAvailable(), tt.wantAvailable)
+			}
 
 			_, cmd := m.Update(tea.WindowSizeMsg{Width: 120, Height: 32})
 			if (cmd != nil) != tt.wantCommand {

@@ -146,7 +146,7 @@ func defaultAgentStateStyle(state AgentState) IconStyle {
 	case AgentWorking:
 		return IconStyle{Icon: "●", ASCII: "working", Color: "10"}
 	case AgentBlocked:
-		return IconStyle{Icon: "◐", ASCII: "blocked", Color: "11"}
+		return IconStyle{Icon: "∅", ASCII: "blocked", Color: "9"}
 	case AgentDone:
 		return IconStyle{Icon: "◉", ASCII: "done", Color: "14"}
 	case AgentUnknown:

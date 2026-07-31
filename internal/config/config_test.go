@@ -288,6 +288,112 @@ func TestNormalizeStateDisplayMode(t *testing.T) {
 	}
 }
 
+func TestNormalizeTUILayout(t *testing.T) {
+	tests := map[string]string{
+		"":               LayoutDefault,
+		"default":        LayoutDefault,
+		" DEFAULT ":      LayoutDefault,
+		"zen":            LayoutZen,
+		" ZEN ":          LayoutZen,
+		" experimental ": "experimental",
+	}
+	for input, want := range tests {
+		cfg := Config{TUI: TUIConfig{Layout: input}}
+		cfg.Normalize()
+		if cfg.TUI.Layout != want {
+			t.Fatalf("normalized layout for %q = %q, want %q", input, cfg.TUI.Layout, want)
+		}
+		if got := (Config{TUI: TUIConfig{Layout: input}}).TUILayout(); got != want {
+			t.Fatalf("TUILayout() for %q = %q, want %q", input, got, want)
+		}
+	}
+}
+
+func TestTUILayoutDefaultWhenMissing(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	path := Path()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	data := []byte("[tui]\ninput_style = \"cmdline\"\ndim_background = false\npreview = false\n")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	loaded, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if loaded.TUI.Layout != LayoutDefault || loaded.TUILayout() != LayoutDefault {
+		t.Fatalf("layout without tui.layout = %q, want %q", loaded.TUI.Layout, LayoutDefault)
+	}
+	if loaded.TUI.InputStyle != InputStyleCmdline ||
+		loaded.TUI.DimBackground == nil || *loaded.TUI.DimBackground ||
+		loaded.TUI.Preview == nil || *loaded.TUI.Preview {
+		t.Fatalf("existing tui settings changed while defaulting layout: %#v", loaded.TUI)
+	}
+	if cfg := Default(); cfg.TUI.Layout != LayoutDefault {
+		t.Fatalf("Default().TUI.Layout = %q, want %q", cfg.TUI.Layout, LayoutDefault)
+	}
+}
+
+func TestTUILayoutRoundTrip(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{input: LayoutDefault, want: LayoutDefault},
+		{input: LayoutZen, want: LayoutZen},
+		{input: " Future ", want: "future"},
+	}
+	for _, test := range tests {
+		t.Run(test.want, func(t *testing.T) {
+			input, want := test.input, test.want
+			t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+			cfg := Default()
+			cfg.TUI.Layout = input
+			cfg.TUI.InputStyle = InputStyleCmdline
+			falseValue := false
+			cfg.TUI.DimBackground = &falseValue
+			cfg.TUI.Preview = &falseValue
+			if err := Save(cfg); err != nil {
+				t.Fatalf("Save() error = %v", err)
+			}
+
+			data, err := os.ReadFile(Path())
+			if err != nil {
+				t.Fatalf("read config: %v", err)
+			}
+			text := string(data)
+			if !strings.Contains(text, `layout = "`+want+`"`) {
+				t.Fatalf("saved config missing layout %q: %s", want, text)
+			}
+			if strings.Contains(text, "[tui.layout") || strings.Contains(text, "[tui.layouts") {
+				t.Fatalf("saved config contains nested layout table: %s", text)
+			}
+
+			loaded, err := Load()
+			if err != nil {
+				t.Fatalf("Load() error = %v", err)
+			}
+			if loaded.TUI.Layout != want || loaded.TUILayout() != want {
+				t.Fatalf(
+					"loaded layout = %q, accessor = %q, want %q",
+					loaded.TUI.Layout,
+					loaded.TUILayout(),
+					want,
+				)
+			}
+			if loaded.TUI.InputStyle != InputStyleCmdline ||
+				loaded.TUI.DimBackground == nil || *loaded.TUI.DimBackground ||
+				loaded.TUI.Preview == nil || *loaded.TUI.Preview {
+				t.Fatalf("existing tui settings changed in round trip: %#v", loaded.TUI)
+			}
+		})
+	}
+}
+
 func TestNormalizeInputStyle(t *testing.T) {
 	tests := map[string]string{
 		"":            InputStylePopup,
@@ -515,6 +621,29 @@ func TestIconSetTmuxStateProjection(t *testing.T) {
 			icons.TmuxStateUsesLabels(),
 			icons.TmuxStateHidden(),
 		)
+	}
+}
+
+func TestBlockedAgentStyleDefaultAndExplicitOverride(t *testing.T) {
+	cfg := Default()
+	if got := cfg.Icons.AgentState.Blocked.Icon; got != "∅" {
+		t.Fatalf("default blocked icon = %q, want ∅", got)
+	}
+	if got := cfg.Icons.AgentState.Blocked.Color; got != "9" {
+		t.Fatalf("default blocked color = %q, want 9", got)
+	}
+	projected := cfg.IconSet().ForAgentState(sessionmgr.AgentBlocked)
+	if projected.Icon != "∅" || projected.Color != "9" {
+		t.Fatalf("projected default blocked style = %#v, want icon ∅ color 9", projected)
+	}
+
+	// Previously generated configs may contain the old defaults explicitly.
+	// They remain valid user overrides rather than being silently migrated.
+	cfg.Icons.AgentState.Blocked.Icon = "◐"
+	cfg.Icons.AgentState.Blocked.Color = "11"
+	projected = cfg.IconSet().ForAgentState(sessionmgr.AgentBlocked)
+	if projected.Icon != "◐" || projected.Color != "11" {
+		t.Fatalf("explicit blocked style override = %#v, want icon ◐ color 11", projected)
 	}
 }
 
