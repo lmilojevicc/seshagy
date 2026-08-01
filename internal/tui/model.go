@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -39,6 +40,8 @@ type notification struct {
 }
 
 const spinnerFrames = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+
+const searchableFieldCount = 7
 
 type Model struct {
 	styles styles
@@ -361,8 +364,8 @@ func (m Model) visibleItems() []sessionmgr.Item {
 	if m.query == "" && !scope && !stateFilter {
 		return m.items
 	}
-	query := strings.ToLower(m.query)
-	out := make([]sessionmgr.Item, 0, len(m.items))
+
+	eligible := make([]sessionmgr.Item, 0, len(m.items))
 	for _, item := range m.items {
 		if scope && item.Session != m.currentSession {
 			continue
@@ -370,26 +373,34 @@ func (m Model) visibleItems() []sessionmgr.Item {
 		if stateFilter && item.AgentState != m.agentsStateFilter {
 			continue
 		}
-		if query != "" {
-			haystack := strings.ToLower(
-				strings.Join(
-					[]string{
-						string(item.Kind),
-						item.Name,
-						item.Path,
-						item.Location,
-						item.AgentName,
-						item.AgentDisplayName,
-						string(item.AgentState),
-					},
-					" ",
-				),
-			)
-			if !strings.Contains(haystack, query) {
-				continue
-			}
+		eligible = append(eligible, item)
+	}
+	if m.query == "" {
+		return eligible
+	}
+
+	candidates := make([]string, 0, len(eligible)*searchableFieldCount)
+	for _, item := range eligible {
+		candidates = append(candidates,
+			string(item.Kind),
+			item.Name,
+			item.Path,
+			item.Location,
+			item.AgentName,
+			item.AgentDisplayName,
+			string(item.AgentState),
+		)
+	}
+
+	out := make([]sessionmgr.Item, 0, len(eligible))
+	seen := make([]bool, len(eligible))
+	for _, rank := range list.DefaultFilter(m.query, candidates) {
+		itemIndex := rank.Index / searchableFieldCount
+		if seen[itemIndex] {
+			continue
 		}
-		out = append(out, item)
+		seen[itemIndex] = true
+		out = append(out, eligible[itemIndex])
 	}
 	return out
 }

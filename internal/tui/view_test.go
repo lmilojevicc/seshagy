@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
@@ -178,6 +179,154 @@ func TestFilterVisibleItems(t *testing.T) {
 	got := m.visibleItems()
 	if len(got) != 1 {
 		t.Fatalf("len = %d, want 1: %#v", len(got), got)
+	}
+}
+
+func TestFilterVisibleItemsFuzzyMatchesEverySearchableField(t *testing.T) {
+	tests := []struct {
+		name  string
+		item  sessionmgr.Item
+		query string
+	}{
+		{
+			name:  "kind",
+			item:  sessionmgr.Item{Kind: sessionmgr.KindSession},
+			query: "SSN",
+		},
+		{
+			name:  "name",
+			item:  sessionmgr.Item{Name: "fuzzy-project"},
+			query: "FZPRJ",
+		},
+		{
+			name:  "path",
+			item:  sessionmgr.Item{Path: "/workspace/fuzzy-project"},
+			query: "WKFZP",
+		},
+		{
+			name:  "location",
+			item:  sessionmgr.Item{Location: "workspace:12.3"},
+			query: "WSP123",
+		},
+		{
+			name:  "agent name",
+			item:  sessionmgr.Item{AgentName: "opencode"},
+			query: "OPCD",
+		},
+		{
+			name:  "agent display name",
+			item:  sessionmgr.Item{AgentDisplayName: "Open Code"},
+			query: "PNCD",
+		},
+		{
+			name:  "agent state",
+			item:  sessionmgr.Item{AgentState: sessionmgr.AgentWorking},
+			query: "WrKiNg",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := newTestModel(t)
+			m.items = []sessionmgr.Item{tt.item}
+			m.query = tt.query
+
+			if got := m.visibleItems(); len(got) != 1 {
+				t.Fatalf("visibleItems() = %#v, want the item", got)
+			}
+		})
+	}
+}
+
+func TestFilterVisibleItemsDoesNotMatchAcrossFields(t *testing.T) {
+	m := newTestModel(t)
+	m.items = []sessionmgr.Item{{Name: "alpha", Path: "beta"}}
+	m.query = "ha be"
+
+	if got := m.visibleItems(); len(got) != 0 {
+		t.Fatalf("visibleItems() = %#v, want no cross-field match", got)
+	}
+}
+
+func TestFilterVisibleItemsRanksByBestFieldAndDeduplicates(t *testing.T) {
+	m := newTestModel(t)
+	m.items = []sessionmgr.Item{
+		{Name: "ab-c", Target: "best name"},
+		{Name: "abc-very-long", Path: "a/b/c", Target: "best field"},
+	}
+	m.query = "abc"
+
+	nameRanks := list.DefaultFilter(m.query, []string{m.items[0].Name, m.items[1].Name})
+	if len(nameRanks) != 2 || nameRanks[0].Index != 0 {
+		t.Fatalf("name-only ranks = %#v, want first item's name ranked first", nameRanks)
+	}
+
+	got := m.visibleItems()
+	if len(got) != 2 {
+		t.Fatalf("len = %d, want 2 without duplicate rows: %#v", len(got), got)
+	}
+	if got[0].Target != "best field" || got[1].Target != "best name" {
+		t.Fatalf("targets = [%q, %q], want [best field, best name]", got[0].Target, got[1].Target)
+	}
+}
+
+func TestFilterVisibleItemsPreservesSourceOrderForEqualRanks(t *testing.T) {
+	m := newTestModel(t)
+	m.items = []sessionmgr.Item{
+		{Name: "abc", Target: "first"},
+		{Name: "abc", Target: "second"},
+		{Name: "abc", Target: "third"},
+	}
+	m.query = "ABC"
+
+	got := m.visibleItems()
+	if len(got) != 3 {
+		t.Fatalf("len = %d, want 3: %#v", len(got), got)
+	}
+	for i, want := range []string{"first", "second", "third"} {
+		if got[i].Target != want {
+			t.Fatalf("item %d target = %q, want %q", i, got[i].Target, want)
+		}
+	}
+}
+
+func TestFilterVisibleItemsComposesFuzzySearchWithAgentFilters(t *testing.T) {
+	m := newTestModel(t)
+	m.source = sessionmgr.ModeAgents
+	m.currentSession = "current"
+	m.agentsCurrentOnly = true
+	m.agentsStateFilter = sessionmgr.AgentWorking
+	m.items = []sessionmgr.Item{
+		{
+			Name:       "fuzzy-project",
+			Target:     "match",
+			Session:    "current",
+			AgentState: sessionmgr.AgentWorking,
+		},
+		{
+			Name:       "fuzzy-project",
+			Target:     "wrong state",
+			Session:    "current",
+			AgentState: sessionmgr.AgentIdle,
+		},
+		{
+			Name:       "fuzzy-project",
+			Target:     "wrong session",
+			Session:    "other",
+			AgentState: sessionmgr.AgentWorking,
+		},
+		{
+			Name:       "unrelated",
+			Target:     "wrong query",
+			Session:    "current",
+			AgentState: sessionmgr.AgentWorking,
+		},
+	}
+	m.query = "FZPRJ"
+
+	got := m.visibleItems()
+	if len(got) != 1 || got[0].Target != "match" {
+		t.Fatalf("visibleItems() = %#v, want only the scoped working fuzzy match", got)
 	}
 }
 
