@@ -68,7 +68,7 @@ Add focused table-driven tests near the package being changed. Use names like `T
 
 ## Commit & Pull Request Guidelines
 
-Recent history uses concise, imperative commit subjects, for example `Update README` and `Harden lifecycle agent integrations`. Capitalize the subject, avoid trailing punctuation, and keep it focused on one change.
+All repository commits must follow Conventional Commits: `<type>[optional scope]: <description>`. Keep descriptions focused, imperative, and without trailing punctuation. Examples include `feat(tui): add ranked fuzzy search`, `fix(sessionmgr): prevent stale agent resurrection`, and `refactor(config): simplify validation`. Mark breaking changes with `!` before the colon.
 
 Pull requests should include a short problem/solution summary, `mise run verify` results, and screenshots or terminal captures for visible TUI changes. Call out any config, tmux, or integration behavior changes.
 
