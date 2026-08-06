@@ -34,6 +34,7 @@ func (noopBackend) KillSession(ctx context.Context, _ string) error {
 	logSessionKill(ctx, BackendNone, started, errNoBackend)
 	return errNoBackend
 }
+func (noopBackend) KillPane(context.Context, string) error              { return errNoBackend }
 func (noopBackend) RenameSession(context.Context, string, string) error { return errNoBackend }
 func (noopBackend) CaptureSession(context.Context, string, int) (string, error) {
 	return "", nil

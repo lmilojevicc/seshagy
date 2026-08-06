@@ -132,6 +132,47 @@ func TestDeleteSelectedSession(t *testing.T) {
 	}
 }
 
+func TestDeleteSelectedAgent(t *testing.T) {
+	mux := &agentKillMux{terms: sessionmgr.TmuxTerms()}
+	m := newTestModel(t)
+	m.mux = mux
+	m.items = []sessionmgr.Item{{
+		Kind:      sessionmgr.KindAgent,
+		PaneID:    "%7",
+		AgentName: "pi",
+	}}
+
+	model, cmd := m.deleteSelected()
+	got := model.(Model)
+	if !got.killInFlight || len(got.notifications) != 0 || cmd == nil {
+		t.Fatalf(
+			"agent delete = inFlight:%v notifications:%#v cmd:%v",
+			got.killInFlight,
+			got.notifications,
+			cmd,
+		)
+	}
+}
+
+func TestDeleteSelectedAgentMissingPaneIDWarns(t *testing.T) {
+	mux := &agentKillMux{terms: sessionmgr.TmuxTerms()}
+	m := newTestModel(t)
+	m.mux = mux
+	m.items = []sessionmgr.Item{{Kind: sessionmgr.KindAgent, AgentName: "pi"}}
+
+	model, cmd := m.deleteSelected()
+	got := model.(Model)
+	if cmd != nil || got.killInFlight || mux.calls != 0 {
+		t.Fatalf("missing pane ID = inFlight:%v calls:%d cmd:%v", got.killInFlight, mux.calls, cmd)
+	}
+	if text := latestNotificationText(got); text != "cannot delete agent (missing pane ID)" {
+		t.Fatalf("notification = %q, want missing pane ID warning", text)
+	}
+	if sev := latestNotificationSeverity(got); sev != sevWarning {
+		t.Fatalf("delete severity = %v, want sevWarning", sev)
+	}
+}
+
 func TestHandleActionKeyPgUpDownHomeEnd(t *testing.T) {
 	m := newTestModel(t)
 	m.items = testKeyItems("00", "01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11")
@@ -509,28 +550,34 @@ func TestStartYaziOutsidePopup(t *testing.T) {
 	}
 }
 
-func TestDeleteNonSessionItemWarns(t *testing.T) {
-	for _, kind := range []sessionmgr.Kind{
-		sessionmgr.KindAgent,
-		sessionmgr.KindZoxide,
-		sessionmgr.KindFD,
+func TestDeleteUnsupportedItemWarns(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		terms sessionmgr.Terms
+		want  string
+	}{
+		{name: "tmux", terms: sessionmgr.TmuxTerms(), want: "delete only applies to sessions and agents"},
+		{name: "herdr", terms: sessionmgr.HerdrTerms(), want: "delete only applies to workspaces and agents"},
 	} {
-		t.Run(string(kind), func(t *testing.T) {
-			m := newTestModel(t)
-			m.items = []sessionmgr.Item{{Kind: kind, AgentName: "pi", Path: "/tmp/project"}}
+		for _, kind := range []sessionmgr.Kind{
+			sessionmgr.KindZoxide,
+			sessionmgr.KindFD,
+		} {
+			t.Run(tt.name+"/"+string(kind), func(t *testing.T) {
+				m := newTestModel(t)
+				m.terms = tt.terms
+				m.items = []sessionmgr.Item{{Kind: kind, AgentName: "pi", Path: "/tmp/project"}}
 
-			model, cmd := m.handleActionKey(keyMsg("x"))
-			got := model.(Model)
-			if text := latestNotificationText(
-				got,
-			); text != "delete only applies to sessions" ||
-				cmd != nil {
-				t.Fatalf("delete = notification:%q cmd:%v", text, cmd)
-			}
-			if sev := latestNotificationSeverity(got); sev != sevWarning {
-				t.Fatalf("delete severity = %v, want sevWarning", sev)
-			}
-		})
+				model, cmd := m.handleActionKey(keyMsg("x"))
+				got := model.(Model)
+				if text := latestNotificationText(got); text != tt.want || cmd != nil {
+					t.Fatalf("delete = notification:%q cmd:%v", text, cmd)
+				}
+				if sev := latestNotificationSeverity(got); sev != sevWarning {
+					t.Fatalf("delete severity = %v, want sevWarning", sev)
+				}
+			})
+		}
 	}
 }
 
@@ -849,6 +896,7 @@ func (c *captureRenameMux) CreateSessionFromDir(
 	return sessionmgr.Item{}, false, nil
 }
 func (c *captureRenameMux) KillSession(context.Context, string) error           { return nil }
+func (c *captureRenameMux) KillPane(context.Context, string) error              { return nil }
 func (c *captureRenameMux) RenameSession(context.Context, string, string) error { return nil }
 func (c *captureRenameMux) CaptureSession(context.Context, string, int) (string, error) {
 	return "", nil
@@ -1027,7 +1075,8 @@ func TestTabCyclesSectionsInTypeFirstMode(t *testing.T) {
 
 // TestDeleteSelectedSetsKillInFlight verifies that pressing x on a session
 // arms killInFlight so the ephemeral focus-loss poll is suppressed while
-// KillSession (and its focus-restore) runs. Non-session deletes must not arm.
+// KillSession (and its focus-restore) runs. Unsupported directory deletes must
+// not arm.
 func TestDeleteSelectedSetsKillInFlight(t *testing.T) {
 	m := newTestModel(t)
 	m.items = []sessionmgr.Item{{Kind: sessionmgr.KindSession, Name: "demo"}}
@@ -1050,15 +1099,22 @@ func TestDeleteSelectedSetsKillInFlight(t *testing.T) {
 }
 
 func TestDeleteSelectedDoesNotStartOverlappingKill(t *testing.T) {
-	m := newTestModel(t)
-	m.items = []sessionmgr.Item{{Kind: sessionmgr.KindSession, Name: "demo"}}
-	m.killInFlight = true
+	for _, item := range []sessionmgr.Item{
+		{Kind: sessionmgr.KindSession, Name: "demo"},
+		{Kind: sessionmgr.KindAgent, PaneID: "%7", AgentName: "pi"},
+	} {
+		t.Run(string(item.Kind), func(t *testing.T) {
+			m := newTestModel(t)
+			m.items = []sessionmgr.Item{item}
+			m.killInFlight = true
 
-	model, cmd := m.deleteSelected()
-	if !model.(Model).killInFlight {
-		t.Fatal("overlapping delete cleared killInFlight")
-	}
-	if cmd != nil {
-		t.Fatal("overlapping delete started another kill command")
+			model, cmd := m.deleteSelected()
+			if !model.(Model).killInFlight {
+				t.Fatal("overlapping delete cleared killInFlight")
+			}
+			if cmd != nil {
+				t.Fatal("overlapping delete started another kill command")
+			}
+		})
 	}
 }

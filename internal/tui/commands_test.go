@@ -80,6 +80,64 @@ func TestCreateDeleteRenameCommandsUseTmuxHooks(t *testing.T) {
 	}
 }
 
+type agentKillMux struct {
+	sessionmgr.Multiplexer
+	terms   sessionmgr.Terms
+	killErr error
+	paneID  string
+	calls   int
+}
+
+func (m *agentKillMux) Terms() sessionmgr.Terms { return m.terms }
+func (m *agentKillMux) KillPane(_ context.Context, paneID string) error {
+	m.calls++
+	m.paneID = paneID
+	return m.killErr
+}
+
+func TestDeleteAgentCmdUsesPaneIDAndBackendTerms(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		terms  sessionmgr.Terms
+		status string
+	}{
+		{name: "tmux", terms: sessionmgr.TmuxTerms(), status: "killed pane pi"},
+		{name: "herdr", terms: sessionmgr.HerdrTerms(), status: "closed pane pi"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			mux := &agentKillMux{terms: tt.terms}
+			item := sessionmgr.Item{
+				Kind:      sessionmgr.KindAgent,
+				Target:    "wrong-action-target",
+				PaneID:    "opaque-pane-id",
+				AgentName: "pi",
+			}
+
+			msg := deleteAgentCmd(mux, item)().(actionDoneMsg)
+			if mux.paneID != item.PaneID {
+				t.Fatalf("KillPane target = %q, want %q", mux.paneID, item.PaneID)
+			}
+			if msg.kind != actionKill || msg.err != nil || msg.status != tt.status {
+				t.Fatalf("deleteAgentCmd() = %#v, want status %q", msg, tt.status)
+			}
+		})
+	}
+}
+
+func TestDeleteAgentCmdPropagatesError(t *testing.T) {
+	killErr := errors.New("close failed")
+	mux := &agentKillMux{terms: sessionmgr.TmuxTerms(), killErr: killErr}
+
+	msg := deleteAgentCmd(mux, sessionmgr.Item{
+		Kind:      sessionmgr.KindAgent,
+		PaneID:    "%7",
+		AgentName: "pi",
+	})().(actionDoneMsg)
+	if msg.kind != actionKill || !errors.Is(msg.err, killErr) {
+		t.Fatalf("deleteAgentCmd() = %#v, want actionKill with sentinel error", msg)
+	}
+}
+
 func TestCreateSessionCmdReusesExistingWithoutNewSession(t *testing.T) {
 	dir := t.TempDir()
 	raw := sessionListLine("work", dir)

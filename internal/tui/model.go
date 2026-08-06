@@ -99,8 +99,8 @@ type Model struct {
 	herdrWorkspaceID string
 
 	// killInFlight suppresses the ephemeral focus-loss dismissal while a
-	// session/workspace kill (x) is in flight, so the close's refocus doesn't
-	// quit seshagy before the focus-restore inside KillSession can land.
+	// session/workspace or agent-pane kill (x) is in flight, so the close's
+	// refocus doesn't quit seshagy before the action completes.
 	killInFlight bool
 
 	setup          setupPrompt

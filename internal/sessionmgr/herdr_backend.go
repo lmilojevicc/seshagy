@@ -184,6 +184,13 @@ func (herdrBackend) KillSession(ctx context.Context, target string) error {
 	return nil
 }
 
+func (herdrBackend) KillPane(ctx context.Context, paneID string) error {
+	if err := herdrRun(ctx, "pane", "close", paneID); err != nil {
+		return fmt.Errorf("herdr pane close: %w", err)
+	}
+	return nil
+}
+
 func (herdrBackend) RenameSession(ctx context.Context, target, newName string) error {
 	if err := herdrRun(ctx, "workspace", "rename", target, newName); err != nil {
 		return fmt.Errorf("herdr workspace rename: %w", err)

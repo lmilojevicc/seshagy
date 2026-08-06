@@ -2,6 +2,7 @@ package sessionmgr
 
 import (
 	"context"
+	"fmt"
 	"os/exec"
 )
 
@@ -44,6 +45,13 @@ func (tmuxBackend) KillSession(ctx context.Context, target string) error {
 	err := KillSession(ctx, target)
 	logSessionKill(ctx, BackendTmux, started, err)
 	return err
+}
+
+func (tmuxBackend) KillPane(ctx context.Context, paneID string) error {
+	if err := tmuxRun(ctx, "kill-pane", "-t", paneID); err != nil {
+		return fmt.Errorf("tmux kill-pane: %w", err)
+	}
+	return nil
 }
 
 func (tmuxBackend) RenameSession(ctx context.Context, target, newName string) error {

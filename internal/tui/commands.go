@@ -173,6 +173,20 @@ func deleteSessionCmd(mux sessionmgr.Multiplexer, item sessionmgr.Item) tea.Cmd 
 	}
 }
 
+func deleteAgentCmd(mux sessionmgr.Multiplexer, item sessionmgr.Item) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		err := mux.KillPane(ctx, item.PaneID)
+		terms := mux.Terms()
+		return actionDoneMsg{
+			kind:   actionKill,
+			status: terms.KillVerbPast + " " + terms.PaneNoun + " " + item.DisplayName(),
+			err:    err,
+		}
+	}
+}
+
 func renameCmd(mux sessionmgr.Multiplexer, target, displayName, newName string) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

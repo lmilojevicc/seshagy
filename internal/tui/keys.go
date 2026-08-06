@@ -533,8 +533,18 @@ func (m Model) deleteSelected() (tea.Model, tea.Cmd) {
 		}
 		m.killInFlight = true
 		return m, deleteSessionCmd(m.mux, item)
+	case sessionmgr.KindAgent:
+		if item.PaneID == "" {
+			m.notify("cannot delete agent (missing pane ID)", sevWarning)
+			return m, nil
+		}
+		if m.killInFlight {
+			return m, nil
+		}
+		m.killInFlight = true
+		return m, deleteAgentCmd(m.mux, item)
 	default:
-		m.notify("delete only applies to "+m.terms.SessionPlural, sevWarning)
+		m.notify("delete only applies to "+m.terms.SessionPlural+" and agents", sevWarning)
 		return m, nil
 	}
 }

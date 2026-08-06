@@ -84,6 +84,7 @@ type Multiplexer interface {
 	HasSession(ctx context.Context, target string) (bool, error)
 	CreateSessionFromDir(ctx context.Context, dir string) (Item, bool, error)
 	KillSession(ctx context.Context, target string) error
+	KillPane(ctx context.Context, paneID string) error
 	RenameSession(ctx context.Context, target, newName string) error
 	CaptureSession(ctx context.Context, target string, lines int) (string, error)
 	AttachOrSwitchCommand(item Item) *exec.Cmd

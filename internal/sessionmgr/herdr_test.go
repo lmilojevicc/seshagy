@@ -688,6 +688,32 @@ func TestHerdrBackendSuppression(t *testing.T) {
 	}
 }
 
+func TestHerdrKillPane(t *testing.T) {
+	t.Run("closes exactly one pane", func(t *testing.T) {
+		rec := &herdrCmdRecorder{}
+		setHerdrHooksForTest(t, rec.outputFn, rec.runFn)
+
+		if err := NewHerdrBackend().KillPane(context.Background(), "opaque-pane-id"); err != nil {
+			t.Fatalf("KillPane() error = %v", err)
+		}
+		if len(rec.calls) != 1 ||
+			strings.Join(rec.calls[0], "\x00") != "pane\x00close\x00opaque-pane-id" {
+			t.Fatalf("herdr calls = %v, want [[pane close opaque-pane-id]]", rec.calls)
+		}
+	})
+
+	t.Run("wraps errors", func(t *testing.T) {
+		killErr := errors.New("close pane failed")
+		rec := &herdrCmdRecorder{runF: func([]string) error { return killErr }}
+		setHerdrHooksForTest(t, rec.outputFn, rec.runFn)
+
+		err := NewHerdrBackend().KillPane(context.Background(), "opaque-pane-id")
+		if !errors.Is(err, killErr) || !strings.Contains(err.Error(), "herdr pane close") {
+			t.Fatalf("KillPane() error = %v, want wrapped sentinel", err)
+		}
+	})
+}
+
 func TestHerdrBackendCommandsUseCorrectArgs(t *testing.T) {
 	// seshagy runs inside this workspace; killing it (w1 == current) is the
 	// self-kill edge case, so no focus-restore should follow the close.

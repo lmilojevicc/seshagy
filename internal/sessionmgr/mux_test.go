@@ -3,6 +3,8 @@ package sessionmgr
 import (
 	"context"
 	"errors"
+	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -106,9 +108,42 @@ func TestNoopBackendReturnsEmpty(t *testing.T) {
 	) {
 		t.Fatalf("CreateSessionFromDir err = %v, want errNoBackend", err)
 	}
+	if err := mux.KillPane(context.Background(), "opaque-pane-id"); !errors.Is(err, errNoBackend) {
+		t.Fatalf("KillPane err = %v, want errNoBackend", err)
+	}
 	if _, err := mux.ReportAgent(context.Background(), AgentReport{}); err != nil {
 		t.Fatalf("ReportAgent err = %v, want nil", err)
 	}
+}
+
+func TestTmuxBackendKillPane(t *testing.T) {
+	t.Run("passes opaque pane ID unchanged", func(t *testing.T) {
+		var got []string
+		SetTmuxHooksForTest(t, nil, func(_ context.Context, args ...string) error {
+			got = append([]string(nil), args...)
+			return nil
+		})
+
+		if err := NewTmuxBackend().KillPane(context.Background(), "opaque-pane-id"); err != nil {
+			t.Fatalf("KillPane() error = %v", err)
+		}
+		want := []string{"kill-pane", "-t", "opaque-pane-id"}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("tmux args = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("wraps errors", func(t *testing.T) {
+		killErr := errors.New("kill pane failed")
+		SetTmuxHooksForTest(t, nil, func(context.Context, ...string) error {
+			return killErr
+		})
+
+		err := NewTmuxBackend().KillPane(context.Background(), "%9")
+		if !errors.Is(err, killErr) || !strings.Contains(err.Error(), "tmux kill-pane") {
+			t.Fatalf("KillPane() error = %v, want wrapped sentinel", err)
+		}
+	})
 }
 
 // TestTmuxBackendDelegates proves the wrapper is transparent: ListSessions via
