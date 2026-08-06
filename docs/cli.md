@@ -13,9 +13,10 @@ seshagy --get-fd
 seshagy --delete-item '<rendered line from --get-all>'
 ```
 
-All commands above (plus `config` and `--version`) support a trailing `--json`
-flag for machine-readable JSON on stdout. Human text output is unchanged when
-`--json` is omitted.
+The `--get-*` commands, `--delete-item`, `--report-agent`, `--release-agent`,
+`config`, `diagnostics`, and `--version` support `--json` for machine-readable
+JSON on stdout. Integration, keybind, help, and completion commands do not.
+Human text output is unchanged when `--json` is omitted.
 
 Successful responses include top-level `schema_version` and `ok` fields. With
 `--json`, errors also print JSON on stdout (not stderr), for example
@@ -39,6 +40,11 @@ seshagy --report-agent \
 seshagy --release-agent --pane %1 --source seshagy:pi --seq 43
 ```
 
+`--report-agent` accepts `--pane`, `--cwd`, `--agent`, `--state`, `--source`,
+`--seq`, `--message`, `--session-id`, and `--json`. Canonical states are
+`idle`, `working`, `blocked`, `done`, and `unknown`. `--release-agent` accepts
+`--pane`, `--cwd`, `--source`, `--seq`, and `--json`.
+
 `--cwd <dir>` may replace `--pane`; the pane is resolved by a unique
 working-directory match across all panes (used by the OpenCode plugin, which
 runs in a server process without a reliable `$TMUX_PANE`).
@@ -50,14 +56,53 @@ cannot resurrect cleared state.
 Other commands:
 
 ```sh
-seshagy integration install <name>
-seshagy integration uninstall <name>
+seshagy integration install pi|codex|claude|droid|opencode
+seshagy integration uninstall pi|codex|claude|droid|opencode
 
 seshagy config path
 seshagy config show
 seshagy config init [--force]
 seshagy diagnostics [--json]
+seshagy keybind install tmux [--key <key>] [--mode popup|window|pane|pane-zoomed] [--persistent]
+seshagy keybind install herdr [--key <key>] [--mode pane|popup] [--width <cells|percent>] [--height <cells|percent>] [--persistent]
+seshagy keybind uninstall tmux|herdr
 ```
+
+Canonical introspection forms are `seshagy --help` and `seshagy --version`.
+`-h` and `help` are accepted help aliases; `version` is an accepted version
+alias.
+
+## Shell completion
+
+Homebrew generates and installs completions for Bash, Zsh, and Fish
+automatically. Other installations can generate static files without evaluating
+shell output:
+
+```sh
+mkdir -p ~/.local/share/bash-completion/completions
+seshagy completion bash > ~/.local/share/bash-completion/completions/seshagy
+
+mkdir -p ~/.zfunc
+seshagy completion zsh > ~/.zfunc/_seshagy
+
+mkdir -p ~/.config/fish/completions
+seshagy completion fish > ~/.config/fish/completions/seshagy.fish
+```
+
+Configure Bash to load the selected directory if it is not already on its
+completion path. For Zsh, add the directory to `fpath` before initializing
+completion, for example in `~/.zshrc`:
+
+```zsh
+fpath=(~/.zfunc $fpath)
+autoload -Uz compinit
+compinit
+```
+
+Dynamic pane, directory, agent, source, and deletable-item
+values are read-only, use a short timeout, and silently return no dynamic values
+when a multiplexer is slow or unavailable. Directory arguments retain native
+shell directory completion as a fallback.
 
 ## Diagnostic logs and bug reports
 

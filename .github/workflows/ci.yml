@@ -37,6 +37,9 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Install completion shells
+        run: sudo apt-get update && sudo apt-get install --yes zsh fish
+
       - name: Set up mise tools
         uses: jdx/mise-action@v4
         with:

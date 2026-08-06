@@ -1,0 +1,54 @@
+# bash completion for seshagy (Bash 3.2+)
+_seshagy_complete() {
+    local i line rest value description directive header current after prefix
+    local -a argv candidates
+    COMPREPLY=()
+    argv=()
+    for ((i=0; i<=COMP_CWORD; i++)); do
+        argv[${#argv[@]}]="${COMP_WORDS[$i]}"
+    done
+    current="${COMP_WORDS[$COMP_CWORD]}"
+    after="${COMP_LINE:COMP_POINT}"
+    after="${after%%[[:space:]]*}"
+    if [[ -n "$after" && "$current" == *"$after" ]]; then
+        argv[${#argv[@]}-1]="${current:0:${#current}-${#after}}"
+    fi
+    prefix="${argv[${#argv[@]}-1]}"
+    header=0
+    candidates=()
+    while IFS= read -r line; do
+        if ((header == 0)); then
+            case "$line" in
+                $'v1\tnofiles') directive=nofiles ;;
+                $'v1\tfiles') directive=files ;;
+                $'v1\tdirs') directive=dirs ;;
+                *) return 0 ;;
+            esac
+            header=1
+            continue
+        fi
+        [[ "$line" == $'c\t'* ]] || return 0
+        rest="${line#*$'\t'}"
+        [[ "$rest" == *$'\t'* ]] || return 0
+        value="${rest%%$'\t'*}"
+        description="${rest#*$'\t'}"
+        [[ -n "$value" && "$description" != *$'\t'* ]] || return 0
+        candidates[${#candidates[@]}]=$value
+    done < <(command seshagy __complete -- "${argv[@]}" 2>/dev/null)
+    ((header == 1)) || return 0
+    for value in "${candidates[@]}"; do
+        COMPREPLY[${#COMPREPLY[@]}]=$value
+    done
+    if [[ "$directive" == "dirs" ]]; then
+        while IFS= read -r value; do
+            [[ "$value" == */ ]] || value="$value/"
+            COMPREPLY[${#COMPREPLY[@]}]=$value
+        done < <(compgen -d -- "$prefix")
+    elif [[ "$directive" == "files" ]]; then
+        while IFS= read -r value; do
+            [[ ! -d "$value" || "$value" == */ ]] || value="$value/"
+            COMPREPLY[${#COMPREPLY[@]}]=$value
+        done < <(compgen -f -- "$prefix")
+    fi
+}
+complete -F _seshagy_complete seshagy

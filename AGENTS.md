@@ -68,7 +68,11 @@ Add focused table-driven tests near the package being changed. Use names like `T
 
 ## Commit & Pull Request Guidelines
 
+Non-release development must occur on a feature branch in a worktree and finish through a pull request. Never commit feature work directly to `main`.
+
 All repository commits must follow Conventional Commits: `<type>[optional scope]: <description>`. Keep descriptions focused, imperative, and without trailing punctuation. Examples include `feat(tui): add ranked fuzzy search`, `fix(sessionmgr): prevent stale agent resurrection`, and `refactor(config): simplify validation`. Mark breaking changes with `!` before the colon.
+
+Every new or changed CLI command, flag, positional argument, documented alias, or fixed enum must update the Go completion specification, public help/docs where applicable, generated-script snapshots, and completion coverage tests in the same PR.
 
 Pull requests should include a short problem/solution summary, `mise run verify` results, and screenshots or terminal captures for visible TUI changes. Call out any config, tmux, or integration behavior changes.
 

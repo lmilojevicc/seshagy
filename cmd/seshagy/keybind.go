@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/lmilojevicc/seshagy/internal/cli"
+	"github.com/lmilojevicc/seshagy/internal/completion"
 )
 
 // defaultTmuxKey is the default key seshagy binds in tmux.
@@ -21,10 +22,10 @@ const defaultTmuxKey = "s"
 type tmuxLaunchMode string
 
 const (
-	tmuxModePopup  tmuxLaunchMode = "popup"       // floating overlay (display-popup)
-	tmuxModeWindow tmuxLaunchMode = "window"      // new full window (new-window)
-	tmuxModePane   tmuxLaunchMode = "pane"        // split-window, unzoomed
-	tmuxModeZoomed tmuxLaunchMode = "pane-zoomed" // split-window, then zoom
+	tmuxModePopup  tmuxLaunchMode = completion.TmuxModePopup      // floating overlay (display-popup)
+	tmuxModeWindow tmuxLaunchMode = completion.TmuxModeWindow     // new full window (new-window)
+	tmuxModePane   tmuxLaunchMode = completion.TmuxModePane       // split-window, unzoomed
+	tmuxModeZoomed tmuxLaunchMode = completion.TmuxModePaneZoomed // split-window, then zoom
 )
 
 func parseTmuxLaunchMode(s string) (tmuxLaunchMode, error) {
@@ -89,8 +90,8 @@ const (
 type herdrLaunchMode string
 
 const (
-	herdrModePane           herdrLaunchMode = "pane"
-	herdrModePopup          herdrLaunchMode = "popup"
+	herdrModePane           herdrLaunchMode = completion.HerdrModePane
+	herdrModePopup          herdrLaunchMode = completion.HerdrModePopup
 	defaultHerdrPopupWidth                  = "80%"
 	defaultHerdrPopupHeight                 = "80%"
 )

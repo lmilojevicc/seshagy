@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/lmilojevicc/seshagy/internal/cli"
@@ -35,6 +36,10 @@ func main() {
 }
 
 func run(args []string) error {
+	if handled, err := runEarlyCompletion(args); handled {
+		return err
+	}
+
 	ephemeral := false
 	filtered := make([]string, 0, len(args))
 	for _, arg := range args {
@@ -80,7 +85,13 @@ func run(args []string) error {
 		return err
 	}
 	if parsed.kind == commandDelete {
-		item, ok := sessionmgr.ParseActionLineWithIcons(parsed.deleteLine, cfg.IconSet())
+		mux := sessionmgr.Detect()
+		item, ok := resolveDeleteItem(
+			context.Background(),
+			mux,
+			parsed.deleteLine,
+			cfg.IconSet(),
+		)
 		if !ok {
 			return fmt.Errorf("--delete-item: unrecognized item line: %q", parsed.deleteLine)
 		}
@@ -552,7 +563,7 @@ func deleteItem(
 	if err != nil {
 		return err
 	}
-	item, ok := sessionmgr.ParseActionLineWithIcons(raw, cfg.IconSet())
+	item, ok := resolveDeleteItem(ctx, mux, raw, cfg.IconSet())
 	if !ok {
 		return fmt.Errorf("--delete-item: unrecognized item line: %q", raw)
 	}
@@ -560,6 +571,89 @@ func deleteItem(
 		return fmt.Errorf("--delete-item: %s items cannot be deleted", item.Kind)
 	}
 	return deletePreparedItem(ctx, mux, item, jsonOutput)
+}
+
+const deleteTargetLookupTimeout = 3 * time.Second
+
+func resolveDeleteItem(
+	ctx context.Context,
+	mux sessionmgr.Multiplexer,
+	raw string,
+	icons sessionmgr.IconSet,
+) (sessionmgr.Item, bool) {
+	if items, ok := currentDeleteSessions(ctx, mux); ok {
+		// Preserve opaque IDs byte-for-byte. In particular, IDs with leading or
+		// trailing whitespace must not be normalized into a different workspace.
+		if item, matched, ambiguous := uniqueSessionMatch(items, func(item sessionmgr.Item) bool {
+			return item.ActionTarget() == raw
+		}); matched || ambiguous {
+			return item, matched
+		}
+
+		// Completion candidates and fzf lines omit ANSI, but otherwise require an
+		// exact match to what the current icon configuration renders.
+		display := sessionmgr.StripANSI(raw)
+		if item, matched, ambiguous := uniqueSessionMatch(items, func(item sessionmgr.Item) bool {
+			return renderedDeleteLine(item, icons) == display
+		}); matched || ambiguous {
+			return item, matched
+		}
+		if item, matched, ambiguous := uniqueSessionMatch(items, func(item sessionmgr.Item) bool {
+			return item.Name == raw
+		}); matched || ambiguous {
+			return item, matched
+		}
+
+		// Discovery succeeded, so a non-match is stale, ambiguous, or was rendered
+		// under different icons. Never reinterpret it as a different close target.
+		return sessionmgr.Item{}, false
+	}
+
+	// Retain the historical presentation parser only when the backend cannot
+	// provide a current session list.
+	return sessionmgr.ParseActionLineWithIcons(raw, icons)
+}
+
+func currentDeleteSessions(
+	ctx context.Context,
+	mux sessionmgr.Multiplexer,
+) ([]sessionmgr.Item, bool) {
+	lookupCtx, cancel := context.WithTimeout(ctx, deleteTargetLookupTimeout)
+	defer cancel()
+	type lookupResult struct {
+		items []sessionmgr.Item
+		err   error
+	}
+	result := make(chan lookupResult, 1)
+	go func() {
+		items, err := sessionmgr.CompletionSessions(lookupCtx, mux)
+		result <- lookupResult{items: items, err: err}
+	}()
+	select {
+	case resolved := <-result:
+		return resolved.items, resolved.err == nil
+	case <-lookupCtx.Done():
+		return nil, false
+	}
+}
+
+func uniqueSessionMatch(
+	items []sessionmgr.Item,
+	matches func(sessionmgr.Item) bool,
+) (sessionmgr.Item, bool, bool) {
+	var match sessionmgr.Item
+	count := 0
+	for _, item := range items {
+		if item.Kind == sessionmgr.KindSession && matches(item) {
+			match = item
+			count++
+		}
+	}
+	return match, count == 1, count > 1
+}
+
+func renderedDeleteLine(item sessionmgr.Item, icons sessionmgr.IconSet) string {
+	return strings.TrimSpace(sessionmgr.StripANSI(sessionmgr.FormatLineWithIcons(item, icons)))
 }
 
 func deletePreparedItem(
@@ -601,6 +695,8 @@ Usage:
   seshagy config show [--json]    print effective config
   seshagy config init [--force] [--json]
   seshagy diagnostics [--json]   show logging status and bug-report guidance
+  seshagy completion bash|zsh|fish
+                                  generate a shell completion script
   seshagy keybind install tmux [--key <key>] [--mode popup|window|pane|pane-zoomed] [--persistent]
                                   bind prefix+<key> (default: s) to launch
                                   seshagy as a tmux window/popup
@@ -617,23 +713,23 @@ Usage:
                                   remove the seshagy tmux keybinding
   seshagy keybind uninstall herdr
                                   remove the seshagy herdr keybinding
-  seshagy --version [--json]
+  seshagy --help                 show this help (-h and help are accepted aliases)
+  seshagy --version [--json]     show version (version is an accepted alias)
 
 Scripting:
-  Append --json to any command above for machine-readable JSON on stdout.
+  Commands showing [--json] support machine-readable JSON on stdout.
   Responses include schema_version and ok; errors also print JSON on stdout.
   Human text output is unchanged when --json is omitted.
-  seshagy --report-agent --pane %N --state <state> --source <src> --seq <n>
+  seshagy --report-agent (--pane %N|--cwd <dir>) [--agent <name>]
+            --state idle|working|blocked|done|unknown --source <src> --seq <n>
+            [--message <text>] [--session-id <id>] [--json]
                                   report agent state to a tmux pane (tmux only;
                                   no-op under herdr since herdr owns state)
-                                  (--cwd <dir> may replace --pane; resolved by
-                                  working directory when unique)
-  seshagy --release-agent --pane %N --source <src> --seq <n>
+  seshagy --release-agent (--pane %N|--cwd <dir>) --source <src> --seq <n> [--json]
                                   clear agent state from a tmux pane
-                                  (--cwd <dir> may replace --pane)
-  seshagy integration install <name>
+  seshagy integration install pi|codex|claude|droid|opencode
                                   install an agent hook/extension
-  seshagy integration uninstall <name>
+  seshagy integration uninstall pi|codex|claude|droid|opencode
                                   remove an agent hook/extension
 
 TUI keys:

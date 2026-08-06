@@ -1,0 +1,25 @@
+function __seshagy_complete
+    set -l current (commandline -ct)
+    set -l lines (command seshagy __complete -- (commandline -opc) "$current" 2>/dev/null)
+    test (count $lines) -gt 0; or return
+    string match -rq '^v1\t(nofiles|files|dirs)$' -- $lines[1]; or return
+    set -l header (string split \t -- $lines[1])
+    set -l directive $header[2]
+    set -l values
+    set -l descriptions
+    for line in $lines[2..-1]
+        string match -rq '^c\t[^\t]+\t[^\t]*$' -- $line; or return
+        set -l fields (string split \t -- $line)
+        set -a values $fields[2]
+        set -a descriptions $fields[3]
+    end
+    for i in (seq (count $values))
+        printf '%s\t%s\n' (string escape -- $values[$i]) $descriptions[$i]
+    end
+    if test "$directive" = dirs
+        __fish_complete_directories "$current"
+    else if test "$directive" = files
+        __fish_complete_path "$current"
+    end
+end
+complete -c seshagy -f -a '(__seshagy_complete)'

@@ -19,13 +19,19 @@ func installDeleteItemTmuxRecorder(
 	onMatch func(args []string),
 ) {
 	t.Helper()
-	sessionmgr.SetTmuxHooksForTest(t, nil, func(_ context.Context, args ...string) error {
-		if len(args) >= 1 && args[0] == wantCmd {
-			onMatch(args)
-			return nil
-		}
-		return fmt.Errorf("unexpected tmux call: %v", args)
-	})
+	sessionmgr.SetTmuxHooksForTest(
+		t,
+		func(_ context.Context, args ...string) ([]byte, error) {
+			return nil, fmt.Errorf("session discovery unavailable in recorder: %v", args)
+		},
+		func(_ context.Context, args ...string) error {
+			if len(args) >= 1 && args[0] == wantCmd {
+				onMatch(args)
+				return nil
+			}
+			return fmt.Errorf("unexpected tmux call: %v", args)
+		},
+	)
 }
 
 func writeFDTestConfig(t *testing.T, fdDir string) {
@@ -279,6 +285,13 @@ func TestDeleteItemNonDeletableKind(t *testing.T) {
 		sessionmgr.Item{Kind: sessionmgr.KindZoxide, Path: "/tmp/demo"},
 		cfg.IconSet(),
 	)
+	sessionmgr.SetTmuxHooksForTest(
+		t,
+		func(_ context.Context, args ...string) ([]byte, error) {
+			return nil, fmt.Errorf("session discovery unavailable: %v", args)
+		},
+		nil,
+	)
 	err = deleteItem(context.Background(), sessionmgr.NewTmuxBackend(), line, false)
 	if err == nil || !strings.Contains(err.Error(), "cannot be deleted") {
 		t.Fatalf("deleteItem() error = %v, want cannot be deleted", err)
@@ -351,6 +364,262 @@ func TestRunDeleteItemViaCLI(t *testing.T) {
 	}
 }
 
+func TestResolveDeleteItemTmuxUsesCurrentSessionsBeforeLegacyParsing(t *testing.T) {
+	iconsOn := sessionmgr.DefaultIconSet()
+	iconsOff := iconsOn
+	iconsOff.Enabled = false
+	tests := []struct {
+		name  string
+		raw   string
+		icons sessionmgr.IconSet
+		want  string
+		ok    bool
+	}{
+		{name: "raw path target", raw: "/", icons: iconsOff, want: "/", ok: true},
+		{
+			name: "icons enabled rendered",
+			raw: renderedDeleteLine(
+				sessionmgr.Item{Kind: sessionmgr.KindSession, Name: "demo"},
+				iconsOn,
+			),
+			icons: iconsOn,
+			want:  "demo",
+			ok:    true,
+		},
+		{name: "icons disabled label", raw: "demo", icons: iconsOff, want: "demo", ok: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			raw := strings.Join([]string{"/", "1", "2", "/tmp", "0", "1"}, "\x1f") + "\n" +
+				strings.Join([]string{"demo", "1", "2", "/tmp", "0", "1"}, "\x1f") + "\n"
+			sessionmgr.SetTmuxHooksForTest(
+				t,
+				func(_ context.Context, args ...string) ([]byte, error) {
+					if sessionmgr.MatchListSessions(args) {
+						return []byte(raw), nil
+					}
+					return nil, fmt.Errorf("unexpected tmux call: %v", args)
+				},
+				nil,
+			)
+			item, ok := resolveDeleteItem(
+				t.Context(),
+				sessionmgr.NewTmuxBackend(),
+				test.raw,
+				test.icons,
+			)
+			if ok != test.ok || (ok && item.ActionTarget() != test.want) {
+				t.Fatalf(
+					"resolveDeleteItem() = %#v, %v; want target %q, %v",
+					item,
+					ok,
+					test.want,
+					test.ok,
+				)
+			}
+		})
+	}
+}
+
+func TestResolveDeleteItemHerdrPresentationFormsAndAmbiguity(t *testing.T) {
+	binDir := t.TempDir()
+	payload := `{"type":"workspace_list","workspaces":[` +
+		`{"workspace_id":"/","label":"path label"},` +
+		`{"workspace_id":"opaque-1","label":"friendly"},` +
+		`{"workspace_id":"opaque-2","label":"duplicate"},` +
+		`{"workspace_id":"opaque-3","label":"duplicate"},` +
+		`{"workspace_id":" raw target ","label":"duplicate"},` +
+		`{"workspace_id":"opaque-path-label","label":"../friendly"}]}`
+	if err := os.WriteFile(filepath.Join(binDir, "herdr"), []byte(
+		"#!/bin/sh\nprintf '%s\\n' '"+payload+"'\n",
+	), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	iconsOn := sessionmgr.DefaultIconSet()
+	iconsOff := iconsOn
+	iconsOff.Enabled = false
+	rendered := renderedDeleteLine(
+		sessionmgr.Item{Kind: sessionmgr.KindSession, Name: "friendly"},
+		iconsOn,
+	)
+	tests := []struct {
+		name  string
+		raw   string
+		icons sessionmgr.IconSet
+		want  string
+		ok    bool
+	}{
+		{name: "raw opaque", raw: "opaque-1", icons: iconsOn, want: "opaque-1", ok: true},
+		{
+			name:  "raw whitespace opaque",
+			raw:   " raw target ",
+			icons: iconsOff,
+			want:  " raw target ",
+			ok:    true,
+		},
+		{name: "trimmed whitespace opaque rejected", raw: "raw target", icons: iconsOff, ok: false},
+		{name: "raw path-like", raw: "/", icons: iconsOff, want: "/", ok: true},
+		{
+			name:  "path-like human label",
+			raw:   "../friendly",
+			icons: iconsOff,
+			want:  "opaque-path-label",
+			ok:    true,
+		},
+		{name: "rendered icons", raw: rendered, icons: iconsOn, want: "opaque-1", ok: true},
+		{
+			name:  "human label icons enabled",
+			raw:   "friendly",
+			icons: iconsOn,
+			want:  "opaque-1",
+			ok:    true,
+		},
+		{
+			name:  "human label icons disabled",
+			raw:   "friendly",
+			icons: iconsOff,
+			want:  "opaque-1",
+			ok:    true,
+		},
+		{name: "duplicate label", raw: "duplicate", icons: iconsOff, ok: false},
+		{
+			name: "duplicate rendered",
+			raw: renderedDeleteLine(
+				sessionmgr.Item{Kind: sessionmgr.KindSession, Name: "duplicate"},
+				iconsOn,
+			),
+			icons: iconsOn,
+			ok:    false,
+		},
+		{
+			name:  "stale icon line while icons disabled",
+			raw:   rendered,
+			icons: iconsOff,
+			ok:    false,
+		},
+		{name: "unmatched stale line", raw: "removed workspace", icons: iconsOff, ok: false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			item, ok := resolveDeleteItem(
+				t.Context(),
+				sessionmgr.NewHerdrBackend(),
+				test.raw,
+				test.icons,
+			)
+			if ok != test.ok || (ok && item.ActionTarget() != test.want) {
+				t.Fatalf(
+					"resolveDeleteItem() = %#v, %v; want target %q, %v",
+					item,
+					ok,
+					test.want,
+					test.ok,
+				)
+			}
+		})
+	}
+}
+
+func TestDeleteItemRejectsStaleIconLineWithoutKill(t *testing.T) {
+	manifestTestDirs(t)
+	cfg := appconfig.Default()
+	cfg.Icons.Mode = appconfig.IconModeNone
+	if err := appconfig.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	staleLine := renderedDeleteLine(
+		sessionmgr.Item{Kind: sessionmgr.KindSession, Name: "demo"},
+		sessionmgr.DefaultIconSet(),
+	)
+	killed := false
+	sessionmgr.SetTmuxHooksForTest(
+		t,
+		func(_ context.Context, args ...string) ([]byte, error) {
+			if sessionmgr.MatchListSessions(args) {
+				return []byte(
+					strings.Join([]string{"demo", "1", "2", "/tmp", "0", "1"}, "\x1f"),
+				), nil
+			}
+			return nil, fmt.Errorf("unexpected tmux output call: %v", args)
+		},
+		func(_ context.Context, args ...string) error {
+			if len(args) > 0 && args[0] == "kill-session" {
+				killed = true
+			}
+			return nil
+		},
+	)
+	err := deleteItem(t.Context(), sessionmgr.NewTmuxBackend(), staleLine, false)
+	if err == nil || !strings.Contains(err.Error(), "unrecognized item line") {
+		t.Fatalf("deleteItem() error = %v, want safe rejection", err)
+	}
+	if killed {
+		t.Fatal("KillSession was invoked for a stale icon line")
+	}
+}
+
+func TestResolveDeleteItemFallsBackWhenDiscoveryFails(t *testing.T) {
+	icons := sessionmgr.DefaultIconSet()
+	line := renderedDeleteLine(
+		sessionmgr.Item{Kind: sessionmgr.KindSession, Name: "legacy"},
+		icons,
+	)
+	sessionmgr.SetTmuxHooksForTest(
+		t,
+		func(_ context.Context, args ...string) ([]byte, error) {
+			return nil, fmt.Errorf("discovery unavailable: %v", args)
+		},
+		nil,
+	)
+	item, ok := resolveDeleteItem(t.Context(), sessionmgr.NewTmuxBackend(), line, icons)
+	if !ok || item.Kind != sessionmgr.KindSession || item.ActionTarget() != "legacy" {
+		t.Fatalf("resolveDeleteItem() = %#v, %v, want legacy parser fallback", item, ok)
+	}
+}
+
+func TestRunDeleteHerdrOpaquePathTargetsWithIconsDisabled(t *testing.T) {
+	manifestTestDirs(t)
+	t.Setenv("HERDR_ENV", "1")
+	t.Setenv("TMUX", "")
+	cfg := appconfig.Default()
+	cfg.Icons.Mode = appconfig.IconModeNone
+	if err := appconfig.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	binDir := t.TempDir()
+	record := filepath.Join(t.TempDir(), "closed")
+	payload := `{"type":"workspace_list","workspaces":[` +
+		`{"workspace_id":"/","label":"duplicate"},` +
+		`{"workspace_id":"~/","label":"duplicate"},` +
+		`{"workspace_id":"./","label":"different label"},` +
+		`{"workspace_id":"../","label":"id mismatch"},` +
+		`{"workspace_id":" raw ","label":"duplicate"}]}`
+	script := "#!/bin/sh\n" +
+		"if [ \"$1 $2\" = 'workspace list' ]; then printf '%s\\n' '" + payload + "'; exit; fi\n" +
+		"if [ \"$1 $2\" = 'workspace close' ]; then printf '%s\\n' \"$3\" >>\"$SESHAGY_TEST_RECORD\"; exit; fi\n" +
+		"if [ \"$1 $2\" = 'workspace focus' ]; then exit; fi\n" +
+		"exit 97\n"
+	if err := os.WriteFile(filepath.Join(binDir, "herdr"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("SESHAGY_TEST_RECORD", record)
+	for _, target := range []string{"/", "~/", "./", "../", " raw "} {
+		if err := run([]string{"--delete-item", target}); err != nil {
+			t.Fatalf("delete opaque target %q: %v", target, err)
+		}
+	}
+	closed, err := os.ReadFile(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(closed), "/\n~/\n./\n../\n raw \n"; got != want {
+		t.Fatalf("closed targets = %q, want %q", got, want)
+	}
+}
+
 func TestDeleteItemUnrecognizedLine(t *testing.T) {
 	manifestTestDirs(t)
 	err := deleteItem(
@@ -387,12 +656,18 @@ func TestDeleteItemKillFailure(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			sessionmgr.SetTmuxHooksForTest(t, nil, func(_ context.Context, args ...string) error {
-				if len(args) >= 1 && args[0] == tt.wantCmd {
-					return killErr
-				}
-				return fmt.Errorf("unexpected tmux call: %v", args)
-			})
+			sessionmgr.SetTmuxHooksForTest(
+				t,
+				func(_ context.Context, args ...string) ([]byte, error) {
+					return nil, fmt.Errorf("session discovery unavailable: %v", args)
+				},
+				func(_ context.Context, args ...string) error {
+					if len(args) >= 1 && args[0] == tt.wantCmd {
+						return killErr
+					}
+					return fmt.Errorf("unexpected tmux call: %v", args)
+				},
+			)
 			err := deleteItem(context.Background(), sessionmgr.NewTmuxBackend(), tt.line, false)
 			if err == nil {
 				t.Fatalf("deleteItem() expected error for %s failure", tt.wantCmd)
@@ -415,12 +690,18 @@ func TestDeleteItemKillFailureJSON(t *testing.T) {
 		sessionmgr.Item{Kind: sessionmgr.KindSession, Name: "demo"},
 		cfg.IconSet(),
 	)
-	sessionmgr.SetTmuxHooksForTest(t, nil, func(_ context.Context, args ...string) error {
-		if len(args) >= 1 && args[0] == "kill-session" {
-			return killErr
-		}
-		return fmt.Errorf("unexpected tmux call: %v", args)
-	})
+	sessionmgr.SetTmuxHooksForTest(
+		t,
+		func(_ context.Context, args ...string) ([]byte, error) {
+			return nil, fmt.Errorf("session discovery unavailable: %v", args)
+		},
+		func(_ context.Context, args ...string) error {
+			if len(args) >= 1 && args[0] == "kill-session" {
+				return killErr
+			}
+			return fmt.Errorf("unexpected tmux call: %v", args)
+		},
+	)
 
 	args := []string{"--delete-item", line, "--json"}
 	err = run(args)

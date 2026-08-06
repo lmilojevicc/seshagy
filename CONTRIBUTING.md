@@ -62,8 +62,9 @@ package-local helpers and the project's existing domain terms: sessions,
 panes, agents, integrations, sources, and launch state. Export identifiers
 only when they are used across packages or by command-facing code.
 
-Keep dependencies minimal: `BurntSushi/toml` is the only non-stdlib
-dependency. Add no new `go.mod` dependencies if avoidable, and stay cgo-free.
+Keep dependencies minimal: `BurntSushi/toml` is the manifest subsystem's
+only non-stdlib dependency. Add no new `go.mod` dependencies if avoidable, and
+stay cgo-free.
 See `AGENTS.md` for the full conventions and the agent-state invariants
 (namespacing, stale-can't-resurrect, authority model, etc.).
 
@@ -85,7 +86,9 @@ A few notes:
 
 ## Pull requests
 
-Open PRs against `main`; the project uses squash merge.
+All non-release development must happen on a feature branch in a separate
+worktree and finish through a pull request. Never commit feature work directly
+to `main`. Open PRs against `main`; the project uses squash merge.
 
 - Keep each PR focused on a single change.
 - Run `mise run verify` before pushing.
@@ -93,21 +96,27 @@ Open PRs against `main`; the project uses squash merge.
   `mise run verify` results.
 - Add screenshots or terminal captures for any visible TUI change.
 - Call out any config, tmux, herdr, or integration behavior changes.
+- Every new or changed CLI command, flag, positional argument, documented
+  alias, or fixed enum must update the Go completion specification, public
+  help/docs where applicable, generated-script snapshots, and completion
+  coverage tests in the same PR.
 
 Link issues with `Closes #NN` so they auto-close on merge. The PR template in
 `.github/PULL_REQUEST_TEMPLATE.md` guides you through this.
 
 ## Commit messages
 
-Use concise, imperative subjects. Capitalize the first word and avoid
-trailing punctuation; keep each commit focused on one change.
+Use Conventional Commits: `<type>[optional scope]: <description>`. Keep the
+description concise and imperative, without trailing punctuation, and keep
+each commit focused on one change. Mark breaking changes with `!` before the
+colon.
 
 Examples:
 
 ```text
-Add herdr keybind installer
-Update README
-Harden lifecycle agent integrations
+feat(keybind): add herdr installer
+docs: update completion setup
+fix(sessionmgr): harden lifecycle agent detection
 ```
 
 ## Releases

@@ -71,6 +71,7 @@ brews:
     directory: Formula
     install: |
       bin.install "seshagy"
+      generate_completions_from_executable(bin/"seshagy", "completion")
     caveats: |
       Built-in --ephemeral focus-loss dismissal replaces the former launcher.
       Wire a one-key launcher with: seshagy keybind install tmux (or: herdr)

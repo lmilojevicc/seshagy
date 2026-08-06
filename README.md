@@ -39,13 +39,35 @@ go install github.com/lmilojevicc/seshagy/cmd/seshagy@latest
 
 For the best experience, `seshagy` is meant to be a one-keystroke pop-up that gets out of your way as soon as you jump to a session.
 
-We highly recommend installing the keybind via `seshagy install keybind` for day-to-day use. This wires up an ephemeral overlay (or popup window) to your multiplexer that auto-dismisses when you make a selection:
+We highly recommend installing the keybind for your multiplexer. This wires up an ephemeral overlay (or popup window) that auto-dismisses when you make a selection:
 
 ```sh
-seshagy install keybind
+seshagy keybind install tmux
+# or
+seshagy keybind install herdr
 ```
 
-_(Note: You can also run `seshagy keybind install tmux` or `seshagy keybind install herdr` if you need to specify your multiplexer or custom keys manually)._
+### Shell completion
+
+Homebrew installs Bash, Zsh, and Fish completions automatically. For other installations, generate a static completion file (do not `eval` it):
+
+```sh
+mkdir -p ~/.local/share/bash-completion/completions
+seshagy completion bash > ~/.local/share/bash-completion/completions/seshagy
+
+mkdir -p ~/.zfunc
+seshagy completion zsh > ~/.zfunc/_seshagy
+
+mkdir -p ~/.config/fish/completions
+seshagy completion fish > ~/.config/fish/completions/seshagy.fish
+```
+
+For Zsh, add the completion directory to `fpath` before initializing completion
+(for example, put `fpath=(~/.zfunc $fpath)` followed by `autoload -Uz compinit &&
+compinit` in `~/.zshrc`). Ensure the selected Bash or Fish directory is also
+loaded by your shell. Dynamic multiplexer values use a short timeout and
+silently fall back to native directory completion when discovery is
+unavailable.
 
 ### 3. Basic Usage
 

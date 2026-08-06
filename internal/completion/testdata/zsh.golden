@@ -1,0 +1,31 @@
+#compdef seshagy
+_seshagy_complete() {
+  local -a argv lines values descriptions
+  local directive line rest value description
+  argv=("${words[@][1,$((CURRENT - 1))]}" "$PREFIX")
+  lines=("${(@f)$(command seshagy __complete -- "${argv[@]}" 2>/dev/null)}")
+  (( ${#lines} > 0 )) || return 0
+  case "${lines[1]}" in
+    $'v1\tnofiles') directive=nofiles ;;
+    $'v1\tfiles') directive=files ;;
+    $'v1\tdirs') directive=dirs ;;
+    *) return 0 ;;
+  esac
+  for line in "${lines[@]:1}"; do
+    [[ "$line" == $'c\t'* ]] || return 0
+    rest="${line#*$'\t'}"
+    [[ "$rest" == *$'\t'* ]] || return 0
+    value="${rest%%$'\t'*}"
+    description="${rest#*$'\t'}"
+    [[ -n "$value" && "$description" != *$'\t'* ]] || return 0
+    values+=("$value")
+    descriptions+=("$description")
+  done
+  (( ${#values} == 0 )) || compadd -d descriptions -- "${values[@]}"
+  if [[ "$directive" == dirs ]]; then
+    _files -/
+  elif [[ "$directive" == files ]]; then
+    _files
+  fi
+}
+compdef _seshagy_complete seshagy
