@@ -1,17 +1,10 @@
 name: CI
 
 on:
+  workflow_dispatch:
   pull_request:
-    paths-ignore:
-      - '**/*.md'
-      - 'docs/**'
-      - '**/*.png'
-      - '**/*.jpg'
-      - '**/*.jpeg'
-      - '**/*.gif'
-      - '**/*.svg'
-      - '**/*.webp'
-      - '**/*.ico'
+    branches:
+      - main
   push:
     branches:
       - main
