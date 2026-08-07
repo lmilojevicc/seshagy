@@ -62,8 +62,9 @@ package-local helpers and the project's existing domain terms: sessions,
 panes, agents, integrations, sources, and launch state. Export identifiers
 only when they are used across packages or by command-facing code.
 
-Keep dependencies minimal: `BurntSushi/toml` is the only non-stdlib
-dependency. Add no new `go.mod` dependencies if avoidable, and stay cgo-free.
+Keep dependencies minimal. Runtime dependencies cover TOML parsing, the
+Bubble Tea TUI stack, and the pinned Cobra completion shadow tree. Add no new
+`go.mod` dependencies if avoidable, and stay cgo-free.
 See `AGENTS.md` for the full conventions and the agent-state invariants
 (namespacing, stale-can't-resurrect, authority model, etc.).
 
@@ -87,14 +88,16 @@ A few notes:
 
 Open PRs against `main`; the project uses squash merge.
 
-- Keep each PR focused on a single change.
+- Changes are accepted through pull requests only; keep each PR focused on a single change.
 - Run `mise run verify` before pushing.
 - Include a short problem/solution summary in the PR description and reference
   `mise run verify` results.
 - Add screenshots or terminal captures for any visible TUI change.
-- Call out any config, tmux, herdr, or integration behavior changes.
+- Call out any config, tmux, herdr, integration, or shell-completion behavior changes.
+- When a command, alias, flag, positional, enum, or registry changes, update the
+  Cobra completion shadow tree and focused completion/parity tests in the same PR.
 
-Link issues with `Closes #NN` so they auto-close on merge. The PR template in
+Link issues only with the generic `Closes #NN` form so they auto-close on merge. The PR template in
 `.github/PULL_REQUEST_TEMPLATE.md` guides you through this.
 
 ## Commit messages

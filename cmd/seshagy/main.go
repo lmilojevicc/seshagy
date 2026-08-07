@@ -35,6 +35,9 @@ func main() {
 }
 
 func run(args []string) error {
+	if handled, err := runCompletion(args); handled {
+		return err
+	}
 	ephemeral := false
 	filtered := make([]string, 0, len(args))
 	for _, arg := range args {
@@ -79,13 +82,13 @@ func run(args []string) error {
 	if err != nil {
 		return err
 	}
+	mux := sessionmgr.Detect()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 	if parsed.kind == commandDelete {
-		item, ok := sessionmgr.ParseActionLineWithIcons(parsed.deleteLine, cfg.IconSet())
-		if !ok {
-			return fmt.Errorf("--delete-item: unrecognized item line: %q", parsed.deleteLine)
-		}
-		if item.Kind != sessionmgr.KindSession {
-			return fmt.Errorf("--delete-item: %s items cannot be deleted", item.Kind)
+		item, resolveErr := resolveDeleteItem(ctx, mux, parsed.deleteLine, cfg)
+		if resolveErr != nil {
+			return resolveErr
 		}
 		parsed.deleteItem = &item
 	}
@@ -101,11 +104,7 @@ func run(args []string) error {
 		return err
 	}
 	runtime.Activate()
-	mux := sessionmgr.Detect()
 	started := logAppStart(runtime.Logger(), mux.Kind(), resolved.LevelName)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
 	var operationErr error
 	switch parsed.kind {
 	case commandGet:
@@ -219,17 +218,43 @@ type releaseAgentCommand struct {
 
 type integrationCommand struct{ action, name string }
 
+type getCommand struct {
+	Name        string
+	Mode        sessionmgr.SourceMode
+	Description string
+}
+
+var getCommands = []getCommand{
+	{Name: "--get-all", Mode: sessionmgr.ModeAll, Description: "print all configured sources"},
+	{
+		Name:        "--get-sessions",
+		Mode:        sessionmgr.ModeSessions,
+		Description: "print sessions or workspaces",
+	},
+	{Name: "--get-zoxide", Mode: sessionmgr.ModeZoxide, Description: "print zoxide directories"},
+	{Name: "--get-fd", Mode: sessionmgr.ModeFD, Description: "print fd directories"},
+	{Name: "--get-agents", Mode: sessionmgr.ModeAgents, Description: "print agent panes"},
+	{
+		Name:        "--get-current-session-agents",
+		Mode:        sessionmgr.ModeCurrentAgents,
+		Description: "print current-session agents",
+	},
+}
+
+func getMode(name string) (sessionmgr.SourceMode, bool) {
+	for _, command := range getCommands {
+		if command.Name == name {
+			return command.Mode, true
+		}
+	}
+	return 0, false
+}
+
 func parseOperationalCommand(args []string) (parsedCommand, error) {
 	if len(args) == 0 {
 		return parsedCommand{}, errors.New(joinUsage("<command>"))
 	}
-	modes := map[string]sessionmgr.SourceMode{
-		"--get-sessions": sessionmgr.ModeSessions, "--get-zoxide": sessionmgr.ModeZoxide,
-		"--get-fd": sessionmgr.ModeFD, "--get-agents": sessionmgr.ModeAgents,
-		"--get-current-session-agents": sessionmgr.ModeCurrentAgents,
-		"--get-all":                    sessionmgr.ModeAll,
-	}
-	if mode, ok := modes[args[0]]; ok {
+	if mode, ok := getMode(args[0]); ok {
 		rest, jsonOutput := stripJSONFlag(args[1:])
 		if len(rest) > 0 {
 			return parsedCommand{}, errors.New(modeUsage(args[0]))
@@ -552,14 +577,60 @@ func deleteItem(
 	if err != nil {
 		return err
 	}
-	item, ok := sessionmgr.ParseActionLineWithIcons(raw, cfg.IconSet())
-	if !ok {
-		return fmt.Errorf("--delete-item: unrecognized item line: %q", raw)
-	}
-	if item.Kind != sessionmgr.KindSession {
-		return fmt.Errorf("--delete-item: %s items cannot be deleted", item.Kind)
+	item, err := resolveDeleteItem(ctx, mux, raw, cfg)
+	if err != nil {
+		return err
 	}
 	return deletePreparedItem(ctx, mux, item, jsonOutput)
+}
+
+func resolveDeleteItem(
+	ctx context.Context,
+	mux sessionmgr.Multiplexer,
+	raw string,
+	cfg appconfig.Config,
+) (sessionmgr.Item, error) {
+	items, err := mux.ListSessions(ctx)
+	if err != nil {
+		return sessionmgr.Item{}, err
+	}
+	matches := func(match func(sessionmgr.Item) bool) []sessionmgr.Item {
+		var found []sessionmgr.Item
+		for _, item := range items {
+			if item.Kind == sessionmgr.KindSession && match(item) {
+				found = append(found, item)
+			}
+		}
+		return found
+	}
+	stages := []func(sessionmgr.Item) bool{
+		func(item sessionmgr.Item) bool { return item.ActionTarget() == raw },
+		func(item sessionmgr.Item) bool {
+			line := sessionmgr.FormatLineWithIcons(item, cfg.IconSet())
+			return line == raw || sessionmgr.StripANSI(line) == sessionmgr.StripANSI(raw)
+		},
+		func(item sessionmgr.Item) bool { return item.Name == raw },
+	}
+	for _, stage := range stages {
+		found := matches(stage)
+		if len(found) == 1 {
+			return found[0], nil
+		}
+		if len(found) > 1 {
+			return sessionmgr.Item{}, fmt.Errorf("--delete-item: ambiguous active item: %q", raw)
+		}
+	}
+	if parsed, ok := sessionmgr.ParseActionLineWithIcons(raw, cfg.IconSet()); ok &&
+		parsed.Kind != sessionmgr.KindSession {
+		return sessionmgr.Item{}, fmt.Errorf(
+			"--delete-item: %s items cannot be deleted",
+			parsed.Kind,
+		)
+	}
+	return sessionmgr.Item{}, fmt.Errorf(
+		"--delete-item: stale or unrecognized active item: %q",
+		raw,
+	)
 }
 
 func deletePreparedItem(
@@ -595,8 +666,9 @@ Usage:
   seshagy --get-agents [--json]   print agent panes (all sessions)
   seshagy --get-current-session-agents [--json]
                                   print agent panes (current session)
-  seshagy --delete-item <line> [--json]
-                                  kill a rendered session line
+  seshagy --delete-item <target> [--json]
+                                  kill an active session/workspace by exact id,
+                                  label, or current rendered line
   seshagy config path [--json]    print config file path
   seshagy config show [--json]    print effective config
   seshagy config init [--force] [--json]
@@ -618,9 +690,11 @@ Usage:
   seshagy keybind uninstall herdr
                                   remove the seshagy herdr keybinding
   seshagy --version [--json]
+  seshagy completion bash|zsh|fish
+                                  generate a shell completion script
 
 Scripting:
-  Append --json to any command above for machine-readable JSON on stdout.
+  Append --json to commands marked [--json] for machine-readable JSON on stdout.
   Responses include schema_version and ok; errors also print JSON on stdout.
   Human text output is unchanged when --json is omitted.
   seshagy --report-agent --pane %N --state <state> --source <src> --seq <n>

@@ -27,6 +27,7 @@ archives:
     files:
       - LICENSE*
       - README*
+      - licenses/*
       - scripts/herdr-plugin-entry.sh
 
 checksum:
@@ -71,6 +72,7 @@ brews:
     directory: Formula
     install: |
       bin.install "seshagy"
+      generate_completions_from_executable bin/"seshagy", shell_parameter_format: :cobra, shells: [:bash, :zsh, :fish]
     caveats: |
       Built-in --ephemeral focus-loss dismissal replaces the former launcher.
       Wire a one-key launcher with: seshagy keybind install tmux (or: herdr)

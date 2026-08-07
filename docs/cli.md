@@ -3,6 +3,31 @@
 The TUI is the main interface. The CLI helpers are useful for scripts, fzf-style
 menus, and agent hooks.
 
+## Shell completion
+
+Generate production completion for Bash, Zsh, or Fish:
+
+```sh
+seshagy completion bash
+seshagy completion zsh
+seshagy completion fish
+```
+
+Each script registers `seshagy`, completes command-local flags and fixed values,
+and reads active pane/session metadata with a short timeout. Dynamic completion
+is read-only and silently falls back when tmux or herdr is unavailable. Homebrew
+installs all three scripts automatically.
+
+Completion metadata is intentionally separate from the operational parser. When
+adding or changing a CLI route, update both the parser and the Cobra completion
+shadow tree, then run the focused completion/parity tests.
+
+Cobra is pinned to `v1.10.2`; generated-script safety patches are exact-marker,
+fail-closed transforms audited for that version. Upgrading Cobra requires
+regenerating all three shells, auditing that unfinished input is never evaluated,
+and updating the pinned markers/tests. Cobra and its `mousetrap` dependency are
+Apache-2.0 licensed; `pflag` is BSD-3-Clause licensed.
+
 ```sh
 seshagy --get-all
 seshagy --get-sessions
@@ -10,10 +35,11 @@ seshagy --get-agents
 seshagy --get-current-session-agents
 seshagy --get-zoxide
 seshagy --get-fd
-seshagy --delete-item '<rendered line from --get-all>'
+seshagy --delete-item '<active target, label, or rendered line from --get-all>'
 ```
 
-All commands above (plus `config` and `--version`) support a trailing `--json`
+The `--get-*` and `--delete-item` commands above (plus `config`, `diagnostics`,
+and `--version`) support a trailing `--json`
 flag for machine-readable JSON on stdout. Human text output is unchanged when
 `--json` is omitted.
 

@@ -29,6 +29,21 @@ Navigating the terminal shouldn't break your flow, and managing AI coding agents
 brew tap lmilojevicc/tap && brew install seshagy
 ```
 
+The Homebrew formula installs Bash, Zsh, and Fish completions automatically.
+For other installs, generate and source the script for your shell:
+
+```sh
+# Bash
+source <(seshagy completion bash)
+# Zsh (save as a file named _seshagy in a directory on $fpath)
+seshagy completion zsh > "${fpath[1]}/_seshagy"
+# Fish
+seshagy completion fish | source
+```
+
+For a persistent manual install, write the generated script to your shell's
+standard completions directory instead of sourcing it from every startup.
+
 **Go:**
 
 ```sh

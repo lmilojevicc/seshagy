@@ -13,7 +13,8 @@
 - [ ] `mise run verify` passes
 - [ ] Tests added/updated for new behavior
 - [ ] Docs updated (README/AGENTS.md) if needed
+- [ ] CLI parser and Cobra completion shadow tree remain in parity (or not applicable)
 
 ## Linked issues
 
-<!-- Closes #NN — auto-closes on merge to main -->
+<!-- Use only: Closes #NN -->
