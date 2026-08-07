@@ -46,6 +46,9 @@ jobs:
       - name: Download modules
         run: go mod download
 
+      - name: Provision completion shells
+        run: sudo apt-get update && sudo apt-get install --yes zsh fish
+
       - name: Check formatting
         run: mise run fmt:check
 
@@ -64,8 +67,25 @@ jobs:
       - name: Build CLI
         run: mise run build
 
+  completion-bash3:
+    runs-on: macos-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Verify stock macOS Bash 3.2 completion
+        run: |
+          /bin/bash --version | head -1 | grep 'version 3.2'
+          go test ./cmd/seshagy -run 'TestGeneratedBashWorksStandaloneAndDoesNotExecuteInput|TestGeneratedShellSyntax/bash' -count=1
+
   release:
-    needs: verify
+    needs: [verify, completion-bash3]
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:

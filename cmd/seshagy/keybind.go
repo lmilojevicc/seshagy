@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -27,21 +28,20 @@ const (
 	tmuxModeZoomed tmuxLaunchMode = "pane-zoomed" // split-window, then zoom
 )
 
+var tmuxLaunchModes = []tmuxLaunchMode{tmuxModePopup, tmuxModeWindow, tmuxModePane, tmuxModeZoomed}
+
 func parseTmuxLaunchMode(s string) (tmuxLaunchMode, error) {
-	switch s {
-	case "", string(tmuxModePopup):
+	if s == "" {
 		return tmuxModePopup, nil
-	case string(tmuxModeWindow):
-		return tmuxModeWindow, nil
-	case string(tmuxModePane):
-		return tmuxModePane, nil
-	case string(tmuxModeZoomed):
-		return tmuxModeZoomed, nil
-	default:
-		return "", fmt.Errorf(
-			"unknown launch mode %q (want popup|window|pane|pane-zoomed)", s,
-		)
 	}
+	for _, mode := range tmuxLaunchModes {
+		if s == string(mode) {
+			return mode, nil
+		}
+	}
+	return "", fmt.Errorf(
+		"unknown launch mode %q (want popup|window|pane|pane-zoomed)", s,
+	)
 }
 
 // tmuxBindLine is the binding for the chosen launch mode. Wrapped in a marker
@@ -95,6 +95,11 @@ const (
 	defaultHerdrPopupHeight                 = "80%"
 )
 
+var (
+	keybindTargets   = []string{"tmux", "herdr"}
+	herdrLaunchModes = []herdrLaunchMode{herdrModePane, herdrModePopup}
+)
+
 var herdrPopupDimensionPattern = regexp.MustCompile(`^[0-9]+%?$`)
 
 func validateHerdrPopupDimension(flag, value string) error {
@@ -105,16 +110,17 @@ func validateHerdrPopupDimension(flag, value string) error {
 }
 
 func parseHerdrLaunchMode(s string) (herdrLaunchMode, error) {
-	switch s {
-	case "", string(herdrModePane):
+	if s == "" {
 		return herdrModePane, nil
-	case string(herdrModePopup):
-		return herdrModePopup, nil
-	default:
-		return "", fmt.Errorf(
-			"unknown herdr launch mode %q (want pane|popup)", s,
-		)
 	}
+	for _, mode := range herdrLaunchModes {
+		if s == string(mode) {
+			return mode, nil
+		}
+	}
+	return "", fmt.Errorf(
+		"unknown herdr launch mode %q (want pane|popup)", s,
+	)
 }
 
 // herdrBindBlock returns the TOML [[keys.command]] block (with markers) that
@@ -427,7 +433,7 @@ func parseKeybindCommand(args []string) (keybindCommand, error) {
 		if len(args) < 2 || args[1] == "" {
 			return keybindCommand{}, errors.New(joinUsage("keybind", "uninstall", "<name>"))
 		}
-		if args[1] != "tmux" && args[1] != "herdr" {
+		if !slices.Contains(keybindTargets, args[1]) {
 			return keybindCommand{}, fmt.Errorf(
 				"unknown keybind target: %q (only \"tmux\" and \"herdr\" are supported)",
 				args[1],
@@ -467,6 +473,12 @@ func parseKeybindCommand(args []string) (keybindCommand, error) {
 			cmd.persistent = true
 		}
 	}
+	if !slices.Contains(keybindTargets, cmd.target) {
+		return keybindCommand{}, fmt.Errorf(
+			"unknown keybind target: %q (only \"tmux\" and \"herdr\" are supported)",
+			cmd.target,
+		)
+	}
 	var err error
 	switch cmd.target {
 	case "tmux":
@@ -478,11 +490,6 @@ func parseKeybindCommand(args []string) (keybindCommand, error) {
 				err = validateHerdrPopupDimension("--height", cmd.height)
 			}
 		}
-	default:
-		return keybindCommand{}, fmt.Errorf(
-			"unknown keybind target: %q (only \"tmux\" and \"herdr\" are supported)",
-			cmd.target,
-		)
 	}
 	return cmd, err
 }

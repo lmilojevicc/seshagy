@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/spf13/cobra"
+
 	appconfig "github.com/lmilojevicc/seshagy/internal/config"
 	"github.com/lmilojevicc/seshagy/internal/sessionmgr"
 )
@@ -93,6 +95,8 @@ func TestPureAndInvalidCommandsDoNotTruncateConfiguredLog(t *testing.T) {
 		{"config", "show"},
 		{"config", "init"},
 		{"diagnostics", "--json"},
+		{"completion", "bash"},
+		{cobra.ShellCompRequestCmd, ""},
 		{"--get-agents", "extra"},
 		{"--report-agent", "--pane", "%1", "--source", "hook"},
 		{"--release-agent", "--source", "hook"},

@@ -29,6 +29,11 @@ const (
 	AgentUnknown AgentState = "unknown"
 )
 
+// AgentStates returns the canonical lifecycle values accepted by agent reports.
+func AgentStates() []AgentState {
+	return []AgentState{AgentIdle, AgentWorking, AgentBlocked, AgentDone, AgentUnknown}
+}
+
 type Item struct {
 	Kind Kind
 

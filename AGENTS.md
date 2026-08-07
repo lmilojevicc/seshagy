@@ -15,6 +15,7 @@ The agent-state-detection subsystem lives in `internal/sessionmgr/`:
 - `mux.go` — `Multiplexer` interface, `Terms` (terminology), `BackendKind`, `Detect`/`DetectFromEnv` (env-based backend selection: herdr wins over tmux).
 - `tmux_backend.go` / `herdr_backend.go` / `noop_backend.go` — backend implementations. Under herdr, agent-state writes (`ReportAgent`/`ReleaseAgent`/`MarkAgentVisited`/`MarkActiveDoneAgentsIdle`) and the capture-pane manifest backstop are no-ops — herdr owns detection.
 - `herdr_parse.go` — JSON parsers for herdr CLI output (workspace/pane/agent payloads); ids are treated as opaque strings.
+- `completion.go` — read-only one-call pane/session snapshots used only by shell completion; never route it through full source/agent loading.
 - `manifest_regions.go` — region slice helpers (whole_recent, osc_title, bottom_lines(N), bottom_non_empty_lines(N), after_last_prompt_marker, after_last_horizontal_rule, prompt_box_body, osc_progress).
 - `manifest_update.go` — launch-time async fetch of manifests from the herdr public catalog; local-override > cached-remote > bundled precedence; version-guarded; HTTPS-only.
 - `proctree.go` — process-tree descendant walk (node-agent discovery).
@@ -66,11 +67,19 @@ Add focused table-driven tests near the package being changed. Use names like `T
 - **Release suppression:** after `ReleaseAgent` clears state, capture-pane manifest is suppressed for 10s (`@seshagy_agent_released_at`) to prevent visual resurrection of a just-released pane.
 - **Zero new go.mod deps if avoidable.** cgo-free. `BurntSushi/toml` is the only non-stdlib dep for manifests.
 
+## Shell completion invariants
+
+The operational parser remains authoritative; Cobra is a completion-only shadow
+tree pinned to v1.10.2. Any PR that changes a command, alias, flag, positional,
+fixed enum, or registry must update the shadow tree and focused completion/parity
+tests in the same PR. Generated endpoint/grouping patches are pinned and
+fail-closed; never add an executable `eval` path for command-line input.
+
 ## Commit & Pull Request Guidelines
 
 All repository commits must follow Conventional Commits: `<type>[optional scope]: <description>`. Keep descriptions focused, imperative, and without trailing punctuation. Examples include `feat(tui): add ranked fuzzy search`, `fix(sessionmgr): prevent stale agent resurrection`, and `refactor(config): simplify validation`. Mark breaking changes with `!` before the colon.
 
-Pull requests should include a short problem/solution summary, `mise run verify` results, and screenshots or terminal captures for visible TUI changes. Call out any config, tmux, or integration behavior changes.
+Changes are accepted through pull requests only. Pull requests should include a short problem/solution summary, `mise run verify` results, and screenshots or terminal captures for visible TUI changes. Call out any config, tmux, integration, or completion-parity behavior changes. Use only generic `Closes #NN` issue links.
 
 ## CI/CD and Release Workflow
 

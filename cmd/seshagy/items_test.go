@@ -19,7 +19,12 @@ func installDeleteItemTmuxRecorder(
 	onMatch func(args []string),
 ) {
 	t.Helper()
-	sessionmgr.SetTmuxHooksForTest(t, nil, func(_ context.Context, args ...string) error {
+	sessionmgr.SetTmuxHooksForTest(t, func(_ context.Context, args ...string) ([]byte, error) {
+		if len(args) >= 1 && args[0] == "list-sessions" {
+			return []byte("demo\x1f100\x1f200\x1f/tmp/demo\x1f0\x1f1"), nil
+		}
+		return nil, fmt.Errorf("unexpected tmux output call: %v", args)
+	}, func(_ context.Context, args ...string) error {
 		if len(args) >= 1 && args[0] == wantCmd {
 			onMatch(args)
 			return nil
@@ -351,6 +356,40 @@ func TestRunDeleteItemViaCLI(t *testing.T) {
 	}
 }
 
+type deleteResolverMux struct {
+	sessionmgr.Multiplexer
+	items []sessionmgr.Item
+}
+
+func (m deleteResolverMux) ListSessions(context.Context) ([]sessionmgr.Item, error) {
+	return m.items, nil
+}
+
+func TestResolveDeleteItemPreservesOpaqueTargetsAndRejectsAmbiguousLabels(t *testing.T) {
+	manifestTestDirs(t)
+	cfg, err := appconfig.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := []sessionmgr.Item{
+		{Kind: sessionmgr.KindSession, Name: "shared", Target: "workspace:opaque/one"},
+		{Kind: sessionmgr.KindSession, Name: "shared", Target: "workspace:opaque/two"},
+	}
+	mux := deleteResolverMux{items: items}
+	got, err := resolveDeleteItem(context.Background(), mux, "workspace:opaque/two", cfg)
+	if err != nil || got.ActionTarget() != "workspace:opaque/two" {
+		t.Fatalf("exact opaque target = %#v, err=%v", got, err)
+	}
+	if _, err := resolveDeleteItem(context.Background(), mux, "shared", cfg); err == nil ||
+		!strings.Contains(err.Error(), "ambiguous") {
+		t.Fatalf("ambiguous label error = %v", err)
+	}
+	if _, err := resolveDeleteItem(context.Background(), mux, "stale", cfg); err == nil ||
+		!strings.Contains(err.Error(), "stale") {
+		t.Fatalf("stale target error = %v", err)
+	}
+}
+
 func TestDeleteItemUnrecognizedLine(t *testing.T) {
 	manifestTestDirs(t)
 	err := deleteItem(
@@ -359,8 +398,8 @@ func TestDeleteItemUnrecognizedLine(t *testing.T) {
 		"not a valid item line",
 		false,
 	)
-	if err == nil || !strings.Contains(err.Error(), "unrecognized item line") {
-		t.Fatalf("deleteItem() error = %v, want unrecognized item line", err)
+	if err == nil || !strings.Contains(err.Error(), "stale or unrecognized active item") {
+		t.Fatalf("deleteItem() error = %v, want stale/unrecognized item", err)
 	}
 }
 
@@ -387,12 +426,21 @@ func TestDeleteItemKillFailure(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			sessionmgr.SetTmuxHooksForTest(t, nil, func(_ context.Context, args ...string) error {
-				if len(args) >= 1 && args[0] == tt.wantCmd {
-					return killErr
-				}
-				return fmt.Errorf("unexpected tmux call: %v", args)
-			})
+			sessionmgr.SetTmuxHooksForTest(
+				t,
+				func(_ context.Context, args ...string) ([]byte, error) {
+					if len(args) >= 1 && args[0] == "list-sessions" {
+						return []byte("demo\x1f100\x1f200\x1f/tmp/demo\x1f0\x1f1"), nil
+					}
+					return nil, fmt.Errorf("unexpected tmux output call: %v", args)
+				},
+				func(_ context.Context, args ...string) error {
+					if len(args) >= 1 && args[0] == tt.wantCmd {
+						return killErr
+					}
+					return fmt.Errorf("unexpected tmux call: %v", args)
+				},
+			)
 			err := deleteItem(context.Background(), sessionmgr.NewTmuxBackend(), tt.line, false)
 			if err == nil {
 				t.Fatalf("deleteItem() expected error for %s failure", tt.wantCmd)
@@ -415,7 +463,12 @@ func TestDeleteItemKillFailureJSON(t *testing.T) {
 		sessionmgr.Item{Kind: sessionmgr.KindSession, Name: "demo"},
 		cfg.IconSet(),
 	)
-	sessionmgr.SetTmuxHooksForTest(t, nil, func(_ context.Context, args ...string) error {
+	sessionmgr.SetTmuxHooksForTest(t, func(_ context.Context, args ...string) ([]byte, error) {
+		if len(args) >= 1 && args[0] == "list-sessions" {
+			return []byte("demo\x1f100\x1f200\x1f/tmp/demo\x1f0\x1f1"), nil
+		}
+		return nil, fmt.Errorf("unexpected tmux output call: %v", args)
+	}, func(_ context.Context, args ...string) error {
 		if len(args) >= 1 && args[0] == "kill-session" {
 			return killErr
 		}
