@@ -10,7 +10,7 @@
 
 ## Validation
 
-- [ ] `mise run verify` passes
+- [ ] `mise run ci` passes
 - [ ] Tests added/updated for new behavior
 - [ ] Docs updated (README/AGENTS.md) if needed
 - [ ] CLI parser and Cobra completion shadow tree remain in parity (or not applicable)

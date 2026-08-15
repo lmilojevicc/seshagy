@@ -9,16 +9,18 @@ multiplexer backends. This guide covers the essentials; for the full picture
 
 ## Quick start
 
+Go 1.26.6 or newer is an explicit prerequisite; `mise.toml` does not install Go.
+
 ```sh
 git clone https://github.com/lmilojevicc/seshagy.git
 cd seshagy
-mise install        # installs the pinned dev tools (Go, linters, …)
-mise run verify     # fmt:check + lint + vet + test + build
+mise install         # installs the pinned linters and development tools
+mise run ci          # verify + vuln
 go run ./cmd/seshagy # run the TUI from the checkout
 ```
 
-You will need Go 1.26 (matching `go.mod`). Runtime needs a multiplexer
-(`tmux` or `herdr`); optional helpers are `zoxide`, `fd`, `yazi`, and `eza`.
+Runtime needs a multiplexer (`tmux` or `herdr`); optional helpers are `zoxide`,
+`fd`, `yazi`, and `eza`.
 
 ## Development commands
 
@@ -27,12 +29,13 @@ All tasks are defined in `mise.toml`.
 | Command | What it does |
 | --- | --- |
 | `mise run fmt` | Format Go and YAML files (`golangci-lint fmt` + `yamlfmt`). |
-| `mise run verify` | The CI gate: `fmt:check`, `lint`, `vet`, `test`, `build`. |
+| `mise run verify` | Run the fast deterministic checks: `fmt:check`, `lint`, `vet`, `test`, `build`. |
+| `mise run ci` | Run `verify` and `vuln` sequentially for local/agent CI parity. |
 | `mise run lint` | `golangci-lint run ./...`. |
 | `mise run vet` | `go vet ./...`. |
 | `mise run test` | `go test ./...`. |
 | `mise run test:focused ./internal/sessionmgr ParseAgents` | Run a focused subset (`<package> <run-pattern>`). |
-| `mise run vuln` | `govulncheck ./...` (CI runs this as a separate gate). |
+| `mise run vuln` | Run `govulncheck ./...` independently. |
 | `mise run release:check` | Validate `.goreleaser.yml` without publishing. |
 | `make build` | Build the local `./seshagy` binary from `./cmd/seshagy`. |
 
@@ -73,8 +76,8 @@ See `AGENTS.md` for the full conventions and the agent-state invariants
 Add focused, table-driven tests next to the package you change, with names
 that describe behavior (for example
 `TestParseAgentsSkipsNonAgentsAndFormatsLocation`). `mise run verify` is the
-default check; iterate on a narrow slice with
-`mise run test:focused ./internal/sessionmgr ParseAgents`.
+default fast check; run `mise run ci` before handoff, and iterate on a narrow
+slice with `mise run test:focused ./internal/sessionmgr ParseAgents`.
 
 A few notes:
 
@@ -89,9 +92,9 @@ A few notes:
 Open PRs against `main`; the project uses squash merge.
 
 - Changes are accepted through pull requests only; keep each PR focused on a single change.
-- Run `mise run verify` before pushing.
+- Run `mise run ci` before pushing.
 - Include a short problem/solution summary in the PR description and reference
-  `mise run verify` results.
+  `mise run ci` results.
 - Add screenshots or terminal captures for any visible TUI change.
 - Call out any config, tmux, herdr, integration, or shell-completion behavior changes.
 - When a command, alias, flag, positional, enum, or registry changes, update the
@@ -115,9 +118,9 @@ Harden lifecycle agent integrations
 
 ## Releases
 
-Releases are **tag-driven**. Once `mise run verify`, `mise run vuln`, and
-`mise run release:check` pass on a clean tree, push a `v*` tag and GoReleaser
-takes it from there. Do not cut a release from a dirty tree.
+Releases are **tag-driven**. Once `mise run ci` and `mise run release:check`
+pass on a clean tree, push a `v*` tag and GoReleaser takes it from there. Do not
+cut a release from a dirty tree.
 
 ## Reporting bugs and ideas
 
