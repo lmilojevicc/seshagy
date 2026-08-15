@@ -1,6 +1,7 @@
 {
   lib,
   buildGoModule,
+  tmux,
   version,
 }:
 buildGoModule {
@@ -17,6 +18,7 @@ buildGoModule {
     "-w"
     "-X main.version=${version}"
   ];
+  nativeCheckInputs = [tmux];
 
   doCheck = true;
   checkPhase = ''
