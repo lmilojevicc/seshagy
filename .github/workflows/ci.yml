@@ -67,6 +67,15 @@ jobs:
       - name: Build CLI
         run: mise run build
 
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31.10.6
+
+      - name: Evaluate Nix flake
+        run: nix flake check --all-systems --no-build --no-update-lock-file
+
+      - name: Build Nix package
+        run: nix build --no-link --no-update-lock-file --print-build-logs
+
   completion-bash3:
     runs-on: macos-latest
     steps:
