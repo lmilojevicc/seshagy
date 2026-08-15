@@ -198,7 +198,9 @@ seshagy speaks your multiplexer's language seamlessly:
 
 ## 🛠 Development
 
-- `mise run verify` runs the CI gate (fmt, lint, test, build).
+- `mise run verify` runs the fast deterministic checks (fmt, lint, vet, test, build).
+- `mise run vuln` runs the vulnerability check independently.
+- `mise run ci` runs `verify` and `vuln` sequentially for CI parity.
 - `make build` produces a local `./seshagy` binary.
 
 ---

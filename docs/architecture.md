@@ -21,7 +21,7 @@ exposes it via the `agent_status` field (`idle`/`working`/`blocked`/`done`/
 `@seshagy_agent_*` options under herdr. The state-reporting hooks (shell,
 Pi extension, OpenCode plugin) early-exit when `$HERDR_ENV=1` is set.
 
-Builds from source require Go 1.26, matching `go.mod`. Shell-hook integrations
+Builds from source require Go 1.26.6 or newer, matching `go.mod`. Shell-hook integrations
 may use `bash` and `python3`; the OpenCode plugin runs on Bun/Node.
 
 ## What seshagy manages

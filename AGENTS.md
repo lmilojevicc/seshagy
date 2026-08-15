@@ -32,14 +32,15 @@ Integrations live in `internal/integrations/`:
 
 ## Build, Test, and Development Commands
 
-- `mise run verify`: runs CI checks (`fmt:check`, `lint`, `vet`, `test`, `build`).
+- `mise run verify`: runs the fast deterministic checks (`fmt:check`, `lint`, `vet`, `test`, `build`).
+- `mise run ci`: runs `verify` and `vuln` sequentially for local/agent CI parity.
 - `mise run fmt`: formats Go and YAML files using the configured formatters.
-- `mise run vuln`: runs `govulncheck ./...`; GitHub CI runs this as a separate gate.
+- `mise run vuln`: runs `govulncheck ./...` independently.
 - `mise run release:check`: validates `.goreleaser.yml` without publishing.
 - `make build`: builds the local `./seshagy` binary from `./cmd/seshagy`.
 - `go run ./cmd/seshagy`: runs the TUI from the checkout.
 
-Go 1.26 is in `go.mod`. Runtime behavior expects a multiplexer (`tmux` or `herdr`); optional tools include `zoxide`, `fd`, `yazi`, and `eza`.
+Go 1.26.6 or newer is required by `go.mod`. Runtime behavior expects a multiplexer (`tmux` or `herdr`); optional tools include `zoxide`, `fd`, `yazi`, and `eza`.
 
 ## Coding Style & Naming Conventions
 
@@ -55,7 +56,7 @@ Diagnostic logging is owned by `internal/logging` and is file-only JSONL; never 
 
 ## Testing Guidelines
 
-Add focused table-driven tests near the package being changed. Use names like `TestParseAgentsSkipsNonAgentsAndFormatsLocation` that describe behavior. `mise run verify` is the default check; use `mise run test:focused ./internal/sessionmgr ParseAgents` for narrow loops. Some `sessionmgr` tests create temporary tmux sessions and skip when `tmux` is unavailable.
+Add focused table-driven tests near the package being changed. Use names like `TestParseAgentsSkipsNonAgentsAndFormatsLocation` that describe behavior. `mise run verify` is the default fast check; run `mise run ci` before handoff, and use `mise run test:focused ./internal/sessionmgr ParseAgents` for narrow loops. Some `sessionmgr` tests create temporary tmux sessions and skip when `tmux` is unavailable.
 
 ## Agent-state invariants
 
@@ -79,8 +80,8 @@ fail-closed; never add an executable `eval` path for command-line input.
 
 All repository commits must follow Conventional Commits: `<type>[optional scope]: <description>`. Keep descriptions focused, imperative, and without trailing punctuation. Examples include `feat(tui): add ranked fuzzy search`, `fix(sessionmgr): prevent stale agent resurrection`, and `refactor(config): simplify validation`. Mark breaking changes with `!` before the colon.
 
-Changes are accepted through pull requests only. Pull requests should include a short problem/solution summary, `mise run verify` results, and screenshots or terminal captures for visible TUI changes. Call out any config, tmux, integration, or completion-parity behavior changes. Use only generic `Closes #NN` issue links.
+Changes are accepted through pull requests only. Pull requests should include a short problem/solution summary, `mise run ci` results, and screenshots or terminal captures for visible TUI changes. Call out any config, tmux, integration, or completion-parity behavior changes. Use only generic `Closes #NN` issue links.
 
 ## CI/CD and Release Workflow
 
-GitHub Actions runs formatting, linting, vet, tests, vulnerability checks, and build through pinned `mise` tools. Releases are tag-driven: after `mise run verify`, `mise run vuln`, and `mise run release:check` pass on a clean tree, push a `v*` tag to run GoReleaser.
+GitHub Actions runs formatting, linting, vet, tests, vulnerability checks, and build through pinned `mise` tools. Releases are tag-driven: after `mise run ci` and `mise run release:check` pass on a clean tree, push a `v*` tag to run GoReleaser.
