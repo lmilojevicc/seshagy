@@ -10,7 +10,6 @@
     systems = [
       "x86_64-linux"
       "aarch64-linux"
-      "x86_64-darwin"
       "aarch64-darwin"
     ];
     genAttrs = names: f:
@@ -24,10 +23,6 @@
     packages = genAttrs systems (system: let
       pkgs = import nixpkgs {
         inherit system;
-        config = {
-          allowDeprecatedx86_64Darwin = "force";
-          allowUnsupportedSystem = system == "x86_64-darwin";
-        };
       };
       seshagy = pkgs.callPackage ./nix/package.nix {inherit version;};
     in {
