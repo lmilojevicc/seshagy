@@ -50,6 +50,14 @@ standard completions directory instead of sourcing it from every startup.
 go install github.com/lmilojevicc/seshagy/cmd/seshagy@latest
 ```
 
+**Nix:**
+
+```sh
+nix run github:lmilojevicc/seshagy
+# Or install it into your profile:
+nix profile install github:lmilojevicc/seshagy
+```
+
 ### 2. The Recommended Setup (Day-to-Day Use)
 
 For the best experience, `seshagy` is meant to be a one-keystroke pop-up that gets out of your way as soon as you jump to a session.
