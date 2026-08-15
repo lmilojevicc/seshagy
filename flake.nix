@@ -24,7 +24,15 @@
       pkgs = import nixpkgs {
         inherit system;
       };
-      seshagy = pkgs.callPackage ./nix/package.nix {inherit version;};
+      go_1_26_6 = pkgs.go_1_26.overrideAttrs {
+        version = "1.26.6";
+        src = pkgs.fetchurl {
+          url = "https://go.dev/dl/go1.26.6.src.tar.gz";
+          hash = "sha256-oHIcVMaIkBRI13rZs+x+p8R0cwdV/4kTgukuy5P/LLE=";
+        };
+      };
+      buildGoModule = pkgs.buildGoModule.override {go = go_1_26_6;};
+      seshagy = pkgs.callPackage ./nix/package.nix {inherit buildGoModule version;};
     in {
       inherit seshagy;
       default = seshagy;
