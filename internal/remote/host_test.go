@@ -349,6 +349,28 @@ func TestDiscoverSSHConfigHostsSkipsWildcardsAndGeneratedAliases(t *testing.T) {
 	}
 }
 
+func TestDiscoverSSHConfigHostsSkipsOptionLikeAndControlNames(t *testing.T) {
+	remoteTestEnv(t)
+	path := filepath.Join(t.TempDir(), "config")
+	content := "Host homelab-lan\n  HostName 192.168.1.10\n\n" +
+		"Host -oProxyCommand\n\n" +
+		"Host bad\x01name\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	hosts, err := DiscoverSSHConfigHosts(path)
+	if err != nil {
+		t.Fatalf("DiscoverSSHConfigHosts() error = %v", err)
+	}
+	var names []string
+	for _, host := range hosts {
+		names = append(names, host.Name)
+	}
+	if want := "homelab-lan"; strings.Join(names, ",") != want {
+		t.Fatalf("discovered hosts = %v, want %s", names, want)
+	}
+}
+
 func TestDiscoverSSHConfigHostsMissingFile(t *testing.T) {
 	remoteTestEnv(t)
 	hosts, err := DiscoverSSHConfigHosts(filepath.Join(t.TempDir(), "absent"))

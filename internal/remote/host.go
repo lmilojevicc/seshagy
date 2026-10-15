@@ -453,11 +453,19 @@ func Hosts(configured []Host, discover bool) []Host {
 	return out
 }
 
+// usableHostPattern reports whether a discovered ssh_config Host pattern can be
+// offered as a remote: wildcard and negated patterns cannot be addressed,
+// seshagy's own generated aliases already exist in the generated config, and a
+// leading "-" or a control character would make ssh/herdr read the alias as an
+// option rather than a host.
 func usableHostPattern(name string) bool {
 	if name == "" || strings.HasPrefix(name, generatedAliasPrefix) {
 		return false
 	}
-	return !strings.ContainsAny(name, "*?!")
+	if strings.HasPrefix(name, "-") || strings.ContainsAny(name, "*?!") {
+		return false
+	}
+	return validateNoControl(name) == nil
 }
 
 func hostPatterns(content string) []string {
