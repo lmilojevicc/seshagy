@@ -164,6 +164,17 @@ func TestClientArgs(t *testing.T) {
 	}
 }
 
+func TestKillClientReapsTheProcessItKills(t *testing.T) {
+	client := exec.Command("sleep", "60")
+	if err := client.Start(); err != nil {
+		t.Fatal(err)
+	}
+	killClient(client)
+	if client.ProcessState == nil {
+		t.Fatal("killClient left the process unreaped")
+	}
+}
+
 func TestRunLauncherRefusesInsideHerdrPane(t *testing.T) {
 	launcherTestEnv(t, "")
 	t.Setenv("HERDR_ENV", "1")

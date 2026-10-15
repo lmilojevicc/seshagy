@@ -210,12 +210,12 @@ func (l *Launcher) runClient(ctx context.Context, target Target) (clientResult, 
 	l.herdrSocket = l.resolveHerdrSocket(ctx, target)
 	listener, err := l.listen()
 	if err != nil {
-		_ = client.Process.Kill()
+		killClient(client)
 		return clientResult{}, err
 	}
 	if err := l.writeRecord(); err != nil {
 		_ = listener.Close()
-		_ = client.Process.Kill()
+		killClient(client)
 		return clientResult{}, err
 	}
 	switches := make(chan Target, 1)
@@ -233,6 +233,13 @@ func (l *Launcher) runClient(ctx context.Context, target Target) (clientResult, 
 	_ = listener.Close()
 	l.removeRecord()
 	return result, nil
+}
+
+// killClient kills a client the launcher could not attach to and reaps it, so
+// no zombie is left behind.
+func killClient(client *exec.Cmd) {
+	_ = client.Process.Kill()
+	_ = client.Wait()
 }
 
 func clientArgs(target Target) []string {
