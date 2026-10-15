@@ -66,6 +66,11 @@ type Model struct {
 	items     []sessionmgr.Item
 	cursor    int
 	cursorKey string
+	// cursorMoved records an explicit up/down/page/home/end since the last scope
+	// or query change. Only then does a refresh follow the selected key; until
+	// then the top row stays selected, so sources that stream in after startup
+	// cannot drag the cursor down the list.
+	cursorMoved bool
 
 	loadedOnce bool
 
@@ -316,9 +321,11 @@ func (m Model) rows() []row {
 	return filterRows(m.items, m.scope, m.query)
 }
 
-// syncCursor re-anchors the cursor on the selected item's key so a refresh that
-// reorders or shortens the list cannot move the selection; it clamps when the
-// selected item is gone.
+// syncCursor keeps the selection stable across a refresh that reorders or
+// shortens the list. Until the user has moved the cursor it holds row 0, the
+// most urgent item, because the key seen so far came from a partially loaded
+// list rather than from a choice. Afterwards the cursor follows the selected key
+// and clamps by index when that item is gone.
 func (m *Model) syncCursor() {
 	rows := m.rows()
 	if len(rows) == 0 {
@@ -326,12 +333,15 @@ func (m *Model) syncCursor() {
 		m.cursorKey = ""
 		return
 	}
-	if m.cursorKey != "" {
-		for i := range rows {
-			if rows[i].item.Key() == m.cursorKey {
-				m.cursor = i
-				return
-			}
+	if !m.cursorMoved {
+		m.cursor = 0
+		m.cursorKey = rows[0].item.Key()
+		return
+	}
+	for i := range rows {
+		if rows[i].item.Key() == m.cursorKey {
+			m.cursor = i
+			return
 		}
 	}
 	m.cursor = clampVal(m.cursor, 0, len(rows)-1)
@@ -339,7 +349,9 @@ func (m *Model) syncCursor() {
 }
 
 // setCursor moves the cursor to index (clamped) and records the selected key.
+// The move is explicit, so later refreshes follow that key.
 func (m Model) setCursor(index int) Model {
+	m.cursorMoved = true
 	rows := m.rows()
 	if len(rows) == 0 {
 		m.cursor = 0

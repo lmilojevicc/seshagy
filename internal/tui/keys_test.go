@@ -367,6 +367,16 @@ func TestCursorFollowsSelectedKeyAcrossReorder(t *testing.T) {
 
 	m := newTestModel(t)
 	m = withItems(m, []sessionmgr.Item{first, second, third})
+
+	// Nothing has moved the cursor yet: a reorder keeps row 0 selected instead
+	// of following the key the partially loaded list happened to expose.
+	m.items = []sessionmgr.Item{third, first, second}
+	m.syncCursor()
+	if m.cursor != 0 || m.cursorKey != third.Key() {
+		t.Fatalf("before any move: cursor = %d key = %q", m.cursor, m.cursorKey)
+	}
+
+	m.items = []sessionmgr.Item{first, second, third}
 	m = m.setCursor(2)
 	if m.cursorKey != third.Key() {
 		t.Fatalf("cursorKey = %q, want %q", m.cursorKey, third.Key())
@@ -384,6 +394,99 @@ func TestCursorFollowsSelectedKeyAcrossReorder(t *testing.T) {
 	m.syncCursor()
 	if m.cursor != 0 || m.cursorKey != first.Key() {
 		t.Fatalf("after removal: cursor = %d key = %q", m.cursor, m.cursorKey)
+	}
+}
+
+func TestCursorFollowedItemTracksItsRowAcrossRefresh(t *testing.T) {
+	m := newTestModel(t)
+	m = withItems(m, []sessionmgr.Item{
+		{Kind: sessionmgr.KindSession, Name: "alpha", Target: "alpha"},
+		{Kind: sessionmgr.KindSession, Name: "bravo", Target: "bravo"},
+		{Kind: sessionmgr.KindSession, Name: "charlie", Target: "charlie"},
+	})
+	m, _ = press(t, m, "down")
+	if m.cursorKey != "session:bravo" {
+		t.Fatalf("cursorKey = %q, want session:bravo", m.cursorKey)
+	}
+
+	m = deliverRefresh(t, m, sessionmgr.ModeSessions, []sessionmgr.Item{
+		{Kind: sessionmgr.KindSession, Name: "charlie", Target: "charlie"},
+		{Kind: sessionmgr.KindSession, Name: "alpha", Target: "alpha"},
+		{Kind: sessionmgr.KindSession, Name: "bravo", Target: "bravo"},
+	})
+	if m.cursor != 2 || m.cursorKey != "session:bravo" {
+		t.Fatalf("after reorder: cursor = %d key = %q, want row 2", m.cursor, m.cursorKey)
+	}
+}
+
+func TestScopeChangeSelectsTheTopRow(t *testing.T) {
+	blocked := agentItem("claude", "%1", "frontend")
+	blocked.AgentState = sessionmgr.AgentBlocked
+	m := newTestModel(t)
+	m = withItems(m, []sessionmgr.Item{
+		{Kind: sessionmgr.KindSession, Name: "demo", Target: "demo"},
+		agentItem("codex", "%2", "backend"),
+		blocked,
+	})
+
+	// Move off the top row first, so the cursor is being followed.
+	m, _ = press(t, m, "down")
+	if m.cursor != 1 {
+		t.Fatalf("cursor = %d, want 1 after down", m.cursor)
+	}
+
+	m, _ = press(t, m, "@")
+	if m.scope != scopeAgents {
+		t.Fatalf("scope = %v, want agents", m.scope)
+	}
+	if m.cursor != 0 || m.cursorKey != blocked.Key() {
+		t.Fatalf("after @: cursor = %d key = %q, want row 0", m.cursor, m.cursorKey)
+	}
+}
+
+func TestQueryEditSelectsTheTopRow(t *testing.T) {
+	m := newTestModel(t)
+	m = withItems(m, []sessionmgr.Item{
+		{Kind: sessionmgr.KindSession, Name: "alpha", Target: "alpha"},
+		{Kind: sessionmgr.KindSession, Name: "alpha-two", Target: "alpha-two"},
+		{Kind: sessionmgr.KindSession, Name: "zulu", Target: "zulu"},
+	})
+	m, _ = press(t, m, "down")
+	if m.cursorKey != "session:alpha-two" {
+		t.Fatalf("cursorKey = %q, want session:alpha-two", m.cursorKey)
+	}
+
+	// The query keeps the followed row at index 1 and drops zulu.
+	m, _ = press(t, m, "alpha")
+	rows := m.rows()
+	if len(rows) != 2 || rows[1].item.Key() != "session:alpha-two" {
+		t.Fatalf("rows = %#v, want alpha-two at row 1", rows)
+	}
+	if m.cursor != 0 || m.cursorKey != "session:alpha" {
+		t.Fatalf("after the query edit: cursor = %d key = %q, want row 0", m.cursor, m.cursorKey)
+	}
+}
+
+func TestVanishedFollowedItemClampsByIndex(t *testing.T) {
+	m := newTestModel(t)
+	m = withItems(m, []sessionmgr.Item{
+		{Kind: sessionmgr.KindSession, Name: "alpha", Target: "alpha"},
+		{Kind: sessionmgr.KindSession, Name: "bravo", Target: "bravo"},
+		{Kind: sessionmgr.KindSession, Name: "charlie", Target: "charlie"},
+		{Kind: sessionmgr.KindSession, Name: "delta", Target: "delta"},
+	})
+	m, _ = press(t, m, "down")
+	if m.cursorKey != "session:bravo" {
+		t.Fatalf("cursorKey = %q, want session:bravo", m.cursorKey)
+	}
+
+	m = deliverRefresh(t, m, sessionmgr.ModeSessions, []sessionmgr.Item{
+		{Kind: sessionmgr.KindSession, Name: "alpha", Target: "alpha"},
+		{Kind: sessionmgr.KindSession, Name: "charlie", Target: "charlie"},
+		{Kind: sessionmgr.KindSession, Name: "delta", Target: "delta"},
+	})
+	if m.cursor != 1 || m.cursorKey != "session:charlie" {
+		t.Fatalf("after removal: cursor = %d key = %q, want row 1", m.cursor, m.cursorKey)
 	}
 }
 

@@ -219,3 +219,45 @@ func TestStoreCacheKeepsCursorOnRefresh(t *testing.T) {
 		t.Fatalf("cursor = %d key = %q, want the reordered selection", m.cursor, m.cursorKey)
 	}
 }
+
+// TestStreamingSourcesKeepTheTopRowSelected reproduces the startup order the
+// picker sees: hosts resolve first, sessions and agents arrive later. Every
+// arrival reorders the list, and until the user moves the cursor the selection
+// stays on row 0 instead of riding the first item it saw to the bottom.
+func TestStreamingSourcesKeepTheTopRowSelected(t *testing.T) {
+	m := newTestModel(t)
+	m = withHosts(m, testHosts()) // a host ranks last and is the only row so far
+	if m.cursor != 0 || m.cursorKey != "host:homelab" {
+		t.Fatalf("after hosts: cursor = %d key = %q", m.cursor, m.cursorKey)
+	}
+
+	blocked := agentItem("claude", "%1", "frontend")
+	blocked.AgentState = sessionmgr.AgentBlocked
+	m = deliverRefresh(t, m, sessionmgr.ModeAgents, []sessionmgr.Item{blocked})
+	m = deliverRefresh(t, m, sessionmgr.ModeSessions, []sessionmgr.Item{
+		{Kind: sessionmgr.KindSession, Name: "demo", Target: "demo"},
+	})
+
+	rows := m.rows()
+	if len(rows) != 3 || rows[2].item.Kind != sessionmgr.KindHost {
+		t.Fatalf("rows = %#v, want the host pushed to the last row", rows)
+	}
+	if m.cursor != 0 || m.cursorKey != blocked.Key() {
+		t.Fatalf("cursor = %d key = %q, want row 0 (%q)", m.cursor, m.cursorKey, blocked.Key())
+	}
+}
+
+// deliverRefresh feeds one source result through Update the way its tea.Cmd
+// does, so the test sees the cursor handling of a real refresh.
+func deliverRefresh(
+	t *testing.T,
+	m Model,
+	source sessionmgr.SourceMode,
+	items []sessionmgr.Item,
+) Model {
+	t.Helper()
+	m.refreshGen[source] = 1
+	m.inflightRefresh[source] = 1
+	model, _ := m.Update(refreshMsg{source: source, gen: 1, items: items})
+	return model.(Model)
+}

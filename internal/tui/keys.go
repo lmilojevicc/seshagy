@@ -66,7 +66,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if !m.previewVisible() {
 			return m, nil
 		}
-		return m.afterSelectionChanged()
+		// Toggling the preview keeps the selection where it is.
+		var preview tea.Cmd
+		m, preview = m.requestPreview()
+		return m, preview
 	case "ctrl+y":
 		return m.startYazi()
 	case "ctrl+l":
@@ -119,9 +122,11 @@ func (m Model) moveCursor(index int) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-// afterSelectionChanged re-anchors the cursor on the previously selected key
-// and schedules a fresh preview capture.
+// afterSelectionChanged lands the cursor on the first row after a scope or
+// query change and schedules a fresh preview capture. Narrowing the list is not
+// a cursor move: only an explicit move makes refreshes follow the selected item.
 func (m Model) afterSelectionChanged() (tea.Model, tea.Cmd) {
+	m.cursorMoved = false
 	m.syncCursor()
 	var cmd tea.Cmd
 	m, cmd = m.requestPreview()
