@@ -725,16 +725,17 @@ Scripting:
                                   remove an agent hook/extension
 
 TUI keys:
-  enter attach/create/focus   q quit   / filter   r refresh   R rename
-  x kill session/pane         y yazi   m mode     1-5 modes
-  o agent scope               p preview   ? help
+  The picker is always type-first: printable keys fuzzy-filter the list and a
+  sigil typed on an empty prompt selects a filter (@ agents, ! needs you,
+  $ sessions, * dirs, ~ zoxide, / find, # hosts); tab/shift+tab cycle them.
+  enter attach/create/focus   ctrl+r rename   ctrl+x kill   ctrl+o preview
+  ctrl+y yazi                 ctrl+l reload   ctrl+a integrations
+  esc clear query and filter, quit when both are empty   ctrl+c quit
 
 Config:
   Config lives at $XDG_CONFIG_HOME/seshagy/config.toml, or
-  ~/.config/seshagy/config.toml when XDG_CONFIG_HOME is unset. It controls
-  source order/default source, fd command, theme colors, Nerd Font icons, text
-  label mode, no-icons mode, icon colors, type-first mode, and the action
-  prefix key.
-  In type-first mode, enter and arrow/page/home/end navigation keys do not need a prefix.
+  ~/.config/seshagy/config.toml when XDG_CONFIG_HOME is unset. It controls the
+  preview column, theme colors, the agent-state and source icons (and their
+  mode and colors), the fd command, remote hosts, and diagnostic logging.
 `
 }
