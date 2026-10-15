@@ -2,7 +2,11 @@
 
 ## Project Structure & Module Organization
 
-This is a Go CLI/TUI project for `seshagy`, an agent-aware terminal dashboard that supports both tmux and [herdr](https://herdr.dev) as multiplexer backends. The command entry point is `cmd/seshagy/`. Core packages live under `internal/`: `config` for TOML config, `sessionmgr` for the `Multiplexer` backend abstraction (tmux/herdr/noop), tmux sessions and agent pane metadata + detection engine, `integrations` for hook/plugin installs, and `tui` for Bubble Tea UI state/rendering. Tests sit beside code as `*_test.go` files. The active backend is auto-detected from the environment (`$HERDR_ENV=1` → herdr wins; else `$TMUX` → tmux; else noop).
+This is a Go CLI/TUI project for `seshagy`, an agent-aware terminal dashboard that supports both tmux and [herdr](https://herdr.dev) as multiplexer backends. The command entry point is `cmd/seshagy/`. Core packages live under `internal/`: `config` for TOML config, `sessionmgr` for the `Multiplexer` backend abstraction (tmux/herdr/noop), tmux sessions and agent pane metadata + detection engine, `integrations` for hook/plugin installs, `remote` for remote hosts and the `seshagy run` launcher, and `tui` for the Bubble Tea picker. Tests sit beside code as `*_test.go` files. The active backend is auto-detected from the environment (`$HERDR_ENV=1` → herdr wins; else `$TMUX` → tmux; else noop).
+
+### TUI picker
+
+The TUI (`internal/tui/`) is a single type-first picker. Printable runes always fuzzy-filter the merged item list; a sigil typed on an empty query selects an inline scope instead (`@` agents, `!` needs you, `$` sessions, `*` dirs, `~` zoxide, `/` find, `#` hosts), and tab/shift+tab cycle scopes. `scope.go` owns the scope enum, sigils, `filterRows`, `itemRank`, and `dedupeDirs`; `model.go` the picker state; `commands.go` the tea.Cmds; `refresh_cache.go` the per-source cache/TTL/generation; `view.go` and `theme.go` the rendering; `icons.go` the agent logos (Herdr Agent Icons Max font, MIT, herdr-radar). Sessions, agents, zoxide, and fd load as independent sources with their own cache entry; hosts load once at startup and on reload. ModeAll remains for the CLI's `--get-*` output only.
 
 ### Agent detection subsystem
 
@@ -29,6 +33,15 @@ Integrations live in `internal/integrations/`:
 - `assets/seshagy-agent-state.sh` — shared TMUX-gated best-effort hook script (codex/claude/droid).
 - `assets/seshagy-agent-state.ts` — Pi TypeScript extension.
 - `assets/seshagy-opencode-plugin.ts` — OpenCode TS plugin (session.idle/permission.ask/tool.execute).
+
+### Remote hosts subsystem
+
+Remote herdr servers live in `internal/remote/`:
+
+- `host.go` — the host registry (`Host`, `Alias`, `Find`, `Hosts`), the generated ssh config (`RenderSSHConfig`/`WriteSSHConfig`/`IncludeLine`/`EnsureUserSSHConfigInclude`, 0600 atomic write), and `~/.ssh/config` discovery (`DiscoverSSHConfigHosts`, one level of `Include`, no wildcards, `seshagy-*` aliases skipped). Configured hosts use the generated alias `seshagy-<name>`.
+- `launcher.go` / `launcher_windows.go` — the `seshagy run` launcher. Only a launcher owns the terminal, so only it can switch the herdr client between the local server and a remote host. It runs one attached `herdr` client at a time, advertises itself as `<pid>.json` + `<pid>.sock` under `$XDG_STATE_HOME/seshagy/launchers/`, accepts `SwitchRequest`s on that unix socket (`RequestSwitch`, `ErrNoLauncher` when none is attached), replies before SIGTERMing the client (a clean detach), then starts the pending target and falls back remote→local when a remote client exits. It refuses to run under `HERDR_ENV=1`.
+- `internal/config` composes the list (`RemoteHosts`/`ValidateRemoteHosts`); `remote` never imports `config`. The `seshagy run` / `seshagy hosts [setup|switch]` commands live in `cmd/seshagy/run.go`.
+- The TUI (`internal/tui/commands.go`) feeds `# hosts` rows from `remote.Hosts`, and `enter` on a host either asks the launcher to switch (herdr) or opens `tmux new-window ... ssh <alias>` (tmux).
 
 ## Build, Test, and Development Commands
 

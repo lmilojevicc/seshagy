@@ -99,53 +99,75 @@ order = ["all", "sessions", "zoxide", "fd", "agents"]
 [directories]
 fd_command = 'fd -H -a -d 2 -t d -E .Trash . "$HOME"'
 
-[type_first]
-enabled = false
-prefix = "ctrl+x"
-
 [agents]
 manifest_fallback = true   # tmux only: capture-pane screen-rule backstop (default on)
 catalog_url = ""           # defaults to the herdr public catalog when empty
 
 [tui]
-layout = "default"             # default | zen
-input_style = "popup"          # popup | cmdline
-dim_background = true           # dim the dashboard behind popup input (popup mode only)
-preview = true                  # enable Preview when the layout supports it
+preview = true                 # the preview column
+
+[remote]
+ssh_config_hosts = true        # offer the hosts of ~/.ssh/config too (default)
+
+[[hosts]]
+name = "homelab"
+target = "milo@192.168.1.10"
 
 [log]
 level = "off"                 # off | debug | info | warn | error
 file = ""                     # empty: create a per-run file under XDG state
 ```
 
-### TUI layouts
+### TUI
 
-Choose a built-in layout at startup with the flat `[tui]` setting:
+The picker is always type-first: printable keys fuzzy-filter the merged list of
+sessions, agents, directories, and hosts, and a sigil typed on an empty prompt
+selects a filter (`@` agents, `!` needs you, `$` sessions, `*` dirs, `~` zoxide,
+`/` find, `#` hosts). `[tui] preview` is the only `[tui]` setting the picker
+reads; `layout`, `input_style`, `dim_background`, `[type_first]` and
+`[sources]` are still accepted in `config.toml` (and by `seshagy config init`)
+but no longer affect the TUI. See the README's TUI section for the full
+keymap.
+
+### Remote hosts
+
+`[remote]` and `[[hosts]]` describe remote herdr servers that `seshagy run` can
+switch the attached client to. See the README's Remote Hosts section for the
+workflow.
 
 ```toml
-[tui]
-layout = "default"             # default | zen
-preview = true
-input_style = "popup"          # popup | cmdline
-dim_background = true
+[remote]
+ssh_config_hosts = true   # list the non-wildcard Host entries of ~/.ssh/config (default)
+
+[[hosts]]
+name = "homelab"            # unique, [A-Za-z0-9._-]+; the generated ssh alias is seshagy-<name>
+target = "milo@192.168.1.10:2222"
+transport = "ssh"           # ssh (default) | iroh
+proxy_command = ""          # optional ProxyCommand (%h / %p expand)
+session = "work"            # optional remote herdr session to attach
 ```
 
-Both layouts retain the shared Sources, Collection, Search, and Actions surfaces.
-Beyond those shared surfaces:
+| Key                 | Purpose                                                                    |
+| ------------------- | -------------------------------------------------------------------------- |
+| `name`              | Required. Unique `[A-Za-z0-9._-]+` name; the alias handed to herdr is `seshagy-<name>`. |
+| `target`            | Required. `[user@]host[:port]` or `ssh://user@host:port`.                   |
+| `transport`         | `ssh` (default) or `iroh`. `iroh` writes `ProxyCommand iroh-ssh proxy %h`, so `target` is the 64-hex endpoint id. |
+| `proxy_command`     | Custom transport; exclusive with `transport = "iroh"`.                       |
+| `session`           | Remote herdr session to attach; empty uses the remote default.             |
 
-- **Default** composes Overview, Details, and Preview.
-- **Zen** is centered and borderless and composes Overview only.
+Entries that fail validation (bad name, target, or transport; control
+characters) are skipped with a warning from `seshagy`, `seshagy hosts`, and
+`seshagy run`; an iroh target that does not look like an endpoint id, or a
+`proxy_command` alongside `transport = "iroh"`, only warns. Configured hosts are
+rendered into `$XDG_CONFIG_HOME/seshagy/ssh_config`, which `seshagy hosts setup`
+writes and Includes from `~/.ssh/config`:
 
-`preview` is a global preference that takes effect only when the selected layout
-supports Preview. Selecting Zen leaves that preference unchanged, so switching
-the startup setting back to Default restores it. Pressing `p` (or `alt+p` in
-type-first mode) in Zen shows a brief unavailable notice and does not perform
-Preview capture work.
-
-The popup/cmdline `input_style` setting and popup `dim_background` behavior are
-shared by both layouts. Layout selection is read from configuration at startup;
-there is no runtime layout switch. An unknown layout value produces one warning
-and falls back to Default.
+```sh
+seshagy hosts            # name, transport, target, and source of every host
+seshagy hosts setup      # write the generated ssh config and add its Include line
+seshagy hosts switch <name|local>
+seshagy run [--session <name>] [<host>]
+```
 
 ### Diagnostic logging
 
@@ -172,10 +194,9 @@ never uploaded automatically and are not guaranteed to be free of identifying
 multiplexer IDs; inspect the file before sharing, then disable logging and
 delete it when finished.
 
-The default `order` lists tabs left→right (`agents` last). `current-agents` is
-not a tab; it is a CLI-only scope (`--get-current-session-agents`), reachable in
-the TUI via the `o` key (toggles the agents source between the current session
-and all).
+`current-agents` is a CLI-only scope (`--get-current-session-agents`) that
+narrows the agent list to the multiplexer session hosting the call; the picker
+shows the current session's agents inline instead.
 
 ### Theme colors
 

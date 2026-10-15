@@ -150,7 +150,7 @@ func TestCtrlUClearsQueryAndCtrlWDeletesWord(t *testing.T) {
 	}
 }
 
-func TestEnterActivatesSessionsAgentsDirectoriesAndHosts(t *testing.T) {
+func TestEnterActivatesSessionsAgentsAndDirectories(t *testing.T) {
 	t.Run("session attaches", func(t *testing.T) {
 		m := newTestModel(t)
 		m = withItems(m, []sessionmgr.Item{
@@ -190,21 +190,6 @@ func TestEnterActivatesSessionsAgentsDirectoriesAndHosts(t *testing.T) {
 		}
 		if mux.createdDir != "/tmp/demo" {
 			t.Fatalf("created dir = %q, want /tmp/demo", mux.createdDir)
-		}
-	})
-
-	t.Run("host points at seshagy run", func(t *testing.T) {
-		m := newTestModel(t)
-		m = withItems(m, []sessionmgr.Item{
-			{Kind: sessionmgr.KindHost, Name: "box", Target: "box"},
-		})
-		model, cmd := m.activateSelected()
-		m = model.(Model)
-		if cmd != nil {
-			t.Fatalf("host activation returned a command: %v", cmd)
-		}
-		if got := latestNotificationText(m); got != "hosts need `seshagy run`" {
-			t.Fatalf("host notification = %q", got)
 		}
 	})
 }

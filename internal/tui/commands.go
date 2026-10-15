@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 
 	appconfig "github.com/lmilojevicc/seshagy/internal/config"
 	"github.com/lmilojevicc/seshagy/internal/integrations"
+	"github.com/lmilojevicc/seshagy/internal/remote"
 	"github.com/lmilojevicc/seshagy/internal/sessionmgr"
 )
 
@@ -95,6 +97,106 @@ func installIntegrationCmd(name, action string) tea.Cmd {
 }
 
 const noPreviewAvailableText = "no preview available"
+
+// loadRemoteHosts resolves the picker's host list: the configured [[hosts]]
+// first, then the hosts already defined in ~/.ssh/config. It reads local files
+// only. It is a seam so tests do not depend on the developer's ssh config.
+var loadRemoteHosts = func(cfg appconfig.Config) []remote.Host {
+	return remote.Hosts(cfg.RemoteHosts(), cfg.RemoteSSHConfigHosts())
+}
+
+// hostsCmd loads the remote hosts the picker offers. Hosts are read once at
+// startup and again on an explicit reload; there is no poll because they cannot
+// change without an edit to config.toml or ~/.ssh/config.
+func hostsCmd(cfg appconfig.Config) tea.Cmd {
+	return func() tea.Msg { return hostsMsg{hosts: loadRemoteHosts(cfg)} }
+}
+
+// hostItem is the picker's row for a remote host: the name is the title, the
+// ssh alias is the target herdr is handed, and the transport plus the raw target
+// fill the meta columns and the fuzzy-search fields.
+func hostItem(host remote.Host) sessionmgr.Item {
+	return sessionmgr.Item{
+		Kind:     sessionmgr.KindHost,
+		Name:     host.Name,
+		Target:   host.Alias(),
+		Location: host.Transport,
+		Path:     host.Target,
+	}
+}
+
+func hostItems(hosts []remote.Host) []sessionmgr.Item {
+	if len(hosts) == 0 {
+		return nil
+	}
+	items := make([]sessionmgr.Item, 0, len(hosts))
+	for _, host := range hosts {
+		items = append(items, hostItem(host))
+	}
+	return items
+}
+
+// switchHostCmd asks the `seshagy run` launcher attached to this herdr server to
+// switch its client to host. It must run inside a herdr pane, where
+// HERDR_SOCKET_PATH identifies the server the launcher is attached to.
+func switchHostCmd(host remote.Host) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		err := requestSwitch(ctx, remote.SwitchRequest{
+			Host:    host.Name,
+			Session: host.Session,
+		}, os.Getenv("HERDR_SOCKET_PATH"))
+		return hostSwitchMsg{err: err}
+	}
+}
+
+// requestSwitch asks a running launcher to switch servers; tests replace it so
+// they need no launcher socket.
+var requestSwitch = remote.RequestSwitch
+
+// runSSHWindow opens the tmux window that reaches a host; tests replace it.
+var runSSHWindow = func(name, alias string) error {
+	return sessionmgr.SSHWindowCommand(name, alias).Run()
+}
+
+// openSSHWindowCmd opens a new tmux window running `ssh <alias>` on the tmux
+// backend, where there is no launcher that can switch servers in place.
+func openSSHWindowCmd(host remote.Host) tea.Cmd {
+	return func() tea.Msg {
+		return hostWindowMsg{err: runSSHWindow(host.Name, host.Alias())}
+	}
+}
+
+// hostPreviewCmd renders a host's connection details from local config, so the
+// preview is instant and needs no network access.
+func hostPreviewCmd(host remote.Host) tea.Cmd {
+	key := hostItem(host).Key()
+	preview := hostPreviewText(host)
+	return func() tea.Msg { return previewMsg{key: key, preview: preview} }
+}
+
+func hostPreviewText(host remote.Host) string {
+	line := func(label, value string) string { return fmt.Sprintf("%-11s%s", label, value) }
+	lines := []string{
+		line("transport", host.Transport),
+		line("target", host.Target),
+	}
+	if host.Session != "" {
+		lines = append(lines, line("session", host.Session))
+	}
+	lines = append(lines, line("alias", host.Alias()))
+	if host.FromSSHConfig {
+		return strings.Join(
+			append(lines, "", "# defined in ~/.ssh/config"), "\n")
+	}
+	block, err := remote.RenderSSHConfig([]remote.Host{host})
+	if err != nil {
+		return strings.Join(
+			append(lines, "", "cannot render ssh config: "+err.Error()), "\n")
+	}
+	return strings.Join(lines, "\n") + "\n\n" + block
+}
 
 func previewCmd(mux sessionmgr.Multiplexer, item sessionmgr.Item) tea.Cmd {
 	key := item.Key()

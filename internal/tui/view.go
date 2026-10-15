@@ -274,7 +274,13 @@ func (m Model) rowMeta(r row) []metaCell {
 		if item.Location != "" {
 			cells = append(cells, m.mutedCell(item.Location))
 		}
-		if target := item.ActionTarget(); target != "" && target != item.DisplayName() {
+		// The row shows the raw target; the alias handed to herdr is the item's
+		// action target and is spelled out in the preview instead.
+		target := item.Path
+		if target == "" {
+			target = item.ActionTarget()
+		}
+		if target != "" && target != item.DisplayName() {
 			cells = append(cells, m.mutedCell(target))
 		}
 		return cells

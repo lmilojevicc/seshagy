@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -11,6 +12,7 @@ import (
 
 	appconfig "github.com/lmilojevicc/seshagy/internal/config"
 	"github.com/lmilojevicc/seshagy/internal/integrations"
+	"github.com/lmilojevicc/seshagy/internal/remote"
 	"github.com/lmilojevicc/seshagy/internal/sessionmgr"
 )
 
@@ -309,11 +311,41 @@ func (m Model) activateSelected() (tea.Model, tea.Cmd) {
 	case sessionmgr.KindZoxide, sessionmgr.KindFD:
 		return m, createSessionCmd(m.mux, item.Path)
 	case sessionmgr.KindHost:
-		m.notify("hosts need `seshagy run`", sevInfo)
-		return m, nil
+		return m.activateHost(item)
 	default:
 		return m, nil
 	}
+}
+
+// activateHost opens a remote host. Under herdr the running `seshagy run`
+// launcher switches the attached client to the host's server; under tmux there
+// is no launcher, so the host is reached the way any ssh host would be.
+func (m Model) activateHost(item sessionmgr.Item) (tea.Model, tea.Cmd) {
+	host, ok := m.hostByName(item.Name)
+	if !ok {
+		m.notify("unknown host "+item.Name, sevError)
+		return m, nil
+	}
+	switch m.mux.Kind() {
+	case sessionmgr.BackendHerdr:
+		return m, switchHostCmd(host)
+	case sessionmgr.BackendTmux:
+		return m, openSSHWindowCmd(host)
+	default:
+		m.notify("cannot open remote hosts without tmux or herdr", sevError)
+		return m, nil
+	}
+}
+
+// reportHostFailure toasts a host that could not be opened, translating the
+// missing-launcher case into the fix the user needs.
+func (m Model) reportHostFailure(err error) Model {
+	if errors.Is(err, remote.ErrNoLauncher) {
+		m.notify("start herdr with `seshagy run` to switch servers", sevError)
+		return m
+	}
+	m.notify(err.Error(), sevError)
+	return m
 }
 
 func (m Model) startYazi() (tea.Model, tea.Cmd) {

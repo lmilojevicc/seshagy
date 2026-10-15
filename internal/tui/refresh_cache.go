@@ -52,7 +52,7 @@ func (m Model) cacheFresh(mode sessionmgr.SourceMode) bool {
 
 // mergedItems rebuilds the visible list from every loaded source: sessions and
 // agents first (itemRank then sorts by urgency), then the directory sources with
-// fd discoveries already covered by zoxide dropped.
+// fd discoveries already covered by zoxide dropped, then the remote hosts.
 func (m Model) mergedItems() []sessionmgr.Item {
 	merged := make([]sessionmgr.Item, 0, len(m.items))
 	for _, mode := range tuiSources {
@@ -62,6 +62,7 @@ func (m Model) mergedItems() []sessionmgr.Item {
 		}
 		merged = append(merged, entry.items...)
 	}
+	merged = append(merged, hostItems(m.hosts)...)
 	return dedupeDirs(merged)
 }
 

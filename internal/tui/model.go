@@ -9,6 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	appconfig "github.com/lmilojevicc/seshagy/internal/config"
+	"github.com/lmilojevicc/seshagy/internal/remote"
 	"github.com/lmilojevicc/seshagy/internal/sessionmgr"
 )
 
@@ -53,6 +54,11 @@ type Model struct {
 
 	scope scope
 	query string
+
+	// hosts are the remote machines offered by the `# hosts` scope. They come
+	// from config.toml and ~/.ssh/config, so they are loaded once at startup and
+	// on an explicit reload instead of by the source poll.
+	hosts []remote.Host
 
 	items     []sessionmgr.Item
 	cursor    int
@@ -133,6 +139,16 @@ type previewMsg struct {
 	preview string
 	err     error
 }
+
+// hostsMsg carries the remote hosts the picker offers.
+type hostsMsg struct{ hosts []remote.Host }
+
+// hostSwitchMsg reports the outcome of asking the `seshagy run` launcher to
+// switch its client; a nil error means the launcher is detaching this client.
+type hostSwitchMsg struct{ err error }
+
+// hostWindowMsg reports the outcome of opening a tmux window on a host.
+type hostWindowMsg struct{ err error }
 
 type actionKind string
 
@@ -254,6 +270,7 @@ func (m Model) Init() tea.Cmd {
 		tickCmd(),
 		notificationTickCmd(),
 		refreshCatalogsCmd(m.config),
+		hostsCmd(m.config),
 	}
 	for _, source := range tuiSources {
 		var cmd tea.Cmd
@@ -331,6 +348,23 @@ func (m Model) selectedKey() string {
 	return item.Key()
 }
 
+// hostByName resolves a host row back to its registry entry, which carries the
+// session and proxy details the row does not.
+func (m Model) hostByName(name string) (remote.Host, bool) {
+	return remote.Find(m.hosts, name)
+}
+
+// previewCmdFor picks the source of a row's preview: hosts are rendered from
+// local config, every other kind is captured from the multiplexer.
+func (m Model) previewCmdFor(item sessionmgr.Item) tea.Cmd {
+	if item.Kind == sessionmgr.KindHost {
+		if host, ok := m.hostByName(item.Name); ok {
+			return hostPreviewCmd(host)
+		}
+	}
+	return previewCmd(m.mux, item)
+}
+
 // currentSessionLabel returns a human-facing label for the current session id.
 // Under herdr the id is opaque (e.g. "wB"); agent items in the same session
 // carry the resolved workspace label in Location, so it is looked up from the
@@ -372,7 +406,7 @@ func (m Model) requestPreview() (Model, tea.Cmd) {
 	m.previewPendingKey = key
 	m.preview = ""
 	m.previewError = ""
-	return m, previewCmd(m.mux, item)
+	return m, m.previewCmdFor(item)
 }
 
 func min(a, b int) int {

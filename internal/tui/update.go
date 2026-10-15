@@ -152,6 +152,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case refreshMsg:
 		return m.handleRefreshMsg(msg)
+	case hostsMsg:
+		m.hosts = msg.hosts
+		m.items = m.mergedItems()
+		m.syncCursor()
+		var preview tea.Cmd
+		m, preview = m.requestPreview()
+		return m, preview
+	case hostSwitchMsg:
+		if msg.err != nil {
+			return m.reportHostFailure(msg.err), nil
+		}
+		// The launcher replied before detaching this client, so the picker's
+		// terminal is about to be handed to the new server.
+		return m, tea.Quit
+	case hostWindowMsg:
+		if msg.err != nil {
+			return m.reportHostFailure(msg.err), nil
+		}
+		return m, nil
 	case previewMsg:
 		if msg.key != m.selectedKey() {
 			// The selection moved on while the capture ran; drop the payload
@@ -228,7 +247,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // used after an action (attach, kill, rename) or a manifest update so the list
 // reflects the multiplexer's new state.
 func (m Model) reloadCmd() (Model, tea.Cmd) {
-	cmds := make([]tea.Cmd, 0, len(tuiSources)+1)
+	cmds := make([]tea.Cmd, 0, len(tuiSources)+2)
 	for _, source := range tuiSources {
 		var cmd tea.Cmd
 		m, cmd = m.beginRefresh(source, true)
@@ -236,6 +255,7 @@ func (m Model) reloadCmd() (Model, tea.Cmd) {
 			cmds = append(cmds, cmd)
 		}
 	}
+	cmds = append(cmds, hostsCmd(m.config))
 	var preview tea.Cmd
 	m, preview = m.requestPreview()
 	if preview != nil {
