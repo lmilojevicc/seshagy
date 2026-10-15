@@ -150,3 +150,24 @@ func TestRunConfigInitAlreadyExistsError(t *testing.T) {
 		t.Fatalf("runConfig(init) error = %v, want config already exists", err)
 	}
 }
+
+// TestRunConfigInitWritesRemoteSection pins the generated config: the new
+// [remote] section (and no [[hosts]] scaffold) is part of `config init`.
+func TestRunConfigInitWritesRemoteSection(t *testing.T) {
+	manifestTestDirs(t)
+	if err := runConfig([]string{"init"}); err != nil {
+		t.Fatalf("runConfig(init) error = %v", err)
+	}
+	data, err := os.ReadFile(appconfig.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	if !strings.Contains(text, "[remote]") ||
+		!strings.Contains(text, "ssh_config_hosts = true") {
+		t.Fatalf("generated config missing the [remote] section:\n%s", text)
+	}
+	if strings.Contains(text, "[[hosts]]") {
+		t.Fatalf("generated config scaffolded hosts:\n%s", text)
+	}
+}

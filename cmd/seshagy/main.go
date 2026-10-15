@@ -72,6 +72,10 @@ func run(args []string) error {
 		return runConfig(args[1:])
 	case "diagnostics":
 		return runDiagnostics(args[1:])
+	case "run":
+		return runRun(args[1:])
+	case "hosts":
+		return runHosts(args[1:])
 	}
 
 	parsed, err := parseOperationalCommand(args)
@@ -672,6 +676,16 @@ Usage:
   seshagy config path [--json]    print config file path
   seshagy config show [--json]    print effective config
   seshagy config init [--force] [--json]
+  seshagy run [--session <name>] [<host>]
+                                  attach herdr to <host> (or the local server)
+                                  through this terminal; switching hosts from
+                                  inside herdr goes through this launcher
+  seshagy hosts [--json]          list configured and ~/.ssh/config hosts
+  seshagy hosts setup [--json]    write the generated ssh config and add its
+                                  Include line to ~/.ssh/config
+  seshagy hosts switch <name|local> [--json]
+                                  ask the running seshagy run launcher to switch
+                                  (used from inside a herdr pane)
   seshagy diagnostics [--json]   show logging status and bug-report guidance
   seshagy keybind install tmux [--key <key>] [--mode popup|window|pane|pane-zoomed] [--persistent]
                                   bind prefix+<key> (default: s) to launch

@@ -69,7 +69,7 @@ func TestCanonicalSourceAndCobraParity(t *testing.T) {
 func canonicalSourceSurface(t *testing.T, overrides map[string]string) canonicalSurface {
 	t.Helper()
 	files := map[string]*ast.File{}
-	for _, path := range []string{"main.go", "keybind.go", "completion.go"} {
+	for _, path := range []string{"main.go", "keybind.go", "completion.go", "run.go"} {
 		data, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatal(err)
@@ -95,6 +95,9 @@ func canonicalSourceSurface(t *testing.T, overrides map[string]string) canonical
 	}
 	for _, action := range switchStrings(findFunction(files["main.go"], "runConfig")) {
 		routes["config "+action] = true
+	}
+	for _, action := range switchStrings(findFunction(files["run.go"], "runHosts")) {
+		routes["hosts "+action] = true
 	}
 	for _, get := range getNames(files["main.go"]) {
 		routes[get] = true
@@ -124,6 +127,12 @@ func canonicalSourceSurface(t *testing.T, overrides map[string]string) canonical
 		"diagnostics":     {"json": true},
 		"version":         {"json": true},
 		"--version":       {"json": true},
+		// parseRunCommand reads --session by hand so a positional <host> may
+		// precede the flag; keep this list in sync with it.
+		"run":          {"session": true},
+		"hosts":        {"json": true},
+		"hosts setup":  {"json": true},
+		"hosts switch": {"json": true},
 	}
 	for _, get := range getNames(files["main.go"]) {
 		flags[get] = map[string]bool{"json": true}
