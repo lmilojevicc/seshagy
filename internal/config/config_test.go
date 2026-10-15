@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lmilojevicc/seshagy/internal/remote"
 	"github.com/lmilojevicc/seshagy/internal/sessionmgr"
 )
 
@@ -1100,5 +1101,203 @@ func TestLogConfigDefaultsAndPreservesInvalidLevel(t *testing.T) {
 	if !strings.Contains(string(data), "[log]") ||
 		!strings.Contains(string(data), `level = "off"`) {
 		t.Fatalf("marshaled config missing log section:\n%s", data)
+	}
+}
+
+func TestDefaultRemoteConfig(t *testing.T) {
+	cfg := Default()
+	if got := cfg.RemoteHosts(); len(got) != 0 {
+		t.Fatalf("Default().RemoteHosts() = %+v, want none", got)
+	}
+	if !cfg.RemoteSSHConfigHosts() {
+		t.Fatal("Default().RemoteSSHConfigHosts() = false, want true")
+	}
+	data, err := Marshal(Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	if !strings.Contains(text, "[remote]") ||
+		!strings.Contains(text, "ssh_config_hosts = true") {
+		t.Fatalf("default config missing the [remote] section:\n%s", text)
+	}
+	if strings.Contains(text, "[[hosts]]") {
+		t.Fatalf("default config must not define hosts:\n%s", text)
+	}
+}
+
+func TestLoadRemoteHosts(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	if err := os.MkdirAll(filepath.Dir(Path()), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	data := []byte(`
+[remote]
+ssh_config_hosts = false
+
+[[hosts]]
+name = "homelab"
+target = "milo@192.168.1.10:2222"
+session = "work"
+
+[[hosts]]
+name = "edge"
+target = "ssh://root@edge.example.com"
+transport = "SHH"
+
+[[hosts]]
+name = "irohbox"
+target = "8f14e45fceea167a5a36dedd4bea2543a1b2c3d4e5f60718293a4b5c6d7e8f90"
+transport = "iroh"
+proxy_command = "iroh-ssh proxy %h"
+`)
+	if err := os.WriteFile(Path(), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.RemoteSSHConfigHosts() {
+		t.Fatal("RemoteSSHConfigHosts() = true, want the configured false")
+	}
+	hosts := cfg.RemoteHosts()
+	if len(hosts) != 2 {
+		t.Fatalf("RemoteHosts() = %+v, want the two valid hosts", hosts)
+	}
+	homelab := hosts[0]
+	if homelab.Name != "homelab" || homelab.Target != "milo@192.168.1.10:2222" ||
+		homelab.Transport != remote.TransportSSH || homelab.Session != "work" ||
+		homelab.FromSSHConfig || homelab.Alias() != "seshagy-homelab" {
+		t.Fatalf("homelab = %+v", homelab)
+	}
+	if got := hosts[1]; got.Name != "irohbox" || got.Transport != remote.TransportIroh ||
+		got.ProxyCommand != "iroh-ssh proxy %h" {
+		t.Fatalf("irohbox = %+v", got)
+	}
+	// transport is normalized to lowercase, so the unknown value is reported
+	// rather than silently accepted as ssh.
+	issues := cfg.ValidateRemoteHosts()
+	if len(issues) != 2 ||
+		!strings.Contains(issues[0], `hosts "edge": unknown transport "shh"`) ||
+		!strings.Contains(
+			issues[1],
+			`hosts "irohbox": proxy_command is ignored when transport is iroh`,
+		) {
+		t.Fatalf("ValidateRemoteHosts() = %v", issues)
+	}
+}
+
+func TestValidateRemoteHosts(t *testing.T) {
+	tests := []struct {
+		name string
+		host HostConfig
+		want string
+	}{
+		{"missing name", HostConfig{Target: "host"}, "name is required"},
+		{"dashed name", HostConfig{Name: "-h", Target: "host"}, `name must not start with "-"`},
+		{"name charset", HostConfig{Name: "a b", Target: "host"}, "name may only contain"},
+		{"missing target", HostConfig{Name: "h"}, "target is required"},
+		{"dashed target", HostConfig{Name: "h", Target: "-x"}, `must not start with "-"`},
+		{
+			"newline in session",
+			HostConfig{Name: "h", Target: "host", Session: "a\nb"},
+			"session must not contain control characters",
+		},
+		{
+			"newline in proxy",
+			HostConfig{Name: "h", Target: "host", ProxyCommand: "a\nb"},
+			"proxy_command must not contain control characters",
+		},
+		{
+			"control char in target",
+			HostConfig{Name: "h", Target: "ho\x01st"},
+			"target must not contain control characters",
+		},
+		{
+			"unknown transport",
+			HostConfig{Name: "h", Target: "host", Transport: "mosh"},
+			`unknown transport "mosh"`,
+		},
+		{
+			"iwrong iroh endpoint",
+			HostConfig{Name: "h", Target: "abc", Transport: "iroh"},
+			"endpoint id",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := Default()
+			cfg.Hosts = []HostConfig{test.host}
+			issues := cfg.ValidateRemoteHosts()
+			if len(issues) == 0 || !strings.Contains(issues[0], test.want) {
+				t.Fatalf("ValidateRemoteHosts() = %v, want a %q issue", issues, test.want)
+			}
+		})
+	}
+}
+
+func TestRemoteHostsSkipInvalidEntriesButKeepWarnings(t *testing.T) {
+	cfg := Default()
+	cfg.Hosts = []HostConfig{
+		{Name: "good", Target: "milo@192.168.1.10"},
+		{Name: "", Target: "anonymous"},
+		{Name: "good", Target: "duplicate"},
+	}
+	hosts := cfg.RemoteHosts()
+	if len(hosts) != 1 || hosts[0].Name != "good" || hosts[0].Target != "milo@192.168.1.10" {
+		t.Fatalf("RemoteHosts() = %+v, want only the first valid entry", hosts)
+	}
+	if issues := cfg.ValidateRemoteHosts(); len(issues) != 2 {
+		t.Fatalf("ValidateRemoteHosts() = %v, want two issues", issues)
+	}
+}
+
+func TestSaveAndLoadRemoteHostsRoundTrip(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	cfg := Default()
+	cfg.Hosts = []HostConfig{{
+		Name: "homelab", Target: "milo@192.168.1.10", Transport: remote.TransportIroh,
+		Session: "work",
+	}}
+	cfg.Remote.SSHConfigHosts = ptrBool(false)
+	if err := Save(cfg); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	data, err := os.ReadFile(Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	if !strings.Contains(text, "[[hosts]]") || !strings.Contains(text, `name = "homelab"`) ||
+		!strings.Contains(text, `transport = "iroh"`) ||
+		!strings.Contains(text, "ssh_config_hosts = false") {
+		t.Fatalf("saved config missing host entries:\n%s", text)
+	}
+	loaded, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if loaded.RemoteSSHConfigHosts() {
+		t.Fatal("loaded ssh_config_hosts = true, want false")
+	}
+	hosts := loaded.RemoteHosts()
+	if len(hosts) != 1 || hosts[0].Transport != remote.TransportIroh || hosts[0].Session != "work" {
+		t.Fatalf("loaded hosts = %+v", hosts)
+	}
+}
+
+func TestNormalizeRemoteHostTransportDefaults(t *testing.T) {
+	cfg := Default()
+	cfg.Hosts = []HostConfig{{Name: "  homelab  ", Target: " user@host ", Transport: " SSH "}}
+	cfg.Normalize()
+	host := cfg.Hosts[0]
+	if host.Name != "homelab" || host.Target != "user@host" ||
+		host.Transport != remote.TransportSSH {
+		t.Fatalf("normalized host = %+v", host)
+	}
+	if cfg.Remote.SSHConfigHosts == nil || !*cfg.Remote.SSHConfigHosts {
+		t.Fatalf("normalized ssh_config_hosts = %v, want true", cfg.Remote.SSHConfigHosts)
 	}
 }

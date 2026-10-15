@@ -15,7 +15,9 @@ import (
 	"github.com/spf13/pflag"
 
 	"github.com/lmilojevicc/seshagy/internal/cli"
+	appconfig "github.com/lmilojevicc/seshagy/internal/config"
 	"github.com/lmilojevicc/seshagy/internal/integrations"
+	"github.com/lmilojevicc/seshagy/internal/remote"
 	"github.com/lmilojevicc/seshagy/internal/sessionmgr"
 )
 
@@ -37,6 +39,7 @@ type completionProvider interface {
 	Agents(context.Context) ([]completionCandidate, error)
 	Sources(context.Context) ([]completionCandidate, error)
 	DeleteTargets(context.Context) ([]completionCandidate, error)
+	Hosts(context.Context) ([]completionCandidate, error)
 }
 
 type productionCompletionProvider struct{}
@@ -120,6 +123,28 @@ func (productionCompletionProvider) DeleteTargets(
 	return out, nil
 }
 
+// Hosts completes the remote hosts `seshagy run` and `seshagy hosts switch`
+// accept. Config problems are ignored here: completion is best-effort.
+func (productionCompletionProvider) Hosts(ctx context.Context) ([]completionCandidate, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	cfg, err := appconfig.Load()
+	if err != nil {
+		return nil, err
+	}
+	hosts := remote.Hosts(cfg.RemoteHosts(), cfg.RemoteSSHConfigHosts())
+	out := make([]completionCandidate, 0, len(hosts))
+	for _, host := range hosts {
+		description := host.Transport + " " + host.Target
+		if host.FromSSHConfig {
+			description = "ssh config host"
+		}
+		out = append(out, completionCandidate{host.Name, description})
+	}
+	return out, nil
+}
+
 var activeCompletionProvider completionProvider = productionCompletionProvider{}
 
 var machineCommands = []completionCandidate{
@@ -193,6 +218,8 @@ func newCompletionRoot(provider completionProvider, rootPrefix string) *cobra.Co
 	root.AddCommand(leafCompletionCommand("diagnostics", "show diagnostic status", true))
 	root.AddCommand(newIntegrationCompletionCommand())
 	root.AddCommand(newKeybindCompletionCommand())
+	root.AddCommand(newRunCompletionCommand(provider))
+	root.AddCommand(newHostsCompletionCommand(provider))
 	versionCommand := leafCompletionCommand("version", "print version", true)
 	versionCommand.Aliases = []string{"__version"}
 	root.AddCommand(versionCommand)
@@ -271,6 +298,47 @@ func newConfigCompletionCommand() *cobra.Command {
 	command.AddCommand(path, show, initCommand)
 	command.ValidArgsFunction = commandBoundaryCompletion()
 	return command
+}
+
+func newRunCompletionCommand(provider completionProvider) *cobra.Command {
+	command := &cobra.Command{
+		Use: "run [--session <name>] [<host>]", Short: "Attach herdr to a remote host",
+		Args: cobra.MaximumNArgs(1), Run: completionNoop,
+	}
+	command.Flags().String("session", "", "herdr session name")
+	command.ValidArgsFunction = hostBoundaryCompletion(provider)
+	return command
+}
+
+func newHostsCompletionCommand(provider completionProvider) *cobra.Command {
+	command := &cobra.Command{Use: "hosts", Short: "Manage remote hosts", Run: completionNoop}
+	addJSONFlag(command)
+	setup := leafCompletionCommand("setup", "write the generated ssh config", true)
+	switchCommand := leafCompletionCommand("switch", "switch the running launcher", true)
+	switchCommand.Use += " <name|local>"
+	switchCommand.Args = cobra.ExactArgs(1)
+	switchCommand.ValidArgsFunction = hostBoundaryCompletion(provider)
+	command.AddCommand(setup, switchCommand)
+	command.ValidArgsFunction = commandBoundaryCompletion()
+	return command
+}
+
+// hostBoundaryCompletion completes host names plus the `local` pseudo host.
+func hostBoundaryCompletion(provider completionProvider) cobra.CompletionFunc {
+	return func(command *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		if len(args) != 0 {
+			return commandBoundaryCompletion()(command, args, toComplete)
+		}
+		if strings.HasPrefix(toComplete, "-") {
+			return nil, cobra.ShellCompDirectiveNoFileComp
+		}
+		candidates := []completionCandidate{{"local", "switch back to the local server"}}
+		candidates = append(candidates, boundedProviderCall(
+			provider, completionProvider.Hosts, nil,
+		)...)
+		return encodeCandidates(matchingCandidates(candidates, toComplete)),
+			cobra.ShellCompDirectiveNoFileComp | cobra.ShellCompDirectiveKeepOrder
+	}
 }
 
 func newIntegrationCompletionCommand() *cobra.Command {

@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/BurntSushi/toml"
 
+	"github.com/lmilojevicc/seshagy/internal/remote"
 	"github.com/lmilojevicc/seshagy/internal/sessionmgr"
 	"github.com/lmilojevicc/seshagy/internal/xdg"
 )
@@ -35,15 +37,34 @@ const (
 )
 
 type Config struct {
-	Sources     SourcesConfig     `toml:"sources"     json:"sources"`
-	Directories DirectoriesConfig `toml:"directories" json:"directories"`
-	Theme       ThemeConfig       `toml:"theme"       json:"theme"`
-	Icons       IconsConfig       `toml:"icons"       json:"icons"`
-	TypeFirst   TypeFirstConfig   `toml:"type_first"  json:"type_first"`
-	Setup       SetupConfig       `toml:"setup"       json:"setup"`
-	Agents      AgentsConfig      `toml:"agents"      json:"agents"`
-	TUI         TUIConfig         `toml:"tui"         json:"tui"`
-	Log         LogConfig         `toml:"log"         json:"log"`
+	Sources     SourcesConfig     `toml:"sources"         json:"sources"`
+	Directories DirectoriesConfig `toml:"directories"     json:"directories"`
+	Theme       ThemeConfig       `toml:"theme"           json:"theme"`
+	Icons       IconsConfig       `toml:"icons"           json:"icons"`
+	TypeFirst   TypeFirstConfig   `toml:"type_first"      json:"type_first"`
+	Setup       SetupConfig       `toml:"setup"           json:"setup"`
+	Agents      AgentsConfig      `toml:"agents"          json:"agents"`
+	TUI         TUIConfig         `toml:"tui"             json:"tui"`
+	Log         LogConfig         `toml:"log"             json:"log"`
+	Remote      RemoteConfig      `toml:"remote"          json:"remote"`
+	Hosts       []HostConfig      `toml:"hosts,omitempty" json:"hosts,omitempty"`
+}
+
+// RemoteConfig holds remote-host discovery settings.
+type RemoteConfig struct {
+	// SSHConfigHosts lists non-wildcard Host entries of ~/.ssh/config alongside
+	// the configured [[hosts]]. Defaults to true.
+	SSHConfigHosts *bool `toml:"ssh_config_hosts" json:"ssh_config_hosts"`
+}
+
+// HostConfig is one `[[hosts]]` entry: a remote herdr server seshagy can attach
+// to through the `seshagy run` launcher.
+type HostConfig struct {
+	Name         string `toml:"name"          json:"name"`
+	Target       string `toml:"target"        json:"target"`
+	Transport    string `toml:"transport"     json:"transport"`
+	ProxyCommand string `toml:"proxy_command" json:"proxy_command"`
+	Session      string `toml:"session"       json:"session"`
 }
 
 // LogConfig controls opt-in, file-only structured diagnostics.
@@ -203,6 +224,7 @@ func Default() Config {
 		},
 		TypeFirst: TypeFirstConfig{Enabled: false, Prefix: DefaultPrefix},
 		Log:       LogConfig{Level: "off"},
+		Remote:    RemoteConfig{SSHConfigHosts: ptrBool(true)},
 		TUI: TUIConfig{
 			Layout:        LayoutDefault,
 			InputStyle:    InputStylePopup,
@@ -306,7 +328,155 @@ func (c *Config) Normalize() {
 	if c.TUI.Preview == nil {
 		c.TUI.Preview = ptrBool(true)
 	}
+	normalizeRemoteHosts(&c.Remote, &c.Hosts)
 }
+
+func normalizeRemoteHosts(remoteCfg *RemoteConfig, hosts *[]HostConfig) {
+	if remoteCfg.SSHConfigHosts == nil {
+		remoteCfg.SSHConfigHosts = ptrBool(true)
+	}
+	for i := range *hosts {
+		host := &(*hosts)[i]
+		host.Name = strings.TrimSpace(host.Name)
+		host.Target = strings.TrimSpace(host.Target)
+		host.Transport = strings.ToLower(strings.TrimSpace(host.Transport))
+		if host.Transport == "" {
+			host.Transport = remote.TransportSSH
+		}
+		host.ProxyCommand = strings.TrimSpace(host.ProxyCommand)
+		host.Session = strings.TrimSpace(host.Session)
+	}
+}
+
+// RemoteSSHConfigHosts reports whether hosts defined in ~/.ssh/config are
+// listed alongside the configured [[hosts]]. Defaults to true.
+func (c Config) RemoteSSHConfigHosts() bool {
+	c.Normalize()
+	return *c.Remote.SSHConfigHosts
+}
+
+// RemoteHosts returns the configured [[hosts]] as remote hosts, skipping
+// entries that fail validation (reported by ValidateRemoteHosts).
+func (c Config) RemoteHosts() []remote.Host {
+	hosts, _ := c.remoteHosts()
+	return hosts
+}
+
+// ValidateRemoteHosts reports problems with configured [[hosts]] entries. They
+// are warnings, not fatal errors: the CLI prints them with cli.Warn and the
+// offending entry is skipped by RemoteHosts.
+func (c Config) ValidateRemoteHosts() []string {
+	_, issues := c.remoteHosts()
+	return issues
+}
+
+func (c Config) remoteHosts() ([]remote.Host, []string) {
+	c.Normalize()
+	var hosts []remote.Host
+	var issues []string
+	seen := map[string]bool{}
+	for i, configured := range c.Hosts {
+		address, err := validateHostConfig(configured, seen[configured.Name])
+		if err != nil {
+			issues = append(issues, hostConfigIssue(configured, i, err))
+			continue
+		}
+		seen[configured.Name] = true
+		for _, warning := range hostConfigWarnings(configured, address) {
+			issues = append(issues, hostConfigIssue(configured, i, warning))
+		}
+		hosts = append(hosts, remote.Host{
+			Name:         configured.Name,
+			Target:       configured.Target,
+			Transport:    configured.Transport,
+			ProxyCommand: configured.ProxyCommand,
+			Session:      configured.Session,
+		})
+	}
+	return hosts, issues
+}
+
+// hostConfigIssue labels a problem with the [[hosts]] entry the user wrote.
+func hostConfigIssue(host HostConfig, index int, problem error) string {
+	if host.Name != "" {
+		return fmt.Sprintf("hosts %q: %v", host.Name, problem)
+	}
+	return fmt.Sprintf("hosts[%d]: %v", index, problem)
+}
+
+// validateHostConfig checks one [[hosts]] entry and returns the parsed target
+// address. It is the hard validation: a failure means the entry is skipped.
+func validateHostConfig(host HostConfig, duplicate bool) (remote.Address, error) {
+	for _, field := range []struct{ name, value string }{
+		{"name", host.Name},
+		{"target", host.Target},
+		{"transport", host.Transport},
+		{"proxy_command", host.ProxyCommand},
+		{"session", host.Session},
+	} {
+		if strings.ContainsFunc(field.value, isControlRune) {
+			return remote.Address{}, fmt.Errorf(
+				"%s must not contain control characters", field.name,
+			)
+		}
+	}
+	switch {
+	case host.Name == "":
+		return remote.Address{}, errors.New("name is required")
+	case strings.HasPrefix(host.Name, "-"):
+		return remote.Address{}, errors.New(`name must not start with "-"`)
+	case !remoteHostNamePattern.MatchString(host.Name):
+		return remote.Address{}, errors.New("name may only contain [A-Za-z0-9._-]")
+	case duplicate:
+		return remote.Address{}, fmt.Errorf("duplicate host name %q", host.Name)
+	}
+	if host.Target == "" {
+		return remote.Address{}, errors.New("target is required")
+	}
+	address, err := remote.ParseAddress(host.Target)
+	if err != nil {
+		return remote.Address{}, err
+	}
+	switch host.Transport {
+	case remote.TransportSSH, remote.TransportIroh:
+		return address, nil
+	default:
+		return remote.Address{}, fmt.Errorf(
+			"unknown transport %q (want ssh or iroh)",
+			host.Transport,
+		)
+	}
+}
+
+// hostConfigWarnings collects problems that do not make the host unusable, so
+// the host is still listed and the transporter keeps working.
+func hostConfigWarnings(host HostConfig, address remote.Address) []error {
+	if host.Transport != remote.TransportIroh {
+		return nil
+	}
+	var warnings []error
+	if !irohEndpointPattern.MatchString(address.Host) {
+		warnings = append(warnings, errors.New(
+			"iroh target host does not look like a 64-character endpoint id",
+		))
+	}
+	if host.ProxyCommand != "" {
+		warnings = append(warnings, errors.New(
+			"proxy_command is ignored when transport is iroh",
+		))
+	}
+	return warnings
+}
+
+func isControlRune(r rune) bool { return r < 0x20 || r == 0x7f }
+
+var (
+	remoteHostNamePattern = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
+	// irohEndpointPattern matches the hex endpoint ids `iroh-ssh proxy` takes
+	// as %h; a mismatch is a warning, not an error, because the check is
+	// format-sensitive.
+	irohEndpointPattern = regexp.MustCompile(`^[0-9a-fA-F]{64}$`)
+)
 
 func normalizeThemeColors(colors *ThemeColorsConfig, defaults ThemeColorsConfig) {
 	if strings.TrimSpace(colors.PopupBorder) == "" {
