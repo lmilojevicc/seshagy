@@ -49,15 +49,6 @@ func refreshCmd(
 	}
 }
 
-func startupSetupCmd(cfg appconfig.Config) tea.Cmd {
-	return func() tea.Msg {
-		if cfg.Setup.TypeFirstPromptSeen {
-			return setupMsg{}
-		}
-		return setupMsg{prompt: true}
-	}
-}
-
 type installMenuMsg struct {
 	show bool
 }
@@ -226,17 +217,10 @@ func renameAgentCmd(
 	}
 }
 
-const tickInterval = 5 * time.Second
+type tickMsg time.Time
 
+// tickCmd drives the source-refresh poll; every tick refreshes whichever
+// sources are stale and not already in flight.
 func tickCmd() tea.Cmd {
-	return tea.Tick(tickInterval, func(t time.Time) tea.Msg { return tickMsg(t) })
-}
-
-// tickIntervalFor returns the tick interval for a source. Agents mode uses 1s
-// for near-instant state-detection; all other modes use the default 5s.
-func tickIntervalFor(source sessionmgr.SourceMode) time.Duration {
-	if source == sessionmgr.ModeAgents {
-		return 1 * time.Second
-	}
-	return tickInterval
+	return tea.Tick(refreshTickInterval, func(t time.Time) tea.Msg { return tickMsg(t) })
 }

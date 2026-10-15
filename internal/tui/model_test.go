@@ -8,40 +8,6 @@ import (
 	"github.com/lmilojevicc/seshagy/internal/sessionmgr"
 )
 
-func TestTUIFirstRefreshSmoke(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-
-	m := New()
-	if m.Init() == nil {
-		t.Fatal("Init() returned nil")
-	}
-
-	m.source = sessionmgr.ModeSessions
-	m.inflightRefresh = map[sessionmgr.SourceMode]uint64{
-		sessionmgr.ModeSessions: 1,
-	}
-	model, cmd := m.Update(refreshMsg{
-		source: sessionmgr.ModeSessions,
-		gen:    1,
-		items: []sessionmgr.Item{
-			{Kind: sessionmgr.KindSession, Name: "dev"},
-		},
-	})
-	m = model.(Model)
-	if len(m.items) == 0 {
-		t.Fatal("expected items after refresh")
-	}
-	if len(m.notifications) != 0 {
-		t.Fatalf("notifications = %#v, want none for successful refresh", m.notifications)
-	}
-	if m.View() == "" {
-		t.Fatal("expected non-empty view after refresh")
-	}
-	if cmd == nil {
-		t.Fatal("expected preview command after refresh")
-	}
-}
-
 func TestNotifyPushesAndTrimsToThree(t *testing.T) {
 	m := Model{}
 	for _, text := range []string{"one", "two", "three", "four"} {
@@ -55,20 +21,6 @@ func TestNotifyPushesAndTrimsToThree(t *testing.T) {
 			t.Fatalf("notification %d = %q, want %q", i, got, want)
 		}
 	}
-}
-
-func latestNotificationText(m Model) string {
-	if len(m.notifications) == 0 {
-		return ""
-	}
-	return m.notifications[len(m.notifications)-1].text
-}
-
-func latestNotificationSeverity(m Model) notifSev {
-	if len(m.notifications) == 0 {
-		return sevInfo
-	}
-	return m.notifications[len(m.notifications)-1].sev
 }
 
 func TestShowPreviewFollowsConfig(t *testing.T) {
@@ -85,56 +37,116 @@ func TestShowPreviewFollowsConfig(t *testing.T) {
 		}
 	}
 
-	// No [tui] section -> default preview ON.
 	writeTUIConfig(t, "[sources]\ndefault = \"sessions\"\n")
-	m := New()
-	if !m.showPreview {
+	if m := New(WithMultiplexer(newFakeMux())); !m.showPreview {
 		t.Fatal("showPreview = false with no [tui] section, want true (default)")
 	}
 
-	// Explicit preview = false -> preview OFF.
 	writeTUIConfig(t, "[tui]\npreview = false\n")
-	m = New()
-	if m.showPreview {
+	if m := New(WithMultiplexer(newFakeMux())); m.showPreview {
 		t.Fatal("showPreview = true with preview = false, want false")
 	}
 
-	// Explicit preview = true -> preview ON.
 	writeTUIConfig(t, "[tui]\npreview = true\n")
-	m = New()
-	if !m.showPreview {
+	if m := New(WithMultiplexer(newFakeMux())); !m.showPreview {
 		t.Fatal("showPreview = false with preview = true, want true")
 	}
 }
 
-func TestSelectedKeyAndSortItems(t *testing.T) {
-	m := New()
-	m.items = []sessionmgr.Item{
-		{Kind: sessionmgr.KindFD, Path: "/tmp/b"},
-		{Kind: sessionmgr.KindSession, Name: "alpha"},
+func TestSelectedItemAndCursorClamp(t *testing.T) {
+	m := newTestModel(t)
+	m = withItems(m, []sessionmgr.Item{
+		{Kind: sessionmgr.KindFD, Path: "/tmp/b", Name: "/tmp/b"},
+		{Kind: sessionmgr.KindSession, Name: "alpha", Target: "alpha"},
+	})
+	if m.selectedKey() != "session:alpha" {
+		t.Fatalf(
+			"selectedKey = %q, want session:alpha (sessions rank before dirs)",
+			m.selectedKey(),
+		)
 	}
-	SortItems(m.items)
-	if m.items[0].Kind != sessionmgr.KindSession {
-		t.Fatalf("sort order = %#v", m.items)
-	}
-
-	m.cursor = 0
-	if key := m.selectedKey(); key != "session:alpha" {
-		t.Fatalf("selectedKey = %q, want session:alpha", key)
-	}
-
 	m.cursor = 99
+	if _, ok := m.selectedItem(); ok {
+		t.Fatal("expected no selection for an out-of-range cursor")
+	}
 	if m.selectedKey() != "" {
-		t.Fatal("expected empty selectedKey for invalid cursor")
+		t.Fatal("expected empty selectedKey for an out-of-range cursor")
 	}
 }
 
-func TestSortedCountsGroupsItemsByKind(t *testing.T) {
-	counts := sortedCounts([]sessionmgr.Item{
-		{Kind: sessionmgr.KindSession},
-		{Kind: sessionmgr.KindSession},
+func TestRequestPreviewReusesLoadedPayload(t *testing.T) {
+	mux := newFakeMux()
+	mux.preview = "captured"
+	m := newTestModelWith(t, mux)
+	m = withItems(m, []sessionmgr.Item{
+		{Kind: sessionmgr.KindSession, Name: "demo", Target: "demo"},
 	})
-	if counts[sessionmgr.KindSession] != 2 {
-		t.Fatalf("counts = %#v", counts)
+
+	m, cmd := m.requestPreview()
+	if cmd == nil {
+		t.Fatal("first request returned no capture command")
+	}
+	if m.previewPendingKey != "session:demo" {
+		t.Fatalf("previewPendingKey = %q", m.previewPendingKey)
+	}
+
+	model, _ := m.Update(cmd())
+	m = model.(Model)
+	if m.previewKey != "session:demo" || m.preview != "captured" {
+		t.Fatalf("preview after capture = %q / key = %q", m.preview, m.previewKey)
+	}
+	if _, again := m.requestPreview(); again != nil {
+		t.Fatal("an already loaded payload was re-captured")
+	}
+}
+
+func TestCurrentSessionLabelHerdrShowsWorkspaceLabel(t *testing.T) {
+	m := newTestModel(t)
+	m.terms = sessionmgr.HerdrTerms()
+	m.items = []sessionmgr.Item{{
+		Kind:      sessionmgr.KindAgent,
+		AgentName: "pi",
+		Session:   "wB",       // opaque herdr workspace id
+		Location:  "frontend", // resolved workspace label
+	}}
+	m.currentSession = "wB"
+	if label := m.currentSessionLabel(); label != "frontend" {
+		t.Fatalf("currentSessionLabel = %q, want \"frontend\"", label)
+	}
+
+	m.items = nil
+	if label := m.currentSessionLabel(); label != "wB" {
+		t.Fatalf("fallback currentSessionLabel = %q, want \"wB\"", label)
+	}
+}
+
+func TestInitAndEmptySourceCaches(t *testing.T) {
+	m := newTestModel(t)
+	if m.Init() == nil {
+		t.Fatal("Init() returned no commands")
+	}
+	for _, source := range tuiSources {
+		if m.cacheFresh(source) {
+			t.Fatalf("%v cache reported fresh before any load", source)
+		}
+	}
+	if m.loadedOnce {
+		t.Fatal("loadedOnce should stay false until the first refresh result")
+	}
+}
+
+func TestWindowSizeGatesPreviewColumn(t *testing.T) {
+	m := newTestModel(t)
+	m.width, m.height = 99, 30
+	if m.previewVisible() {
+		t.Fatal("preview visible below the minimum width")
+	}
+	m.width = 100
+	if !m.previewVisible() {
+		t.Fatal("preview hidden at the minimum width")
+	}
+	m.showPreview = false
+	if m.previewVisible() {
+		t.Fatal("preview visible while disabled")
 	}
 }

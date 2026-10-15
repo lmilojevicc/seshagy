@@ -22,6 +22,7 @@ const (
 	scopeDirs
 	scopeZoxide
 	scopeFind
+	scopeHosts
 	scopeCount
 )
 
@@ -38,6 +39,7 @@ var scopeInfos = [scopeCount]scopeInfo{
 	scopeDirs:      {sigil: '*', label: "dirs"},
 	scopeZoxide:    {sigil: '~', label: "zoxide"},
 	scopeFind:      {sigil: '/', label: "find"},
+	scopeHosts:     {sigil: '#', label: "hosts"},
 }
 
 func (s scope) sigil() rune   { return scopeInfos[s].sigil }
@@ -81,6 +83,8 @@ func (s scope) includes(item sessionmgr.Item) bool {
 		return item.Kind == sessionmgr.KindZoxide
 	case scopeFind:
 		return item.Kind == sessionmgr.KindFD
+	case scopeHosts:
+		return item.Kind == sessionmgr.KindHost
 	default:
 		return true
 	}
@@ -114,8 +118,10 @@ func itemRank(item sessionmgr.Item) int {
 		return 5
 	case sessionmgr.KindFD:
 		return 6
-	default:
+	case sessionmgr.KindHost:
 		return 7
+	default:
+		return 8
 	}
 }
 

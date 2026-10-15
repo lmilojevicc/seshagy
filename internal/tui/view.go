@@ -5,84 +5,791 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/lipgloss"
 
-	appconfig "github.com/lmilojevicc/seshagy/internal/config"
 	"github.com/lmilojevicc/seshagy/internal/integrations"
 	"github.com/lmilojevicc/seshagy/internal/sessionmgr"
 )
 
-// previewMinWidth gates the list+preview split.
-const previewMinWidth = 110
+const (
+	// previewMinWidth gates the list+preview split.
+	previewMinWidth = 100
+	// previewPercent is the preview column's share of the frame width.
+	previewPercent = 45
+	// previewMinCols is the narrowest usable preview column.
+	previewMinCols = 28
+	// metaColumnMax caps each right-aligned meta column.
+	metaColumnMax = 18
+	// titleMinWidth is the room a title keeps before meta columns are dropped.
+	titleMinWidth = 12
+	// hostIcon marks remote-machine rows.
+	hostIcon = "󰒋 "
 
-// tabWidthUnset skips tab width limits when terminal width is unknown.
-const tabWidthUnset = 9999
+	placeholderText = "type to search · ⇥ or a sigil to filter"
+)
 
-// safeWidth is one column shy of the terminal to avoid auto-wrap at the right edge.
-func safeWidth(w int) int {
-	if w <= 0 {
-		return tabWidthUnset
+// viewLayout is one frame's row/column budget: two header rows, optional rules,
+// an optional footer, and the body in between.
+type viewLayout struct {
+	width        int
+	bodyHeight   int
+	listWidth    int
+	previewWidth int
+	rules        bool
+	footer       bool
+}
+
+func computeViewLayout(width, height int, preview bool) viewLayout {
+	rules := height >= 8
+	footer := height >= 6
+	chrome := 2 // prompt row + filter strip
+	if rules {
+		chrome += 2
 	}
-	return max(1, w-1)
+	if footer {
+		chrome++
+	}
+	l := viewLayout{
+		width:      width,
+		bodyHeight: max(1, height-chrome),
+		listWidth:  width,
+		rules:      rules,
+		footer:     footer,
+	}
+	if preview {
+		l.previewWidth = max(previewMinCols, width*previewPercent/100)
+		l.listWidth = max(1, width-l.previewWidth-3) // " │ "
+	}
+	return l
+}
+
+func (m Model) viewLayout() viewLayout {
+	return computeViewLayout(safeWidth(m.width), m.height, m.previewVisible())
+}
+
+// bodyHeight is the number of list rows a frame shows; page-up/down uses it.
+func (m Model) bodyHeight() int {
+	return m.viewLayout().bodyHeight
 }
 
 func (m Model) View() string {
 	if m.width == 0 || m.height == 0 {
 		return "loading…"
 	}
-
 	var frame string
+	if m.installMenu.active {
+		frame = m.renderInstallMenu(m.height)
+	} else {
+		frame = m.renderPicker()
+	}
+	return m.overlayNotifications(m.styles.app.Render(frame))
+}
+
+func (m Model) renderPicker() string {
+	l := m.viewLayout()
+	lines := make([]string, 0, m.height)
+	lines = append(lines, m.renderPromptRow(l.width))
+	lines = append(lines, m.renderFilterStrip(l.width))
+	if l.rules {
+		lines = append(lines, m.renderRule(l.width))
+	}
+	lines = append(lines, m.renderBody(l)...)
+	if l.rules {
+		lines = append(lines, m.renderRule(l.width))
+	}
+	if l.footer {
+		lines = append(lines, m.renderFooter(l.width))
+	}
+	return trimHeight(strings.Join(lines, "\n"), max(1, m.height))
+}
+
+func (m Model) renderRule(width int) string {
+	return m.styles.rule.Render(strings.Repeat("─", max(0, width)))
+}
+
+// composeLine left-aligns left and right-aligns right inside width, dropping the
+// right side when both cannot fit.
+func composeLine(left, right string, width int, rightStyle lipgloss.Style) string {
+	if right == "" {
+		return clampStyledText(left, width)
+	}
+	right = rightStyle.Render(right)
+	if lipgloss.Width(left)+lipgloss.Width(right)+1 > width {
+		return clampStyledText(left, width)
+	}
+	return left + strings.Repeat(" ", width-lipgloss.Width(left)-lipgloss.Width(right)) + right
+}
+
+// cursorBlock is the reverse-video cell that marks the typing position.
+func (m Model) cursorBlock() string {
+	return lipgloss.NewStyle().Reverse(true).Render(" ")
+}
+
+func spinnerFrame(frame int) string {
+	frames := []rune(spinnerFrames)
+	return string(frames[frame%len(frames)])
+}
+
+func (m Model) renderPromptRow(width int) string {
+	s := m.styles
+	prompt := s.emphasis.Render("❯") + " "
+	var left string
 	switch {
-	case m.setup.active:
-		frame = m.styles.app.Width(m.width).Height(m.height).
-			Render(m.renderSetupPrompt(m.height))
-	case m.installMenu.active:
-		frame = m.styles.app.Width(m.width).Height(m.height).
-			Render(m.renderInstallMenu(m.height))
+	case m.renameActive:
+		left = s.title.Render("rename") + " " + prompt + m.renameText + m.cursorBlock()
+	case m.query != "":
+		left = prompt + m.query + m.cursorBlock()
 	default:
-		frame = m.renderNormalSurface()
+		hint := clampText(placeholderText, max(1, width-4))
+		left = prompt + s.muted.Render(hint) + m.cursorBlock()
 	}
-	return m.overlayNotifications(frame)
+	right := ""
+	if !m.loadedOnce && m.spinnerActive {
+		right = spinnerFrame(m.spinnerFrame)
+	}
+	return composeLine(left, right, width, s.emphasis)
 }
 
-func (m Model) renderNormalSurface() string {
-	spec := m.layoutSpec()
-	view := m.projectLayout(spec.needs)
-	theme := layoutRenderTheme{styles: m.styles, icons: m.config.IconSet()}
-	footer := m.renderShellFooter(view.Actions)
-	view.Frame.ContentHeight = max(1, m.height-lipgloss.Height(footer))
-	dashboard := spec.render(view, theme)
-	if m.inlineInputActive() {
-		inputTile := m.renderInlineInputTile()
-		if m.height == 1 {
-			return renderInputOnly(m.projectInputChrome(safeWidth(m.width)))
+// visibleScopes lists the chips the filter strip shows, in cycle order. The
+// hosts chip only appears once host items exist.
+func (m Model) visibleScopes() []scope {
+	scopes := make([]scope, 0, int(scopeCount))
+	for sc := scopeAll; sc < scopeCount; sc++ {
+		if sc == scopeHosts && !m.hasHosts() {
+			continue
 		}
-		if m.height < lipgloss.Height(dashboard.Header)+1+lipgloss.Height(inputTile) {
-			return trimHeight(inputTile, m.height)
-		}
+		scopes = append(scopes, sc)
 	}
-
-	frame := joinFrame(
-		dashboard.Header,
-		dashboard.Body,
-		footer,
-		m.width,
-		m.height,
-	)
-	if !m.inputPopupActive() {
-		return frame
-	}
-	background := frame
-	if m.config.TUI.DimBackground != nil && *m.config.TUI.DimBackground {
-		background = dimDashboard(frame)
-	}
-	popup := m.renderInputPopup()
-	x := max(0, (m.width-lipgloss.Width(popup))/2)
-	y := max(0, (m.height-lipgloss.Height(popup))/2)
-	return overlay(background, popup, x, y)
+	return scopes
 }
 
+func (m Model) hasHosts() bool {
+	for _, item := range m.items {
+		if item.Kind == sessionmgr.KindHost {
+			return true
+		}
+	}
+	return false
+}
+
+// renderFilterStrip draws every scope chip, keeping the active one visible when
+// the terminal is too narrow for all of them.
+func (m Model) renderFilterStrip(width int) string {
+	scopes := m.visibleScopes()
+	active := 0
+	for i, sc := range scopes {
+		if sc == m.scope {
+			active = i
+		}
+	}
+	chipWidth := func(from, to int) int {
+		total := 0
+		for i := from; i < to; i++ {
+			if i > from {
+				total += 2
+			}
+			total += len([]rune(scopes[i].chip()))
+		}
+		return total
+	}
+	start, end := active, active+1
+	for {
+		grew := false
+		if start > 0 && chipWidth(start-1, end) <= width {
+			start--
+			grew = true
+		}
+		if end < len(scopes) && chipWidth(start, end+1) <= width {
+			end++
+			grew = true
+		}
+		if !grew {
+			break
+		}
+	}
+	parts := make([]string, 0, end-start)
+	for _, sc := range scopes[start:end] {
+		if sc == m.scope {
+			parts = append(parts, m.styles.chipActive.Render(sc.chip()))
+			continue
+		}
+		parts = append(parts, m.styles.chipIdle.Render(sc.chip()))
+	}
+	return clampStyledText(strings.Join(parts, "  "), width)
+}
+
+// metaCell is one right-aligned row column: the plain text used for width
+// computation and the styled text actually drawn.
+type metaCell struct {
+	plain string
+	text  string
+}
+
+func styledCell(style lipgloss.Style, text string) metaCell {
+	return metaCell{plain: text, text: style.Render(text)}
+}
+
+func (m Model) mutedCell(text string) metaCell {
+	return styledCell(m.styles.muted, text)
+}
+
+// rowMeta builds the right-aligned meta columns for a row.
+func (m Model) rowMeta(r row) []metaCell {
+	item := r.item
+	switch item.Kind {
+	case sessionmgr.KindAgent:
+		cells := make([]metaCell, 0, 3)
+		if item.Location != "" && item.Location != itemTitle(item) {
+			cells = append(cells, m.mutedCell(item.Location))
+		}
+		if label := agentKey(item.AgentName); label != "" {
+			cells = append(cells, styledCell(
+				lipgloss.NewStyle().Foreground(agentColor(item.AgentName)), label))
+		}
+		state := agentStateDisplayFor(item.AgentState)
+		cells = append(cells, styledCell(lipgloss.NewStyle().Foreground(state.color), state.word))
+		return cells
+	case sessionmgr.KindSession:
+		cells := make([]metaCell, 0, 3)
+		if item.Windows > 0 {
+			cells = append(cells, m.mutedCell(windowCountLabel(m.terms, item.Windows)))
+		}
+		if item.Attached {
+			cells = append(cells, styledCell(m.styles.success, "attached"))
+		}
+		if label := m.currentSessionLabel(); label != "" && item.Name == label {
+			cells = append(cells, styledCell(m.styles.emphasis, "current"))
+		}
+		return cells
+	case sessionmgr.KindZoxide:
+		return []metaCell{m.mutedCell("zoxide")}
+	case sessionmgr.KindFD:
+		label := "fd"
+		if !sessionmgr.FDAvailable() {
+			label = "find"
+		}
+		return []metaCell{m.mutedCell(label)}
+	case sessionmgr.KindHost:
+		cells := make([]metaCell, 0, 2)
+		if item.Location != "" {
+			cells = append(cells, m.mutedCell(item.Location))
+		}
+		if target := item.ActionTarget(); target != "" && target != item.DisplayName() {
+			cells = append(cells, m.mutedCell(target))
+		}
+		return cells
+	default:
+		return nil
+	}
+}
+
+// metaColumnMin is the width a meta column can shrink to before its text is
+// ellipsized; metaColumnMax caps a column so one long value cannot dominate.
+const metaColumnMin = 6
+
+// metaGrid is the right-aligned table the visible rows' meta cells share: the
+// rightmost cell of every row sits in the last column, so rows that carry fewer
+// cells (a session has no agent kind) leave the leading columns blank instead of
+// shifting their own cells left.
+type metaGrid struct {
+	widths []int
+}
+
+func (g metaGrid) total() int {
+	total := 0
+	for i, w := range g.widths {
+		if i > 0 {
+			total += 2
+		}
+		total += w
+	}
+	return total
+}
+
+// buildMetaGrid measures every cell in its right-aligned column (capped at
+// metaColumnMax) and then shrinks the least specific leftmost columns until the
+// titles keep their minimum room. The rightmost column — the agent state or the
+// session's attached flag — is never squeezed below metaColumnMin.
+func buildMetaGrid(metas [][]metaCell, budget int) metaGrid {
+	columns := 0
+	for _, cells := range metas {
+		if len(cells) > columns {
+			columns = len(cells)
+		}
+	}
+	grid := metaGrid{widths: make([]int, columns)}
+	for _, cells := range metas {
+		offset := columns - len(cells)
+		for i, cell := range cells {
+			if w := min(metaColumnMax, lipgloss.Width(cell.plain)); w > grid.widths[offset+i] {
+				grid.widths[offset+i] = w
+			}
+		}
+	}
+	for i := 0; i < len(grid.widths) && grid.total() > budget; i++ {
+		shortfall := min(grid.widths[i]-metaColumnMin, grid.total()-budget)
+		if shortfall > 0 {
+			grid.widths[i] -= shortfall
+		}
+	}
+	return grid
+}
+
+// renderMetaCells places a row's cells in the grid's trailing columns; the
+// columns the row lacks are kept blank so the block stays flush right.
+func renderMetaCells(cells []metaCell, grid metaGrid) string {
+	parts := make([]string, 0, len(grid.widths))
+	offset := len(grid.widths) - len(cells)
+	for i, w := range grid.widths {
+		index := i - offset
+		if index < 0 || index >= len(cells) {
+			parts = append(parts, strings.Repeat(" ", w))
+			continue
+		}
+		cell := cells[index]
+		parts = append(parts, pad(clampStyledText(cell.text, w), w))
+	}
+	return strings.Join(parts, "  ")
+}
+
+func (m Model) renderBody(l viewLayout) []string {
+	if !m.loadedOnce {
+		return centeredNote(l, m.styles.muted.Render("loading…"))
+	}
+	rows := m.rows()
+	if len(rows) == 0 {
+		return m.renderEmptyState(l)
+	}
+	start, end := visibleWindow(len(rows), m.cursor, l.bodyHeight)
+	visible := rows[start:end]
+	metas := make([][]metaCell, len(visible))
+	for i, r := range visible {
+		metas[i] = m.rowMeta(r)
+	}
+	grid := buildMetaGrid(metas, l.listWidth-m.rowPrefixWidth()-titleMinWidth-2)
+	list := make([]string, 0, l.bodyHeight)
+	for i, r := range visible {
+		list = append(list, m.renderRow(r, metas[i], grid, l.listWidth, start+i == m.cursor))
+	}
+	var preview []string
+	if l.previewWidth > 0 {
+		preview = m.renderPreview(l.previewWidth, l.bodyHeight)
+	}
+	out := make([]string, 0, l.bodyHeight)
+	separator := m.styles.rule.Render("│")
+	for i := 0; i < l.bodyHeight; i++ {
+		line := ""
+		if i < len(list) {
+			line = list[i]
+		}
+		line = pad(clampStyledText(line, l.listWidth), l.listWidth)
+		if l.previewWidth > 0 {
+			cell := ""
+			if i < len(preview) {
+				cell = preview[i]
+			}
+			line += " " + separator + " " + pad(
+				clampStyledText(cell, l.previewWidth),
+				l.previewWidth,
+			)
+		}
+		out = append(out, line)
+	}
+	return out
+}
+
+// renderRow draws one item: selection marker, kind icon (agents add their logo),
+// agent state glyph, highlighted title, then the right-aligned meta columns.
+func (m Model) renderRow(r row, meta []metaCell, grid metaGrid, width int, selected bool) string {
+	marker := "  "
+	if selected {
+		marker = m.styles.bar.Render("▌") + " "
+	}
+	prefixWidth := m.rowPrefixWidth()
+	iconWidth := prefixWidth - 4
+	icon := pad(clampStyledText(m.rowIcon(r.item), iconWidth), iconWidth)
+	state := pad(clampStyledText(m.rowStateGlyph(r.item), 2), 2)
+	titleWidth := max(1, width-prefixWidth-grid.total()-2)
+	left := marker + icon + state + m.renderTitle(r, titleWidth, selected)
+	if len(grid.widths) == 0 {
+		return pad(clampStyledText(left, width), width)
+	}
+	left = pad(clampStyledText(left, max(1, width-grid.total()-1)), max(1, width-grid.total()))
+	return pad(clampStyledText(left+renderMetaCells(meta, grid), width), width)
+}
+
+// rowPrefixWidth is the fixed marker/icon/state prefix every row shares. The
+// icon field is one cell wider when agent logos are drawn, because the icon
+// font extends into the cell after the glyph.
+func (m Model) rowPrefixWidth() int {
+	iconWidth := 2
+	if m.showAgentLogos() {
+		iconWidth = 3
+	}
+	return 2 + iconWidth + 2
+}
+
+// rowIcon is the 2-3 cell kind column: the agent's font logo, the configured
+// kind icon, or the host marker.
+func (m Model) rowIcon(item sessionmgr.Item) string {
+	switch item.Kind {
+	case sessionmgr.KindAgent:
+		if !m.showAgentLogos() {
+			return ""
+		}
+		logo := agentLogo(item.AgentName)
+		if logo == "" {
+			return ""
+		}
+		// The icon font extends into the next cell; reserve it plus one space
+		// so the state glyph keeps an even gap on both sides.
+		return lipgloss.NewStyle().Foreground(agentColor(item.AgentName)).Render(logo + "  ")
+	case sessionmgr.KindHost:
+		icons := m.config.IconSet()
+		if !icons.Enabled {
+			return ""
+		}
+		if icons.ASCII {
+			return m.styles.muted.Render("h ")
+		}
+		return m.styles.muted.Render(hostIcon)
+	default:
+		style := m.config.IconSet().For(item.Kind)
+		if style.Text == "" {
+			return ""
+		}
+		color := lipgloss.TerminalColor(lipgloss.NoColor{})
+		if style.Color != "" {
+			color = lipgloss.Color(style.Color)
+		}
+		return lipgloss.NewStyle().Foreground(color).Render(style.Text)
+	}
+}
+
+// rowStateGlyph is the 2-cell agent state column; in text/hidden icon modes the
+// state is worded in the meta columns instead.
+func (m Model) rowStateGlyph(item sessionmgr.Item) string {
+	if item.Kind != sessionmgr.KindAgent {
+		return ""
+	}
+	icons := m.config.IconSet()
+	if !icons.AgentStateUsesIcons() {
+		return ""
+	}
+	state := agentStateDisplayFor(item.AgentState)
+	return lipgloss.NewStyle().Foreground(state.color).Render(state.glyph)
+}
+
+type agentStateDisplay struct {
+	glyph string
+	word  string
+	color lipgloss.TerminalColor
+}
+
+// agentStateDisplayFor is the picker's state vocabulary: the glyph, the word,
+// and the color both are drawn in.
+func agentStateDisplayFor(state sessionmgr.AgentState) agentStateDisplay {
+	switch sessionmgr.NormalizeAgentState(string(state)) {
+	case sessionmgr.AgentBlocked:
+		return agentStateDisplay{glyph: "◉", word: "needs you", color: lipgloss.Color("9")}
+	case sessionmgr.AgentWorking:
+		return agentStateDisplay{glyph: "◐", word: "working", color: lipgloss.Color("11")}
+	case sessionmgr.AgentDone:
+		return agentStateDisplay{glyph: "●", word: "done", color: lipgloss.Color("14")}
+	case sessionmgr.AgentIdle:
+		return agentStateDisplay{glyph: "✓", word: "idle", color: lipgloss.Color("10")}
+	default:
+		return agentStateDisplay{glyph: "○", word: "unknown", color: lipgloss.Color("8")}
+	}
+}
+
+// renderTitle draws the item title with the fuzzy-matched runes emphasized. A
+// directory's parent path is dimmed and its basename kept in the normal color;
+// an agent's tab label is appended muted when there is room.
+func (m Model) renderTitle(r row, width int, selected bool) string {
+	title := itemTitle(r.item)
+	suffix := ""
+	if r.item.Kind == sessionmgr.KindAgent && r.item.TabLabel != "" && r.item.TabLabel != title {
+		suffix = " — " + r.item.TabLabel
+		if lipgloss.Width(suffix)+titleMinWidth > width {
+			suffix = ""
+		}
+	}
+	base := m.styles.itemName
+	if r.item.Kind == sessionmgr.KindAgent && r.item.AgentState == sessionmgr.AgentWorking {
+		base = m.styles.working
+	}
+	if selected {
+		base = base.Bold(true)
+	}
+	text := clampText(title, max(1, width-lipgloss.Width(suffix)))
+	switch r.item.Kind {
+	case sessionmgr.KindZoxide, sessionmgr.KindFD:
+		if cut := strings.LastIndex(text, "/"); cut >= 0 && cut+1 < len(text) {
+			parent, name := text[:cut+1], text[cut+1:]
+			return m.highlight(parent, shiftMatches(r.matches, 0, cut+1), m.styles.muted) +
+				m.highlight(name, shiftMatches(r.matches, cut+1, len(name)), base) +
+				m.styles.muted.Render(suffix)
+		}
+	}
+	return m.highlight(text, r.matches, base) + m.styles.muted.Render(suffix)
+}
+
+// highlight renders text in base style with the matched rune positions drawn in
+// the accent match style (bold + underline so the subsequence reads clearly).
+func (m Model) highlight(text string, matches []int, base lipgloss.Style) string {
+	if len(matches) == 0 {
+		return base.Render(text)
+	}
+	marked := make(map[int]bool, len(matches))
+	for _, pos := range matches {
+		marked[pos] = true
+	}
+	var out, run strings.Builder
+	runMarked := false
+	flush := func() {
+		if run.Len() == 0 {
+			return
+		}
+		style := base
+		if runMarked {
+			style = m.styles.match
+		}
+		out.WriteString(style.Render(run.String()))
+		run.Reset()
+	}
+	for i, r := range []rune(text) {
+		if marked[i] != runMarked {
+			flush()
+			runMarked = marked[i]
+		}
+		run.WriteRune(r)
+	}
+	flush()
+	return out.String()
+}
+
+// shiftMatches rebases match positions onto a substring drawn at offset and
+// drops the ones that fall outside it.
+func shiftMatches(matches []int, offset, size int) []int {
+	out := make([]int, 0, len(matches))
+	for _, pos := range matches {
+		if shifted := pos - offset; shifted >= 0 && shifted < size {
+			out = append(out, shifted)
+		}
+	}
+	return out
+}
+
+// renderEmptyState centers the "nothing here" message in the list area.
+func (m Model) renderEmptyState(l viewLayout) []string {
+	var headline, hint string
+	switch {
+	case m.query != "":
+		headline = m.styles.emphasis.Render(`no matches for "` + m.query + `"`)
+		hint = "⌫ backspace clears the query"
+	case m.scope != scopeAll:
+		headline = m.styles.itemName.Render("nothing in ") +
+			m.styles.emphasis.Render(m.scope.chip()) +
+			m.styles.itemName.Render(" filter")
+		hint = "⇥ next filter · ⌫ back to all"
+	default:
+		headline = m.styles.itemName.Render("nothing to jump to")
+		hint = "start an agent or open a directory"
+	}
+	return centeredNote(l, headline, m.styles.muted.Render(hint))
+}
+
+// centeredNote centers one or more rendered lines in the list area.
+func centeredNote(l viewLayout, lines ...string) []string {
+	out := make([]string, 0, l.bodyHeight)
+	top := max(0, (l.bodyHeight-len(lines))/2)
+	for i := 0; i < l.bodyHeight; i++ {
+		index := i - top
+		if index < 0 || index >= len(lines) {
+			out = append(out, "")
+			continue
+		}
+		line := clampStyledText(lines[index], l.listWidth)
+		indent := max(0, (l.listWidth-lipgloss.Width(line))/2)
+		out = append(out, pad(strings.Repeat(" ", indent)+line, l.listWidth))
+	}
+	return out
+}
+
+// renderPreview draws the preview column: a muted header, then the captured
+// content with its ANSI colors intact, bottom-anchored for multiplexer captures
+// and top-anchored for directory listings.
+func (m Model) renderPreview(width, height int) []string {
+	item, ok := m.selectedItem()
+	if !ok || height <= 0 {
+		return nil
+	}
+	header := m.styles.muted.Render(clampText(itemTitle(item), width))
+	out := make([]string, 0, height)
+	out = append(out, header)
+	room := height - 1
+	if room <= 0 {
+		return out
+	}
+	content, style := m.preview, lipgloss.NewStyle()
+	switch {
+	case m.previewError != "":
+		content, style = m.previewError, m.styles.danger
+	case m.preview == "":
+		content, style = "loading…", m.styles.muted
+	}
+	lines := strings.Split(content, "\n")
+	if isTailPreviewKind(item.Kind) {
+		if len(lines) > room {
+			lines = lines[len(lines)-room:]
+		}
+		out = append(out, make([]string, max(0, room-len(lines)))...)
+	} else if len(lines) > room {
+		lines = lines[:room]
+	}
+	for _, line := range lines {
+		clipped := clampStyledText(line, width)
+		if style.GetForeground() != nil {
+			clipped = style.Render(clipped)
+		}
+		out = append(out, clipped)
+	}
+	return out
+}
+
+// isTailPreviewKind reports whether a kind's preview is sourced from a
+// multiplexer capture (tmux capture-pane or herdr pane read), both of which are
+// bottom-anchored, rather than a top-down directory listing.
+func isTailPreviewKind(kind sessionmgr.Kind) bool {
+	return kind == sessionmgr.KindSession || kind == sessionmgr.KindAgent
+}
+
+type footerHint struct {
+	key   string
+	label string
+}
+
+var pickerHints = []footerHint{
+	{"↑↓", "move"},
+	{"⏎", "open"},
+	{"⇥", "filter"},
+	{"^r", "rename"},
+	{"^x", "kill"},
+	{"^o", "preview"},
+	{"^y", "yazi"},
+	{"esc", "quit"},
+}
+
+func (m Model) renderFooter(width int) string {
+	switch {
+	case m.killArmed:
+		return m.renderKillConfirm(width)
+	case m.renameActive:
+		return m.styles.key.Render("⏎") + " " + m.styles.muted.Render("save") +
+			"  " + m.styles.key.Render("esc") + " " + m.styles.muted.Render("cancel")
+	}
+	counter := m.footerCounter()
+	parts := make([]string, 0, len(pickerHints))
+	for _, hint := range pickerHints {
+		parts = append(parts, m.styles.key.Render(hint.key)+" "+m.styles.muted.Render(hint.label))
+	}
+	width2 := func() int {
+		total := 0
+		for i, part := range parts {
+			if i > 0 {
+				total += 2
+			}
+			total += lipgloss.Width(part)
+		}
+		return total
+	}
+	for len(parts) > 0 && width2()+lipgloss.Width(counter)+2 > width {
+		parts = parts[:len(parts)-1]
+	}
+	return composeLine(strings.Join(parts, "  "), counter, width, m.styles.muted)
+}
+
+// footerCounter is "shown/total", collapsed to "total" when nothing is filtered
+// out.
+func (m Model) footerCounter() string {
+	shown, total := len(m.rows()), len(m.items)
+	if shown == total {
+		return fmt.Sprintf("%d", total)
+	}
+	return fmt.Sprintf("%d/%d", shown, total)
+}
+
+func (m Model) renderKillConfirm(width int) string {
+	item := m.killPending
+	question := fmt.Sprintf("kill %s %s?", m.terms.SessionNoun, item.DisplayName())
+	if item.Kind == sessionmgr.KindAgent {
+		question = fmt.Sprintf("kill %s %s?", m.terms.PaneNoun, item.DisplayName())
+	}
+	left := m.styles.danger.Render(clampText(question, max(1, width-30)))
+	right := m.styles.muted.Render("⏎/y confirm · any other key cancels")
+	if lipgloss.Width(left)+lipgloss.Width(right)+2 > width {
+		return clampStyledText(left+"  "+right, width)
+	}
+	return left + "  " + right
+}
+
+func (m Model) renderInstallMenu(height int) string {
+	s := m.styles
+	width := max(54, min(88, m.width-4))
+	innerW := max(44, width-4)
+	names := integrations.Available()
+	innerH := max(11, len(names)+7)
+
+	lines := []string{
+		s.title.Render("Install agent integrations"),
+		s.muted.Render("Hooks/plugins report state to seshagy in real time."),
+		"",
+	}
+	for i, name := range names {
+		cursor := "  "
+		if i == m.installMenu.cursor {
+			cursor = s.bar.Render("▌") + " "
+		}
+		status := m.installMenu.statuses[name]
+		if status == "" {
+			status = "idle"
+		}
+		var glyph string
+		switch status {
+		case "installing", "uninstalling":
+			glyph = s.warning.Render("…")
+		case "installed":
+			glyph = s.success.Render("✓")
+		case "failed":
+			glyph = s.danger.Render("✗")
+		default:
+			glyph = s.muted.Render("○")
+		}
+		line := cursor + name + "  " + glyph
+		if i == m.installMenu.cursor {
+			line = s.selectedBG.Render(pad(line, innerW))
+		}
+		lines = append(lines, line)
+	}
+	if msg := m.installMenu.message; msg != "" {
+		lines = append(lines, "", s.muted.Render(clampText(msg, innerW)))
+	}
+	helpParts := []string{
+		s.key.Render("enter") + " install",
+		s.key.Render("u") + " uninstall",
+		s.key.Render("a") + " all",
+		s.key.Render("esc") + " close",
+		s.key.Render("q") + " quit",
+	}
+	lines = append(lines, "", strings.Join(helpParts, s.muted.Render(" · ")))
+	content := trimHeight(strings.Join(lines, "\n"), innerH)
+	box := s.panePopup.Width(width - 2).Height(innerH).Render(content)
+	return lipgloss.Place(m.width, height, lipgloss.Center, lipgloss.Center, box)
+}
+
+// overlayNotifications floats the toast stack in the frame's bottom-right
+// corner; the frame itself is the dimmed or plain dashboard.
 func (m Model) overlayNotifications(frame string) string {
 	toast := m.renderNotificationToast(time.Now())
 	if toast == "" {
@@ -141,316 +848,4 @@ func (m Model) renderNotificationToast(now time.Time) string {
 		BorderForeground(m.styles.muted.GetForeground()).
 		Width(contentW).
 		Render(strings.Join(lines, "\n"))
-}
-
-// inputPopupActive reports whether the search/rename text input is currently
-// shown as a floating popup rather than inline in the footer. Below a small
-// terminal size the popup is suppressed and the legacy inline field is used.
-// Cmdline input style always renders in the footer instead.
-func (m Model) inputPopupActive() bool {
-	if m.config.TUI.InputStyle == appconfig.InputStyleCmdline {
-		return false
-	}
-	return (m.inputMode == modeSearch || m.inputMode == modeRename) &&
-		m.width >= 34 && m.height >= 5
-}
-
-func (m Model) inlineInputActive() bool {
-	if m.inputMode != modeSearch && m.inputMode != modeRename {
-		return false
-	}
-	return m.config.TUI.InputStyle == appconfig.InputStyleCmdline || !m.inputPopupActive()
-}
-
-// configuredInput returns the active text input sized to available, including
-// its prompt and one cell for the cursor.
-func (m Model) configuredInput(available int) (string, textinput.Model, string) {
-	available = max(1, available)
-	var title, help string
-	var ti textinput.Model
-	switch m.inputMode {
-	case modeRename:
-		title = "RENAME"
-		ti = m.renameInput
-		ti.Prompt = clampText(m.renameFrom, available/2) + " -> "
-		help = "enter to rename · esc to cancel"
-	default:
-		title = "SEARCH"
-		ti = m.searchInput
-		help = "enter to filter · esc to cancel"
-	}
-	ti.Width = max(1, available-lipgloss.Width(ti.Prompt)-1)
-	return title, ti, help
-}
-
-// renderInputPopup renders the bordered centered popup that hosts the
-// search or rename text input plus a one-line help row.
-func (m Model) renderInputPopup() string {
-	boxWidth := min(60, m.width-4)
-	if boxWidth < 30 {
-		boxWidth = 30
-	}
-	contentWidth := max(1, boxWidth-4)
-	return renderPopupInput(m.projectInputChrome(contentWidth), m.styles, boxWidth)
-}
-
-func (m Model) renderSetupPrompt(height int) string {
-	s := m.styles
-	width := max(54, min(88, m.width-4))
-	innerW := max(44, width-4)
-	innerH := 11
-	title := "Choose startup input mode"
-	if m.setup.manual {
-		title = "Change input mode"
-	}
-	lines := []string{
-		s.title.Render(title),
-		s.muted.Render("Type-first mode lets normal typing filter immediately."),
-		s.muted.Render(
-			"App actions then require the configured prefix key (" + m.config.PrefixKey() + ").",
-		),
-		"",
-	}
-	choices := []struct {
-		label string
-		desc  string
-	}{
-		{"Enable type-first mode", "typing filters; " + m.config.PrefixKey() + " runs actions"},
-		{"Keep classic mode", "/ starts filtering; action keys work directly"},
-	}
-	for i, choice := range choices {
-		cursor := "  "
-		if i == m.setup.cursor {
-			cursor = s.bar.Render("▌") + " "
-		}
-		line := cursor + choice.label + s.muted.Render(" — "+choice.desc)
-		if i == m.setup.cursor {
-			line = s.selectedBG.Render(pad(line, innerW))
-		}
-		lines = append(lines, line)
-	}
-	helpParts := []string{
-		s.key.Render("enter") + " select",
-		s.key.Render("y") + " type-first",
-		s.key.Render("n") + " classic",
-	}
-	if m.setup.manual {
-		helpParts = append(helpParts, s.key.Render("esc")+" cancel")
-	}
-	helpParts = append(helpParts, s.key.Render("q")+" quit")
-	lines = append(lines, "", strings.Join(helpParts, s.muted.Render(" · ")))
-	content := trimHeight(strings.Join(lines, "\n"), innerH)
-	box := s.panePopup.Width(width - 2).Height(innerH).Render(content)
-	return lipgloss.Place(m.width, height, lipgloss.Center, lipgloss.Center, box)
-}
-
-func (m Model) renderInstallMenu(height int) string {
-	s := m.styles
-	width := max(54, min(88, m.width-4))
-	innerW := max(44, width-4)
-	names := integrations.Available()
-	innerH := max(11, len(names)+7)
-
-	lines := []string{
-		s.title.Render("Install agent integrations"),
-		s.muted.Render("Hooks/plugins report state to seshagy in real time."),
-		"",
-	}
-	for i, name := range names {
-		cursor := "  "
-		if i == m.installMenu.cursor {
-			cursor = s.bar.Render("▌") + " "
-		}
-		status := m.installMenu.statuses[name]
-		if status == "" {
-			status = "idle"
-		}
-		var glyph string
-		switch status {
-		case "installing", "uninstalling":
-			glyph = s.warning.Render("…")
-		case "installed":
-			glyph = s.success.Render("✓")
-		case "failed":
-			glyph = s.danger.Render("✗")
-		default:
-			glyph = s.muted.Render("○")
-		}
-		line := cursor + name + "  " + glyph
-		if i == m.installMenu.cursor {
-			line = s.selectedBG.Render(pad(line, innerW))
-		}
-		lines = append(lines, line)
-	}
-	if msg := m.installMenu.message; msg != "" {
-		lines = append(lines, "", s.muted.Render(msg))
-	}
-	helpParts := []string{
-		s.key.Render("enter") + " install",
-		s.key.Render("u") + " uninstall",
-		s.key.Render("a") + " all",
-		s.key.Render("esc") + " close",
-		s.key.Render("q") + " quit",
-	}
-	lines = append(lines, "", strings.Join(helpParts, s.muted.Render(" · ")))
-	content := trimHeight(strings.Join(lines, "\n"), innerH)
-	box := s.panePopup.Width(width - 2).Height(innerH).Render(content)
-	return lipgloss.Place(m.width, height, lipgloss.Center, lipgloss.Center, box)
-}
-
-func compactAgentCount(count, maxWidth int) string {
-	if maxWidth <= 0 {
-		return ""
-	}
-	raw := fmt.Sprintf("%d", count)
-	if lipgloss.Width(raw) <= maxWidth {
-		return raw
-	}
-	for _, unit := range []struct {
-		value  int
-		suffix string
-	}{
-		{1_000_000_000, "b"},
-		{1_000_000, "m"},
-		{1_000, "k"},
-	} {
-		if count >= unit.value {
-			compact := fmt.Sprintf("%d%s", count/unit.value, unit.suffix)
-			if lipgloss.Width(compact) <= maxWidth {
-				return compact
-			}
-		}
-	}
-	return clampText(raw, maxWidth)
-}
-
-func rowText(parts ...string) string {
-	kept := make([]string, 0, len(parts))
-	for _, part := range parts {
-		if part != "" {
-			kept = append(kept, part)
-		}
-	}
-	if len(kept) == 0 {
-		return ""
-	}
-	var b strings.Builder
-	for i, part := range kept {
-		if i > 0 && !strings.HasSuffix(sessionmgr.StripANSI(b.String()), " ") &&
-			!strings.HasPrefix(sessionmgr.StripANSI(part), " ") {
-			b.WriteString(" ")
-		}
-		b.WriteString(part)
-	}
-	return b.String()
-}
-
-// isTailPreviewKind reports whether a kind's preview is sourced from a
-// multiplexer capture (tmux capture-pane or herdr pane read), both of which
-// are bottom-anchored, rather than a top-down directory listing.
-func isTailPreviewKind(kind sessionmgr.Kind) bool {
-	return kind == sessionmgr.KindSession || kind == sessionmgr.KindAgent
-}
-
-func (m Model) renderShellFooter(actions actionsView) string {
-	footerWidth := safeWidth(m.width)
-	renderActions := m.layoutSpec().renderActions
-	if renderActions == nil {
-		renderActions = renderDefaultActionsTile
-	}
-	help := renderActions(actions, m.styles, footerWidth)
-	if m.inlineInputActive() {
-		inputTile := m.renderInlineInputTile()
-		if m.height > 0 && m.height < 5 {
-			return inputTile
-		}
-		return inputTile + "\n" + help
-	}
-	return help
-}
-
-func (m Model) renderInlineInputTile() string {
-	footerWidth := safeWidth(m.width)
-	spec := m.layoutSpec()
-	contentWidth := defaultInputContentWidth(footerWidth)
-	if spec.inputContentWidth != nil {
-		contentWidth = spec.inputContentWidth(footerWidth)
-	}
-	renderInput := spec.renderInput
-	if renderInput == nil {
-		renderInput = renderCmdlineInput
-	}
-	return renderInput(
-		m.projectInputChrome(contentWidth),
-		m.styles,
-		footerWidth,
-	)
-}
-
-func renderTmuxStateStyled(s styles, attached bool, text, color string) string {
-	if strings.TrimSpace(color) != "" {
-		return lipgloss.NewStyle().Foreground(lipgloss.Color(color)).Render(text)
-	}
-	if attached {
-		return s.success.Render(text)
-	}
-	return s.muted.Render(text)
-}
-
-func renderAgentStateStyled(s styles, state sessionmgr.AgentState, text, color string) string {
-	if strings.TrimSpace(color) != "" {
-		return lipgloss.NewStyle().Foreground(lipgloss.Color(color)).Render(text)
-	}
-	return agentStateFallback(s, state, text)
-}
-
-func agentStateText(state sessionmgr.AgentState) string {
-	return string(state)
-}
-
-func agentStateFallback(s styles, state sessionmgr.AgentState, text string) string {
-	switch state {
-	case sessionmgr.AgentWorking:
-		return s.success.Render(text)
-	case sessionmgr.AgentBlocked:
-		return s.warning.Render(text)
-	case sessionmgr.AgentDone:
-		return s.info.Render(text)
-	case sessionmgr.AgentUnknown:
-		return s.muted.Render(text)
-	default:
-		return s.muted.Render(text)
-	}
-}
-
-func kv(s styles, key, value string) string {
-	return fmt.Sprintf("%-9s %s", s.muted.Render(key), value)
-}
-
-func composeLine(left, right string, width int, rightStyle lipgloss.Style) string {
-	if right == "" {
-		return clampText(left, width)
-	}
-	right = rightStyle.Render(right)
-	leftW := lipgloss.Width(left)
-	rightW := lipgloss.Width(right)
-	if leftW+rightW+1 > width {
-		return clampText(left, width)
-	}
-	return left + strings.Repeat(" ", width-leftW-rightW) + right
-}
-
-func visibleWindow(total, cursor, height int) (int, int) {
-	if total <= height {
-		return 0, total
-	}
-	half := height / 2
-	start := cursor - half
-	if start < 0 {
-		start = 0
-	}
-	if start+height > total {
-		start = total - height
-	}
-	return start, start + height
 }

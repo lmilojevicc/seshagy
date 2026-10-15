@@ -14,6 +14,21 @@ import (
 
 const DefaultFDCommand = `fd -H -a -d 2 -t d -E .Trash . "$HOME"`
 
+// findFallbackCommand is the portable `find` equivalent of DefaultFDCommand:
+// directories one and two levels below $HOME, hidden ones included (like
+// `fd -H`), with the noisy VCS/dependency/trash trees pruned. Paths are
+// absolute because $HOME is.
+const findFallbackCommand = `find "$HOME" -mindepth 1 -maxdepth 2 ` +
+	`\( -name .git -o -name node_modules -o -name .Trash \) -prune ` +
+	`-o -mindepth 1 -maxdepth 2 -type d -print`
+
+// FDAvailable reports whether the `fd` binary is on PATH. When it is missing
+// the default fd command falls back to `find`; callers use this to label the
+// resulting rows honestly.
+func FDAvailable() bool {
+	return commandOnPath("fd")
+}
+
 func ListZoxideDirs(ctx context.Context) ([]Item, error) {
 	if !commandOnPath("zoxide") {
 		return nil, nil
@@ -26,10 +41,7 @@ func ListZoxideDirs(ctx context.Context) ([]Item, error) {
 }
 
 func ListFDirsWithCommand(ctx context.Context, command string) ([]Item, error) {
-	command = strings.TrimSpace(command)
-	if command == "" {
-		command = DefaultFDCommand
-	}
+	command = resolveFDCommand(command)
 	out, err := optionalCommandOutput(shellCommand(ctx, command))
 	if err != nil {
 		return nil, fmt.Errorf("fd command: %w", err)
@@ -42,6 +54,20 @@ func ListFDirsWithCommand(ctx context.Context, command string) ([]Item, error) {
 func commandOnPath(name string) bool {
 	_, err := exec.LookPath(name)
 	return err == nil
+}
+
+// resolveFDCommand picks the command actually run for the directory source. An
+// empty or default-configured command falls back to `find` when `fd` is not
+// installed; a user-supplied custom command is always run as given.
+func resolveFDCommand(command string) string {
+	command = strings.TrimSpace(command)
+	if command == "" {
+		command = DefaultFDCommand
+	}
+	if command == DefaultFDCommand && !FDAvailable() {
+		return findFallbackCommand
+	}
+	return command
 }
 
 // optionalCommandOutput runs cmd and returns its stdout. A non-zero exit (for

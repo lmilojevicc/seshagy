@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"context"
 	"errors"
 	"testing"
 	"time"
@@ -11,412 +10,228 @@ import (
 	"github.com/lmilojevicc/seshagy/internal/sessionmgr"
 )
 
-func TestUpdateRefreshMsgForCurrentSource(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	m := New()
-	m.source = sessionmgr.ModeSessions
-	m.loading = true
-	m.inflightRefresh = map[sessionmgr.SourceMode]uint64{
-		sessionmgr.ModeSessions: 1,
-	}
+func TestUpdateRefreshMsgMergesSourcesAndTracksCurrentSession(t *testing.T) {
+	m := newTestModel(t)
+	m.inflightRefresh[sessionmgr.ModeSessions] = 1
+	m.refreshGen[sessionmgr.ModeSessions] = 1
 
-	model, cmd := m.Update(refreshMsg{
+	model, _ := m.Update(refreshMsg{
 		source: sessionmgr.ModeSessions,
 		gen:    1,
-		items:  testUpdateItems("alpha"),
+		items: []sessionmgr.Item{
+			{Kind: sessionmgr.KindSession, Name: "dev", Target: "dev"},
+		},
 	})
-	got := model.(Model)
-	if got.loading {
-		t.Fatal("loading still true after refresh")
+	m = model.(Model)
+	if !m.loadedOnce {
+		t.Fatal("loadedOnce not set after the first result")
 	}
-	if len(got.items) != 1 || got.items[0].Name != "alpha" {
-		t.Fatalf("items = %#v", got.items)
+	if len(m.items) != 1 || m.items[0].Name != "dev" {
+		t.Fatalf("items = %#v", m.items)
 	}
-	if len(got.notifications) != 0 {
-		t.Fatalf("notifications = %#v, want none for successful refresh", got.notifications)
+	if m.refreshInflight(sessionmgr.ModeSessions) {
+		t.Fatal("refresh still marked in flight after its result arrived")
 	}
-	if cmd == nil {
-		t.Fatal("expected preview command after refresh")
+
+	m.inflightRefresh[sessionmgr.ModeAgents] = 1
+	m.refreshGen[sessionmgr.ModeAgents] = 1
+	model, _ = m.Update(refreshMsg{
+		source:         sessionmgr.ModeAgents,
+		gen:            1,
+		items:          []sessionmgr.Item{agentItem("claude", "%1", "frontend")},
+		currentSession: "dev",
+	})
+	m = model.(Model)
+	if m.currentSession != "dev" {
+		t.Fatalf("currentSession = %q, want dev", m.currentSession)
+	}
+	if len(m.items) != 2 {
+		t.Fatalf("merged items = %#v, want sessions and agents", m.items)
+	}
+	if m.footerCounter() != "2" {
+		t.Fatalf("footerCounter = %q, want 2", m.footerCounter())
 	}
 }
 
 func TestSpinnerTickStopsWhenIdle(t *testing.T) {
-	m := New()
-	m.loading = false
+	m := newTestModel(t)
 	m.spinnerActive = true
-	m.inflightRefresh = map[sessionmgr.SourceMode]uint64{}
-
-	model, cmd := m.Update(spinnerTickMsg{})
-	got := model.(Model)
+	model, cmd := m.Update(spinnerTickMsg(time.Now()))
+	m = model.(Model)
 	if cmd != nil {
-		t.Fatalf("idle spinner tick rescheduled command: %v", cmd)
+		t.Fatalf("idle spinner kept ticking: %v", cmd)
 	}
-	if got.spinnerActive {
-		t.Fatal("spinnerActive remained true after idle tick")
-	}
-	if got.spinnerFrame != m.spinnerFrame {
-		t.Fatalf("idle spinner frame advanced from %d to %d", m.spinnerFrame, got.spinnerFrame)
+	if m.spinnerActive {
+		t.Fatal("spinner still active with nothing in flight")
 	}
 }
 
 func TestNotificationTickDismissesAfterTTL(t *testing.T) {
-	now := time.Now()
-	m := Model{notifications: []notification{
-		{text: "expired", sev: sevInfo, at: now.Add(-notificationTTL - time.Millisecond)},
-		{text: "fresh", sev: sevInfo, at: now},
-	}}
-
-	model, cmd := m.Update(notificationTickMsg(now))
-	got := model.(Model)
-	if len(got.notifications) != 1 || got.notifications[0].text != "fresh" {
-		t.Fatalf("notifications = %#v, want only fresh", got.notifications)
+	m := newTestModel(t)
+	m.notify("hello", sevInfo)
+	model, cmd := m.Update(notificationTickMsg(time.Now().Add(2 * notificationTTL)))
+	m = model.(Model)
+	if len(m.notifications) != 0 {
+		t.Fatalf("notifications = %#v, want none", m.notifications)
 	}
 	if cmd == nil {
-		t.Fatal("notification tick did not reschedule")
-	}
-}
-
-func TestUpdateAttachDoneMsgRefreshesAndSetsStatus(t *testing.T) {
-	t.Setenv("TMUX", "/tmp/fake-tmux-sock,12345,0")
-	t.Setenv("HERDR_ENV", "")
-	m := New()
-	m.cache = map[sessionmgr.SourceMode]modeCache{
-		sessionmgr.ModeSessions: {items: testUpdateItems("cached"), fetchedAt: time.Now()},
-	}
-
-	model, cmd := m.Update(attachDoneMsg{})
-	got := model.(Model)
-	if text := latestNotificationText(got); text != "returned from tmux" {
-		t.Fatalf("notification = %q, want returned from tmux", text)
-	}
-	if len(got.cache) != 0 {
-		t.Fatalf("cache not cleared = %#v", got.cache)
-	}
-	if cmd == nil {
-		t.Fatal("expected refresh command after attach")
-	}
-}
-
-func TestUpdateAttachDoneMsgRecordsError(t *testing.T) {
-	m := New()
-	loadErr := errors.New("attach failed")
-
-	model, cmd := m.Update(attachDoneMsg{err: loadErr})
-	got := model.(Model)
-	if sev := latestNotificationSeverity(got); sev != sevError {
-		t.Fatalf("severity = %v, want sevError", sev)
-	}
-	if text := latestNotificationText(got); text != "attach failed" {
-		t.Fatalf("notification = %q", text)
-	}
-	if cmd == nil {
-		t.Fatal("expected refresh command after attach error")
-	}
-}
-
-func TestUpdateCreateDoneMsgSuccessSchedulesAttach(t *testing.T) {
-	t.Setenv("TMUX", "/tmp/fake-tmux-sock,12345,0")
-	t.Setenv("HERDR_ENV", "")
-	m := New()
-
-	model, cmd := m.Update(
-		createDoneMsg{
-			item:    sessionmgr.Item{Kind: sessionmgr.KindSession, Name: "demo", Target: "demo"},
-			created: true,
-		},
-	)
-	got := model.(Model)
-	if text := latestNotificationText(got); text != "created session demo" {
-		t.Fatalf("notification = %q", text)
-	}
-	if cmd == nil {
-		t.Fatal("expected attach command after create")
-	}
-
-	model, cmd = m.Update(
-		createDoneMsg{
-			item: sessionmgr.Item{
-				Kind:   sessionmgr.KindSession,
-				Name:   "existing",
-				Target: "existing",
-			},
-			created: false,
-		},
-	)
-	got = model.(Model)
-	if text := latestNotificationText(got); text != "using session existing" {
-		t.Fatalf("notification = %q", text)
-	}
-	if cmd == nil {
-		t.Fatal("expected attach command after reuse")
-	}
-}
-
-func TestUpdateCreateDoneMsgRecordsError(t *testing.T) {
-	m := New()
-	createErr := errors.New("create failed")
-
-	model, cmd := m.Update(createDoneMsg{err: createErr})
-	got := model.(Model)
-	if sev := latestNotificationSeverity(got); sev != sevError {
-		t.Fatalf("severity = %v, want sevError", sev)
-	}
-	if text := latestNotificationText(got); text != "create failed" {
-		t.Fatalf("notification = %q", text)
-	}
-	if cmd != nil {
-		t.Fatal("expected no command after create error")
+		t.Fatal("notification tick stopped re-arming")
 	}
 }
 
 func TestUpdatePreviewMsgIgnoresStaleSelection(t *testing.T) {
-	m := New()
-	m.items = testUpdateItems("alpha")
-	m.cursor = 0
-
-	model, cmd := m.Update(previewMsg{key: "session:other", preview: "stale"})
-	got := model.(Model)
-	if got.preview != "" || got.previewError != "" || cmd != nil {
-		t.Fatalf(
-			"stale preview should be ignored: preview=%q error=%q cmd=%v",
-			got.preview,
-			got.previewError,
-			cmd,
-		)
-	}
-}
-
-func TestUpdatePreviewMsgStoresSemanticError(t *testing.T) {
-	m := New()
-	m.items = testUpdateItems("alpha")
-	m.cursor = 0
-	previewErr := errors.New("preview failed")
-
-	model, cmd := m.Update(previewMsg{
-		key: "session:alpha",
-		err: previewErr,
-	})
-	got := model.(Model)
-	if got.preview != "" || got.previewError != "preview failed" {
-		t.Fatalf(
-			"preview = %q error = %q, want semantic preview error",
-			got.preview,
-			got.previewError,
-		)
-	}
-	if got.previewKey != "session:alpha" || cmd != nil {
-		t.Fatalf("previewKey = %q cmd = %v", got.previewKey, cmd)
-	}
-}
-
-func TestUpdateYaziDoneMsgSchedulesCreateSession(t *testing.T) {
-	dir := t.TempDir()
-	sessionmgr.SetTmuxHooksForTest(t, func(_ context.Context, args ...string) ([]byte, error) {
-		if len(args) >= 1 && args[0] == "list-sessions" {
-			return nil, nil
-		}
-		return nil, nil
-	}, func(_ context.Context, args ...string) error {
-		if sessionmgr.MatchNewSession(args) {
-			return nil
-		}
-		return nil
-	})
-
 	m := newTestModel(t)
-	model, cmd := m.Update(yaziDoneMsg{path: dir})
-	got := model.(Model)
-	if text := latestNotificationText(got); text != "" {
-		t.Fatalf("yazi success notification = %q", text)
-	}
-	if cmd == nil {
-		t.Fatal("expected createSession command after yazi path")
-	}
-	createMsg := cmd().(createDoneMsg)
-	if createMsg.err != nil {
-		t.Fatalf("createSessionCmd() err = %v", createMsg.err)
-	}
-}
-
-func TestErrorNotifiedAsError(t *testing.T) {
-	m := New()
-	killErr := errors.New("kill failed")
-
-	model, cmd := m.Update(actionDoneMsg{
-		kind:   actionKill,
-		status: "killed session demo",
-		err:    killErr,
+	m = withItems(m, []sessionmgr.Item{
+		{Kind: sessionmgr.KindSession, Name: "demo", Target: "demo"},
 	})
-	got := model.(Model)
-	if sev := latestNotificationSeverity(got); sev != sevError {
-		t.Fatalf("severity = %v, want sevError", sev)
+	model, _ := m.Update(previewMsg{key: "session:other", preview: "stale"})
+	m = model.(Model)
+	if m.preview != "" {
+		t.Fatalf("stale preview stored: %q", m.preview)
 	}
-	if text := latestNotificationText(got); text != "kill failed" {
-		t.Fatalf("notification = %q, want kill failed", text)
+	model, _ = m.Update(previewMsg{key: "session:demo", preview: "fresh"})
+	m = model.(Model)
+	if m.preview != "fresh" || m.previewKey != "session:demo" {
+		t.Fatalf("preview = %q key = %q", m.preview, m.previewKey)
 	}
-	if len(got.cache) != 0 {
-		t.Fatalf("cache not cleared = %#v", got.cache)
-	}
-	if cmd == nil {
-		t.Fatal("expected refresh command after delete error")
-	}
-}
-
-func TestUpdateYaziDoneMsgErrorAndEmptyPath(t *testing.T) {
-	m := New()
-	yaziErr := errors.New("yazi failed")
-
-	model, cmd := m.Update(yaziDoneMsg{err: yaziErr})
-	got := model.(Model)
-	if text := latestNotificationText(got); text != "yazi failed" || cmd != nil {
-		t.Fatalf("yazi error notification = %q cmd:%v", text, cmd)
-	}
-
-	model, cmd = m.Update(yaziDoneMsg{})
-	got = model.(Model)
-	if text := latestNotificationText(
-		got,
-	); text != "yazi closed without a directory" ||
-		cmd != nil {
-		t.Fatalf("empty yazi path notification = %q cmd:%v", text, cmd)
-	}
-	if sev := latestNotificationSeverity(got); sev != sevWarning {
-		t.Fatalf("empty yazi path severity = %v, want sevWarning", sev)
+	model, _ = m.Update(previewMsg{key: "session:demo", err: errors.New("capture failed")})
+	m = model.(Model)
+	if m.previewError != "capture failed" || m.preview != "" {
+		t.Fatalf("preview error = %q preview = %q", m.previewError, m.preview)
 	}
 }
 
-func TestUpdateActionDoneMsgRecordsRenameError(t *testing.T) {
-	m := New()
-	renameErr := errors.New("rename failed")
-
-	model, cmd := m.Update(actionDoneMsg{
-		kind:   actionRename,
-		status: "renamed old to new",
-		err:    renameErr,
+func TestUpdateCreateDoneMsgSchedulesAttach(t *testing.T) {
+	m := newTestModel(t)
+	model, cmd := m.Update(createDoneMsg{
+		item:    sessionmgr.Item{Kind: sessionmgr.KindSession, Name: "demo", Target: "demo"},
+		created: true,
 	})
-	got := model.(Model)
-	if sev := latestNotificationSeverity(got); sev != sevError {
-		t.Fatalf("severity = %v, want sevError", sev)
-	}
-	if text := latestNotificationText(got); text != "rename failed" {
-		t.Fatalf("notification = %q", text)
-	}
-	if len(got.cache) != 0 {
-		t.Fatalf("cache not cleared = %#v", got.cache)
-	}
+	m = model.(Model)
 	if cmd == nil {
-		t.Fatal("expected refresh command after rename error")
+		t.Fatal("create did not schedule an attach")
+	}
+	if got := latestNotificationText(m); got != "created session demo" {
+		t.Fatalf("notification = %q", got)
+	}
+
+	errMsg := errors.New("boom")
+	model, cmd = m.Update(createDoneMsg{err: errMsg})
+	m = model.(Model)
+	if cmd != nil || latestNotificationSeverity(m) != sevError {
+		t.Fatalf("error create: cmd = %v notifications = %#v", cmd, m.notifications)
 	}
 }
 
-func TestUpdateDeleteDoneMsgSetsStatusAndRefreshes(t *testing.T) {
-	m := New()
-	m.cache = map[sessionmgr.SourceMode]modeCache{
-		sessionmgr.ModeSessions: {items: testUpdateItems("cached"), fetchedAt: time.Now()},
-	}
-
-	model, cmd := m.Update(actionDoneMsg{kind: actionKill, status: "killed session demo"})
-	got := model.(Model)
-	if text := latestNotificationText(got); text != "killed session demo" {
-		t.Fatalf("notification = %q", text)
-	}
-	if len(got.cache) != 0 {
-		t.Fatalf("cache not cleared = %#v", got.cache)
-	}
-	if cmd == nil {
-		t.Fatal("expected refresh command after delete")
-	}
-}
-
-func testUpdateItems(names ...string) []sessionmgr.Item {
-	items := make([]sessionmgr.Item, len(names))
-	for i, name := range names {
-		items[i] = sessionmgr.Item{Kind: sessionmgr.KindSession, Name: name}
-	}
-	return items
-}
-
-// TestActionDoneMsgClearsKillInFlight verifies that completing a kill (success
-// or error) clears the in-flight flag so the ephemeral focus-loss poll resumes.
-func TestActionDoneMsgClearsKillInFlight(t *testing.T) {
-	m := New()
-	m.killInFlight = true
-	model, _ := m.Update(actionDoneMsg{kind: actionKill, status: "killed session demo"})
-	if model.(Model).killInFlight {
-		t.Fatal("killInFlight not cleared on success")
-	}
-
-	m2 := New()
-	m2.killInFlight = true
-	model2, _ := m2.Update(actionDoneMsg{
-		kind: actionKill,
-		err:  errors.New("boom"),
+func TestUpdateAttachDoneMsgRefreshesSources(t *testing.T) {
+	m := newTestModel(t)
+	m = withItems(m, []sessionmgr.Item{
+		{Kind: sessionmgr.KindSession, Name: "demo", Target: "demo"},
 	})
-	if model2.(Model).killInFlight {
-		t.Fatal("killInFlight not cleared on error")
+	model, cmd := m.Update(attachDoneMsg{})
+	m = model.(Model)
+	if cmd == nil {
+		t.Fatal("returning from the multiplexer did not reload")
+	}
+	if len(m.cache) != 0 {
+		t.Fatalf("cache not invalidated: %#v", m.cache)
+	}
+	if got := latestNotificationText(m); got != "returned from tmux" {
+		t.Fatalf("notification = %q", got)
 	}
 }
 
-func TestActionDoneMsgRenameKindsDoNotClearKillInFlight(t *testing.T) {
-	for _, kind := range []actionKind{actionRename, actionAgentRename} {
-		for _, err := range []error{nil, errors.New("boom")} {
-			name := string(kind) + "/success"
-			if err != nil {
-				name = string(kind) + "/error"
-			}
-			t.Run(name, func(t *testing.T) {
-				m := New()
-				m.killInFlight = true
-
-				model, _ := m.Update(actionDoneMsg{
-					kind:   kind,
-					status: "rename complete",
-					err:    err,
-				})
-				if !model.(Model).killInFlight {
-					t.Fatalf("%s completion cleared killInFlight", kind)
-				}
-			})
-		}
-	}
-
-	// Positive control: only a completed kill owns and clears the flag.
-	m := New()
+func TestActionDoneMsgClearsKillInFlightForKillsOnly(t *testing.T) {
+	m := newTestModel(t)
 	m.killInFlight = true
 	model, _ := m.Update(actionDoneMsg{kind: actionKill, status: "killed session demo"})
 	if model.(Model).killInFlight {
 		t.Fatal("kill completion did not clear killInFlight")
 	}
+
+	m = newTestModel(t)
+	m.killInFlight = true
+	model, _ = m.Update(actionDoneMsg{kind: actionRename, status: "renamed session demo"})
+	if !model.(Model).killInFlight {
+		t.Fatal("rename completion cleared killInFlight")
+	}
 }
 
-// TestEphemeralTickSkipsQuitWhileKillInFlight verifies that while a kill is in
-// flight, the ephemeral focus-loss poll does NOT quit seshagy (the close's
-// refocus would otherwise dismiss the dashboard before the focus-restore
-// lands). When no kill is in flight, focus-loss still quits as before.
-func TestEphemeralTickSkipsQuitWhileKillInFlight(t *testing.T) {
-	m := New()
-	m.mux = sessionmgr.NewHerdrBackend()
+func TestActionDoneMsgErrorIsNotifiedAsError(t *testing.T) {
+	m := newTestModel(t)
+	model, cmd := m.Update(actionDoneMsg{kind: actionKill, err: errors.New("kill failed")})
+	m = model.(Model)
+	if cmd == nil {
+		t.Fatal("failed action did not reload")
+	}
+	if latestNotificationSeverity(m) != sevError || latestNotificationText(m) != "kill failed" {
+		t.Fatalf("notifications = %#v", m.notifications)
+	}
+}
+
+func TestUpdateYaziDoneMsgSchedulesCreateSession(t *testing.T) {
+	m := newTestModel(t)
+	_, cmd := m.Update(yaziDoneMsg{path: "/tmp/picked"})
+	if cmd == nil {
+		t.Fatal("yazi result did not schedule session creation")
+	}
+
+	m = newTestModel(t)
+	model, cmd := m.Update(yaziDoneMsg{path: ""})
+	m = model.(Model)
+	if cmd != nil {
+		t.Fatalf("empty yazi path scheduled a command: %v", cmd)
+	}
+	if latestNotificationSeverity(m) != sevWarning {
+		t.Fatalf("notifications = %#v, want a warning", m.notifications)
+	}
+}
+
+func TestUpdateEphemeralTickSkipsQuitWhileKillInFlight(t *testing.T) {
+	m := newTestModel(t)
 	m.ephemeral = true
-	m.herdrPaneID = "pSelf"
-	m.herdrWorkspaceID = "wSelf"
-
-	// In flight: must re-schedule the tick, not quit.
 	m.killInFlight = true
-	_, cmd := m.Update(ephemeralTickMsg{})
-	if cmd == nil {
-		t.Fatal("expected re-tick cmd while killInFlight")
+	_, cmd := m.Update(ephemeralTickMsg(time.Now()))
+	if isQuitCmd(cmd) {
+		t.Fatal("focus-loss poll quit seshagy while a kill was in flight")
 	}
-	if _, ok := cmd().(tea.QuitMsg); ok {
-		t.Fatal("ephemeral tick quit while killInFlight")
+	if cmd == nil {
+		t.Fatal("focus-loss poll stopped re-arming")
+	}
+}
+
+func TestCatalogRefreshMsgReloadsCaches(t *testing.T) {
+	m := newTestModel(t)
+	m = withItems(m, []sessionmgr.Item{
+		{Kind: sessionmgr.KindSession, Name: "demo", Target: "demo"},
+	})
+	model, cmd := m.Update(catalogRefreshMsg{
+		result: sessionmgr.ManifestFetchResult{Fetched: []string{"claude"}},
+	})
+	m = model.(Model)
+	if cmd == nil {
+		t.Fatal("manifest update did not reload sources")
+	}
+	if len(m.cache) != 0 {
+		t.Fatalf("cache not invalidated: %#v", m.cache)
+	}
+	if got := latestNotificationText(m); got != "agent rules updated (1)" {
+		t.Fatalf("notification = %q", got)
 	}
 
-	// Not in flight: the pane query fails (no such pane) → focus lost → quit.
-	m.killInFlight = false
-	_, cmd = m.Update(ephemeralTickMsg{})
-	if cmd == nil {
-		t.Fatal("expected a cmd when not in flight")
+	m = newTestModel(t)
+	model, cmd = m.Update(catalogRefreshMsg{err: errors.New("offline")})
+	m = model.(Model)
+	if cmd != nil || latestNotificationSeverity(m) != sevWarning {
+		t.Fatalf("failed catalog refresh: cmd = %v notifications = %#v", cmd, m.notifications)
 	}
-	if _, ok := cmd().(tea.QuitMsg); !ok {
-		t.Fatalf("expected tea.Quit on focus-loss when not in flight; got %T", cmd())
+}
+
+func TestWindowSizeUpdateKeepsModelSized(t *testing.T) {
+	m := newTestModel(t)
+	model, _ := m.Update(tea.WindowSizeMsg{Width: 140, Height: 40})
+	m = model.(Model)
+	if m.width != 140 || m.height != 40 {
+		t.Fatalf("size = %dx%d", m.width, m.height)
 	}
 }

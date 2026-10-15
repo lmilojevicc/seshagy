@@ -1,344 +1,221 @@
 package tui
 
 import (
-	"errors"
 	"testing"
 	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/lmilojevicc/seshagy/internal/sessionmgr"
 )
 
-func testItems(names ...string) []sessionmgr.Item {
-	items := make([]sessionmgr.Item, len(names))
-	for i, name := range names {
-		items[i] = sessionmgr.Item{Kind: sessionmgr.KindSession, Name: name}
+func TestCacheTTLsPerSource(t *testing.T) {
+	tests := []struct {
+		source sessionmgr.SourceMode
+		want   time.Duration
+	}{
+		{sessionmgr.ModeAgents, time.Second},
+		{sessionmgr.ModeSessions, 2 * time.Second},
+		{sessionmgr.ModeZoxide, 15 * time.Second},
+		{sessionmgr.ModeFD, time.Minute},
 	}
-	return items
+	for _, tt := range tests {
+		if got := cacheTTL(tt.source); got != tt.want {
+			t.Fatalf("cacheTTL(%v) = %v, want %v", tt.source, got, tt.want)
+		}
+	}
 }
 
-func TestSwitchSourceUsesFreshCacheWithoutBlockingLoad(t *testing.T) {
-	m := New()
-	m.source = sessionmgr.ModeSessions
-	m.items = testItems("stale-session")
-	m.loading = false
+func TestMergedItemsDedupesFDAgainstZoxide(t *testing.T) {
+	m := newTestModel(t)
 	m.cache = map[sessionmgr.SourceMode]modeCache{
-		sessionmgr.ModeZoxide: {
-			items:     testItems("cached-zoxide"),
-			fetchedAt: time.Now(),
-		},
+		sessionmgr.ModeSessions: {items: []sessionmgr.Item{
+			{Kind: sessionmgr.KindSession, Name: "dev", Target: "dev"},
+		}},
+		sessionmgr.ModeAgents: {items: []sessionmgr.Item{agentItem("claude", "%1", "dev")}},
+		sessionmgr.ModeZoxide: {items: []sessionmgr.Item{
+			{Kind: sessionmgr.KindZoxide, Path: "~/code", Name: "~/code"},
+		}},
+		sessionmgr.ModeFD: {items: []sessionmgr.Item{
+			{Kind: sessionmgr.KindFD, Path: "~/code", Name: "~/code"},
+			{Kind: sessionmgr.KindFD, Path: "~/other", Name: "~/other"},
+		}},
 	}
-
-	model, cmd := m.switchSource(sessionmgr.ModeZoxide)
-	got := model.(Model)
-	if got.loading {
-		t.Fatal("loading = true, want false for fresh cache hit")
+	items := m.mergedItems()
+	if len(items) != 4 {
+		t.Fatalf("merged items = %#v, want 4 (fd duplicate dropped)", items)
 	}
-	if len(got.items) != 1 || got.items[0].Name != "cached-zoxide" {
-		t.Fatalf("items = %#v, want cached agent", got.items)
+	deduped := 0
+	for _, item := range items {
+		if item.Kind == sessionmgr.KindFD {
+			deduped++
+			if item.Path == "~/code" {
+				t.Fatal("fd duplicate of the zoxide path survived")
+			}
+		}
 	}
-	if cmd == nil {
-		t.Fatal("expected background refresh command")
+	if deduped != 1 {
+		t.Fatalf("fd items = %d, want 1", deduped)
 	}
 }
 
-func TestSwitchSourceClearsItemsWhenCacheMissing(t *testing.T) {
-	m := New()
-	m.source = sessionmgr.ModeSessions
-	m.items = testItems("session-a")
-	m.loading = false
-
-	model, _ := m.switchSource(sessionmgr.ModeZoxide)
-	got := model.(Model)
-	if !got.loading {
-		t.Fatalf("loading = %v, want true", got.loading)
+func TestTickRefreshesOnlyStaleSources(t *testing.T) {
+	m := newTestModel(t)
+	now := time.Now()
+	m.cache = map[sessionmgr.SourceMode]modeCache{
+		sessionmgr.ModeAgents: {fetchedAt: now}, // fresh (TTL 1s)
+		sessionmgr.ModeSessions: {
+			fetchedAt: now.Add(-3 * time.Second), // stale (TTL 2s)
+		},
+		sessionmgr.ModeZoxide: {fetchedAt: now.Add(-time.Minute)}, // stale (TTL 15s)
+		// fd has no entry: never loaded, so stale.
 	}
-	if len(got.items) != 0 {
-		t.Fatalf("items = %#v, want empty while loading uncached mode", got.items)
+	model, cmd := m.Update(tickMsg(now))
+	m = model.(Model)
+	if cmd == nil {
+		t.Fatal("tick returned no commands")
+	}
+	for _, source := range []sessionmgr.SourceMode{
+		sessionmgr.ModeSessions,
+		sessionmgr.ModeZoxide,
+		sessionmgr.ModeFD,
+	} {
+		if !m.refreshInflight(source) {
+			t.Fatalf("stale source %v was not refreshed", source)
+		}
+	}
+	if m.refreshInflight(sessionmgr.ModeAgents) {
+		t.Fatal("fresh agents source was refreshed")
+	}
+}
+
+func TestBeginRefreshCoalescesInflightAndStartsSpinner(t *testing.T) {
+	m := newTestModel(t)
+	var cmd tea.Cmd
+	m, cmd = m.beginRefresh(sessionmgr.ModeSessions, false)
+	if cmd == nil {
+		t.Fatal("first refresh returned no command")
+	}
+	if !m.spinnerActive {
+		t.Fatal("first refresh did not start the spinner")
+	}
+	if _, again := m.beginRefresh(sessionmgr.ModeSessions, false); again != nil {
+		t.Fatal("an in-flight refresh was started twice")
+	}
+	gen := m.inflightRefresh[sessionmgr.ModeSessions]
+	if _, forced := m.beginRefresh(sessionmgr.ModeSessions, true); forced == nil {
+		t.Fatal("forced refresh did not restart the source")
+	}
+	if m.inflightRefresh[sessionmgr.ModeSessions] == gen {
+		t.Fatal("forced refresh reused the previous generation")
 	}
 }
 
 func TestRefreshMsgDropsStaleGeneration(t *testing.T) {
-	m := New()
-	m.source = sessionmgr.ModeSessions
-	m.items = testItems("keep-me")
-	m.inflightRefresh = map[sessionmgr.SourceMode]uint64{
-		sessionmgr.ModeSessions: 2,
+	m := newTestModel(t)
+	m.refreshGen[sessionmgr.ModeSessions] = 5
+	m.inflightRefresh[sessionmgr.ModeSessions] = 5
+	model, cmd := m.handleRefreshMsg(refreshMsg{
+		source: sessionmgr.ModeSessions,
+		gen:    4,
+		items:  []sessionmgr.Item{{Kind: sessionmgr.KindSession, Name: "stale"}},
+	})
+	m = model
+	if cmd != nil || len(m.items) != 0 {
+		t.Fatalf("stale generation applied: items = %#v cmd = %v", m.items, cmd)
 	}
+	if m.loadedOnce {
+		t.Fatal("a stale result marked the picker as loaded")
+	}
+}
 
-	model, cmd := m.Update(refreshMsg{
+func TestServerWarningsAreToastedOnce(t *testing.T) {
+	m := newTestModel(t)
+	m.inflightRefresh[sessionmgr.ModeZoxide] = 1
+	m.refreshGen[sessionmgr.ModeZoxide] = 1
+	msg := refreshMsg{
+		source:  sessionmgr.ModeZoxide,
+		gen:     1,
+		warning: "zoxide unavailable",
+	}
+	model, _ := m.Update(msg)
+	m = model.(Model)
+	if latestNotificationText(m) != "zoxide unavailable" ||
+		latestNotificationSeverity(m) != sevWarning {
+		t.Fatalf("notifications = %#v", m.notifications)
+	}
+	before := len(m.notifications)
+
+	m.inflightRefresh[sessionmgr.ModeZoxide] = 2
+	m.refreshGen[sessionmgr.ModeZoxide] = 2
+	model, _ = m.Update(refreshMsg{
+		source:  sessionmgr.ModeZoxide,
+		gen:     2,
+		warning: "zoxide unavailable",
+	})
+	m = model.(Model)
+	if len(m.notifications) != before {
+		t.Fatalf("repeated warning toasted again: %#v", m.notifications)
+	}
+}
+
+func TestServerErrorIsToastedAsError(t *testing.T) {
+	m := newTestModel(t)
+	m.inflightRefresh[sessionmgr.ModeSessions] = 1
+	m.refreshGen[sessionmgr.ModeSessions] = 1
+	model, _ := m.Update(refreshMsg{
 		source: sessionmgr.ModeSessions,
 		gen:    1,
-		items:  testItems("stale"),
+		err:    errSessionsUnavailable,
 	})
-	got := model.(Model)
-	if len(got.items) != 1 || got.items[0].Name != "keep-me" {
-		t.Fatalf("stale refresh updated items = %#v", got.items)
-	}
-	if cmd != nil {
-		t.Fatal("expected no follow-up command for dropped refresh")
-	}
-	if _, ok := got.cache[sessionmgr.ModeSessions]; ok {
-		t.Fatal("stale refresh should not update cache")
+	m = model.(Model)
+	if latestNotificationSeverity(m) != sevError ||
+		latestNotificationText(m) != errSessionsUnavailable.Error() {
+		t.Fatalf("notifications = %#v", m.notifications)
 	}
 }
 
-func TestRefreshMsgUpdatesCacheForBackgroundMode(t *testing.T) {
-	m := New()
-	m.source = sessionmgr.ModeSessions
-	m.items = testItems("session-a")
-	m.inflightRefresh = map[sessionmgr.SourceMode]uint64{
-		sessionmgr.ModeZoxide: 1,
-	}
+type staticError string
 
-	model, cmd := m.Update(refreshMsg{
-		source: sessionmgr.ModeZoxide,
-		gen:    1,
-		items:  testItems("agent-a"),
-	})
-	got := model.(Model)
-	if cmd != nil {
-		t.Fatal("background refresh for other mode should not trigger preview")
-	}
-	if len(got.items) != 1 || got.items[0].Name != "session-a" {
-		t.Fatalf("visible items changed = %#v", got.items)
-	}
-	entry, ok := got.cache[sessionmgr.ModeZoxide]
-	if !ok || len(entry.items) != 1 || entry.items[0].Name != "agent-a" {
-		t.Fatalf("agents cache = %#v, ok=%v", entry, ok)
-	}
-}
+func (e staticError) Error() string { return string(e) }
 
-func TestTickSkipsRefreshWhenCacheFresh(t *testing.T) {
-	m := New()
+var errSessionsUnavailable = staticError("no server running")
+
+func TestInvalidateAllCachesDropsInflightRefreshes(t *testing.T) {
+	m := newTestModel(t)
+	m.inflightRefresh[sessionmgr.ModeSessions] = 1
 	m.cache = map[sessionmgr.SourceMode]modeCache{
-		m.source: {
-			items:     testItems("fresh"),
-			fetchedAt: time.Now(),
+		sessionmgr.ModeSessions: {items: []sessionmgr.Item{{Kind: sessionmgr.KindSession}}},
+	}
+	m = m.invalidateAllCaches()
+	if len(m.cache) != 0 {
+		t.Fatalf("cache not cleared: %#v", m.cache)
+	}
+	if m.anyRefreshInflight() {
+		t.Fatal("in-flight refreshes survived invalidation")
+	}
+	if m.refreshGen[sessionmgr.ModeSessions] != 1 {
+		t.Fatalf("generation not advanced: %d", m.refreshGen[sessionmgr.ModeSessions])
+	}
+}
+
+func TestStoreCacheKeepsCursorOnRefresh(t *testing.T) {
+	m := newTestModel(t)
+	m = withItems(m, []sessionmgr.Item{
+		{Kind: sessionmgr.KindSession, Name: "alpha", Target: "alpha"},
+		{Kind: sessionmgr.KindSession, Name: "bravo", Target: "bravo"},
+	})
+	m = m.setCursor(1)
+	model, _ := m.handleRefreshMsg(refreshMsg{
+		source: sessionmgr.ModeSessions,
+		gen:    m.inflightRefresh[sessionmgr.ModeSessions],
+		items: []sessionmgr.Item{
+			{Kind: sessionmgr.KindSession, Name: "bravo", Target: "bravo"},
+			{Kind: sessionmgr.KindSession, Name: "alpha", Target: "alpha"},
 		},
-	}
-	before := m.inflightRefresh[m.source]
-
-	model, cmd := m.Update(tickMsg(time.Now()))
-	got := model.(Model)
-	if cmd == nil {
-		t.Fatal("expected tick reschedule command")
-	}
-	if got.inflightRefresh[got.source] != before {
-		t.Fatal("tick started refresh despite fresh cache")
-	}
-}
-
-func TestTickSkipsRefreshWhenOverlayActive(t *testing.T) {
-	m := New()
-	m.setup.active = true
-	beforeGen := m.refreshGen[m.source]
-
-	model, cmd := m.Update(tickMsg(time.Now()))
-	got := model.(Model)
-	if cmd == nil {
-		t.Fatal("expected tick reschedule command")
-	}
-	if got.refreshGen[got.source] != beforeGen {
-		t.Fatal("tick started refresh during setup overlay")
-	}
-}
-
-func TestInvalidateCachesOnAttachDone(t *testing.T) {
-	m := New()
-	m.cache = map[sessionmgr.SourceMode]modeCache{
-		sessionmgr.ModeSessions: {items: testItems("cached"), fetchedAt: time.Now()},
-	}
-
-	model, cmd := m.Update(attachDoneMsg{})
-	got := model.(Model)
-	if len(got.cache) != 0 {
-		t.Fatalf("cache not cleared = %#v", got.cache)
-	}
-	if cmd == nil {
-		t.Fatal("expected refresh after attach")
-	}
-}
-
-func TestBeginRefreshStartsSpinnerTick(t *testing.T) {
-	m := New()
-	m.spinnerActive = false
-	m.inflightRefresh = map[sessionmgr.SourceMode]uint64{}
-
-	got, cmd := m.beginRefresh(sessionmgr.ModeZoxide, false)
-	if !got.spinnerActive {
-		t.Fatal("beginRefresh did not activate spinner")
-	}
-	if cmd == nil {
-		t.Fatal("beginRefresh did not schedule refresh and spinner commands")
-	}
-}
-
-func TestBeginRefreshCoalescesInflight(t *testing.T) {
-	m := New()
-	m.inflightRefresh = map[sessionmgr.SourceMode]uint64{
-		sessionmgr.ModeZoxide: 1,
-	}
-
-	model, cmd := m.beginRefresh(sessionmgr.ModeZoxide, false)
-	if cmd != nil {
-		t.Fatal("expected nil cmd for inflight coalesce")
-	}
-	if model.inflightRefresh[sessionmgr.ModeZoxide] != 1 {
-		t.Fatalf("inflight gen = %d, want 1", model.inflightRefresh[sessionmgr.ModeZoxide])
-	}
-}
-
-func TestInvalidateAllCachesDropsInflightRefresh(t *testing.T) {
-	m := New()
-	m.source = sessionmgr.ModeSessions
-	m.refreshGen = map[sessionmgr.SourceMode]uint64{
-		sessionmgr.ModeZoxide: 1,
-	}
-	m.inflightRefresh = map[sessionmgr.SourceMode]uint64{
-		sessionmgr.ModeZoxide: 1,
-	}
-	m.cache = map[sessionmgr.SourceMode]modeCache{
-		sessionmgr.ModeZoxide: {items: testItems("old-agent"), fetchedAt: time.Now()},
-	}
-
-	got := m.invalidateAllCaches()
-	if got.inflightRefresh[sessionmgr.ModeZoxide] != 0 {
-		t.Fatalf(
-			"inflight gen = %d, want 0 after invalidation",
-			got.inflightRefresh[sessionmgr.ModeZoxide],
-		)
-	}
-	if got.refreshGen[sessionmgr.ModeZoxide] != 2 {
-		t.Fatalf("refreshGen = %d, want 2 after bump", got.refreshGen[sessionmgr.ModeZoxide])
-	}
-	if len(got.cache) != 0 {
-		t.Fatalf("cache not cleared = %#v", got.cache)
-	}
-
-	model, cmd := got.handleRefreshMsg(refreshMsg{
-		source: sessionmgr.ModeZoxide,
-		gen:    1,
-		items:  testItems("stale-agent"),
 	})
-	if cmd != nil {
-		t.Fatal("expected no follow-up command for dropped refresh")
-	}
-	if _, ok := model.cache[sessionmgr.ModeZoxide]; ok {
-		t.Fatal("stale refresh repopulated cache after invalidation")
-	}
-}
-
-func TestHandleRefreshMsgStoresErrorInCache(t *testing.T) {
-	m := New()
-	m.source = sessionmgr.ModeZoxide
-	m.inflightRefresh = map[sessionmgr.SourceMode]uint64{
-		sessionmgr.ModeZoxide: 1,
-	}
-	loadErr := errors.New("load failed")
-
-	got, _ := m.handleRefreshMsg(refreshMsg{
-		source: sessionmgr.ModeZoxide,
-		gen:    1,
-		err:    loadErr,
-	})
-	entry, ok := got.cache[sessionmgr.ModeZoxide]
-	if !ok || !errors.Is(entry.err, loadErr) {
-		t.Fatalf("cache err = %v, ok=%v", entry.err, ok)
-	}
-	if text := latestNotificationText(got); text != "load failed" {
-		t.Fatalf("notification = %q, want load failed", text)
-	}
-}
-
-func TestHandleRefreshMsgSetsStatusFromWarning(t *testing.T) {
-	const warn = "manifest fallback used"
-	m := New()
-	m.source = sessionmgr.ModeSessions
-	m.inflightRefresh = map[sessionmgr.SourceMode]uint64{
-		sessionmgr.ModeSessions: 1,
-	}
-
-	got, _ := m.handleRefreshMsg(refreshMsg{
-		source:  sessionmgr.ModeSessions,
-		gen:     1,
-		items:   testItems("session-a", "session-b"),
-		warning: warn,
-	})
-	if text := latestNotificationText(got); text != warn {
-		t.Fatalf("notification = %q, want warning %q", text, warn)
-	}
-	if sev := latestNotificationSeverity(got); sev != sevWarning {
-		t.Fatalf("severity = %v, want sevWarning", sev)
-	}
-	entry, ok := got.cache[sessionmgr.ModeSessions]
-	if !ok || entry.warning != warn {
-		t.Fatalf("cache warning = %q, ok=%v", entry.warning, ok)
-	}
-}
-
-func TestSwitchSourceAppliesCachedWarningStatus(t *testing.T) {
-	const warn = "partial agent list"
-	m := New()
-	m.source = sessionmgr.ModeSessions
-	m.cache = map[sessionmgr.SourceMode]modeCache{
-		sessionmgr.ModeZoxide: {
-			items:     testItems("agent-a"),
-			fetchedAt: time.Now(),
-			warning:   warn,
-		},
-	}
-
-	model, _ := m.switchSource(sessionmgr.ModeZoxide)
-	got := model.(Model)
-	if text := latestNotificationText(got); text != warn {
-		t.Fatalf("notification = %q, want cached warning %q", text, warn)
-	}
-	if sev := latestNotificationSeverity(got); sev != sevWarning {
-		t.Fatalf("severity = %v, want sevWarning", sev)
-	}
-}
-
-// TestTickWarmsModeAllForOverview verifies the tick handler kicks off a
-// background ModeAll refresh (for the overview hero counts) even when the
-// active source tab is something else and already fresh.
-func TestTickWarmsModeAllForOverview(t *testing.T) {
-	m := New()
-	m.source = sessionmgr.ModeSessions
-	// Active source is fresh; ModeAll cache is absent (stale).
-	m.cache = map[sessionmgr.SourceMode]modeCache{
-		sessionmgr.ModeSessions: {items: testItems("s1"), fetchedAt: time.Now()},
-	}
-
-	model, _ := m.Update(tickMsg(time.Now()))
-	got := model.(Model)
-	if got.inflightRefresh[sessionmgr.ModeAll] == 0 {
-		t.Fatal("tick did not start a background ModeAll refresh for the overview")
-	}
-}
-
-// TestOverviewItemsReadsModeAllCache verifies overviewItems returns the warmed
-// ModeAll cache when another tab is active, m.items when ModeAll is active,
-// and nil before any ModeAll load.
-func TestOverviewItemsReadsModeAllCache(t *testing.T) {
-	m := New()
-	m.source = sessionmgr.ModeSessions
-	if got := m.overviewItems(); got != nil {
-		t.Fatalf("overviewItems before cache = %v, want nil", got)
-	}
-
-	cached := testItems("ws")
-	m.cache = map[sessionmgr.SourceMode]modeCache{
-		sessionmgr.ModeAll: {items: cached, fetchedAt: time.Now()},
-	}
-	if got := m.overviewItems(); len(got) != len(cached) {
-		t.Fatalf("overviewItems = %d items, want %d (ModeAll cache)", len(got), len(cached))
-	}
-
-	// When ModeAll is the active tab, m.items is used directly.
-	m.source = sessionmgr.ModeAll
-	m.items = testItems("active")
-	got := m.overviewItems()
-	if len(got) != len(m.items) {
-		t.Fatalf("overviewItems in ModeAll = %d, want m.items %d", len(got), len(m.items))
+	m = model
+	if m.cursor != 0 || m.cursorKey != "session:bravo" {
+		t.Fatalf("cursor = %d key = %q, want the reordered selection", m.cursor, m.cursorKey)
 	}
 }
