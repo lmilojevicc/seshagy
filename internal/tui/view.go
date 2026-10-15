@@ -25,11 +25,11 @@ const (
 	// hostIcon marks remote-machine rows.
 	hostIcon = "󰒋 "
 
-	placeholderText = "type to search · ⇥ or a sigil to filter"
+	placeholderText = "type to search"
 )
 
-// viewLayout is one frame's row/column budget: two header rows, optional rules,
-// an optional footer, and the body in between.
+// viewLayout is one frame's row/column budget: a prompt row, optional rules, an
+// optional footer, and the body in between.
 type viewLayout struct {
 	width        int
 	bodyHeight   int
@@ -42,7 +42,7 @@ type viewLayout struct {
 func computeViewLayout(width, height int, preview bool) viewLayout {
 	rules := height >= 8
 	footer := height >= 6
-	chrome := 2 // prompt row + filter strip
+	chrome := 1 // prompt row (query + filter chips)
 	if rules {
 		chrome += 2
 	}
@@ -89,7 +89,6 @@ func (m Model) renderPicker() string {
 	l := m.viewLayout()
 	lines := make([]string, 0, m.height)
 	lines = append(lines, m.renderPromptRow(l.width))
-	lines = append(lines, m.renderFilterStrip(l.width))
 	if l.rules {
 		lines = append(lines, m.renderRule(l.width))
 	}
@@ -130,6 +129,9 @@ func spinnerFrame(frame int) string {
 	return string(frames[frame%len(frames)])
 }
 
+// renderPromptRow draws the type-first prompt: the query (or the muted
+// placeholder) with the cursor block on the left, and the filter chips
+// right-aligned on the same row.
 func (m Model) renderPromptRow(width int) string {
 	s := m.styles
 	prompt := s.emphasis.Render("❯") + " "
@@ -140,17 +142,33 @@ func (m Model) renderPromptRow(width int) string {
 	case m.query != "":
 		left = prompt + m.query + m.cursorBlock()
 	default:
-		hint := clampText(placeholderText, max(1, width-4))
-		left = prompt + s.muted.Render(hint) + m.cursorBlock()
+		// An empty query types into the first cell of the input, so the cursor
+		// sits right behind the prompt with the placeholder following it.
+		left = prompt + m.cursorBlock() + s.muted.Render(placeholderText)
 	}
-	right := ""
+	// The query always wins the row: the chips only get whatever is left.
+	available := width - lipgloss.Width(left) - 1
+	spinner := ""
 	if !m.loadedOnce && m.spinnerActive {
-		right = spinnerFrame(m.spinnerFrame)
+		spinner = spinnerFrame(m.spinnerFrame)
+		if available >= lipgloss.Width(spinner)+1 {
+			available -= lipgloss.Width(spinner) + 1
+		} else {
+			spinner = ""
+		}
+	}
+	right := m.renderChips(available)
+	if spinner != "" {
+		if right == "" {
+			right = spinner
+		} else {
+			right += " " + spinner
+		}
 	}
 	return composeLine(left, right, width, s.emphasis)
 }
 
-// visibleScopes lists the chips the filter strip shows, in cycle order. The
+// visibleScopes lists the chips the prompt row shows, in cycle order. The
 // hosts chip only appears once host items exist.
 func (m Model) visibleScopes() []scope {
 	scopes := make([]scope, 0, int(scopeCount))
@@ -172,50 +190,61 @@ func (m Model) hasHosts() bool {
 	return false
 }
 
-// renderFilterStrip draws every scope chip, keeping the active one visible when
-// the terminal is too narrow for all of them.
-func (m Model) renderFilterStrip(width int) string {
+// chipSeparator joins the filter chips in the prompt row.
+const chipSeparator = "  "
+
+// renderChips renders the filter chips that fit in available columns. Inactive
+// chips drop from the end first; the active chip is kept whenever it fits at
+// all, so the current filter never disappears from the row.
+func (m Model) renderChips(available int) string {
 	scopes := m.visibleScopes()
+	if available <= 0 || len(scopes) == 0 {
+		return ""
+	}
 	active := 0
 	for i, sc := range scopes {
 		if sc == m.scope {
 			active = i
 		}
 	}
-	chipWidth := func(from, to int) int {
+	kept := make([]bool, len(scopes))
+	for i := range kept {
+		kept[i] = true
+	}
+	width := func() int {
 		total := 0
-		for i := from; i < to; i++ {
-			if i > from {
-				total += 2
+		for i, sc := range scopes {
+			if !kept[i] {
+				continue
 			}
-			total += len([]rune(scopes[i].chip()))
+			if total > 0 {
+				total += len(chipSeparator)
+			}
+			total += len([]rune(sc.chip()))
 		}
 		return total
 	}
-	start, end := active, active+1
-	for {
-		grew := false
-		if start > 0 && chipWidth(start-1, end) <= width {
-			start--
-			grew = true
+	for i := len(scopes) - 1; i >= 0 && width() > available; i-- {
+		if i == active {
+			continue
 		}
-		if end < len(scopes) && chipWidth(start, end+1) <= width {
-			end++
-			grew = true
-		}
-		if !grew {
-			break
-		}
+		kept[i] = false
 	}
-	parts := make([]string, 0, end-start)
-	for _, sc := range scopes[start:end] {
-		if sc == m.scope {
+	if width() > available {
+		return ""
+	}
+	parts := make([]string, 0, len(scopes))
+	for i, sc := range scopes {
+		if !kept[i] {
+			continue
+		}
+		if i == active {
 			parts = append(parts, m.styles.chipActive.Render(sc.chip()))
 			continue
 		}
 		parts = append(parts, m.styles.chipIdle.Render(sc.chip()))
 	}
-	return clampStyledText(strings.Join(parts, "  "), width)
+	return strings.Join(parts, chipSeparator)
 }
 
 // metaCell is one right-aligned row column: the plain text used for width
@@ -631,7 +660,7 @@ func (m Model) renderPreview(width, height int) []string {
 	if !ok || height <= 0 {
 		return nil
 	}
-	header := m.styles.muted.Render(clampText(itemTitle(item), width))
+	header := m.styles.muted.Render(clampText(sanitizePreviewLine(itemTitle(item)), width))
 	out := make([]string, 0, height)
 	out = append(out, header)
 	room := height - 1
@@ -655,11 +684,15 @@ func (m Model) renderPreview(width, height int) []string {
 		lines = lines[:room]
 	}
 	for _, line := range lines {
-		clipped := clampStyledText(line, width)
+		// Captures are raw terminal output: sanitize before clipping so no
+		// stray CR, tab, or cursor sequence reaches the frame, and close any
+		// color the line left open so it cannot bleed into the separator,
+		// the padding, or the next row.
+		clipped := clampStyledText(sanitizePreviewLine(line), width)
 		if style.GetForeground() != nil {
 			clipped = style.Render(clipped)
 		}
-		out = append(out, clipped)
+		out = append(out, clipped+previewReset)
 	}
 	return out
 }

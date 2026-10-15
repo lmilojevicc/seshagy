@@ -45,7 +45,7 @@ var scopeInfos = [scopeCount]scopeInfo{
 func (s scope) sigil() rune   { return scopeInfos[s].sigil }
 func (s scope) label() string { return scopeInfos[s].label }
 
-// chip is the "<sigil> <label>" text used by the filter strip and empty state.
+// chip is the "<sigil> <label>" text used by the prompt row and the empty state.
 func (s scope) chip() string {
 	if s.sigil() == 0 {
 		return s.label()

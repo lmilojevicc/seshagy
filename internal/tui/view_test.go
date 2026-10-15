@@ -49,6 +49,18 @@ func TestViewSnapshotSanityAcrossWidths(t *testing.T) {
 				)
 			}
 		}
+		// The chips share the prompt row with the query; there is no separate
+		// filter strip row, so the line under the prompt is the top rule.
+		prompt := lines[0]
+		for _, text := range []string{"❯", placeholderText, "all"} {
+			if !strings.Contains(prompt, text) {
+				t.Fatalf("width %d: prompt row missing %q: %q", width, text, prompt)
+			}
+		}
+		if stripped := strings.Trim(lines[1], "─"); stripped != "" {
+			t.Fatalf("width %d: line 1 is not a rule: %q", width, lines[1])
+		}
+
 		want := []string{
 			"❯",
 			"all",
@@ -63,12 +75,16 @@ func TestViewSnapshotSanityAcrossWidths(t *testing.T) {
 				"$ sessions",
 				"* dirs",
 				"~ zoxide",
-				"/ find",
 				"needs you",
 			)
 			// Narrow frames ellipsize titles and the placeholder; keep the
 			// full-text assertions to widths where nothing has to be clipped.
-			want = append(want, placeholderText, "claude-refactor", "review-spec", "~/code/demo")
+			want = append(want, "claude-refactor", "review-spec", "~/code/demo")
+		}
+		if width >= 100 {
+			// The chips share the prompt row with the query, so the last ones
+			// only fit on a wide frame.
+			want = append(want, "/ find")
 		}
 		for _, text := range want {
 			if !strings.Contains(out, text) {
@@ -105,6 +121,9 @@ func TestViewHighlightsActiveScopeChip(t *testing.T) {
 	}
 	if !strings.Contains(out, "\x1b[") {
 		t.Fatal("chips are rendered without styles")
+	}
+	if !strings.Contains(strings.Split(plain, "\n")[0], "@ agents") {
+		t.Fatal("chips are not on the prompt row")
 	}
 }
 
@@ -169,7 +188,70 @@ func TestPromptRowShowsShortPlaceholderOnly(t *testing.T) {
 		t.Fatalf("placeholder missing\n%s", plain)
 	}
 	if strings.Contains(placeholderText, "@ agents") {
-		t.Fatal("placeholder lists sigils; the filter strip is the only place they appear")
+		t.Fatal("placeholder lists sigils; the chips are the only place they appear")
+	}
+}
+
+// cursorColumn is the column the reverse-video cursor block starts in.
+func cursorColumn(t *testing.T, line string) int {
+	t.Helper()
+	index := strings.Index(line, "\x1b[7m")
+	if index < 0 {
+		t.Fatalf("no cursor block in %q", line)
+	}
+	return ansi.StringWidth(line[:index])
+}
+
+func TestPromptCursorSitsInTheInputNotAfterThePlaceholder(t *testing.T) {
+	withColor(t)
+	m := newTestModel(t)
+	m = withItems(m, pickerItems())
+
+	empty := m.renderPromptRow(80)
+	if got := cursorColumn(t, empty); got != 2 {
+		t.Fatalf("empty query: cursor column = %d, want 2: %q", got, empty)
+	}
+	if strings.Index(empty, "\x1b[7m") > strings.Index(empty, placeholderText) {
+		t.Fatalf("empty query: placeholder precedes the cursor: %q", empty)
+	}
+
+	m.query = "api"
+	typed := m.renderPromptRow(80)
+	if got := cursorColumn(t, typed); got != 5 {
+		t.Fatalf("typed query: cursor column = %d, want 5: %q", got, typed)
+	}
+}
+
+func TestPromptRowDropsInactiveChipsFromTheEnd(t *testing.T) {
+	m := newTestModel(t)
+	m = withItems(m, pickerItems())
+	m.scope = scopeAgents
+
+	row := sessionmgr.StripANSI(m.renderPromptRow(30))
+	if !strings.Contains(row, "@ agents") {
+		t.Fatalf("active chip dropped: %q", row)
+	}
+	for _, dropped := range []string{"/ find", "~ zoxide", "* dirs", "$ sessions"} {
+		if strings.Contains(row, dropped) {
+			t.Fatalf("narrow row kept %q: %q", dropped, row)
+		}
+	}
+
+	// The active chip is the last one: it survives while the others go.
+	m = withItems(m, []sessionmgr.Item{{Kind: sessionmgr.KindHost, Name: "box", Target: "box"}})
+	m.scope = scopeHosts
+	hosts := sessionmgr.StripANSI(m.renderPromptRow(28))
+	if !strings.Contains(hosts, "# hosts") {
+		t.Fatalf("trailing active chip dropped: %q", hosts)
+	}
+	if strings.Contains(hosts, "all") {
+		t.Fatalf("narrow row kept an inactive chip: %q", hosts)
+	}
+
+	// The query wins: a long query leaves no room for any chip.
+	m.query = strings.Repeat("q", 40)
+	if row := sessionmgr.StripANSI(m.renderPromptRow(30)); strings.Contains(row, "all") {
+		t.Fatalf("chips overlap a long query: %q", row)
 	}
 }
 

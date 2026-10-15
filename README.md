@@ -200,8 +200,8 @@ The picker is always type-first: printable keys filter the list, and every actio
 
 ### Filters
 
-Type a sigil on an **empty** prompt to select a filter, or cycle them with `tab`. The filter strip
-lists them; `# hosts` only appears when you have hosts.
+Type a sigil on an **empty** prompt to select a filter, or cycle them with `tab`. The chips sit
+right of the prompt; `# hosts` only appears when you have hosts.
 
 | Sigil | Filter      | Shows                                                      |
 | ----- | ----------- | ---------------------------------------------------------- |
