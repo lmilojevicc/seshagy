@@ -38,21 +38,51 @@ func refreshCmd(
 			warning: result.Warning,
 			err:     err,
 		}
-		// Resolve the current multiplexer session once per agent refresh so
-		// the current-session scope filter (toggled with 'o') can match
-		// without a per-render call. Runs in this background goroutine; a
-		// missing session (not in tmux/herdr) leaves currentSession empty.
-		if source == sessionmgr.ModeAgents {
-			if session, err := mux.CurrentSession(ctx); err == nil {
-				msg.currentSession = session
-			}
-		}
 		return msg
 	}
 }
 
 type installMenuMsg struct {
 	show bool
+}
+
+// agentStartTimesCmd resolves when the agents in items started: the agent pid
+// per pane (a CLI call under herdr, already known under tmux) and then ONE
+// batched ps call for every pid. Failures resolve nothing rather than erroring:
+// the row simply shows no age.
+func agentStartTimesCmd(mux sessionmgr.Multiplexer, items []sessionmgr.Item) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		panePIDs := make(map[string]int, len(items))
+		pids := make([]int, 0, len(items))
+		for _, item := range items {
+			pid := item.AgentPID
+			if pid <= 0 {
+				resolved, err := mux.AgentPID(ctx, item)
+				if err != nil || resolved <= 0 {
+					continue
+				}
+				pid = resolved
+			}
+			panePIDs[item.PaneID] = pid
+			pids = append(pids, pid)
+		}
+		if len(pids) == 0 {
+			return agentStartedMsg{}
+		}
+		starts, err := sessionmgr.ProcessStartTimes(ctx, pids, time.Now())
+		if err != nil {
+			return agentStartedMsg{}
+		}
+		resolved := make(map[string]agentStart, len(panePIDs))
+		for pane, pid := range panePIDs {
+			if started, ok := starts[pid]; ok {
+				resolved[pane] = agentStart{pid: pid, started: started}
+			}
+		}
+		return agentStartedMsg{starts: resolved}
+	}
 }
 
 type installResultMsg struct {

@@ -383,6 +383,16 @@ func herdrTabLabels(ctx context.Context) map[string]string {
 	return labels
 }
 
+// AgentPID resolves the pane's foreground process pid with
+// `herdr pane process-info`, which is how the picker reports agent uptime.
+func (herdrBackend) AgentPID(ctx context.Context, item Item) (int, error) {
+	out, err := herdrOutput(ctx, "pane", "process-info", "--pane", item.PaneID)
+	if err != nil {
+		return 0, fmt.Errorf("herdr pane process-info: %w", err)
+	}
+	return parseHerdrPaneProcessPID(out)
+}
+
 // CaptureAgentPane reads recent pane output. herdr's "recent" source is
 // tail/bottom-anchored, matching seshagy's bottom-anchored preview rendering.
 func (herdrBackend) CaptureAgentPane(

@@ -37,7 +37,6 @@ type styles struct {
 	rule       lipgloss.Style
 	chipActive lipgloss.Style
 	chipIdle   lipgloss.Style
-	working    lipgloss.Style
 	success    lipgloss.Style
 	info       lipgloss.Style
 	warning    lipgloss.Style
@@ -84,7 +83,6 @@ func stylesFromConfig(cfg appconfig.Config) styles {
 	s.rule = lipgloss.NewStyle().Foreground(muted)
 	s.chipActive = lipgloss.NewStyle().Foreground(accent).Bold(true)
 	s.chipIdle = lipgloss.NewStyle().Foreground(muted)
-	s.working = lipgloss.NewStyle().Foreground(p.yellow)
 	s.success = lipgloss.NewStyle().Foreground(success).Bold(true)
 	s.info = lipgloss.NewStyle().Foreground(info).Bold(true)
 	s.warning = lipgloss.NewStyle().Foreground(warning).Bold(true)

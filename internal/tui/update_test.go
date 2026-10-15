@@ -10,7 +10,7 @@ import (
 	"github.com/lmilojevicc/seshagy/internal/sessionmgr"
 )
 
-func TestUpdateRefreshMsgMergesSourcesAndTracksCurrentSession(t *testing.T) {
+func TestUpdateRefreshMsgMergesSourcesAndSchedulesAgentStartTimes(t *testing.T) {
 	m := newTestModel(t)
 	m.inflightRefresh[sessionmgr.ModeSessions] = 1
 	m.refreshGen[sessionmgr.ModeSessions] = 1
@@ -35,21 +35,25 @@ func TestUpdateRefreshMsgMergesSourcesAndTracksCurrentSession(t *testing.T) {
 
 	m.inflightRefresh[sessionmgr.ModeAgents] = 1
 	m.refreshGen[sessionmgr.ModeAgents] = 1
-	model, _ = m.Update(refreshMsg{
-		source:         sessionmgr.ModeAgents,
-		gen:            1,
-		items:          []sessionmgr.Item{agentItem("claude", "%1", "frontend")},
-		currentSession: "dev",
+	pane := agentItem("claude", "%1", "frontend")
+	pane.AgentPID = 4242
+	model, cmd := m.Update(refreshMsg{
+		source: sessionmgr.ModeAgents,
+		gen:    1,
+		items:  []sessionmgr.Item{pane},
 	})
 	m = model.(Model)
-	if m.currentSession != "dev" {
-		t.Fatalf("currentSession = %q, want dev", m.currentSession)
-	}
 	if len(m.items) != 2 {
 		t.Fatalf("merged items = %#v, want sessions and agents", m.items)
 	}
 	if m.footerCounter() != "2" {
 		t.Fatalf("footerCounter = %q, want 2", m.footerCounter())
+	}
+	// The new agent pane has no cached process start time, so an agent refresh
+	// queues the background resolution the age column renders from.
+	if !m.agentStartPending || cmd == nil {
+		t.Fatalf("agent refresh scheduled no start-time resolution (pending=%v)",
+			m.agentStartPending)
 	}
 }
 

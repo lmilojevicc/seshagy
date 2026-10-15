@@ -63,6 +63,12 @@ type Item struct {
 	AgentUpdated     time.Time
 	AgentSeq         int64
 	AgentSource      string
+	// AgentPID is the agent process discovery matched in the pane (tmux's
+	// process-tree walk). herdr panes leave it zero and resolve it on demand.
+	AgentPID int
+	// StartedAt is when the agent process started. It is not part of discovery:
+	// the caller resolves it with one batched ps call and stamps it on the item.
+	StartedAt time.Time
 }
 
 // ActionTarget returns the multiplexer-actionable identifier for an item: the

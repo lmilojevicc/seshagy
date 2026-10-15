@@ -37,6 +37,17 @@ func clampStyledText(text string, width int) string {
 	return ansi.Truncate(text, width, "…")
 }
 
+// hardCutStyledText truncates rendered text to width visible columns with no
+// ellipsis. It is the clipping a captured preview uses: a preview is a window
+// onto a terminal, so a partially drawn line reads as content the pane never
+// printed.
+func hardCutStyledText(text string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	return ansi.Truncate(text, width, "")
+}
+
 // previewTabStop is the tab stop width captured preview tabs expand to.
 const previewTabStop = 8
 
@@ -184,4 +195,34 @@ func visibleWindow(total, cursor, height int) (int, int) {
 		start = total - height
 	}
 	return start, start + height
+}
+
+// listWindow is the [start, end) row range a list of the given height draws,
+// plus the lines left over for the counters that report the rows hidden above
+// and below it ("↑ N more" / "↓ N more"). The rows and their counters never
+// add up to more than the list height, so a counter can never push the cursor
+// row out of the frame.
+func listWindow(total, cursor, height int) (start, end, counterSlots int) {
+	windowHeight := max(1, height)
+	// The counter count depends on the window height, which depends on the
+	// counter count; two passes settle it (shrinking the window by one line can
+	// only remove a counter, never add one).
+	for range 2 {
+		s, e := visibleWindow(total, cursor, windowHeight)
+		counters := 0
+		if s > 0 {
+			counters++
+		}
+		if e < total {
+			counters++
+		}
+		counters = min(counters, max(0, height-1))
+		if next := max(1, height-counters); next != windowHeight {
+			windowHeight = next
+			continue
+		}
+		break
+	}
+	start, end = visibleWindow(total, cursor, windowHeight)
+	return start, end, max(0, height-(end-start))
 }

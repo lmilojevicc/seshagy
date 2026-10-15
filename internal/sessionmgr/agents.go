@@ -152,7 +152,7 @@ func ParseAgents(raw []byte, sessionFilter string) []Item {
 		if sessionFilter != "" && parts[1] != sessionFilter {
 			continue
 		}
-		agentName := detectAgent(parts[5], parts[6], cache)
+		agentName, agentPID := detectAgent(parts[5], parts[6], cache)
 		if agentName == "" {
 			continue
 		}
@@ -193,6 +193,7 @@ func ParseAgents(raw []byte, sessionFilter string) []Item {
 			AgentName:    agentName,
 			AgentState:   agentState,
 			AgentUpdated: agentUpdated,
+			AgentPID:     agentPID,
 			PaneID:       parts[0],
 			Session:      parts[1],
 			Window:       parts[2],

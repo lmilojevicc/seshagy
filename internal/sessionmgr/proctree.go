@@ -80,32 +80,50 @@ func descendants(table map[int32]procEntry, root int32) []int32 {
 	return out
 }
 
-// detectAgent resolves the canonical agent name for a pane. It first tries the
-// fast path (the foreground command from pane_current_command). When that
-// fails — typically for node-based agents (pi, opencode, cursor-agent) that
-// report as "node" — it falls back to walking the pane's process descendants
-// and matching each comm against the same agentProcessNames table.
-func detectAgent(command, panePID string, cache *snapshotCache) string {
-	if agent := detectAgentName(command); agent != "" {
-		return agent
-	}
-	if panePID == "" || cache == nil {
-		return ""
-	}
-	pid, err := strconv.Atoi(panePID)
-	if err != nil || pid <= 1 {
-		return ""
+// detectAgent resolves the canonical agent name for a pane and the pid of the
+// process that matched. The fast path (the foreground command from
+// pane_current_command) settles the name without a process-table read; the pid
+// then comes from the descendant walk. When that fails — typically for
+// node-based agents (pi, opencode, cursor-agent) reporting as "node" — the walk
+// itself names the agent. The pid is the agent's own process so its uptime can
+// be reported; a pane that runs the agent directly (no shell) has no matching
+// descendant and reports the pane pid, which is the agent itself.
+func detectAgent(command, panePID string, cache *snapshotCache) (string, int) {
+	name := detectAgentName(command)
+	pane, ok := parsePID(panePID)
+	if !ok || cache == nil {
+		return name, 0
 	}
 	table, err := cache.get()
 	if err != nil || len(table) == 0 {
-		return ""
+		return name, 0
 	}
-	for _, child := range descendants(table, int32(pid)) {
-		if agent := detectAgentName(table[child].comm); agent != "" {
-			return agent
+	for _, child := range descendants(table, pane) {
+		childAgent := detectAgentName(table[child].comm)
+		if childAgent == "" {
+			continue
+		}
+		if name == "" {
+			return childAgent, int(child)
+		}
+		if childAgent == name {
+			return name, int(child)
 		}
 	}
-	return ""
+	if name != "" {
+		return name, int(pane)
+	}
+	return "", 0
+}
+
+// parsePID parses a pane pid field. PIDs 0 and 1 (the kernel and init) are never
+// an agent, so they are rejected like an unparsable value.
+func parsePID(value string) (int32, bool) {
+	pid, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil || pid <= 1 {
+		return 0, false
+	}
+	return int32(pid), true
 }
 
 // defaultProcSnapshot reads the process table via ps. The comm field from ps

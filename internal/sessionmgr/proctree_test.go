@@ -104,9 +104,12 @@ func TestDetectAgentNodeResolvesToPiViaDescendants(t *testing.T) {
 		}, nil
 	})
 	cache := &snapshotCache{}
-	got := detectAgent("node", "100", cache)
+	got, pid := detectAgent("node", "100", cache)
 	if got != "pi" {
 		t.Errorf("detectAgent(\"node\", \"100\", cache) = %q, want \"pi\"", got)
+	}
+	if pid != 200 {
+		t.Errorf("detectAgent(\"node\", \"100\", cache) pid = %d, want 200", pid)
 	}
 }
 
@@ -118,25 +121,48 @@ func TestDetectAgentNodeResolvesCursorAgentViaBasename(t *testing.T) {
 		}, nil
 	})
 	cache := &snapshotCache{}
-	got := detectAgent("node", "100", cache)
+	got, pid := detectAgent("node", "100", cache)
 	if got != "cursor" {
 		t.Errorf("detectAgent(\"node\", \"100\", cache) = %q, want \"cursor\"", got)
 	}
+	if pid != 200 {
+		t.Errorf("detectAgent(\"node\", \"100\", cache) pid = %d, want 200", pid)
+	}
 }
 
-func TestDetectAgentFastPathSkipsSnapshot(t *testing.T) {
-	calls := 0
+func TestDetectAgentFastPathKeepsPaneCommandNameAndFindsOwnPid(t *testing.T) {
 	setProcSnapshotForTest(t, func() (map[int32]procEntry, error) {
-		calls++
-		return nil, nil
+		return map[int32]procEntry{
+			100: {pid: 100, ppid: 99, comm: "zsh"},
+			200: {pid: 200, ppid: 100, comm: "claude"},
+		}, nil
 	})
 	cache := &snapshotCache{}
-	got := detectAgent("claude", "100", cache)
+	// The foreground command names the agent; the walk still supplies the
+	// agent's own pid for its uptime.
+	got, pid := detectAgent("claude", "100", cache)
 	if got != "claude" {
 		t.Fatalf("detectAgent(\"claude\", ...) = %q, want \"claude\"", got)
 	}
-	if calls != 0 {
-		t.Errorf("procSnapshot called %d times on fast path, want 0", calls)
+	if pid != 200 {
+		t.Errorf("detectAgent(\"claude\", ...) pid = %d, want 200", pid)
+	}
+}
+
+func TestDetectAgentFastPathFallsBackToPanePidWithoutIdenticalChild(t *testing.T) {
+	setProcSnapshotForTest(t, func() (map[int32]procEntry, error) {
+		return map[int32]procEntry{
+			100: {pid: 100, ppid: 99, comm: "codex"},
+		}, nil
+	})
+	cache := &snapshotCache{}
+	// tmux spawned the agent directly (no shell), so the pane pid IS the agent.
+	got, pid := detectAgent("codex", "100", cache)
+	if got != "codex" {
+		t.Fatalf("detectAgent(\"codex\", ...) = %q, want \"codex\"", got)
+	}
+	if pid != 100 {
+		t.Errorf("detectAgent(\"codex\", ...) pid = %d, want 100", pid)
 	}
 }
 
@@ -148,9 +174,12 @@ func TestDetectAgentUnknownReturnsEmpty(t *testing.T) {
 		}, nil
 	})
 	cache := &snapshotCache{}
-	got := detectAgent("bash", "100", cache)
+	got, pid := detectAgent("bash", "100", cache)
 	if got != "" {
 		t.Errorf("detectAgent(\"bash\", ...) = %q, want \"\"", got)
+	}
+	if pid != 0 {
+		t.Errorf("detectAgent(\"bash\", ...) pid = %d, want 0", pid)
 	}
 }
 
@@ -198,7 +227,7 @@ func TestDetectAgentPanePidAbsentFromSnapshot(t *testing.T) {
 	cache := &snapshotCache{}
 	// pane_pid 999 does not exist in the snapshot (process exited between
 	// the tmux snapshot and the ps call).
-	got := detectAgent("node", "999", cache)
+	got, _ := detectAgent("node", "999", cache)
 	if got != "" {
 		t.Errorf("detectAgent(\"node\", \"999\", cache) = %q, want \"\" for absent pane_pid", got)
 	}
@@ -209,7 +238,7 @@ func TestDetectAgentSnapshotErrorReturnsEmpty(t *testing.T) {
 		return nil, errors.New("ps: command not found")
 	})
 	cache := &snapshotCache{}
-	got := detectAgent("node", "100", cache)
+	got, _ := detectAgent("node", "100", cache)
 	if got != "" {
 		t.Errorf("detectAgent(\"node\", \"100\", cache) = %q, want \"\" on snapshot error", got)
 	}

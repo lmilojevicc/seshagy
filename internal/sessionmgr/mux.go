@@ -90,6 +90,10 @@ type Multiplexer interface {
 	AttachOrSwitchCommand(item Item) *exec.Cmd
 
 	ListAgents(ctx context.Context, sessionFilter string) ([]Item, error)
+	// AgentPID returns the pid of the agent process in a pane, so the picker can
+	// report its uptime. tmux already knows it from discovery (Item.AgentPID);
+	// herdr resolves it with `pane process-info`.
+	AgentPID(ctx context.Context, item Item) (int, error)
 	CaptureAgentPane(ctx context.Context, paneID string, lines int) (string, error)
 	FocusAgentCommand(item Item) *exec.Cmd
 	RenameAgent(ctx context.Context, item Item, displayName string) error

@@ -152,6 +152,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case refreshMsg:
 		return m.handleRefreshMsg(msg)
+	case agentStartedMsg:
+		m = m.applyAgentStarts(msg)
+		m.syncCursor()
+		return m, nil
 	case hostsMsg:
 		m.hosts = msg.hosts
 		m.items = m.mergedItems()

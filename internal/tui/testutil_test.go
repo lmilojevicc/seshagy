@@ -32,6 +32,12 @@ type fakeMux struct {
 	renamed     []string
 	visited     []string
 	focused     sessionmgr.Item
+
+	// agentPID is the pid AgentPID reports for panes that carry none; pidQueries
+	// records every pane it was asked about (nil when unset).
+	agentPID    int
+	agentPIDErr error
+	pidQueries  []string
 }
 
 func newFakeMux() *fakeMux {
@@ -88,6 +94,14 @@ func (f *fakeMux) AttachOrSwitchCommand(sessionmgr.Item) *exec.Cmd {
 
 func (f *fakeMux) ListAgents(context.Context, string) ([]sessionmgr.Item, error) {
 	return f.agents, f.agentsErr
+}
+
+func (f *fakeMux) AgentPID(_ context.Context, item sessionmgr.Item) (int, error) {
+	f.pidQueries = append(f.pidQueries, item.PaneID)
+	if item.AgentPID > 0 {
+		return item.AgentPID, nil
+	}
+	return f.agentPID, f.agentPIDErr
 }
 
 func (f *fakeMux) CaptureAgentPane(context.Context, string, int) (string, error) {

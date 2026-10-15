@@ -267,27 +267,38 @@ func (m Model) rowMeta(r row) []metaCell {
 	item := r.item
 	switch item.Kind {
 	case sessionmgr.KindAgent:
-		cells := make([]metaCell, 0, 3)
+		cells := make([]metaCell, 0, 4)
 		if item.Location != "" && item.Location != itemTitle(item) {
 			cells = append(cells, m.mutedCell(item.Location))
 		}
-		if label := agentKey(item.AgentName); label != "" {
-			cells = append(cells, styledCell(
-				lipgloss.NewStyle().Foreground(agentColor(item.AgentName)), label))
+		if !item.StartedAt.IsZero() {
+			cells = append(cells, m.mutedCell(agentAgeAt(item.StartedAt, time.Now())))
 		}
-		state := agentStateDisplayFor(item.AgentState)
-		cells = append(cells, styledCell(lipgloss.NewStyle().Foreground(state.color), state.word))
+		// The logo already says which agent this is; the colored kind label is
+		// only worth the columns when no logo is drawn.
+		if !m.showAgentLogos() {
+			if label := agentKey(item.AgentName); label != "" {
+				cells = append(cells,
+					styledCell(lipgloss.NewStyle().Foreground(agentColor(item.AgentName)), label))
+			}
+		}
+		if !m.icons.AgentStateHidden() {
+			state := m.icons.ForAgentState(item.AgentState)
+			cells = append(cells, styledCell(m.agentStateStyle(item.AgentState), state.ASCII))
+		}
 		return cells
 	case sessionmgr.KindSession:
-		cells := make([]metaCell, 0, 3)
-		if item.Windows > 0 {
-			cells = append(cells, m.mutedCell(windowCountLabel(m.terms, item.Windows)))
-		}
+		// The attached flag comes first and the window count last, with an empty
+		// placeholder in the attached column when the session is not attached, so
+		// the count sits in the last column on every session row.
+		cells := make([]metaCell, 0, 2)
 		if item.Attached {
 			cells = append(cells, styledCell(m.styles.success, "attached"))
+		} else {
+			cells = append(cells, metaCell{})
 		}
-		if label := m.currentSessionLabel(); label != "" && item.Name == label {
-			cells = append(cells, styledCell(m.styles.emphasis, "current"))
+		if item.Windows > 0 {
+			cells = append(cells, m.mutedCell(windowCountLabel(m.terms, item.Windows)))
 		}
 		return cells
 	case sessionmgr.KindZoxide:
@@ -344,7 +355,7 @@ func (g metaGrid) total() int {
 // buildMetaGrid measures every cell in its right-aligned column (capped at
 // metaColumnMax) and then shrinks the least specific leftmost columns until the
 // titles keep their minimum room. The rightmost column — the agent state or the
-// session's attached flag — is never squeezed below metaColumnMin.
+// session's window count — is never squeezed below metaColumnMin.
 func buildMetaGrid(metas [][]metaCell, budget int) metaGrid {
 	columns := 0
 	for _, cells := range metas {
@@ -395,7 +406,7 @@ func (m Model) renderBody(l viewLayout) []string {
 	if len(rows) == 0 {
 		return m.renderEmptyState(l)
 	}
-	start, end := visibleWindow(len(rows), m.cursor, l.bodyHeight)
+	start, end, counterSlots := listWindow(len(rows), m.cursor, l.bodyHeight)
 	visible := rows[start:end]
 	metas := make([][]metaCell, len(visible))
 	for i, r := range visible {
@@ -403,8 +414,15 @@ func (m Model) renderBody(l viewLayout) []string {
 	}
 	grid := buildMetaGrid(metas, l.listWidth-m.rowPrefixWidth()-titleMinWidth-2)
 	list := make([]string, 0, l.bodyHeight)
+	if start > 0 && counterSlots > 0 {
+		counterSlots--
+		list = append(list, m.styles.muted.Render(fmt.Sprintf("  ↑ %d more", start)))
+	}
 	for i, r := range visible {
 		list = append(list, m.renderRow(r, metas[i], grid, l.listWidth, start+i == m.cursor))
+	}
+	if end < len(rows) && counterSlots > 0 {
+		list = append(list, m.styles.muted.Render(fmt.Sprintf("  ↓ %d more", len(rows)-end)))
 	}
 	var preview []string
 	if l.previewWidth > 0 {
@@ -480,7 +498,7 @@ func (m Model) rowIcon(item sessionmgr.Item) string {
 		// so the state glyph keeps an even gap on both sides.
 		return lipgloss.NewStyle().Foreground(agentColor(item.AgentName)).Render(logo + "  ")
 	case sessionmgr.KindHost:
-		icons := m.config.IconSet()
+		icons := m.icons
 		if !icons.Enabled {
 			return ""
 		}
@@ -489,7 +507,7 @@ func (m Model) rowIcon(item sessionmgr.Item) string {
 		}
 		return m.styles.muted.Render(hostIcon)
 	default:
-		style := m.config.IconSet().For(item.Kind)
+		style := m.icons.For(item.Kind)
 		if style.Text == "" {
 			return ""
 		}
@@ -504,38 +522,69 @@ func (m Model) rowIcon(item sessionmgr.Item) string {
 // rowStateGlyph is the 2-cell agent state column; in text/hidden icon modes the
 // state is worded in the meta columns instead.
 func (m Model) rowStateGlyph(item sessionmgr.Item) string {
-	if item.Kind != sessionmgr.KindAgent {
+	if item.Kind != sessionmgr.KindAgent || !m.icons.AgentStateUsesIcons() {
 		return ""
 	}
-	icons := m.config.IconSet()
-	if !icons.AgentStateUsesIcons() {
-		return ""
+	glyph := m.icons.ForAgentState(item.AgentState).Icon
+	return m.agentStateStyle(item.AgentState).Render(glyph)
+}
+
+// agentStateStyle is the style an agent's state glyph and word are drawn in: the
+// configured color when the icon set has one, the semantic theme color
+// otherwise (sessionmgr deliberately leaves an unconfigured color empty so the
+// TUI can fill it).
+func (m Model) agentStateStyle(state sessionmgr.AgentState) lipgloss.Style {
+	if color := strings.TrimSpace(m.icons.ForAgentState(state).Color); color != "" {
+		return lipgloss.NewStyle().Foreground(lipgloss.Color(color))
 	}
-	state := agentStateDisplayFor(item.AgentState)
-	return lipgloss.NewStyle().Foreground(state.color).Render(state.glyph)
-}
-
-type agentStateDisplay struct {
-	glyph string
-	word  string
-	color lipgloss.TerminalColor
-}
-
-// agentStateDisplayFor is the picker's state vocabulary: the glyph, the word,
-// and the color both are drawn in.
-func agentStateDisplayFor(state sessionmgr.AgentState) agentStateDisplay {
-	switch sessionmgr.NormalizeAgentState(string(state)) {
-	case sessionmgr.AgentBlocked:
-		return agentStateDisplay{glyph: "◉", word: "needs you", color: lipgloss.Color("9")}
+	switch state {
 	case sessionmgr.AgentWorking:
-		return agentStateDisplay{glyph: "◐", word: "working", color: lipgloss.Color("11")}
+		return m.styles.success
+	case sessionmgr.AgentBlocked:
+		return m.styles.warning
 	case sessionmgr.AgentDone:
-		return agentStateDisplay{glyph: "●", word: "done", color: lipgloss.Color("14")}
-	case sessionmgr.AgentIdle:
-		return agentStateDisplay{glyph: "✓", word: "idle", color: lipgloss.Color("10")}
+		return m.styles.info
 	default:
-		return agentStateDisplay{glyph: "○", word: "unknown", color: lipgloss.Color("8")}
+		return m.styles.muted
 	}
+}
+
+// agentAgeAt renders how long an agent process has been running: seconds under a
+// minute, minutes under an hour, then hours with zero-padded minutes, then days
+// with hours.
+func agentAgeAt(started, now time.Time) string {
+	elapsed := now.Sub(started)
+	if elapsed < 0 {
+		elapsed = 0
+	}
+	switch {
+	case elapsed < time.Minute:
+		return fmt.Sprintf("%ds", int(elapsed.Seconds()))
+	case elapsed < time.Hour:
+		return fmt.Sprintf("%dm", int(elapsed.Minutes()))
+	case elapsed < 24*time.Hour:
+		return fmt.Sprintf("%dh%02dm", int(elapsed.Hours()), int(elapsed.Minutes())%60)
+	default:
+		return fmt.Sprintf("%dd%dh", int(elapsed.Hours())/24, int(elapsed.Hours())%24)
+	}
+}
+
+// agentTabSuffix returns the tab label an agent row still has to show, or ""
+// when the label repeats the title or the workspace already drawn in the meta
+// columns. A label that is not shown would only repeat the row ("pi — skills"
+// beside a "skills" meta cell).
+func agentTabSuffix(item sessionmgr.Item) string {
+	label := strings.TrimSpace(item.TabLabel)
+	if label == "" {
+		return ""
+	}
+	repeats := func(other string) bool {
+		return strings.EqualFold(label, strings.TrimSpace(other))
+	}
+	if repeats(itemTitle(item)) || repeats(item.Location) {
+		return ""
+	}
+	return label
 }
 
 // renderTitle draws the item title with the fuzzy-matched runes emphasized. A
@@ -544,15 +593,17 @@ func agentStateDisplayFor(state sessionmgr.AgentState) agentStateDisplay {
 func (m Model) renderTitle(r row, width int, selected bool) string {
 	title := itemTitle(r.item)
 	suffix := ""
-	if r.item.Kind == sessionmgr.KindAgent && r.item.TabLabel != "" && r.item.TabLabel != title {
-		suffix = " — " + r.item.TabLabel
-		if lipgloss.Width(suffix)+titleMinWidth > width {
-			suffix = ""
+	if r.item.Kind == sessionmgr.KindAgent {
+		if label := agentTabSuffix(r.item); label != "" {
+			suffix = " — " + label
+			if lipgloss.Width(suffix)+titleMinWidth > width {
+				suffix = ""
+			}
 		}
 	}
 	base := m.styles.itemName
 	if r.item.Kind == sessionmgr.KindAgent && r.item.AgentState == sessionmgr.AgentWorking {
-		base = m.styles.working
+		base = m.agentStateStyle(sessionmgr.AgentWorking)
 	}
 	if selected {
 		base = base.Bold(true)
@@ -660,7 +711,7 @@ func (m Model) renderPreview(width, height int) []string {
 	if !ok || height <= 0 {
 		return nil
 	}
-	header := m.styles.muted.Render(clampText(sanitizePreviewLine(itemTitle(item)), width))
+	header := m.styles.muted.Render(hardCutStyledText(sanitizePreviewLine(itemTitle(item)), width))
 	out := make([]string, 0, height)
 	out = append(out, header)
 	room := height - 1
@@ -685,10 +736,12 @@ func (m Model) renderPreview(width, height int) []string {
 	}
 	for _, line := range lines {
 		// Captures are raw terminal output: sanitize before clipping so no
-		// stray CR, tab, or cursor sequence reaches the frame, and close any
-		// color the line left open so it cannot bleed into the separator,
-		// the padding, or the next row.
-		clipped := clampStyledText(sanitizePreviewLine(line), width)
+		// stray CR, tab, or cursor sequence reaches the frame. The cut is hard
+		// — a preview is a window onto a terminal, and an ellipsis would read
+		// as content the pane never printed. A reset closes any color the line
+		// left open so it cannot bleed into the separator, the padding, or the
+		// next row.
+		clipped := hardCutStyledText(sanitizePreviewLine(line), width)
 		if style.GetForeground() != nil {
 			clipped = style.Render(clipped)
 		}

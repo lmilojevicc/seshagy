@@ -1,9 +1,11 @@
 package tui
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/lmilojevicc/seshagy/internal/sessionmgr"
 )
@@ -100,26 +102,6 @@ func TestRequestPreviewReusesLoadedPayload(t *testing.T) {
 	}
 }
 
-func TestCurrentSessionLabelHerdrShowsWorkspaceLabel(t *testing.T) {
-	m := newTestModel(t)
-	m.terms = sessionmgr.HerdrTerms()
-	m.items = []sessionmgr.Item{{
-		Kind:      sessionmgr.KindAgent,
-		AgentName: "pi",
-		Session:   "wB",       // opaque herdr workspace id
-		Location:  "frontend", // resolved workspace label
-	}}
-	m.currentSession = "wB"
-	if label := m.currentSessionLabel(); label != "frontend" {
-		t.Fatalf("currentSessionLabel = %q, want \"frontend\"", label)
-	}
-
-	m.items = nil
-	if label := m.currentSessionLabel(); label != "wB" {
-		t.Fatalf("fallback currentSessionLabel = %q, want \"wB\"", label)
-	}
-}
-
 func TestInitAndEmptySourceCaches(t *testing.T) {
 	m := newTestModel(t)
 	if m.Init() == nil {
@@ -148,5 +130,103 @@ func TestWindowSizeGatesPreviewColumn(t *testing.T) {
 	m.showPreview = false
 	if m.previewVisible() {
 		t.Fatal("preview visible while disabled")
+	}
+}
+
+func TestAgentStartTimesResolveOncePerPaneAndPid(t *testing.T) {
+	m := newTestModel(t)
+	pane := agentItem("pi", "%1", "work")
+	pane.AgentPID = 4242
+	m = withItems(m, []sessionmgr.Item{pane})
+
+	if got := len(m.pendingAgentStarts()); got != 1 {
+		t.Fatalf("pending = %d, want the new pane", got)
+	}
+	m, cmd := m.resolveAgentStarts()
+	if cmd == nil || !m.agentStartPending {
+		t.Fatal("resolution was not scheduled")
+	}
+
+	started := time.Now().Add(-2 * time.Hour)
+	m = m.applyAgentStarts(agentStartedMsg{starts: map[string]agentStart{
+		"%1": {pid: 4242, started: started},
+	}})
+	if m.agentStartPending {
+		t.Fatal("pending flag not cleared by the result")
+	}
+	if got := m.pendingAgentStarts(); len(got) != 0 {
+		t.Fatalf("pending = %d after resolving, want none", len(got))
+	}
+	if got := m.items[0].StartedAt; !got.Equal(started) {
+		t.Fatalf("StartedAt = %v, want the resolved %v", got, started)
+	}
+	if again, _ := m.resolveAgentStarts(); again.agentStartPending {
+		t.Fatal("a cached pane was resolved again")
+	}
+
+	// A pane that restarted its agent (a new pid) is resolved again.
+	restarted := pane
+	restarted.AgentPID = 5150
+	m = withItems(m, []sessionmgr.Item{restarted})
+	if got := len(m.pendingAgentStarts()); got != 1 {
+		t.Fatalf("pending = %d, want the restarted pane", got)
+	}
+	if !m.items[0].StartedAt.IsZero() {
+		t.Fatal("a restarted agent inherited the previous process's age")
+	}
+}
+
+func TestAgentStartTimesSkipPanesWithoutAPid(t *testing.T) {
+	m := newTestModel(t)
+	mux := newFakeMux()
+	m.mux = mux
+	// herdr agents carry no pid: AgentPID resolves it (and records the pane).
+	pane := agentItem("pi", "%7", "work")
+	m = withItems(m, []sessionmgr.Item{pane})
+
+	if got := len(m.pendingAgentStarts()); got != 1 {
+		t.Fatalf("pending = %d, want the pane without a pid", got)
+	}
+	if m.agentStartPending {
+		t.Fatal("pending flag set before the resolution was scheduled")
+	}
+}
+
+func TestAgentStartTimesCmdResolvesTheAgentPid(t *testing.T) {
+	mux := newFakeMux()
+	mux.agentPID = os.Getpid()
+	mux.agentPIDErr = nil
+	pane := agentItem("pi", "%3", "work")
+
+	msg, ok := agentStartTimesCmd(mux, []sessionmgr.Item{pane})().(agentStartedMsg)
+	if !ok {
+		t.Fatal("agentStartTimesCmd did not produce an agentStartedMsg")
+	}
+	if len(mux.pidQueries) != 1 || mux.pidQueries[0] != "%3" {
+		t.Fatalf("pid queries = %v, want one for %%3", mux.pidQueries)
+	}
+	start, found := msg.starts["%3"]
+	if !found {
+		t.Skip("ps did not report this process; the ps path is covered by sessionmgr tests")
+	}
+	if start.pid != os.Getpid() {
+		t.Fatalf("resolved pid = %d, want %d", start.pid, os.Getpid())
+	}
+	if time.Since(start.started) < 0 {
+		t.Fatalf("resolved start %v is in the future", start.started)
+	}
+}
+
+func TestAgentStartTimesCmdOmitsUnresolvablePanes(t *testing.T) {
+	mux := newFakeMux()
+	mux.agentPIDErr = errors.New("herdr: not running")
+	pane := agentItem("pi", "%9", "work")
+
+	msg, ok := agentStartTimesCmd(mux, []sessionmgr.Item{pane})().(agentStartedMsg)
+	if !ok {
+		t.Fatal("agentStartTimesCmd did not produce an agentStartedMsg")
+	}
+	if len(msg.starts) != 0 {
+		t.Fatalf("starts = %v, want none for an unresolvable pane", msg.starts)
 	}
 }

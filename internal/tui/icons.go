@@ -146,7 +146,7 @@ func agentFontAvailable() bool {
 // glyphs are printed only when the configured icon set renders icons (not
 // text/none) and the env-driven font mode resolves to "font".
 func (m Model) showAgentLogos() bool {
-	icons := m.config.IconSet()
+	icons := m.icons
 	if !icons.Enabled || icons.ASCII {
 		return false
 	}

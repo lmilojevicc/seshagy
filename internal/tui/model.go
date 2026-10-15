@@ -44,6 +44,9 @@ var tuiSources = []sessionmgr.SourceMode{
 type Model struct {
 	styles styles
 	config appconfig.Config
+	// icons is the configured icon set, resolved once per model instead of once
+	// per rendered row.
+	icons sessionmgr.IconSet
 
 	mux    sessionmgr.Multiplexer
 	terms  sessionmgr.Terms
@@ -88,9 +91,13 @@ type Model struct {
 
 	notifications []notification
 
-	// currentSession is the multiplexer session hosting seshagy, resolved on
-	// every agent refresh; session rows for it are marked "current".
-	currentSession string
+	// agentStarted caches when each agent pane's process started, keyed by pane
+	// id. The pid it was resolved from is cached with it, so a pane hosting a
+	// new agent process is resolved again. Ages render from these values.
+	agentStarted map[string]agentStart
+	// agentStartPending guards the in-flight start-time resolution so the 1s
+	// tick cannot queue a second ps call while one is running.
+	agentStartPending bool
 
 	cache           map[sessionmgr.SourceMode]modeCache
 	refreshGen      map[sessionmgr.SourceMode]uint64
@@ -126,13 +133,23 @@ type installMenuState struct {
 }
 
 type refreshMsg struct {
-	source         sessionmgr.SourceMode
-	gen            uint64
-	items          []sessionmgr.Item
-	currentSession string
-	warning        string
-	err            error
+	source  sessionmgr.SourceMode
+	gen     uint64
+	items   []sessionmgr.Item
+	warning string
+	err     error
 }
+
+// agentStart is a resolved agent process start time plus the pid it came from.
+type agentStart struct {
+	pid     int
+	started time.Time
+}
+
+// agentStartedMsg carries the agent start times resolved in the background,
+// keyed by pane id. A pane whose process could not be resolved is absent from
+// the map, which renders as no age cell.
+type agentStartedMsg struct{ starts map[string]agentStart }
 
 type previewMsg struct {
 	key     string
@@ -241,6 +258,7 @@ func New(optionFns ...Option) Model {
 	m := Model{
 		styles:           stylesFromConfig(cfg),
 		config:           cfg,
+		icons:            cfg.IconSet(),
 		mux:              mux,
 		terms:            mux.Terms(),
 		logger:           logger,
@@ -249,6 +267,7 @@ func New(optionFns ...Option) Model {
 		refreshGen:       make(map[sessionmgr.SourceMode]uint64),
 		inflightRefresh:  make(map[sessionmgr.SourceMode]uint64),
 		reportedWarnings: make(map[sessionmgr.SourceMode]string),
+		agentStarted:     make(map[string]agentStart),
 		checkPopup:       mux.InMultiplexerPopup,
 		ephemeral:        settings.ephemeral,
 	}
@@ -365,21 +384,50 @@ func (m Model) previewCmdFor(item sessionmgr.Item) tea.Cmd {
 	return previewCmd(m.mux, item)
 }
 
-// currentSessionLabel returns a human-facing label for the current session id.
-// Under herdr the id is opaque (e.g. "wB"); agent items in the same session
-// carry the resolved workspace label in Location, so it is looked up from the
-// loaded items and falls back to the raw id. Under tmux the id IS the name.
-func (m Model) currentSessionLabel() string {
-	if m.currentSession == "" {
-		return ""
+// resolveAgentStarts schedules the background resolution of the agent start
+// times that are not cached yet. It is a no-op while a resolution is in flight.
+func (m Model) resolveAgentStarts() (Model, tea.Cmd) {
+	if m.agentStartPending {
+		return m, nil
 	}
+	pending := m.pendingAgentStarts()
+	if len(pending) == 0 {
+		return m, nil
+	}
+	m.agentStartPending = true
+	return m, agentStartTimesCmd(m.mux, pending)
+}
+
+// pendingAgentStarts lists the agent items whose process start time is missing
+// from the cache, or was resolved from a pid the pane no longer hosts (a pane
+// that restarted its agent).
+func (m Model) pendingAgentStarts() []sessionmgr.Item {
+	pending := make([]sessionmgr.Item, 0, len(m.items))
 	for _, item := range m.items {
-		if item.Kind == sessionmgr.KindAgent && item.Session == m.currentSession &&
-			item.Location != "" {
-			return item.Location
+		if item.Kind != sessionmgr.KindAgent || item.PaneID == "" {
+			continue
 		}
+		if cached, ok := m.agentStarted[item.PaneID]; ok &&
+			(item.AgentPID == 0 || cached.pid == item.AgentPID) {
+			continue
+		}
+		pending = append(pending, item)
 	}
-	return m.currentSession
+	return pending
+}
+
+// applyAgentStarts stores resolved start times and re-stamps the item list so
+// the age column renders from them.
+func (m Model) applyAgentStarts(msg agentStartedMsg) Model {
+	m.agentStartPending = false
+	if m.agentStarted == nil {
+		m.agentStarted = make(map[string]agentStart)
+	}
+	for pane, start := range msg.starts {
+		m.agentStarted[pane] = start
+	}
+	m.items = m.mergedItems()
+	return m
 }
 
 // previewVisible reports whether the preview column is drawn: enabled and wide

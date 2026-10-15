@@ -955,3 +955,73 @@ func TestHerdrBackendExecCommands(t *testing.T) {
 		}
 	}
 }
+
+func TestParseHerdrPaneProcessPID(t *testing.T) {
+	// Captured from `herdr pane process-info --pane w7E:p7`: the foreground
+	// process is the agent wrapper (argv0 pi, name node), and the process group
+	// mirrors its pid.
+	const processInfo = `{"id":"cli:pane:process_info","result":{"process_info":` +
+		`{"foreground_process_group_id":72784,"foreground_processes":[` +
+		`{"argv0":"pi","cwd":"/proj","name":"node","pid":72784}],` +
+		`"pane_id":"w7E:p7","shell_pid":71542},"type":"pane_process_info"}}`
+
+	pid, err := parseHerdrPaneProcessPID([]byte(processInfo))
+	if err != nil {
+		t.Fatalf("parseHerdrPaneProcessPID error: %v", err)
+	}
+	if pid != 72784 {
+		t.Fatalf("pid = %d, want 72784", pid)
+	}
+
+	// No foreground process listed: fall back to the process group.
+	const groupOnly = `{"result":{"process_info":{"foreground_process_group_id":42,` +
+		`"foreground_processes":[],"pane_id":"w1:p1","shell_pid":7},` +
+		`"type":"pane_process_info"}}`
+	pid, err = parseHerdrPaneProcessPID([]byte(groupOnly))
+	if err != nil {
+		t.Fatalf("fallback error: %v", err)
+	}
+	if pid != 42 {
+		t.Fatalf("fallback pid = %d, want 42", pid)
+	}
+
+	for _, bad := range []string{
+		`{"result":{"type":"pane_process_info"}}`,
+		`{"result":{"process_info":{"foreground_processes":[],"shell_pid":7},` +
+			`"type":"pane_process_info"}}`,
+		`not json`,
+	} {
+		if _, err := parseHerdrPaneProcessPID([]byte(bad)); err == nil {
+			t.Errorf("parseHerdrPaneProcessPID(%q) error = nil, want failure", bad)
+		}
+	}
+}
+
+func TestHerdrBackendAgentPIDQueriesPaneProcessInfo(t *testing.T) {
+	rec := &herdrCmdRecorder{outputF: func([]string) ([]byte, error) {
+		return []byte(`{"result":{"process_info":{"foreground_processes":` +
+			`[{"pid":5150}],"pane_id":"w1:p1","shell_pid":7},` +
+			`"type":"pane_process_info"}}`), nil
+	}}
+	setHerdrHooksForTest(t, rec.outputFn, rec.runFn)
+
+	pid, err := NewHerdrBackend().AgentPID(context.Background(), Item{
+		Kind:   KindAgent,
+		PaneID: "w1:p1",
+	})
+	if err != nil {
+		t.Fatalf("AgentPID error: %v", err)
+	}
+	if pid != 5150 {
+		t.Fatalf("pid = %d, want 5150", pid)
+	}
+	want := []string{"pane", "process-info", "--pane", "w1:p1"}
+	if len(rec.calls) != 1 {
+		t.Fatalf("herdr calls = %v, want one", rec.calls)
+	}
+	for i, arg := range want {
+		if rec.calls[0][i] != arg {
+			t.Fatalf("herdr args = %v, want %v", rec.calls[0], want)
+		}
+	}
+}

@@ -63,7 +63,29 @@ func (m Model) mergedItems() []sessionmgr.Item {
 		merged = append(merged, entry.items...)
 	}
 	merged = append(merged, hostItems(m.hosts)...)
-	return dedupeDirs(merged)
+	merged = dedupeDirs(merged)
+	return m.stampAgentStarts(merged)
+}
+
+// stampAgentStarts fills in the agent process start time each row's age column
+// is computed from. The cache is keyed by pane id, and an entry resolved from a
+// pid the pane no longer hosts is skipped so a replaced agent never inherits the
+// previous process's age.
+func (m Model) stampAgentStarts(items []sessionmgr.Item) []sessionmgr.Item {
+	if len(m.agentStarted) == 0 {
+		return items
+	}
+	for i := range items {
+		if items[i].Kind != sessionmgr.KindAgent {
+			continue
+		}
+		start, ok := m.agentStarted[items[i].PaneID]
+		if !ok || (items[i].AgentPID > 0 && start.pid != items[i].AgentPID) {
+			continue
+		}
+		items[i].StartedAt = start.started
+	}
+	return items
 }
 
 func (m Model) invalidateAllCaches() Model {
@@ -175,9 +197,6 @@ func (m Model) handleRefreshMsg(msg refreshMsg) (Model, tea.Cmd) {
 	m = m.finishRefresh(msg.source, msg.gen)
 	m = m.storeCache(msg.source, msg.items)
 	m.items = m.mergedItems()
-	if msg.source == sessionmgr.ModeAgents {
-		m.currentSession = msg.currentSession
-	}
 	m.loadedOnce = true
 	m.syncCursor()
 	switch {
@@ -188,5 +207,18 @@ func (m Model) handleRefreshMsg(msg refreshMsg) (Model, tea.Cmd) {
 	}
 	var preview tea.Cmd
 	m, preview = m.requestPreview()
-	return m, preview
+	cmds := make([]tea.Cmd, 0, 2)
+	if preview != nil {
+		cmds = append(cmds, preview)
+	}
+	// New agent panes (and panes whose agent was replaced) need their process
+	// start time before the age column can show it.
+	if msg.source == sessionmgr.ModeAgents && msg.err == nil {
+		var starts tea.Cmd
+		m, starts = m.resolveAgentStarts()
+		if starts != nil {
+			cmds = append(cmds, starts)
+		}
+	}
+	return m, tea.Batch(cmds...)
 }
