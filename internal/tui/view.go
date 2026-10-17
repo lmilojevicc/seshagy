@@ -24,6 +24,9 @@ const (
 	// promptWindowRows is the prompt window's height: top border, content row,
 	// bottom border.
 	promptWindowRows = 3
+	// promptInset is the blank column the prompt content row keeps inside the
+	// window border, matching the inset the results rows carry.
+	promptInset = 1
 	// resultsPercent is the stacked layouts' share of the rows left after the
 	// prompt window; the preview window takes the rest.
 	resultsPercent = 45
@@ -294,13 +297,24 @@ func (m Model) renderPreviewWindow(l viewLayout) []string {
 	if item, ok := m.selectedItem(); ok {
 		// The name comes from the multiplexer, so it is sanitized like the
 		// capture itself: a control character must not reach the border.
-		title = m.styles.titlePreview.Render(sanitizePreviewLine(itemTitle(item)))
+		title = m.styles.titlePreview.Render(sanitizePreviewLine(previewTitle(item)))
 		if footer := sanitizePreviewLine(m.previewFooter(item)); footer != "" {
 			bottom = m.styles.muted.Render(footer)
 		}
 	}
 	lines := m.renderPreviewContent(max(0, l.preview.width-2), max(0, l.preview.height-2))
 	return drawWindow(title, lines, l.preview.width, l.preview.height, m.styles.border, bottom)
+}
+
+// previewTitle is the preview window's title: the selected item's name, and for
+// an agent the workspace it runs in — the same pair its row shows as the title
+// and the workspace column.
+func previewTitle(item sessionmgr.Item) string {
+	title := itemTitle(item)
+	if item.Kind != sessionmgr.KindAgent || item.Location == "" || item.Location == title {
+		return title
+	}
+	return title + " · " + item.Location
 }
 
 // previewFooter spells the dim footer the preview window keeps in its bottom
@@ -362,19 +376,25 @@ func spinnerFrame(frame int) string {
 	return string(frames[frame%len(frames)])
 }
 
-// renderPromptContent draws the prompt window's content row: the accent prompt
-// and the query (or the muted placeholder) with the typing cursor, the dim sigil
-// hint, and the shown/total count right-aligned. A kill confirmation or an
-// in-flight rename replaces the row.
+// renderPromptContent draws the prompt window's content row: one column of
+// inset — the same the results rows carry — then the accent prompt and the query
+// (or the muted placeholder) with the typing cursor, the dim sigil hint, and the
+// shown/total count right-aligned. A kill confirmation or an in-flight rename
+// replaces the row.
 func (m Model) renderPromptContent(width int) string {
+	if width <= 0 {
+		return ""
+	}
+	inset := strings.Repeat(" ", min(promptInset, width))
+	row := width - promptInset
 	s := m.styles
 	switch {
 	case m.killArmed:
-		return m.renderKillConfirm(width)
+		return inset + m.renderKillConfirm(row)
 	case m.renameActive:
 		left := s.title.Render("rename") + " " + s.emphasis.Render("❯") + " " +
 			m.renameText + m.cursorBlock()
-		return clampStyledText(left, width)
+		return inset + clampStyledText(left, row)
 	}
 	prompt := s.emphasis.Render("❯") + " "
 	var left string
@@ -388,12 +408,12 @@ func (m Model) renderPromptContent(width int) string {
 	}
 	// The count keeps the last cells: a long query is clipped with an ellipsis
 	// rather than the count, which is the only place the row reports the size.
-	right := m.promptTrailing(width)
+	right := m.promptTrailing(row)
 	if right == "" {
-		return clampStyledText(left, width)
+		return inset + clampStyledText(left, row)
 	}
-	room := width - lipgloss.Width(right)
-	return clampStyledText(left, room) +
+	room := row - lipgloss.Width(right)
+	return inset + clampStyledText(left, room) +
 		strings.Repeat(" ", max(0, room-lipgloss.Width(left))) + right
 }
 
@@ -417,13 +437,11 @@ func (m Model) promptTrailing(width int) string {
 	return right
 }
 
-// promptCount is the "shown/total" the prompt window reports, collapsed to
-// "total" when nothing is filtered out.
+// promptCount is the "shown/total" the prompt window reports: how many rows the
+// active scope and query leave of the whole list. The shown count stays bright
+// and the total dim, so the row always reads as a pair.
 func (m Model) promptCount() string {
 	shown, total := len(m.rows()), len(m.items)
-	if shown == total {
-		return m.styles.muted.Render(fmt.Sprintf("%d", total))
-	}
 	return m.styles.itemName.Bold(true).Render(fmt.Sprintf("%d", shown)) +
 		m.styles.muted.Render(fmt.Sprintf("/%d", total))
 }

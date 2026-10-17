@@ -46,8 +46,8 @@ func TestUpdateRefreshMsgMergesSourcesAndSchedulesAgentStartTimes(t *testing.T) 
 	if len(m.items) != 2 {
 		t.Fatalf("merged items = %#v, want sessions and agents", m.items)
 	}
-	if got := sessionmgr.StripANSI(m.promptCount()); got != "2" {
-		t.Fatalf("prompt count = %q, want 2", got)
+	if got := sessionmgr.StripANSI(m.promptCount()); got != "2/2" {
+		t.Fatalf("prompt count = %q, want 2/2", got)
 	}
 	// The new agent pane has no cached process start time, so an agent refresh
 	// queues the background resolution the age column renders from.

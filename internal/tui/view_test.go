@@ -369,9 +369,11 @@ func TestPromptCursorSitsInTheInputNotAfterThePlaceholder(t *testing.T) {
 	m := newTestModel(t)
 	m = withItems(m, pickerItems())
 
+	// The row carries a one-column inset before the prompt, so the prompt starts
+	// in the row's second cell and the cursor sits two cells behind it.
 	empty := m.renderPromptContent(80)
-	if got := cursorColumn(t, empty); got != 2 {
-		t.Fatalf("empty query: cursor column = %d, want 2: %q", got, empty)
+	if got := cursorColumn(t, empty); got != promptInset+2 {
+		t.Fatalf("empty query: cursor column = %d, want %d: %q", got, promptInset+2, empty)
 	}
 	if strings.Index(empty, "\x1b[7m") > strings.Index(empty, placeholderText) {
 		t.Fatalf("empty query: placeholder precedes the cursor: %q", empty)
@@ -379,8 +381,30 @@ func TestPromptCursorSitsInTheInputNotAfterThePlaceholder(t *testing.T) {
 
 	m.query = "api"
 	typed := m.renderPromptContent(80)
-	if got := cursorColumn(t, typed); got != 5 {
-		t.Fatalf("typed query: cursor column = %d, want 5: %q", got, typed)
+	if got := cursorColumn(t, typed); got != promptInset+5 {
+		t.Fatalf("typed query: cursor column = %d, want %d: %q", got, promptInset+5, typed)
+	}
+}
+
+// TestPromptContentKeepsItsInsetAndCount pins the prompt content row's chrome:
+// one column of inset before the accent prompt — the inset the results rows
+// carry — and a count that always reads shown/total.
+func TestPromptContentKeepsItsInsetAndCount(t *testing.T) {
+	withColor(t)
+	m := newTestModel(t)
+	m = withItems(m, pickerItems())
+
+	row := sessionmgr.StripANSI(m.renderPromptContent(60))
+	if !strings.HasPrefix(row, " ❯") {
+		t.Fatalf("prompt row = %q, want a one-column inset before the prompt", row)
+	}
+	if !strings.HasSuffix(row, "4/4") {
+		t.Fatalf("prompt row = %q, want the shown/total count", row)
+	}
+
+	m.query = "ses"
+	if row := sessionmgr.StripANSI(m.renderPromptContent(60)); !strings.HasSuffix(row, "1/4") {
+		t.Fatalf("filtered prompt row = %q, want the shown/total count", row)
 	}
 }
 
@@ -1256,6 +1280,13 @@ func TestPreviewWindowTitleIsTheSelectedItem(t *testing.T) {
 			title,
 		)
 	}
+
+	// An agent's title carries the workspace its row shows as a column.
+	m = withItems(m, []sessionmgr.Item{agentItem("pi", "%1", "skills")})
+	title = sessionmgr.StripANSI(m.renderPreviewWindow(m.viewLayout())[0])
+	if !strings.Contains(title, " pi · skills ") {
+		t.Fatalf("agent preview title row = %q, want the workspace beside the name", title)
+	}
 }
 
 // TestPreviewGutterNumbersEveryContentLine pins the preview window's line-number
@@ -1539,12 +1570,12 @@ func TestAgentRowDropsTheRepeatedTabAndKindCells(t *testing.T) {
 
 	m := newTestModel(t)
 	m = withItems(m, []sessionmgr.Item{item})
-	plain := sessionmgr.StripANSI(m.View())
-	if strings.Contains(plain, "— skills") {
-		t.Fatalf("row repeats the workspace as a tab suffix:\n%s", plain)
+	row := resultRowLine(t, m.View(), "pi")
+	if strings.Contains(row, "— skills") {
+		t.Fatalf("row repeats the workspace as a tab suffix: %q", row)
 	}
-	if strings.Count(plain, "skills") != 1 {
-		t.Fatalf("row shows the workspace more than once:\n%s", plain)
+	if strings.Count(row, "skills") != 1 {
+		t.Fatalf("row shows the workspace more than once: %q", row)
 	}
 }
 
