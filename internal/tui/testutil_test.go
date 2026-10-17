@@ -277,7 +277,14 @@ func defaultTestConfig() appconfig.Config {
 // restoring the detected profile when the test ends.
 func withColor(t *testing.T) {
 	t.Helper()
+	withProfile(t, termenv.TrueColor)
+}
+
+// withProfile forces the lipgloss renderer into a color profile, restoring the
+// detected one when the test ends.
+func withProfile(t *testing.T, profile termenv.Profile) {
+	t.Helper()
 	previous := lipgloss.ColorProfile()
-	lipgloss.SetColorProfile(termenv.TrueColor)
+	lipgloss.SetColorProfile(profile)
 	t.Cleanup(func() { lipgloss.SetColorProfile(previous) })
 }

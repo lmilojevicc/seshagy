@@ -241,6 +241,7 @@ shows the current session's agents inline instead.
 | `info`           | informational status messages        |
 | `warning`        | warning status messages              |
 | `danger`         | error/danger status messages         |
+| `selection_bg`   | background bar under the selected result row (default `236`, a 256-color dark grey) |
 
 Per-pane borders, border titles, input fields, and overview tiles can be themed
 independently. Each defaults to the relevant global when unset (`list_border`,
@@ -292,11 +293,16 @@ Example:
     # list_border_title = "#cdd6f4"
     # metadata_border_title = "#cdd6f4"
     # preview_border_title = "#cdd6f4"
+    # The solid bar behind the selected result row. Any color lipgloss
+    # accepts (ANSI index or hex) works; "default" leaves the row unbarred.
+    selection_bg = "236"
 ```
 
-The TUI keeps the terminal's default foreground/background for list text and
-selection (reverse video), so changing your terminal theme still rethemes most
-of seshagy without extra config.
+The TUI keeps the terminal's default foreground/background for list text, so
+changing your terminal theme still rethemes most of seshagy without extra
+config. The selected row is drawn as a solid background bar (`selection_bg`)
+with the row's own foreground colors on top; set it to `"default"` to drop the
+bar and mark the selection with the accent `▌` instead.
 
 ### Icons
 

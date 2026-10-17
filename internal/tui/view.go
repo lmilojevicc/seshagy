@@ -799,33 +799,20 @@ func (m Model) renderRow(r row, meta []metaCell, cols rowColumns, width int, sel
 	}
 	line = pad(clampStyledText(line, width), width)
 	if selected {
-		line = m.selectionBar(line)
+		line = m.selectionBar(line, width)
 	}
 	return line
 }
 
-// sgrReset closes every cell lipgloss renders; the selection bar has to re-open
-// itself after each one to keep covering the row.
-const sgrReset = "\x1b[0m"
-
-// selectionBar paints a drawn row with the selection style over its full width.
-// A plain surround would only cover the cells before the first styled one,
-// because every cell ends by resetting the attributes, so the selection's
-// opening sequence is written again after each reset and the row closes with a
-// single reset of its own. A profile that renders no styling has no bar to
-// paint, and the row keeps a plain marker instead: the cursor has to stay
-// visible without color.
-func (m Model) selectionBar(line string) string {
-	probe := m.styles.selectedBG.Render("x")
-	if !strings.HasSuffix(probe, sgrReset) {
+// selectionBar paints a drawn row with the configured selection background over
+// its full width. A profile that draws no styling has no bar to paint, and the
+// row keeps a plain marker instead: the cursor has to stay visible without
+// color.
+func (m Model) selectionBar(line string, width int) string {
+	if backgroundOpen(m.styles.selectionBG) == "" {
 		return m.styles.bar.Render("▌") + strings.TrimPrefix(line, " ")
 	}
-	open := strings.TrimSuffix(strings.TrimSuffix(probe, sgrReset), "x")
-	if open == "" {
-		return line
-	}
-	bar := strings.TrimSuffix(m.styles.selectedBG.Render(line), sgrReset)
-	return strings.ReplaceAll(bar, sgrReset, sgrReset+open) + sgrReset
+	return paintBackground(line, width, m.styles.selectionBG)
 }
 
 // rowPrefixWidth is the fixed inset/icon/gap prefix every row shares: one
@@ -1236,7 +1223,7 @@ func (m Model) renderInstallMenu(height int) string {
 		}
 		line := cursor + name + "  " + glyph
 		if i == m.installMenu.cursor {
-			line = s.selectedBG.Render(pad(line, innerW))
+			line = paintBackground(line, innerW, s.selectionBG)
 		}
 		lines = append(lines, line)
 	}

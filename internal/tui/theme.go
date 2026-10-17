@@ -21,6 +21,9 @@ type palette struct {
 	sky    lipgloss.TerminalColor
 	red    lipgloss.TerminalColor
 	yellow lipgloss.TerminalColor
+
+	// selection is the background bar under the selected result row.
+	selection lipgloss.TerminalColor
 }
 
 type styles struct {
@@ -41,9 +44,12 @@ type styles struct {
 	info       lipgloss.Style
 	warning    lipgloss.Style
 	danger     lipgloss.Style
-	selectedBG lipgloss.Style
 	pane       lipgloss.Style
 	panePopup  lipgloss.Style
+
+	// selectionBG is the selected row's bar color; the rows paint it
+	// themselves with paintBackground so inner resets cannot break the bar.
+	selectionBG lipgloss.TerminalColor
 
 	// Telescope chrome: window borders and titles, the preview line-number
 	// gutter, and the needs-you accent.
@@ -69,6 +75,8 @@ func stylesFromConfig(cfg appconfig.Config) styles {
 		sky:    lipgloss.Color("14"),
 		red:    lipgloss.Color("9"),
 		yellow: lipgloss.Color("11"),
+
+		selection: lipgloss.Color("236"),
 	}
 	muted := themeColor(colors.Muted, p.muted)
 	border := themeColor(colors.Border, p.muted)
@@ -96,7 +104,7 @@ func stylesFromConfig(cfg appconfig.Config) styles {
 	s.info = lipgloss.NewStyle().Foreground(info).Bold(true)
 	s.warning = lipgloss.NewStyle().Foreground(warning).Bold(true)
 	s.danger = lipgloss.NewStyle().Foreground(danger).Bold(true)
-	s.selectedBG = lipgloss.NewStyle().Reverse(true)
+	s.selectionBG = themeColor(colors.SelectionBG, p.selection)
 	s.pane = lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(border).

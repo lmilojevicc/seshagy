@@ -109,6 +109,7 @@ type ThemeColorsConfig struct {
 	Info                string `toml:"info"                  json:"info"`
 	Warning             string `toml:"warning"               json:"warning"`
 	Danger              string `toml:"danger"                json:"danger"`
+	SelectionBG         string `toml:"selection_bg"          json:"selection_bg"` // selected row highlight bar
 	ListBorder          string `toml:"list_border"           json:"list_border"`
 	MetadataBorder      string `toml:"metadata_border"       json:"metadata_border"`
 	PreviewBorder       string `toml:"preview_border"        json:"preview_border"`
@@ -213,6 +214,9 @@ func Default() Config {
 			Info:        "14",
 			Warning:     "11",
 			Danger:      "9",
+			// The selected row's bar: a 256-color dark grey chosen to sit behind
+			// the row's own foreground colors.
+			SelectionBG: "236",
 		}},
 		Icons: IconsConfig{
 			Mode:       IconModeIcons,
@@ -521,6 +525,9 @@ func normalizeThemeColors(colors *ThemeColorsConfig, defaults ThemeColorsConfig)
 	}
 	if strings.TrimSpace(colors.Danger) == "" {
 		colors.Danger = defaults.Danger
+	}
+	if strings.TrimSpace(colors.SelectionBG) == "" {
+		colors.SelectionBG = defaults.SelectionBG
 	}
 	// Per-pane borders and border titles inherit the relevant global (or the
 	// pane's own border, for titles) when unset, so omitting them preserves

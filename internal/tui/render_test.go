@@ -6,9 +6,215 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/muesli/termenv"
 
 	"github.com/lmilojevicc/seshagy/internal/sessionmgr"
 )
+
+// barCells reports the selection-bar state of every cell a rendered line draws,
+// so a test can assert the bar covers the row end to end. It walks the line the
+// way a terminal does and records whether the bar's opening sequence was still
+// in effect when each printable cell was written.
+func barCells(t *testing.T, line, open string) []bool {
+	t.Helper()
+	var cells []bool
+	bar := false
+	var state byte
+	p := ansi.NewParser()
+	for i := 0; i < len(line); {
+		seq, width, n, newState := ansi.DecodeSequence(line[i:], state, p)
+		state = newState
+		i += n
+		if strings.HasPrefix(seq, "\x1b") {
+			switch {
+			case seq == open:
+				bar = true
+			case sgrClearsBackground(seq):
+				bar = false
+			}
+			continue
+		}
+		for range width {
+			cells = append(cells, bar)
+		}
+	}
+	return cells
+}
+
+// TestPaintBackground pins the selected row's bar: the configured color is what
+// gets emitted, the background is re-opened behind every sequence that clears it
+// and behind nothing else, and the bar is exactly the row width.
+func TestPaintBackground(t *testing.T) {
+	withColor(t)
+	// #283457 on the truecolor profile the test pins, and a dark grey ANSI
+	// index; both go through the terminal's own conversion.
+	const hexOpen = "\x1b[48;2;40;52;87m"
+	hex := lipgloss.Color("#283457")
+	tests := []struct {
+		name  string
+		bg    lipgloss.TerminalColor
+		width int
+		line  string
+		want  string
+	}{
+		{
+			name:  "hex color fills the padded row",
+			bg:    hex,
+			width: 4,
+			line:  "\x1b[90mapi\x1b[0m",
+			want:  hexOpen + "\x1b[90mapi\x1b[0m" + hexOpen + " " + sgrReset,
+		},
+		{
+			name:  "ansi index color",
+			bg:    lipgloss.Color("4"),
+			width: 2,
+			line:  "ab",
+			want:  "\x1b[44mab" + sgrReset,
+		},
+		{
+			name:  "a bare reset re-opens the bar",
+			bg:    hex,
+			width: 4,
+			line:  "a\x1b[mb",
+			want:  hexOpen + "a\x1b[m" + hexOpen + "b  " + sgrReset,
+		},
+		{
+			name:  "the default background re-opens the bar",
+			bg:    hex,
+			width: 4,
+			line:  "a\x1b[49mb",
+			want:  hexOpen + "a\x1b[49m" + hexOpen + "b  " + sgrReset,
+		},
+		{
+			name:  "a color list with a bare 0 re-opens the bar",
+			bg:    hex,
+			width: 4,
+			line:  "a\x1b[0;39mb",
+			want:  hexOpen + "a\x1b[0;39m" + hexOpen + "b  " + sgrReset,
+		},
+		{
+			name:  "a 256-color index of 0 is black, not a reset",
+			bg:    hex,
+			width: 2,
+			line:  "a\x1b[38;5;0mb",
+			want:  hexOpen + "a\x1b[38;5;0mb" + sgrReset,
+		},
+		{
+			name:  "a truecolor 0 component is not a reset",
+			bg:    hex,
+			width: 2,
+			line:  "a\x1b[38;2;0;0;0mb",
+			want:  hexOpen + "a\x1b[38;2;0;0;0mb" + sgrReset,
+		},
+		{
+			name:  "the default foreground is not a reset",
+			bg:    hex,
+			width: 2,
+			line:  "a\x1b[39mb",
+			want:  hexOpen + "a\x1b[39mb" + sgrReset,
+		},
+		{
+			name:  "a longer line is cut to the row width",
+			bg:    hex,
+			width: 2,
+			line:  "abcdef",
+			want:  hexOpen + "a…" + sgrReset,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := paintBackground(tt.line, tt.width, tt.bg)
+			if got != tt.want {
+				t.Fatalf("paintBackground() = %q, want %q", got, tt.want)
+			}
+			if !strings.HasSuffix(got, sgrReset) {
+				t.Fatalf("bar does not close its style: %q", got)
+			}
+			if strings.Contains(got, "\x1b[7m") {
+				t.Fatalf("bar is drawn in reverse video: %q", got)
+			}
+			if w := ansi.StringWidth(got); w != tt.width {
+				t.Fatalf("bar is %d cells, want %d: %q", w, tt.width, got)
+			}
+			cells := barCells(t, got, backgroundOpen(tt.bg))
+			if len(cells) != tt.width {
+				t.Fatalf("bar covers %d cells, want %d: %q", len(cells), tt.width, got)
+			}
+			for i, on := range cells {
+				if !on {
+					t.Fatalf("cell %d of the bar has no background: %q", i, got)
+				}
+			}
+		})
+	}
+}
+
+// TestPaintBackgroundCoversAStyledRow draws a row out of the picker's own
+// styles — a title, a muted age, a match highlight, and a state word — and pins
+// that the bar is active on every cell while the row keeps its foreground
+// colors on top.
+func TestPaintBackgroundCoversAStyledRow(t *testing.T) {
+	withColor(t)
+	s := newTestModel(t).styles
+	line := s.itemName.Render("api") + " " + s.muted.Render("2d23h") + " " +
+		s.match.Render("lo") + " " + s.needsYou.Render("blocked")
+	open := "\x1b[48;5;236m" // the default selection_bg
+
+	got := paintBackground(line, 40, s.selectionBG)
+	if !strings.HasPrefix(got, open) {
+		t.Fatalf("bar does not open with the selection background: %q", got)
+	}
+	if !strings.HasSuffix(got, sgrReset) {
+		t.Fatalf("bar does not close its style: %q", got)
+	}
+	if strings.Contains(got, "\x1b[7m") {
+		t.Fatalf("bar is drawn in reverse video: %q", got)
+	}
+	if w := ansi.StringWidth(got); w != 40 {
+		t.Fatalf("bar is %d cells, want 40: %q", w, got)
+	}
+	cells := barCells(t, got, open)
+	if len(cells) != 40 {
+		t.Fatalf("bar covers %d cells, want 40: %q", len(cells), got)
+	}
+	for i, on := range cells {
+		if !on {
+			t.Fatalf("cell %d of the bar has no background: %q", i, got)
+		}
+	}
+	for _, segment := range []string{s.muted.Render("2d23h"), s.match.Render("l")} {
+		if !strings.Contains(got, segment) {
+			t.Fatalf("row lost its own styling %q: %q", segment, got)
+		}
+	}
+}
+
+// TestSelectionBarWithoutAColorProfile pins the no-color paths: a profile that
+// draws no styling provides no background sequence to emit, so the row stays
+// plain and the picker falls back to the accent marker that keeps the cursor
+// visible. The configured "default" color means the same.
+func TestSelectionBarWithoutAColorProfile(t *testing.T) {
+	tests := []struct {
+		name  string
+		color lipgloss.TerminalColor
+	}{
+		{name: "ascii profile", color: lipgloss.Color("236")},
+		{name: "the default color keyword", color: themeColor("default", lipgloss.Color("236"))},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			withProfile(t, termenv.Ascii)
+			m := newTestModel(t)
+			m.styles.selectionBG = tt.color
+			if got := m.selectionBar(" abc", 4); got != "▌abc" {
+				t.Fatalf("selectionBar() = %q, want the plain accent marker", got)
+			}
+			if got := paintBackground("abcdef", 4, tt.color); got != "abc…" {
+				t.Fatalf("paintBackground() = %q, want the plain cut row", got)
+			}
+		})
+	}
+}
 
 func TestSanitizePreviewLine(t *testing.T) {
 	tests := []struct {

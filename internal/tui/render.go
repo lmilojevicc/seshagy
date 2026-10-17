@@ -48,6 +48,103 @@ func hardCutStyledText(text string, width int) string {
 	return ansi.Truncate(text, width, "")
 }
 
+// sgrReset is the full reset that closes a styled run.
+const sgrReset = "\x1b[0m"
+
+// paintBackground draws one full-width bar behind an already-rendered line: the
+// line is cut and padded to exactly width cells, the background is opened at the
+// start and re-opened after every sequence inside the line that resets or
+// clears it, and the bar closes with a single reset of its own. Every styled
+// segment a cell carries ends with a reset, so a plain surround would leave the
+// bar painted only up to the first one; re-opening behind each reset is what
+// keeps the selected row one solid bar while the row's own foreground colors
+// stay on top. A color profile that draws no background leaves the line plain.
+func paintBackground(line string, width int, bg lipgloss.TerminalColor) string {
+	line = pad(clampStyledText(line, width), width)
+	open := backgroundOpen(bg)
+	if open == "" {
+		return line
+	}
+	var out strings.Builder
+	out.Grow(len(line) + 2*len(open) + len(sgrReset))
+	out.WriteString(open)
+	for i := 0; i < len(line); {
+		if line[i] != escByte {
+			end := i + 1
+			for end < len(line) && line[end] != escByte {
+				end++
+			}
+			out.WriteString(line[i:end])
+			i = end
+			continue
+		}
+		// Only SGR sequences survive here, exactly as in a sanitized preview:
+		// anything else would move the picker's own cursor out of the bar.
+		seq, size := previewEscape(line[i:])
+		out.WriteString(seq)
+		if sgrClearsBackground(seq) {
+			out.WriteString(open)
+		}
+		i += size
+	}
+	out.WriteString(sgrReset)
+	return out.String()
+}
+
+// backgroundOpen renders the sequence that turns bg on for the renderer's
+// active color profile, or "" when the configured color is none or the profile
+// draws no styling at all.
+func backgroundOpen(bg lipgloss.TerminalColor) string {
+	probe := lipgloss.NewStyle().Background(bg).Render("x")
+	open := strings.TrimSuffix(probe, sgrReset)
+	if !strings.HasSuffix(open, "x") {
+		return ""
+	}
+	return strings.TrimSuffix(open, "x")
+}
+
+// sgrClearsBackground reports whether an SGR sequence ends the background
+// paintBackground drew: a full reset (ESC[0m, ESC[m, or a list carrying a bare
+// 0) or the default background (ESC[49m). Foregrounds and attributes survive
+// the bar re-opening behind them.
+func sgrClearsBackground(seq string) bool {
+	params, ok := sgrParams(seq)
+	if !ok {
+		return false
+	}
+	if len(params) == 0 {
+		return true // ESC[m is ESC[0m
+	}
+	for i := 0; i < len(params); i++ {
+		switch params[i] {
+		case "", "0", "49":
+			return true
+		case "38", "48", "58":
+			// Extended color: "5;n" (256-color) or "2;r;g;b" (truecolor). The
+			// arguments are color values, where 0 is black, not a reset.
+			if i+1 < len(params) && params[i+1] == "2" {
+				i += 4
+			} else {
+				i += 2
+			}
+		}
+	}
+	return false
+}
+
+// sgrParams splits the parameters of an SGR sequence, and reports whether seq
+// is one at all.
+func sgrParams(seq string) ([]string, bool) {
+	if len(seq) < 3 || seq[0] != escByte || seq[1] != '[' || seq[len(seq)-1] != 'm' {
+		return nil, false
+	}
+	body := seq[2 : len(seq)-1]
+	if body == "" {
+		return nil, true
+	}
+	return strings.Split(body, ";"), true
+}
+
 // previewTabStop is the tab stop width captured preview tabs expand to.
 const previewTabStop = 8
 

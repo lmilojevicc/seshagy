@@ -54,6 +54,35 @@ func TestStylesFromConfigChromeDefaults(t *testing.T) {
 	}
 }
 
+// TestStylesFromConfigSelectionBackground pins the bar color under the selected
+// result row: the 256-color dark grey default, an ANSI index, a hex override,
+// and "default" for a row with no bar at all.
+func TestStylesFromConfigSelectionBackground(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		want  lipgloss.TerminalColor
+	}{
+		{name: "default dark grey", value: "", want: lipgloss.Color("236")},
+		{name: "ansi index", value: "4", want: lipgloss.Color("4")},
+		{name: "hex", value: "#283457", want: lipgloss.Color("#283457")},
+		{
+			name:  "the default keyword leaves the bar unpainted",
+			value: "default",
+			want:  lipgloss.NoColor{},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := appconfig.Default()
+			cfg.Theme.Colors.SelectionBG = test.value
+			if got := stylesFromConfig(cfg).selectionBG; got != test.want {
+				t.Fatalf("selectionBG = %v, want %v", got, test.want)
+			}
+		})
+	}
+}
+
 // TestStylesFromConfigChromeOverrides verifies [theme.colors] still rethemes the
 // chrome: each new style follows the existing key it inherits from.
 func TestStylesFromConfigChromeOverrides(t *testing.T) {

@@ -850,15 +850,18 @@ func TestResultRowsAlignTheirColumnsPerKind(t *testing.T) {
 		t.Fatalf("state cell is flush right (%d of 60): %q", end, blockedLine)
 	}
 
-	// The selection bar covers the whole row: no cell's reset is left without
-	// the bar re-opened behind it.
+	// The selection bar covers the whole row: the bar's background is re-opened
+	// behind every cell's reset, so no cell is left unpainted.
 	selected := m.renderRow(rows[0], metas[0], cols, 60, true)
-	bar := strings.TrimSuffix(m.styles.selectedBG.Render("x"), "x"+sgrReset)
+	bar := "\x1b[48;5;236m"
 	if !strings.HasPrefix(selected, bar) {
 		t.Fatalf("selected row does not open with the selection bar: %q", selected)
 	}
 	if !strings.HasSuffix(selected, sgrReset) {
 		t.Fatalf("selected row does not close its style: %q", selected)
+	}
+	if strings.Contains(selected, "\x1b[7m") {
+		t.Fatalf("selected row is drawn in reverse video: %q", selected)
 	}
 	for i, part := range strings.Split(strings.TrimSuffix(selected, sgrReset), sgrReset) {
 		if i > 0 && !strings.HasPrefix(part, bar) {
@@ -1178,13 +1181,20 @@ func TestResultsWindowCountersLiveInTheBottomBorder(t *testing.T) {
 				t.Fatalf("results bottom border = %q, want %q", bottom, want)
 			}
 			// No inner row is spent on a counter, and the selection is visible.
+			// The bar is a background sequence, which a profile that draws no
+			// styling cannot emit: that one falls back to the accent marker.
+			barOpen := backgroundOpen(m.styles.selectionBG)
 			selected := ""
 			for _, line := range block[1 : len(block)-1] {
 				plain := sessionmgr.StripANSI(line)
 				if strings.Contains(plain, "more") {
 					t.Fatalf("counter drawn inside the results window: %q", plain)
 				}
-				if strings.Contains(line, "\x1b[7m") || strings.Contains(plain, "▌") {
+				isSelected := strings.Contains(plain, "▌")
+				if barOpen != "" {
+					isSelected = strings.Contains(line, barOpen)
+				}
+				if isSelected {
 					selected = plain
 				}
 			}

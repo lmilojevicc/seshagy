@@ -35,7 +35,8 @@ func TestLoadDefaultWhenMissing(t *testing.T) {
 		cfg.Theme.Colors.Success != "10" ||
 		cfg.Theme.Colors.Info != "14" ||
 		cfg.Theme.Colors.Warning != "11" ||
-		cfg.Theme.Colors.Danger != "9" {
+		cfg.Theme.Colors.Danger != "9" ||
+		cfg.Theme.Colors.SelectionBG != "236" {
 		t.Fatalf("theme color defaults = %#v", cfg.Theme.Colors)
 	}
 	if got := cfg.Sources.Order; strings.Join(
@@ -74,6 +75,7 @@ func TestSaveAndLoadConfig(t *testing.T) {
 	cfg.Theme.Colors.Info = "#89dceb"
 	cfg.Theme.Colors.Warning = "#f9e2af"
 	cfg.Theme.Colors.Danger = "#f38ba8"
+	cfg.Theme.Colors.SelectionBG = "#283457"
 	cfg.TypeFirst.Enabled = true
 	cfg.TypeFirst.Prefix = "alt+x"
 	cfg.Setup.TypeFirstPromptSeen = true
@@ -112,7 +114,8 @@ func TestSaveAndLoadConfig(t *testing.T) {
 		!strings.Contains(string(data), `#313244`) ||
 		!strings.Contains(string(data), `#7f849c`) ||
 		!strings.Contains(string(data), `#a6e3a1`) ||
-		!strings.Contains(string(data), `#f38ba8`) {
+		!strings.Contains(string(data), `#f38ba8`) ||
+		!strings.Contains(string(data), `selection_bg = "#283457"`) {
 		t.Fatalf("saved config missing theme colors: %s", data)
 	}
 	loaded, err := Load()
@@ -140,7 +143,8 @@ func TestSaveAndLoadConfig(t *testing.T) {
 		loaded.Theme.Colors.Success != "#a6e3a1" ||
 		loaded.Theme.Colors.Info != "#89dceb" ||
 		loaded.Theme.Colors.Warning != "#f9e2af" ||
-		loaded.Theme.Colors.Danger != "#f38ba8" {
+		loaded.Theme.Colors.Danger != "#f38ba8" ||
+		loaded.Theme.Colors.SelectionBG != "#283457" {
 		t.Fatalf("loaded theme colors = %#v", loaded.Theme.Colors)
 	}
 	if !loaded.TypeFirst.Enabled || loaded.PrefixKey() != "alt+x" ||
@@ -954,6 +958,32 @@ func TestNormalizeThemeColorsPopupTitleAlias(t *testing.T) {
 	}
 }
 
+// TestNormalizeThemeColorsSelectionBG covers the selected row's bar color: an
+// unset value falls back to the dark grey default, and any color lipgloss
+// accepts (ANSI index or hex) is kept as written.
+func TestNormalizeThemeColorsSelectionBG(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{name: "unset falls back to the default", in: "", want: "236"},
+		{name: "whitespace falls back to the default", in: "   ", want: "236"},
+		{name: "ansi index is kept", in: "4", want: "4"},
+		{name: "hex is kept", in: "#283457", want: "#283457"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := Default()
+			cfg.Theme.Colors.SelectionBG = tt.in
+			cfg.Normalize()
+			if got := cfg.Theme.Colors.SelectionBG; got != tt.want {
+				t.Fatalf("selection_bg = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestNormalizeThemeColorsFillsAllEmptyFields(t *testing.T) {
 	cfg := Default()
 	cfg.Theme.Colors = ThemeColorsConfig{}
@@ -978,6 +1008,7 @@ func TestNormalizeThemeColorsFillsAllEmptyFields(t *testing.T) {
 		{"Info", cfg.Theme.Colors.Info, defaults.Info},
 		{"Warning", cfg.Theme.Colors.Warning, defaults.Warning},
 		{"Danger", cfg.Theme.Colors.Danger, defaults.Danger},
+		{"SelectionBG", cfg.Theme.Colors.SelectionBG, defaults.SelectionBG},
 		// Per-pane tokens inherit the relevant global when unset.
 		{"ListBorder", cfg.Theme.Colors.ListBorder, defaults.Border},
 		{"MetadataBorder", cfg.Theme.Colors.MetadataBorder, defaults.Border},
