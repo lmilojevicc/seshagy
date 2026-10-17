@@ -51,6 +51,29 @@ func frameLines(t *testing.T, m Model) []string {
 	return lines
 }
 
+// resultRowLine is the content of the first framed column of the line that holds
+// text — the results window's row for a row that carries text — with the window
+// borders and the row's padding removed. The caller decides whether the line is
+// stripped or still styled.
+func resultRowLine(t *testing.T, frame, text string) string {
+	t.Helper()
+	for _, line := range strings.Split(frame, "\n") {
+		start := strings.Index(line, "│")
+		if start < 0 {
+			continue
+		}
+		end := strings.Index(line[start+1:], "│")
+		if end < 0 {
+			continue
+		}
+		if row := line[start+1 : start+1+end]; strings.Contains(row, text) {
+			return strings.TrimRight(row, " ")
+		}
+	}
+	t.Fatalf("no results row contains %q:\n%s", text, frame)
+	return ""
+}
+
 // promptContentLine is the ANSI-stripped content row of the prompt window.
 func promptContentLine(t *testing.T, m Model) string {
 	t.Helper()
@@ -735,7 +758,7 @@ func TestAgentStateNoneModeHidesGlyphAndWord(t *testing.T) {
 	}
 }
 
-func TestMetaGridShrinksLeadingColumnsBeforeSqueezingTheTitle(t *testing.T) {
+func TestMetaGridShrinksLeadingColumnsBeforeSqueezingTheStateColumn(t *testing.T) {
 	m := newTestModel(t)
 	item := agentItem("claude", "%1", "a-very-long-workspace-name")
 	m = withItems(m, []sessionmgr.Item{item})
@@ -745,52 +768,78 @@ func TestMetaGridShrinksLeadingColumnsBeforeSqueezingTheTitle(t *testing.T) {
 	if grid.total() > 30 {
 		t.Fatalf("grid total = %d, want <= 30", grid.total())
 	}
-	if len(grid.widths) != 3 {
-		t.Fatalf("columns = %d, want 3 (no column dropped)", len(grid.widths))
+	if len(grid.widths) != 4 {
+		t.Fatalf("columns = %d, want 4 (no column dropped)", len(grid.widths))
 	}
-	if grid.widths[0] >= metaColumnMax {
-		t.Fatalf("leading column not shrunk: %d", grid.widths[0])
+	if grid.widths[1] >= metaColumnMax {
+		t.Fatalf("workspace column not shrunk: %d", grid.widths[1])
 	}
-	if grid.widths[2] < len("idle") {
-		t.Fatalf("state column squeezed to %d", grid.widths[2])
+	if grid.widths[3] < metaColumnMin {
+		t.Fatalf("state column squeezed to %d", grid.widths[3])
 	}
 }
 
-func TestRowMetaColumnsAlignFlushRight(t *testing.T) {
+// TestResultRowsAlignTheirColumnsPerKind pins the row table: rows of one kind
+// share the title and meta columns, so their titles, context, and state line up
+// down the window, and the selected row is the full-width selection bar.
+func TestResultRowsAlignTheirColumnsPerKind(t *testing.T) {
+	withColor(t)
+	blocked := agentItem("claude", "%1", "frontend")
+	blocked.AgentState = sessionmgr.AgentBlocked
+	blocked.AgentDisplayName = "claude"
+	idle := agentItem("pi", "%2", "a-very-long-workspace")
+	idle.AgentDisplayName = "pi"
 	m := newTestModel(t)
-	m = withItems(m, []sessionmgr.Item{
-		agentItem("claude", "%1", "frontend"),
-		{Kind: sessionmgr.KindSession, Name: "dev", Target: "dev", Attached: true},
-	})
+	m = withItems(m, []sessionmgr.Item{blocked, idle})
 	rows := m.rows()
 	if len(rows) != 2 {
 		t.Fatalf("rows = %d, want 2", len(rows))
 	}
 	metas := [][]metaCell{m.rowMeta(rows[0]), m.rowMeta(rows[1])}
-	grid := buildMetaGrid(metas, 60-m.rowPrefixWidth()-titleMinWidth-2)
-	agentLine := sessionmgr.StripANSI(m.renderRow(rows[0], metas[0], grid, 60, false))
-	sessionLine := sessionmgr.StripANSI(m.renderRow(rows[1], metas[1], grid, 60, false))
+	grid := buildRowGrid(rows, metas, 60, m.rowPrefixWidth())
+	cols := grid[sessionmgr.KindAgent]
+	blockedLine := sessionmgr.StripANSI(m.renderRow(rows[0], metas[0], cols, 60, false))
+	idleLine := sessionmgr.StripANSI(m.renderRow(rows[1], metas[1], cols, 60, false))
 
-	if got := ansi.StringWidth(agentLine); got != 60 {
-		t.Fatalf("agent row width = %d, want 60: %q", got, agentLine)
+	for _, line := range []string{blockedLine, idleLine} {
+		if got := ansi.StringWidth(line); got != 60 {
+			t.Fatalf("row width = %d, want 60: %q", got, line)
+		}
 	}
-	if got := ansi.StringWidth(sessionLine); got != 60 {
-		t.Fatalf("session row width = %d, want 60: %q", got, sessionLine)
-	}
-	// The session row carries one meta cell fewer, so its "attached" state must
-	// start in the same column as the agent's state word rather than shift left.
+	// Both state cells start in the same column, and the block is left aligned:
+	// the state ends before the row does instead of being pushed to the edge.
 	column := func(line, word string) int {
-		index := strings.LastIndex(line, word)
+		t.Helper()
+		index := strings.Index(line, word)
 		if index < 0 {
 			t.Fatalf("%q does not contain %q", line, word)
 		}
 		return ansi.StringWidth(line[:index])
 	}
-	agentColumn := column(agentLine, "idle")
-	sessionColumn := column(sessionLine, "attached")
-	if agentColumn != sessionColumn {
-		t.Fatalf("meta columns are not flush right (agent %d, session %d):\n%q\n%q",
-			agentColumn, sessionColumn, agentLine, sessionLine)
+	blockedColumn := column(blockedLine, "∅ blocked")
+	idleColumn := column(idleLine, "○ idle")
+	if blockedColumn != idleColumn {
+		t.Fatalf("state columns do not line up (%d, %d):\n%q\n%q",
+			blockedColumn, idleColumn, blockedLine, idleLine)
+	}
+	if end := blockedColumn + ansi.StringWidth("∅ blocked"); end >= 60 {
+		t.Fatalf("state cell is flush right (%d of 60): %q", end, blockedLine)
+	}
+
+	// The selection bar covers the whole row: no cell's reset is left without
+	// the bar re-opened behind it.
+	selected := m.renderRow(rows[0], metas[0], cols, 60, true)
+	bar := strings.TrimSuffix(m.styles.selectedBG.Render("x"), "x"+sgrReset)
+	if !strings.HasPrefix(selected, bar) {
+		t.Fatalf("selected row does not open with the selection bar: %q", selected)
+	}
+	if !strings.HasSuffix(selected, sgrReset) {
+		t.Fatalf("selected row does not close its style: %q", selected)
+	}
+	for i, part := range strings.Split(strings.TrimSuffix(selected, sgrReset), sgrReset) {
+		if i > 0 && !strings.HasPrefix(part, bar) {
+			t.Fatalf("selection bar stops at cell %d: %q", i, selected)
+		}
 	}
 }
 
@@ -808,66 +857,248 @@ func TestTextIconModeHidesPrivateUseAgentGlyphs(t *testing.T) {
 	}
 }
 
-func TestSessionRowMetaPutsAttachedFirstAndCountLast(t *testing.T) {
+// TestSessionRowColumns pins the session row: the name, the dim window count,
+// the green attached flag (kept as a blank column when the session is detached),
+// and the agents inside the session counted per state.
+func TestSessionRowColumns(t *testing.T) {
+	withColor(t)
+	working := agentItem("pi", "%1", "seshagy")
+	working.AgentState = sessionmgr.AgentWorking
+	working.Session = "seshagy"
+	blocked := agentItem("claude", "%2", "seshagy")
+	blocked.AgentState = sessionmgr.AgentBlocked
+	blocked.Session = "seshagy"
+	idle := agentItem("codex", "%3", "fff-cli")
+	idle.Session = "fff-cli"
+
 	m := newTestModel(t)
 	m = withItems(m, []sessionmgr.Item{
+		working,
+		blocked,
+		idle,
 		{
 			Kind:     sessionmgr.KindSession,
-			Name:     "attached3",
-			Target:   "attached3",
+			Name:     "seshagy",
+			Target:   "seshagy",
 			Attached: true,
 			Windows:  3,
 		},
-		{Kind: sessionmgr.KindSession, Name: "detached5", Target: "detached5", Windows: 5},
+		{Kind: sessionmgr.KindSession, Name: "fff-cli", Target: "fff-cli", Windows: 5},
 	})
 	rows := m.rows()
-	if len(rows) != 2 {
-		t.Fatalf("rows = %d, want 2", len(rows))
+	var sessions []row
+	for _, r := range rows {
+		if r.item.Kind == sessionmgr.KindSession {
+			sessions = append(sessions, r)
+		}
 	}
-	attached := m.rowMeta(rows[0])
-	detached := m.rowMeta(rows[1])
+	if len(sessions) != 2 {
+		t.Fatalf("session rows = %d, want 2", len(sessions))
+	}
+	attached := m.rowMeta(sessions[0])
+	detached := m.rowMeta(sessions[1])
 
-	if attached[0].plain != "attached" {
-		t.Fatalf("attached session's first cell = %q, want attached", attached[0].plain)
+	if want := windowCountLabel(m.terms, 3); attached[0].plain != want {
+		t.Fatalf("attached session's first cell = %q, want %q", attached[0].plain, want)
 	}
-	if want := windowCountLabel(m.terms, 3); attached[len(attached)-1].plain != want {
+	if attached[1].plain != "attached" {
+		t.Fatalf("attached session's second cell = %q, want attached", attached[1].plain)
+	}
+	if want := "●1 ∅1"; attached[len(attached)-1].plain != want {
 		t.Fatalf("attached session's last cell = %q, want %q",
 			attached[len(attached)-1].plain, want)
 	}
-	// The unattached session keeps an empty placeholder in the attached column
-	// so its count still lands in the last column.
-	if detached[0].plain != "" {
-		t.Fatalf("unattached session's first cell = %q, want empty", detached[0].plain)
+	if !strings.Contains(attached[1].text, m.styles.success.Render("attached")) {
+		t.Fatalf("attached is not drawn in the success accent: %q", attached[1].text)
 	}
-	if want := windowCountLabel(m.terms, 5); detached[len(detached)-1].plain != want {
-		t.Fatalf("unattached session's last cell = %q, want %q",
+	// A detached session keeps the attached column blank so the counts that
+	// follow it still line up, and it counts only its own agents.
+	if detached[0].plain != windowCountLabel(m.terms, 5) {
+		t.Fatalf("detached session's first cell = %q", detached[0].plain)
+	}
+	if detached[1].plain != "" {
+		t.Fatalf("detached session's attached cell = %q, want empty", detached[1].plain)
+	}
+	if want := "○1"; detached[len(detached)-1].plain != want {
+		t.Fatalf("detached session's last cell = %q, want %q",
 			detached[len(detached)-1].plain, want)
 	}
-	for _, cells := range [][]metaCell{attached, detached} {
-		for _, cell := range cells {
-			if cell.plain == "current" {
-				t.Fatal("the session row still shows a current cell")
-			}
-		}
-	}
 
-	// Both counts end in the same column, whatever the attached flag says.
-	grid := buildMetaGrid([][]metaCell{attached, detached}, 40)
-	attachedLine := sessionmgr.StripANSI(m.renderRow(rows[0], attached, grid, 60, false))
-	detachedLine := sessionmgr.StripANSI(m.renderRow(rows[1], detached, grid, 60, false))
+	// Both rows draw their counts in the same column, whatever the attached flag
+	// says, and no row shows the removed "current" cell.
+	grid := buildRowGrid([]row{sessions[0], sessions[1]},
+		[][]metaCell{attached, detached}, 60, m.rowPrefixWidth())
+	cols := grid[sessionmgr.KindSession]
+	attachedLine := sessionmgr.StripANSI(m.renderRow(sessions[0], attached, cols, 60, false))
+	detachedLine := sessionmgr.StripANSI(m.renderRow(sessions[1], detached, cols, 60, false))
 	countColumn := func(line, count string) int {
 		t.Helper()
-		index := strings.LastIndex(line, count)
+		index := strings.Index(line, count)
 		if index < 0 {
 			t.Fatalf("%q does not contain %q", line, count)
 		}
 		return ansi.StringWidth(line[:index])
 	}
-	attachedColumn := countColumn(attachedLine, windowCountLabel(m.terms, 3))
-	detachedColumn := countColumn(detachedLine, windowCountLabel(m.terms, 5))
+	attachedColumn := countColumn(attachedLine, "●1")
+	detachedColumn := countColumn(detachedLine, "○1")
 	if attachedColumn != detachedColumn {
-		t.Fatalf("window counts are not in the same column (%d, %d):\n%q\n%q",
+		t.Fatalf("agent counts are not in the same column (%d, %d):\n%q\n%q",
 			attachedColumn, detachedColumn, attachedLine, detachedLine)
+	}
+	for _, line := range []string{attachedLine, detachedLine} {
+		if strings.Contains(line, "current") {
+			t.Fatalf("the session row still shows a current cell: %q", line)
+		}
+	}
+}
+
+// titleSegment is one style run of an expected title.
+type titleSegment struct {
+	text  string
+	style func(m Model) lipgloss.Style
+}
+
+// TestDirRowSplitsParentAndBasename pins the directory row: the path splits at
+// its last slash into the dim parent, trailing slash included, and the bright
+// basename the row is about. The match runes are emphasized on whichever side of
+// the split they fall.
+func TestDirRowSplitsParentAndBasename(t *testing.T) {
+	withColor(t)
+	muted := func(m Model) lipgloss.Style { return m.styles.muted }
+	name := func(m Model) lipgloss.Style { return m.styles.itemName }
+	match := func(m Model) lipgloss.Style { return m.styles.match }
+	tests := []struct {
+		name    string
+		path    string
+		matches []int
+		want    []titleSegment
+	}{
+		{
+			name: "nested path",
+			path: "internal/tui/view.go",
+			want: []titleSegment{{"internal/tui/", muted}, {"view.go", name}},
+		},
+		{
+			name: "home relative",
+			path: "~/code/demo",
+			want: []titleSegment{{"~/code/", muted}, {"demo", name}},
+		},
+		{
+			name: "absolute two levels",
+			path: "/tmp/demo",
+			want: []titleSegment{{"/tmp/", muted}, {"demo", name}},
+		},
+		{
+			name: "root level basename",
+			path: "/demo",
+			want: []titleSegment{{"/", muted}, {"demo", name}},
+		},
+		{
+			name: "basename only",
+			path: "demo",
+			want: []titleSegment{{"demo", name}},
+		},
+		{
+			name:    "match in the basename",
+			path:    "internal/tui/view.go",
+			matches: []int{13},
+			want: []titleSegment{
+				{"internal/tui/", muted}, {"v", match}, {"iew.go", name},
+			},
+		},
+		{
+			name:    "match in the parent",
+			path:    "internal/tui/view.go",
+			matches: []int{2},
+			want: []titleSegment{
+				{"in", muted}, {"t", match}, {"ernal/tui/", muted}, {"view.go", name},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := newTestModel(t)
+			item := sessionmgr.Item{Kind: sessionmgr.KindFD, Path: tt.path, Name: tt.path}
+			var want strings.Builder
+			for _, seg := range tt.want {
+				want.WriteString(seg.style(m).Render(seg.text))
+			}
+			got := m.renderTitle(row{item: item, matches: tt.matches}, 80, false)
+			if got != want.String() {
+				t.Fatalf("title = %q, want %q", got, want.String())
+			}
+		})
+	}
+}
+
+// TestAgentRowShowsNameContextAndState pins the agent row: the bright display
+// name, the dim `workspace · age` context, and the configured state glyph and
+// word in the state color. A blocked or done agent renders its name bold, and a
+// visited, working, or idle one does not.
+func TestAgentRowShowsNameContextAndState(t *testing.T) {
+	withColor(t)
+	const name = "review-spec"
+	tests := []struct {
+		state sessionmgr.AgentState
+		glyph string
+		word  string
+		bold  bool
+	}{
+		{sessionmgr.AgentBlocked, "∅", "blocked", true},
+		{sessionmgr.AgentDone, "◉", "done", true},
+		{sessionmgr.AgentWorking, "●", "working", false},
+		{sessionmgr.AgentIdle, "○", "idle", false},
+	}
+	for _, tt := range tests {
+		t.Run(string(tt.state), func(t *testing.T) {
+			m := newTestModel(t)
+			item := agentItem("claude", "%1", "seshagy")
+			item.AgentDisplayName = name
+			item.AgentState = tt.state
+			item.StartedAt = time.Now().Add(-3 * time.Minute)
+			m = withItems(m, []sessionmgr.Item{
+				item,
+				{Kind: sessionmgr.KindSession, Name: "other", Target: "other"},
+			})
+			// The cursor starts on the first row and bolds it; keep the agent row
+			// out of the selection so only the state decides the weight.
+			m.cursor = 1
+
+			row := resultRowLine(t, m.View(), name)
+			plain := sessionmgr.StripANSI(row)
+
+			// Name, workspace, age, state: one single-line row in that order.
+			order := []string{name, "seshagy", "·", "3m", tt.glyph, tt.word}
+			previous := -1
+			for _, part := range order {
+				index := strings.Index(plain, part)
+				if index <= previous {
+					t.Fatalf("agent row is out of order at %q: %q", part, plain)
+				}
+				previous = index
+			}
+
+			bold := m.styles.itemName.Bold(true)
+			if tt.bold && !strings.Contains(row, bold.Render(name)) {
+				t.Fatalf("an agent that needs you is not bold: %q", row)
+			}
+			if !tt.bold && strings.Contains(row, bold.Render(name)) {
+				t.Fatalf("a settled agent is bold: %q", row)
+			}
+			if !strings.Contains(row, m.styles.muted.Render("seshagy")) {
+				t.Fatalf("workspace is not dim: %q", row)
+			}
+			if !strings.Contains(row, m.styles.muted.Render("3m")) {
+				t.Fatalf("age is not dim: %q", row)
+			}
+			style := m.agentStateStyle(tt.state)
+			if !strings.Contains(row, style.Render(tt.glyph)) {
+				t.Fatalf("state glyph is not drawn in the state color: %q", row)
+			}
+			if !strings.Contains(row, style.Render(tt.word)) {
+				t.Fatalf("state word is not drawn in the state color: %q", row)
+			}
+		})
 	}
 }
 

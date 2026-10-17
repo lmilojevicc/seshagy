@@ -528,12 +528,12 @@ func wrapCursorDown(cursor, count int) int {
 	return cursor + 1
 }
 
-// windowCountLabel abbreviates the multiplexer's window noun to a 3-rune meta
-// cell ("win" under tmux, "tab" under herdr).
+// windowCountLabel names a session's window count in the multiplexer's own
+// vocabulary: "2 tabs" under herdr, "3 windows" under tmux.
 func windowCountLabel(terms sessionmgr.Terms, count int) string {
-	noun := []rune(terms.WindowNoun)
-	if len(noun) > 3 {
-		noun = noun[:3]
+	noun := terms.WindowPlural
+	if count == 1 {
+		noun = terms.WindowNoun
 	}
-	return fmt.Sprintf("%d %s", count, string(noun))
+	return fmt.Sprintf("%d %s", count, noun)
 }

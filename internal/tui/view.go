@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -246,10 +247,11 @@ func (m Model) resultsRows(
 	for i, r := range visible {
 		metas[i] = m.rowMeta(r)
 	}
-	grid := buildMetaGrid(metas, width-m.rowPrefixWidth()-titleMinWidth-2)
+	grid := buildRowGrid(visible, metas, width, m.rowPrefixWidth())
 	lines = make([]string, 0, len(visible))
 	for i, r := range visible {
-		lines = append(lines, m.renderRow(r, metas[i], grid, width, start+i == m.cursor))
+		cols := grid[r.item.Kind]
+		lines = append(lines, m.renderRow(r, metas[i], cols, width, start+i == m.cursor))
 	}
 	return lines, start, len(rows) - end
 }
@@ -408,128 +410,267 @@ func (m Model) hasHosts() bool {
 	return false
 }
 
-// metaCell is one right-aligned row column: the plain text used for width
-// computation and the styled text actually drawn.
+// cellSep is the gap between two meta columns; the column that starts a row's
+// run draws no separator (the title column's own gap precedes it).
+const cellSep = "  "
+
+// metaDot is the gap inside one dim context ("workspace · age"): the columns are
+// separate so they align, but the dot reads as part of the dim run around it.
+func (m Model) metaDot() string { return m.styles.muted.Render(" · ") }
+
+// metaCell is one trailing row column: the separator drawn before it, the plain
+// text its column width is measured from, and the styled text drawn.
 type metaCell struct {
+	sep   string
 	plain string
 	text  string
 }
 
-func styledCell(style lipgloss.Style, text string) metaCell {
-	return metaCell{plain: text, text: style.Render(text)}
+// metaCol builds one column from a style and its plain text.
+func metaCol(sep string, style lipgloss.Style, text string) metaCell {
+	return metaCell{sep: sep, plain: text, text: style.Render(text)}
 }
 
-func (m Model) mutedCell(text string) metaCell {
-	return styledCell(m.styles.muted, text)
-}
-
-// rowMeta builds the right-aligned meta columns for a row.
+// rowMeta builds a row's trailing columns. Each kind lays out its own columns —
+// agents their workspace, age, and state, sessions their window count, attached
+// flag, and the agents inside them, hosts their transport and alias — in fixed
+// slots, so a value a row lacks leaves its column blank instead of shifting the
+// columns that follow it.
 func (m Model) rowMeta(r row) []metaCell {
 	item := r.item
 	switch item.Kind {
 	case sessionmgr.KindAgent:
-		cells := make([]metaCell, 0, 4)
-		if item.Location != "" && item.Location != itemTitle(item) {
-			cells = append(cells, m.mutedCell(item.Location))
-		}
-		if !item.StartedAt.IsZero() {
-			cells = append(cells, m.mutedCell(agentAgeAt(item.StartedAt, time.Now())))
-		}
 		// The logo already says which agent this is; the colored kind label is
 		// only worth the columns when no logo is drawn.
+		label := ""
 		if !m.showAgentLogos() {
-			if label := agentKey(item.AgentName); label != "" {
-				cells = append(cells,
-					styledCell(lipgloss.NewStyle().Foreground(agentColor(item.AgentName)), label))
+			// A label that only repeats the name already drawn as the title is
+			// dropped, exactly like a tab label that repeats it.
+			if kind := agentKey(item.AgentName); !repeatsTitle(item, kind) {
+				label = kind
 			}
 		}
-		if !m.icons.AgentStateHidden() {
-			state := m.icons.ForAgentState(item.AgentState)
-			cells = append(cells, styledCell(m.agentStateStyle(item.AgentState), state.ASCII))
+		workspace := ""
+		if item.Location != "" && item.Location != itemTitle(item) {
+			workspace = item.Location
+		}
+		age := ""
+		if !item.StartedAt.IsZero() {
+			age = agentAgeAt(item.StartedAt, time.Now())
+		}
+		cells := make([]metaCell, 0, 4)
+		cells = append(cells, metaCol("", agentNameStyle(item.AgentName), label))
+		cells = append(cells, metaCol(cellSep, m.styles.muted, workspace))
+		cells = append(cells, metaCol(m.metaDot(), m.styles.muted, age))
+		if state, ok := m.agentStateCell(item.AgentState); ok {
+			cells = append(cells, state)
 		}
 		return cells
 	case sessionmgr.KindSession:
-		// The attached flag comes first and the window count last, with an empty
-		// placeholder in the attached column when the session is not attached, so
-		// the count sits in the last column on every session row.
-		cells := make([]metaCell, 0, 2)
-		if item.Attached {
-			cells = append(cells, styledCell(m.styles.success, "attached"))
-		} else {
-			cells = append(cells, metaCell{})
-		}
+		// The window count comes first and the attached flag keeps its column
+		// (blank while the session is not attached) so the agent counts after
+		// them line up on every session row.
+		cells := make([]metaCell, 0, 3)
+		count := ""
 		if item.Windows > 0 {
-			cells = append(cells, m.mutedCell(windowCountLabel(m.terms, item.Windows)))
+			count = windowCountLabel(m.terms, item.Windows)
+		}
+		cells = append(cells, metaCol("", m.styles.muted, count))
+		attached := metaCol(cellSep, m.styles.muted, "")
+		if item.Attached {
+			attached = metaCol(cellSep, m.styles.success, "attached")
+		}
+		cells = append(cells, attached)
+		if counts, ok := m.sessionAgentCountsCell(item); ok {
+			cells = append(cells, counts)
 		}
 		return cells
-	case sessionmgr.KindZoxide:
-		return []metaCell{m.mutedCell("zoxide")}
-	case sessionmgr.KindFD:
-		label := "fd"
-		if !sessionmgr.FDAvailable() {
-			label = "find"
-		}
-		return []metaCell{m.mutedCell(label)}
 	case sessionmgr.KindHost:
+		// The transport and the alias herdr is handed; an alias that only repeats
+		// the row's name (a host discovered in ~/.ssh/config) is dropped, which
+		// leaves the transport as the row's only column. The raw target is spelled
+		// out in the preview instead.
+		alias := item.Target
+		if alias == item.DisplayName() {
+			alias = ""
+		}
 		cells := make([]metaCell, 0, 2)
-		if item.Location != "" {
-			cells = append(cells, m.mutedCell(item.Location))
-		}
-		// The row shows the raw target; the alias handed to herdr is the item's
-		// action target and is spelled out in the preview instead.
-		target := item.Path
-		if target == "" {
-			target = item.ActionTarget()
-		}
-		if target != "" && target != item.DisplayName() {
-			cells = append(cells, m.mutedCell(target))
-		}
+		cells = append(cells, metaCol("", m.styles.muted, item.Location))
+		cells = append(cells, metaCol(m.metaDot(), m.styles.muted, alias))
 		return cells
 	default:
+		// Directories are their own context: the path is the row.
 		return nil
 	}
+}
+
+// agentNameStyle is the style an agent's kind label is drawn in: its brand
+// color when the vendor has one, the default foreground otherwise.
+func agentNameStyle(name string) lipgloss.Style {
+	return lipgloss.NewStyle().Foreground(agentColor(name))
+}
+
+// agentStateCell is an agent row's trailing cell: the configured state glyph
+// and word, in the configured state color. State mode "none" hides agent state
+// entirely, and then the cell is dropped. The word is drawn as its own run so a
+// configured color covers it exactly as it covers the glyph.
+func (m Model) agentStateCell(state sessionmgr.AgentState) (metaCell, bool) {
+	if m.icons.AgentStateHidden() {
+		return metaCell{}, false
+	}
+	icon := m.icons.ForAgentState(state)
+	style := m.agentStateStyle(state)
+	if !m.icons.AgentStateUsesIcons() {
+		return metaCol(cellSep, style, icon.ASCII), true
+	}
+	return metaCell{
+		sep:   cellSep,
+		plain: icon.Icon + " " + icon.ASCII,
+		text:  style.Render(icon.Icon) + " " + style.Render(icon.ASCII),
+	}, true
+}
+
+// sessionAgentCountsCell is a session row's trailing cell: the agents running
+// inside the session, tallied per state as a colored glyph and its count
+// ("●1 ∅1"). States are listed in urgency order, and the cell is dropped when
+// the session has no agents.
+func (m Model) sessionAgentCountsCell(session sessionmgr.Item) (metaCell, bool) {
+	counts := m.sessionAgentCounts(session)
+	var plain, text strings.Builder
+	for _, state := range agentCountOrder {
+		n := counts[state]
+		if n == 0 {
+			continue
+		}
+		glyph := m.stateLabel(state)
+		if plain.Len() > 0 {
+			plain.WriteString(" ")
+			text.WriteString(" ")
+		}
+		plain.WriteString(glyph)
+		plain.WriteString(strconv.Itoa(n))
+		text.WriteString(m.agentStateStyle(state).Render(glyph + strconv.Itoa(n)))
+	}
+	if plain.Len() == 0 {
+		return metaCell{}, false
+	}
+	return metaCell{sep: cellSep, plain: plain.String(), text: text.String()}, true
+}
+
+// agentCountOrder lists the agent states a session's count cell reports, most
+// urgent first; an empty state (no agents) never appears.
+var agentCountOrder = []sessionmgr.AgentState{
+	sessionmgr.AgentWorking,
+	sessionmgr.AgentBlocked,
+	sessionmgr.AgentDone,
+	sessionmgr.AgentIdle,
+	sessionmgr.AgentUnknown,
+}
+
+// sessionAgentCounts tallies the loaded agents running inside a session by
+// state. An agent belongs to the session its session field names, which tmux
+// spells as the session name and herdr as the workspace id.
+func (m Model) sessionAgentCounts(session sessionmgr.Item) map[sessionmgr.AgentState]int {
+	counts := make(map[sessionmgr.AgentState]int)
+	for _, item := range m.items {
+		if item.Kind != sessionmgr.KindAgent {
+			continue
+		}
+		if item.Session != session.Name && item.Session != session.ActionTarget() {
+			continue
+		}
+		counts[item.AgentState]++
+	}
+	return counts
+}
+
+// stateLabel is how a state is named inside a count: its configured glyph when
+// the icon set draws icons, and its configured word when it does not.
+func (m Model) stateLabel(state sessionmgr.AgentState) string {
+	icon := m.icons.ForAgentState(state)
+	if m.icons.AgentStateUsesIcons() {
+		return icon.Icon
+	}
+	return icon.ASCII
 }
 
 // metaColumnMin is the width a meta column can shrink to before its text is
 // ellipsized; metaColumnMax caps a column so one long value cannot dominate.
 const metaColumnMin = 6
 
-// metaGrid is the right-aligned table the visible rows' meta cells share: the
-// rightmost cell of every row sits in the last column, so rows that carry fewer
-// cells (a session has no agent kind) leave the leading columns blank instead of
-// shifting their own cells left.
-type metaGrid struct {
-	widths []int
+// rowColumns is one item kind's resolved row layout: the shared width of its
+// title column and its trailing meta columns. Each kind resolves its own, so a
+// long agent workspace widens the agent rows instead of pushing the session
+// rows' counts to the right.
+type rowColumns struct {
+	title int
+	grid  metaGrid
 }
 
+// rowGrid is one frame's row layout: the columns of every kind the visible rows
+// draw. Kinds without meta columns (directories) only carry a title width.
+type rowGrid map[sessionmgr.Kind]rowColumns
+
+// buildRowGrid measures the visible rows and resolves each kind's columns: the
+// title column is as wide as the kind's widest title, and every meta column as
+// wide as its widest cell (capped at metaColumnMax) — both then shrink so the
+// titles keep titleMinWidth and the rows fit the list's width.
+func buildRowGrid(rows []row, metas [][]metaCell, width, prefix int) rowGrid {
+	titles := make(map[sessionmgr.Kind]int)
+	cells := make(map[sessionmgr.Kind][][]metaCell)
+	for i, r := range rows {
+		kind := r.item.Kind
+		titles[kind] = max(titles[kind], lipgloss.Width(itemTitle(r.item)))
+		cells[kind] = append(cells[kind], metas[i])
+	}
+	grid := make(rowGrid, len(cells))
+	for kind, kindCells := range cells {
+		// The meta columns are measured against the room the title leaves them.
+		meta := buildMetaGrid(kindCells, width-prefix-1-titleMinWidth)
+		room := max(1, width-prefix-1-meta.total())
+		grid[kind] = rowColumns{
+			title: min(max(titles[kind], titleMinWidth), room),
+			grid:  meta,
+		}
+	}
+	return grid
+}
+
+// metaGrid is the resolved trailing columns of one kind's visible rows: each
+// column's width and the separator drawn before it. Rows left-align their cells
+// in their kind's columns, so name, context, and state read as a table down the
+// window instead of drifting to the right edge.
+type metaGrid struct {
+	widths []int
+	seps   []string
+}
+
+// total is the columns the grid draws: every column with its separator.
 func (g metaGrid) total() int {
 	total := 0
 	for i, w := range g.widths {
-		if i > 0 {
-			total += 2
-		}
-		total += w
+		total += w + lipgloss.Width(g.seps[i])
 	}
 	return total
 }
 
-// buildMetaGrid measures every cell in its right-aligned column (capped at
-// metaColumnMax) and then shrinks the least specific leftmost columns until the
-// titles keep their minimum room. The rightmost column — the agent state or the
-// session's window count — is never squeezed below metaColumnMin.
+// buildMetaGrid measures every cell in its column (capped at metaColumnMax) and
+// then shrinks the least specific leftmost columns until the titles keep their
+// minimum room. The last column — the agent state or the session's agent counts
+// — is never squeezed below metaColumnMin.
 func buildMetaGrid(metas [][]metaCell, budget int) metaGrid {
 	columns := 0
 	for _, cells := range metas {
-		if len(cells) > columns {
-			columns = len(cells)
-		}
+		columns = max(columns, len(cells))
 	}
-	grid := metaGrid{widths: make([]int, columns)}
+	grid := metaGrid{widths: make([]int, columns), seps: make([]string, columns)}
 	for _, cells := range metas {
-		offset := columns - len(cells)
 		for i, cell := range cells {
-			if w := min(metaColumnMax, lipgloss.Width(cell.plain)); w > grid.widths[offset+i] {
-				grid.widths[offset+i] = w
+			if w := min(metaColumnMax, lipgloss.Width(cell.plain)); w > grid.widths[i] {
+				grid.widths[i] = w
+			}
+			if grid.seps[i] == "" {
+				grid.seps[i] = cell.sep
 			}
 		}
 	}
@@ -542,52 +683,87 @@ func buildMetaGrid(metas [][]metaCell, budget int) metaGrid {
 	return grid
 }
 
-// renderMetaCells places a row's cells in the grid's trailing columns; the
-// columns the row lacks are kept blank so the block stays flush right.
+// renderMetaCells draws a row's cells left-aligned in the grid's columns: each
+// cell is padded to its column (rows that stop short simply end there) and the
+// styled text is clamped, never the plain width the column was measured from. A
+// cell a row has no value for still occupies its column, so the columns that
+// follow it line up, but it draws no separator and neither does the cell that
+// starts the row's run: a missing workspace must not leave a dangling " · ".
 func renderMetaCells(cells []metaCell, grid metaGrid) string {
-	parts := make([]string, 0, len(grid.widths))
-	offset := len(grid.widths) - len(cells)
-	for i, w := range grid.widths {
-		index := i - offset
-		if index < 0 || index >= len(cells) {
-			parts = append(parts, strings.Repeat(" ", w))
-			continue
+	var out strings.Builder
+	content := false
+	for i, cell := range cells {
+		if i >= len(grid.widths) {
+			break
 		}
-		cell := cells[index]
-		parts = append(parts, pad(clampStyledText(cell.text, w), w))
+		switch {
+		case !content:
+			// The row's run starts here: no separator to draw in front of it.
+		case cell.plain == "":
+			out.WriteString(strings.Repeat(" ", lipgloss.Width(grid.seps[i])))
+		default:
+			out.WriteString(cell.sep)
+		}
+		content = content || cell.plain != ""
+		out.WriteString(pad(clampStyledText(cell.text, grid.widths[i]), grid.widths[i]))
 	}
-	return strings.Join(parts, "  ")
+	return out.String()
 }
 
-// renderRow draws one item: selection marker, kind icon (agents add their logo),
-// agent state glyph, highlighted title, then the right-aligned meta columns.
-func (m Model) renderRow(r row, meta []metaCell, grid metaGrid, width int, selected bool) string {
-	marker := "  "
-	if selected {
-		marker = m.styles.bar.Render("▌") + " "
-	}
-	prefixWidth := m.rowPrefixWidth()
-	iconWidth := prefixWidth - 4
+// renderRow draws one result row: the kind icon, the title in its kind's title
+// column, and the trailing meta columns. The selected row is painted with the
+// selection bar across the full width.
+func (m Model) renderRow(r row, meta []metaCell, cols rowColumns, width int, selected bool) string {
+	iconWidth := m.rowIconWidth()
 	icon := pad(clampStyledText(m.rowIcon(r.item), iconWidth), iconWidth)
-	state := pad(clampStyledText(m.rowStateGlyph(r.item), 2), 2)
-	titleWidth := max(1, width-prefixWidth-grid.total()-2)
-	left := marker + icon + state + m.renderTitle(r, titleWidth, selected)
-	if len(grid.widths) == 0 {
-		return pad(clampStyledText(left, width), width)
+	title := pad(clampStyledText(m.renderTitle(r, cols.title, selected), cols.title), cols.title)
+	line := " " + icon + " " + title
+	if len(meta) > 0 {
+		line += " " + renderMetaCells(meta, cols.grid)
 	}
-	left = pad(clampStyledText(left, max(1, width-grid.total()-1)), max(1, width-grid.total()))
-	return pad(clampStyledText(left+renderMetaCells(meta, grid), width), width)
+	line = pad(clampStyledText(line, width), width)
+	if selected {
+		line = m.selectionBar(line)
+	}
+	return line
 }
 
-// rowPrefixWidth is the fixed marker/icon/state prefix every row shares. The
-// icon field is one cell wider when agent logos are drawn, because the icon
-// font extends into the cell after the glyph.
-func (m Model) rowPrefixWidth() int {
-	iconWidth := 2
-	if m.showAgentLogos() {
-		iconWidth = 3
+// sgrReset closes every cell lipgloss renders; the selection bar has to re-open
+// itself after each one to keep covering the row.
+const sgrReset = "\x1b[0m"
+
+// selectionBar paints a drawn row with the selection style over its full width.
+// A plain surround would only cover the cells before the first styled one,
+// because every cell ends by resetting the attributes, so the selection's
+// opening sequence is written again after each reset and the row closes with a
+// single reset of its own. A profile that renders no styling has no bar to
+// paint, and the row keeps a plain marker instead: the cursor has to stay
+// visible without color.
+func (m Model) selectionBar(line string) string {
+	probe := m.styles.selectedBG.Render("x")
+	if !strings.HasSuffix(probe, sgrReset) {
+		return m.styles.bar.Render("▌") + strings.TrimPrefix(line, " ")
 	}
-	return 2 + iconWidth + 2
+	open := strings.TrimSuffix(strings.TrimSuffix(probe, sgrReset), "x")
+	if open == "" {
+		return line
+	}
+	bar := strings.TrimSuffix(m.styles.selectedBG.Render(line), sgrReset)
+	return strings.ReplaceAll(bar, sgrReset, sgrReset+open) + sgrReset
+}
+
+// rowPrefixWidth is the fixed inset/icon/gap prefix every row shares: one
+// column of space inside the window border, the kind icon, then the gap before
+// the title.
+func (m Model) rowPrefixWidth() int { return 1 + m.rowIconWidth() + 1 }
+
+// rowIconWidth is the icon column's width. It is one cell wider when agent logos
+// are drawn, because the icon font extends into the cell after the glyph.
+func (m Model) rowIconWidth() int {
+	if m.showAgentLogos() {
+		return 3
+	}
+	return 2
 }
 
 // rowIcon is the 2-3 cell kind column: the agent's font logo, the configured
@@ -625,16 +801,6 @@ func (m Model) rowIcon(item sessionmgr.Item) string {
 		}
 		return lipgloss.NewStyle().Foreground(color).Render(style.Text)
 	}
-}
-
-// rowStateGlyph is the 2-cell agent state column; in text/hidden icon modes the
-// state is worded in the meta columns instead.
-func (m Model) rowStateGlyph(item sessionmgr.Item) string {
-	if item.Kind != sessionmgr.KindAgent || !m.icons.AgentStateUsesIcons() {
-		return ""
-	}
-	glyph := m.icons.ForAgentState(item.AgentState).Icon
-	return m.agentStateStyle(item.AgentState).Render(glyph)
 }
 
 // agentStateStyle is the style an agent's state glyph and word are drawn in: the
@@ -689,15 +855,23 @@ func agentTabSuffix(item sessionmgr.Item) string {
 	repeats := func(other string) bool {
 		return strings.EqualFold(label, strings.TrimSpace(other))
 	}
-	if repeats(itemTitle(item)) || repeats(item.Location) {
+	if repeatsTitle(item, label) || repeats(item.Location) {
 		return ""
 	}
 	return label
 }
 
-// renderTitle draws the item title with the fuzzy-matched runes emphasized. A
-// directory's parent path is dimmed and its basename kept in the normal color;
-// an agent's tab label is appended muted when there is room.
+// repeatsTitle reports whether label would only repeat the title the row already
+// draws.
+func repeatsTitle(item sessionmgr.Item, label string) bool {
+	return strings.EqualFold(strings.TrimSpace(label), strings.TrimSpace(itemTitle(item)))
+}
+
+// renderTitle draws the item title in its column with the fuzzy-matched runes
+// emphasized. An agent's name is bright — bold while selected or while the agent
+// waits on the user (blocked or done) — and its tab label is appended muted when
+// there is room; a directory's parent path is dimmed and its basename kept
+// bright, which is what the path's row is about.
 func (m Model) renderTitle(r row, width int, selected bool) string {
 	title := itemTitle(r.item)
 	suffix := ""
@@ -710,23 +884,33 @@ func (m Model) renderTitle(r row, width int, selected bool) string {
 		}
 	}
 	base := m.styles.itemName
-	if r.item.Kind == sessionmgr.KindAgent && r.item.AgentState == sessionmgr.AgentWorking {
-		base = m.agentStateStyle(sessionmgr.AgentWorking)
-	}
-	if selected {
+	if selected || needsAttention(r.item) {
 		base = base.Bold(true)
 	}
 	text := clampText(title, max(1, width-lipgloss.Width(suffix)))
-	switch r.item.Kind {
-	case sessionmgr.KindZoxide, sessionmgr.KindFD:
-		if cut := strings.LastIndex(text, "/"); cut >= 0 && cut+1 < len(text) {
-			parent, name := text[:cut+1], text[cut+1:]
+	if r.item.Kind == sessionmgr.KindZoxide || r.item.Kind == sessionmgr.KindFD {
+		runes := []rune(text)
+		if cut := lastIndexRune(runes, '/'); cut >= 0 && cut+1 < len(runes) {
+			parent, name := string(runes[:cut+1]), string(runes[cut+1:])
 			return m.highlight(parent, shiftMatches(r.matches, 0, cut+1), m.styles.muted) +
-				m.highlight(name, shiftMatches(r.matches, cut+1, len(name)), base) +
-				m.styles.muted.Render(suffix)
+				m.highlight(name, shiftMatches(r.matches, cut+1, len(runes)-cut-1), base)
 		}
 	}
-	return m.highlight(text, r.matches, base) + m.styles.muted.Render(suffix)
+	if suffix != "" {
+		return m.highlight(text, r.matches, base) + m.styles.muted.Render(suffix)
+	}
+	return m.highlight(text, r.matches, base)
+}
+
+// lastIndexRune is the position of the last occurrence of r in runes, or -1. It
+// works in runes so a path's split points stay valid for match highlighting.
+func lastIndexRune(runes []rune, r rune) int {
+	for i := len(runes) - 1; i >= 0; i-- {
+		if runes[i] == r {
+			return i
+		}
+	}
+	return -1
 }
 
 // highlight renders text in base style with the matched rune positions drawn in
