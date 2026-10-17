@@ -55,16 +55,21 @@ type RemoteConfig struct {
 	// SSHConfigHosts lists non-wildcard Host entries of ~/.ssh/config alongside
 	// the configured [[hosts]]. Defaults to true.
 	SSHConfigHosts *bool `toml:"ssh_config_hosts" json:"ssh_config_hosts"`
+	// Keybindings is the default `herdr --remote-keybindings` mode (local or
+	// server) for every host; a [[hosts]] keybindings value overrides it.
+	// Empty leaves herdr's default (local).
+	Keybindings string `toml:"keybindings,omitempty" json:"keybindings,omitempty"`
 }
 
 // HostConfig is one `[[hosts]]` entry: a remote herdr server seshagy can attach
 // to through the `seshagy run` launcher.
 type HostConfig struct {
-	Name         string `toml:"name"          json:"name"`
-	Target       string `toml:"target"        json:"target"`
-	Transport    string `toml:"transport"     json:"transport"`
-	ProxyCommand string `toml:"proxy_command" json:"proxy_command"`
-	Session      string `toml:"session"       json:"session"`
+	Name         string `toml:"name"                  json:"name"`
+	Target       string `toml:"target"                json:"target"`
+	Transport    string `toml:"transport"             json:"transport"`
+	ProxyCommand string `toml:"proxy_command"         json:"proxy_command"`
+	Session      string `toml:"session"               json:"session"`
+	Keybindings  string `toml:"keybindings,omitempty" json:"keybindings,omitempty"`
 }
 
 // LogConfig controls opt-in, file-only structured diagnostics.
@@ -335,6 +340,7 @@ func normalizeRemoteHosts(remoteCfg *RemoteConfig, hosts *[]HostConfig) {
 	if remoteCfg.SSHConfigHosts == nil {
 		remoteCfg.SSHConfigHosts = ptrBool(true)
 	}
+	remoteCfg.Keybindings = strings.ToLower(strings.TrimSpace(remoteCfg.Keybindings))
 	for i := range *hosts {
 		host := &(*hosts)[i]
 		host.Name = strings.TrimSpace(host.Name)
@@ -345,6 +351,7 @@ func normalizeRemoteHosts(remoteCfg *RemoteConfig, hosts *[]HostConfig) {
 		}
 		host.ProxyCommand = strings.TrimSpace(host.ProxyCommand)
 		host.Session = strings.TrimSpace(host.Session)
+		host.Keybindings = strings.ToLower(strings.TrimSpace(host.Keybindings))
 	}
 }
 
@@ -375,6 +382,14 @@ func (c Config) remoteHosts() ([]remote.Host, []string) {
 	var hosts []remote.Host
 	var issues []string
 	seen := map[string]bool{}
+	defaultKeybindings := c.Remote.Keybindings
+	if !validKeybindings(defaultKeybindings) {
+		issues = append(issues, fmt.Sprintf(
+			"remote: unknown keybindings %q (want local or server); ignored",
+			defaultKeybindings,
+		))
+		defaultKeybindings = ""
+	}
 	for i, configured := range c.Hosts {
 		address, err := validateHostConfig(configured, seen[configured.Name])
 		if err != nil {
@@ -385,12 +400,17 @@ func (c Config) remoteHosts() ([]remote.Host, []string) {
 		for _, warning := range hostConfigWarnings(configured, address) {
 			issues = append(issues, hostConfigIssue(configured, i, warning))
 		}
+		keybindings := configured.Keybindings
+		if keybindings == "" {
+			keybindings = defaultKeybindings
+		}
 		hosts = append(hosts, remote.Host{
 			Name:         configured.Name,
 			Target:       configured.Target,
 			Transport:    configured.Transport,
 			ProxyCommand: configured.ProxyCommand,
 			Session:      configured.Session,
+			Keybindings:  keybindings,
 		})
 	}
 	return hosts, issues
@@ -413,6 +433,7 @@ func validateHostConfig(host HostConfig, duplicate bool) (remote.Address, error)
 		{"transport", host.Transport},
 		{"proxy_command", host.ProxyCommand},
 		{"session", host.Session},
+		{"keybindings", host.Keybindings},
 	} {
 		if strings.ContainsFunc(field.value, isControlRune) {
 			return remote.Address{}, fmt.Errorf(
@@ -432,6 +453,11 @@ func validateHostConfig(host HostConfig, duplicate bool) (remote.Address, error)
 	}
 	if host.Target == "" {
 		return remote.Address{}, errors.New("target is required")
+	}
+	if !validKeybindings(host.Keybindings) {
+		return remote.Address{}, fmt.Errorf(
+			"unknown keybindings %q (want local or server)", host.Keybindings,
+		)
 	}
 	address, err := remote.ParseAddress(host.Target)
 	if err != nil {
@@ -884,5 +910,16 @@ func projectAgentStateStyles(states AgentStatesConfig) sessionmgr.AgentStateStyl
 			ASCII: states.Unknown.Label,
 			Color: states.Unknown.Color,
 		},
+	}
+}
+
+// validKeybindings reports whether value is a `herdr --remote-keybindings` mode
+// or empty (herdr's default).
+func validKeybindings(value string) bool {
+	switch value {
+	case "", remote.KeybindingsLocal, remote.KeybindingsServer:
+		return true
+	default:
+		return false
 	}
 }

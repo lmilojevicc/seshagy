@@ -138,6 +138,7 @@ workflow.
 ```toml
 [remote]
 ssh_config_hosts = true   # list the non-wildcard Host entries of ~/.ssh/config (default)
+keybindings = "server"    # optional default --remote-keybindings for every host: local | server
 
 [[hosts]]
 name = "homelab"            # unique, [A-Za-z0-9._-]+; the generated ssh alias is seshagy-<name>
@@ -145,7 +146,19 @@ target = "milo@192.168.1.10:2222"
 transport = "ssh"           # ssh (default) | iroh
 proxy_command = ""          # optional ProxyCommand (%h / %p expand)
 session = "work"            # optional remote herdr session to attach
+keybindings = "server"      # optional: local | server; overrides [remote] keybindings
+
+[[hosts]]
+name = "laptop"
+target = "milo@<64-hex iroh endpoint id>"
+transport = "iroh"
+keybindings = "server"
 ```
+
+The two hosts above make `seshagy run` attach with
+`herdr --remote seshagy-homelab --session work --remote-keybindings server` and
+`herdr --remote seshagy-laptop --remote-keybindings server`; the generated ssh
+config supplies the user, port, and (for iroh) `ProxyCommand iroh-ssh proxy %h`.
 
 | Key                 | Purpose                                                                    |
 | ------------------- | -------------------------------------------------------------------------- |
@@ -154,6 +167,11 @@ session = "work"            # optional remote herdr session to attach
 | `transport`         | `ssh` (default) or `iroh`. `iroh` writes `ProxyCommand iroh-ssh proxy %h`, so `target` is the 64-hex endpoint id. |
 | `proxy_command`     | Custom transport; exclusive with `transport = "iroh"`.                       |
 | `session`           | Remote herdr session to attach; empty uses the remote default.             |
+| `keybindings`       | `local` or `server`, passed as `herdr --remote-keybindings`. Empty uses `[remote] keybindings`, then herdr's default (`local`). |
+
+`[remote] keybindings` also applies to hosts discovered from `~/.ssh/config`.
+An unknown `[remote] keybindings` value is ignored with a warning; an unknown
+host `keybindings` value skips that host.
 
 Entries that fail validation (bad name, target, or transport; control
 characters) are skipped with a warning from `seshagy`, `seshagy hosts`, and

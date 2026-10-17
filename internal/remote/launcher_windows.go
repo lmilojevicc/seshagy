@@ -22,8 +22,9 @@ type SwitchRequest struct {
 
 // Target identifies the herdr server a launcher is attached to.
 type Target struct {
-	Alias   string
-	Session string
+	Alias       string
+	Session     string
+	Keybindings string
 }
 
 // LaunchOptions configures RunLauncher.
