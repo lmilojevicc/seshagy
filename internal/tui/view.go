@@ -35,6 +35,10 @@ const (
 	metaColumnMax = 18
 	// titleMinWidth is the room a title keeps before meta columns are dropped.
 	titleMinWidth = 12
+	// previewGutterWidth is the preview window's line-number column, and
+	// previewGutterGap the blank run that separates it from the content.
+	previewGutterWidth = 3
+	previewGutterGap   = 2
 	// hostIcon marks remote-machine rows.
 	hostIcon = "󰒋 "
 
@@ -282,16 +286,70 @@ func needsYouCount(rows []row) int {
 }
 
 // renderPreviewWindow draws the preview window: the selected item's name as the
-// window title and the captured content inside it.
+// window title, the captured content behind a line-number gutter inside it, and
+// the kind's footer in the bottom border.
 func (m Model) renderPreviewWindow(l viewLayout) []string {
 	title := m.styles.muted.Render("Preview")
+	bottom := ""
 	if item, ok := m.selectedItem(); ok {
 		// The name comes from the multiplexer, so it is sanitized like the
 		// capture itself: a control character must not reach the border.
 		title = m.styles.titlePreview.Render(sanitizePreviewLine(itemTitle(item)))
+		if footer := sanitizePreviewLine(m.previewFooter(item)); footer != "" {
+			bottom = m.styles.muted.Render(footer)
+		}
 	}
 	lines := m.renderPreviewContent(max(0, l.preview.width-2), max(0, l.preview.height-2))
-	return drawWindow(title, lines, l.preview.width, l.preview.height, m.styles.border, "")
+	return drawWindow(title, lines, l.preview.width, l.preview.height, m.styles.border, bottom)
+}
+
+// previewFooter spells the dim footer the preview window keeps in its bottom
+// border, one wording per kind: the pane and how long it has been running for an
+// agent, the window count of a session, the entry count of a directory listing,
+// and the transport of a host. It is empty when the item has nothing to report.
+func (m Model) previewFooter(item sessionmgr.Item) string {
+	switch item.Kind {
+	case sessionmgr.KindAgent:
+		parts := make([]string, 0, 2)
+		if item.PaneID != "" {
+			parts = append(parts, "pane "+item.PaneID)
+		}
+		if !item.StartedAt.IsZero() {
+			parts = append(parts, agentAgeAt(item.StartedAt, time.Now()))
+		}
+		return strings.Join(parts, " · ")
+	case sessionmgr.KindSession:
+		if item.Windows <= 0 {
+			return ""
+		}
+		return windowCountLabel(m.terms, item.Windows)
+	case sessionmgr.KindHost:
+		return item.Location
+	case sessionmgr.KindZoxide, sessionmgr.KindFD:
+		// A directory row previews a listing, so its entries are the lines that
+		// came back. A capture that is still running, failed, or had nothing to
+		// list has no count to report.
+		if n, ok := m.previewEntryCount(); ok {
+			return fmt.Sprintf("%d entries", n)
+		}
+	}
+	return ""
+}
+
+// previewEntryCount counts the rows of the loaded directory-listing preview. It
+// reports false while no listing is loaded, because neither an in-flight capture
+// nor a failed one is a listing to count.
+func (m Model) previewEntryCount() (int, bool) {
+	if m.previewError != "" || m.preview == "" || m.preview == noPreviewAvailableText {
+		return 0, false
+	}
+	n := 0
+	for _, line := range strings.Split(m.preview, "\n") {
+		if strings.TrimSpace(sessionmgr.StripANSI(line)) != "" {
+			n++
+		}
+	}
+	return n, true
 }
 
 // cursorBlock is the reverse-video cell that marks the typing position.
@@ -998,7 +1056,9 @@ func centeredNote(width, height int, lines ...string) []string {
 // renderPreviewContent draws the captured content of the preview window: the
 // selected item's payload with its ANSI colors intact, bottom-anchored for
 // multiplexer captures and top-anchored for directory listings, always exactly
-// height lines wide enough for the window.
+// height lines wide enough for the window. width is the window's inner width and
+// includes the line-number gutter, so the content is clipped to what the gutter
+// leaves.
 func (m Model) renderPreviewContent(width, height int) []string {
 	item, ok := m.selectedItem()
 	if !ok || height <= 0 {
@@ -1026,22 +1086,33 @@ func (m Model) renderPreviewContent(width, height int) []string {
 		// last row, so the padding goes above it.
 		out = append(out, make([]string, height-len(lines))...)
 	}
-	for _, line := range lines {
+	// The gutter numbers the rows the window shows, from 1: a capture is already
+	// the tail of a pane, so its visible rows are what the numbers can name.
+	textWidth := max(0, width-previewGutterWidth-previewGutterGap)
+	for i, line := range lines {
 		// Captures are raw terminal output: sanitize before clipping so no
 		// stray CR, tab, or cursor sequence reaches the frame. The cut is hard
 		// — a preview is a window onto a terminal, and an ellipsis would read
 		// as content the pane never printed. A reset closes any color the line
 		// left open so it cannot bleed into the border or the next row.
-		clipped := hardCutStyledText(sanitizePreviewLine(line), width)
+		clipped := hardCutStyledText(sanitizePreviewLine(line), textWidth)
 		if style.GetForeground() != nil {
 			clipped = style.Render(clipped)
 		}
-		out = append(out, clipped+previewReset)
+		out = append(out, m.previewGutter(i+1)+clipped+previewReset)
 	}
 	for len(out) < height {
 		out = append(out, "")
 	}
 	return out
+}
+
+// previewGutter renders one preview line number: right-aligned in the gutter
+// column, dim, and followed by the gap that keeps it off the content. Numbers
+// past the column width widen it rather than lose a digit.
+func (m Model) previewGutter(number int) string {
+	return m.styles.gutter.Render(fmt.Sprintf("%*d", previewGutterWidth, number)) +
+		strings.Repeat(" ", previewGutterGap)
 }
 
 // isTailPreviewKind reports whether a kind's preview is sourced from a

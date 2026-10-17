@@ -1258,6 +1258,239 @@ func TestPreviewWindowTitleIsTheSelectedItem(t *testing.T) {
 	}
 }
 
+// TestPreviewGutterNumbersEveryContentLine pins the preview window's line-number
+// gutter: every content line is numbered from 1, right-aligned in the three-column
+// dim gutter, and followed by the two-column gap before the content. The blank
+// lines that pad the window to its height carry no number.
+func TestPreviewGutterNumbersEveryContentLine(t *testing.T) {
+	withColor(t)
+	m := newTestModel(t)
+	m = withItems(m, []sessionmgr.Item{
+		{Kind: sessionmgr.KindSession, Name: "demo", Target: "demo"},
+	})
+	m.preview = "alpha\n\ncharlie"
+	m.previewKey = "session:demo"
+
+	lines := m.renderPreviewContent(30, 5)
+	if len(lines) != 5 {
+		t.Fatalf("preview lines = %d, want 5", len(lines))
+	}
+	// A session capture is bottom-anchored, so its rows are the last content
+	// lines and the padding above them is blank.
+	if lines[0] != "" || lines[1] != "" {
+		t.Fatalf("padding lines carry a gutter: %q", lines[:2])
+	}
+	want := []string{"  1  alpha", "  2  ", "  3  charlie"}
+	for i, w := range want {
+		line := lines[len(lines)-len(want)+i]
+		prefix := m.styles.gutter.Render(fmt.Sprintf("%*d", previewGutterWidth, i+1)) +
+			strings.Repeat(" ", previewGutterGap)
+		if !strings.HasPrefix(line, prefix) {
+			t.Fatalf("row %d does not start with the numbered gutter %q: %q", i+1, prefix, line)
+		}
+		if got := sessionmgr.StripANSI(line); got != w {
+			t.Fatalf("row %d = %q, want %q", i+1, got, w)
+		}
+	}
+}
+
+// TestPreviewGutterKeepsTheLineExactWithANSI checks that a colored capture line
+// survives the gutter: the content keeps its color, is hard-cut to the columns the
+// gutter leaves rather than ellipsized, and the line still measures exactly the
+// window's inner width.
+func TestPreviewGutterKeepsTheLineExactWithANSI(t *testing.T) {
+	withColor(t)
+	m := newTestModel(t)
+	m = withItems(m, []sessionmgr.Item{
+		{Kind: sessionmgr.KindSession, Name: "demo", Target: "demo"},
+	})
+	m.preview = "\x1b[31m" + strings.Repeat("x", 60) + "\x1b[0m"
+	m.previewKey = "session:demo"
+
+	lines := m.renderPreviewContent(20, 2)
+	line := lines[len(lines)-1]
+	if got := ansi.StringWidth(line); got != 20 {
+		t.Fatalf("preview line is %d columns, want exactly 20: %q", got, line)
+	}
+	if !strings.Contains(line, "\x1b[31m") {
+		t.Fatalf("preview content lost its color: %q", line)
+	}
+	if !strings.HasSuffix(line, previewReset) {
+		t.Fatalf("preview line does not close its style: %q", line)
+	}
+	stripped := sessionmgr.StripANSI(line)
+	if strings.Contains(stripped, "…") {
+		t.Fatalf("preview line is ellipsized: %q", stripped)
+	}
+	want := "  1  " + strings.Repeat("x", 20-previewGutterWidth-previewGutterGap)
+	if stripped != want {
+		t.Fatalf("preview line = %q, want %q", stripped, want)
+	}
+}
+
+// TestPreviewFooterPerKind pins the wording of the preview window's footer: the
+// pane and age of an agent, the window count of a session in the multiplexer's
+// vocabulary, the entry count of a directory listing, and the transport of a
+// host. A kind with nothing to report claims nothing.
+func TestPreviewFooterPerKind(t *testing.T) {
+	started := time.Now().Add(-3 * time.Minute)
+	listing := "-rw-r--r-- 1 u g 12 Jan  1 00:00 a.txt\n\x1b[34mdrwxr-xr-x 1 u g 4k Jan  1 00:00 docs/\x1b[0m\n"
+	tests := []struct {
+		name         string
+		item         sessionmgr.Item
+		terms        sessionmgr.Terms
+		preview      string
+		previewError string
+		want         string
+	}{
+		{
+			name: "agent pane and age",
+			item: sessionmgr.Item{Kind: sessionmgr.KindAgent, PaneID: "%7", StartedAt: started},
+			want: "pane %7 · 3m",
+		},
+		{
+			name: "agent without a pane id",
+			item: sessionmgr.Item{Kind: sessionmgr.KindAgent, StartedAt: started},
+			want: "3m",
+		},
+		{
+			name: "agent without a start time",
+			item: sessionmgr.Item{Kind: sessionmgr.KindAgent, PaneID: "%7"},
+			want: "pane %7",
+		},
+		{
+			name:  "herdr session tabs",
+			item:  sessionmgr.Item{Kind: sessionmgr.KindSession, Name: "demo", Windows: 2},
+			terms: sessionmgr.HerdrTerms(),
+			want:  "2 tabs",
+		},
+		{
+			name:  "tmux session windows",
+			item:  sessionmgr.Item{Kind: sessionmgr.KindSession, Name: "demo", Windows: 2},
+			terms: sessionmgr.TmuxTerms(),
+			want:  "2 windows",
+		},
+		{
+			name:    "zoxide listing entries",
+			item:    sessionmgr.Item{Kind: sessionmgr.KindZoxide, Path: "/tmp/demo"},
+			preview: listing,
+			want:    "2 entries",
+		},
+		{
+			name:    "fd listing entries",
+			item:    sessionmgr.Item{Kind: sessionmgr.KindFD, Path: "/tmp/demo"},
+			preview: "one\n",
+			want:    "1 entries",
+		},
+		{
+			name: "listing before its capture lands",
+			item: sessionmgr.Item{Kind: sessionmgr.KindZoxide, Path: "/tmp/demo"},
+		},
+		{
+			name:    "listing with nothing to list",
+			item:    sessionmgr.Item{Kind: sessionmgr.KindZoxide, Path: "/tmp/demo"},
+			preview: noPreviewAvailableText,
+		},
+		{
+			name:         "failed listing",
+			item:         sessionmgr.Item{Kind: sessionmgr.KindZoxide, Path: "/tmp/demo"},
+			previewError: "capture failed",
+		},
+		{
+			name: "host transport",
+			item: sessionmgr.Item{Kind: sessionmgr.KindHost, Name: "box", Location: "ssh"},
+			want: "ssh",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := newTestModel(t)
+			m = withItems(m, []sessionmgr.Item{tt.item})
+			if tt.terms != (sessionmgr.Terms{}) {
+				m.terms = tt.terms
+			}
+			m.preview = tt.preview
+			m.previewError = tt.previewError
+			m.previewKey = tt.item.Key()
+			if got := m.previewFooter(tt.item); got != tt.want {
+				t.Fatalf("previewFooter = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestPreviewWindowFooterLandsInTheBottomBorder draws the whole window: the kind's
+// footer is right-aligned in the bottom border, a kind with nothing to report keeps
+// a plain border, and the footer never widens the frame.
+func TestPreviewWindowFooterLandsInTheBottomBorder(t *testing.T) {
+	tests := []struct {
+		name    string
+		item    sessionmgr.Item
+		preview string
+		want    string
+	}{
+		{
+			name: "agent",
+			item: sessionmgr.Item{
+				Kind:      sessionmgr.KindAgent,
+				PaneID:    "%7",
+				StartedAt: time.Now().Add(-3 * time.Minute),
+			},
+			preview: "working…\n",
+			want:    "pane %7 · 3m",
+		},
+		{
+			name:    "session",
+			item:    sessionmgr.Item{Kind: sessionmgr.KindSession, Name: "demo", Windows: 2},
+			preview: "alpha\n",
+			want:    "2 windows",
+		},
+		{
+			name:    "directory",
+			item:    sessionmgr.Item{Kind: sessionmgr.KindZoxide, Path: "/tmp/demo"},
+			preview: "a.txt\nb.txt\n",
+			want:    "2 entries",
+		},
+		{
+			name:    "host",
+			item:    sessionmgr.Item{Kind: sessionmgr.KindHost, Name: "box", Location: "ssh"},
+			preview: "alias seshagy-box\n",
+			want:    "ssh",
+		},
+		{
+			name: "directory without a listing",
+			item: sessionmgr.Item{Kind: sessionmgr.KindZoxide, Path: "/tmp/demo"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := newTestModel(t)
+			m = withItems(m, []sessionmgr.Item{tt.item})
+			m.preview = tt.preview
+			m.previewKey = tt.item.Key()
+
+			l := m.viewLayout()
+			block := m.renderPreviewWindow(l)
+			bottom := sessionmgr.StripANSI(block[len(block)-1])
+			if got := ansi.StringWidth(bottom); got != l.preview.width {
+				t.Fatalf("bottom border is %d columns, want %d: %q", got, l.preview.width, bottom)
+			}
+			if tt.want == "" {
+				if strings.Trim(bottom, "─╰╯") != "" {
+					t.Fatalf("footer drawn without anything to report: %q", bottom)
+				}
+			} else if !strings.HasSuffix(bottom, tt.want+" ╯") {
+				t.Fatalf(
+					"bottom border = %q, want the footer %q flush against the corner",
+					bottom,
+					tt.want,
+				)
+			}
+			frameLines(t, m)
+		})
+	}
+}
+
 func TestAgentTabSuffixOnlyWhenItAddsInformation(t *testing.T) {
 	tests := []struct {
 		name     string
