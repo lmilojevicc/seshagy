@@ -97,8 +97,60 @@ func needsAttention(item sessionmgr.Item) bool {
 		(item.AgentState == sessionmgr.AgentBlocked || item.AgentState == sessionmgr.AgentDone)
 }
 
-// itemRank orders the unfiltered list: agents by urgency, then sessions, then
-// directories (zoxide by frecency before fd discoveries).
+// group is the section an empty-query list files a row under. Sections draw in
+// this order: what the user owes an answer to first, then the agents, then the
+// places to go (sessions, hosts, and the directory sources). A query drops the
+// sections for one ranked list.
+type group int
+
+const (
+	groupNeedsYou group = iota
+	groupAgents
+	groupSessions
+	groupHosts
+	groupZoxide
+	groupFind
+	groupCount
+)
+
+// groupLabels are the headers the sections draw, lowercase like the scope
+// labels. The sessions section is the exception: its header uses the backend's
+// own word for a session (see Model.groupLabel).
+var groupLabels = [groupCount]string{
+	groupNeedsYou: "needs you",
+	groupAgents:   "agents",
+	groupSessions: "sessions",
+	groupHosts:    "hosts",
+	groupZoxide:   "zoxide",
+	groupFind:     "find",
+}
+
+func (g group) label() string { return groupLabels[g] }
+
+// itemGroup is the section an item files under: the agents the user owes an
+// answer to (blocked, or a finished turn they have not looked at) lead in their
+// own section, the remaining agents follow, then sessions, hosts, and the
+// directory sources.
+func itemGroup(item sessionmgr.Item) group {
+	switch item.Kind {
+	case sessionmgr.KindAgent:
+		if needsAttention(item) {
+			return groupNeedsYou
+		}
+		return groupAgents
+	case sessionmgr.KindSession:
+		return groupSessions
+	case sessionmgr.KindHost:
+		return groupHosts
+	case sessionmgr.KindZoxide:
+		return groupZoxide
+	default:
+		return groupFind
+	}
+}
+
+// itemRank orders the items inside a section: agents by urgency, then sessions,
+// then directories (zoxide by frecency before fd discoveries).
 func itemRank(item sessionmgr.Item) int {
 	switch item.Kind {
 	case sessionmgr.KindAgent:
@@ -129,6 +181,9 @@ func itemRank(item sessionmgr.Item) int {
 type row struct {
 	item    sessionmgr.Item
 	matches []int
+	// group is the section the row files under, which is where an empty-query
+	// list draws its headers.
+	group group
 }
 
 // searchFields are the per-item strings the query is matched against. The
@@ -150,9 +205,10 @@ func searchFields(item sessionmgr.Item) [searchFieldCount]string {
 }
 
 // filterRows applies the scope and fuzzy query to items. Without a query the
-// rows follow itemRank (stable within a rank, so backend order such as zoxide
-// frecency survives); with a query the best fuzzy score wins and itemRank
-// breaks ties.
+// rows follow the section order and itemRank inside it, so the needs-you section
+// leads whatever the items' own ranks say (stable within a rank, so backend
+// order such as zoxide frecency survives); with a query the best fuzzy score
+// wins and itemRank breaks ties.
 func filterRows(items []sessionmgr.Item, sc scope, query string) []row {
 	eligible := make([]sessionmgr.Item, 0, len(items))
 	for _, item := range items {
@@ -163,11 +219,15 @@ func filterRows(items []sessionmgr.Item, sc scope, query string) []row {
 	query = strings.TrimSpace(query)
 	if query == "" {
 		sort.SliceStable(eligible, func(i, j int) bool {
+			gi, gj := itemGroup(eligible[i]), itemGroup(eligible[j])
+			if gi != gj {
+				return gi < gj
+			}
 			return itemRank(eligible[i]) < itemRank(eligible[j])
 		})
 		rows := make([]row, len(eligible))
 		for i, item := range eligible {
-			rows[i] = row{item: item}
+			rows[i] = row{item: item, group: itemGroup(item)}
 		}
 		return rows
 	}
@@ -198,7 +258,10 @@ func filterRows(items []sessionmgr.Item, sc scope, query string) []row {
 		if !ok {
 			at = len(matched)
 			slot[index] = at
-			matched = append(matched, scored{row: row{item: eligible[index]}, score: score})
+			matched = append(matched, scored{
+				row:   row{item: eligible[index], group: itemGroup(eligible[index])},
+				score: score,
+			})
 		} else if score > matched[at].score {
 			matched[at].score = score
 		}

@@ -60,6 +60,9 @@ type styles struct {
 
 	// badgeBlocked is the red block behind a blocked agent's state badge.
 	badgeBlocked lipgloss.Style
+
+	// groupCount is the dim item count a section header reports.
+	groupCount lipgloss.Style
 }
 
 func stylesFromConfig(cfg appconfig.Config) styles {
@@ -117,6 +120,7 @@ func stylesFromConfig(cfg appconfig.Config) styles {
 	s.titlePreview = lipgloss.NewStyle().Foreground(success).Bold(true)
 	s.needsYou = lipgloss.NewStyle().Foreground(danger).Bold(true)
 	s.badgeBlocked = lipgloss.NewStyle().Background(danger)
+	s.groupCount = lipgloss.NewStyle().Faint(true)
 	return s
 }
 

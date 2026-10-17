@@ -249,77 +249,153 @@ func itemHeight(item sessionmgr.Item) int {
 	return 1
 }
 
-// itemFlow lays the result rows out as the lines the results window draws and
-// owns the scroll math over them. Items are one or two lines tall, so the window
-// is measured in lines while the cursor and the ↑/↓ counters count items.
-type itemFlow struct {
-	// starts[i] is the first line item i draws on, heights[i] its line count.
-	starts  []int
-	heights []int
-	total   int
+// itemLine is one drawn line of the results list: an item's first line, one of
+// the lines an item continues onto, or the header that opens a section.
+type itemLine struct {
+	// item is the index of the item the line draws, or -1 for a section header.
+	item int
+	// detail marks an item's continuation line, which the window never opens on.
+	detail bool
+	// group is the section a header line titles.
+	group group
 }
 
-func newItemFlow(rows []row) itemFlow {
-	flow := itemFlow{starts: make([]int, len(rows)), heights: make([]int, len(rows))}
+// itemFlow lays the result rows out as the lines the results window draws and
+// owns the scroll math over them. An item is one or two lines tall, and an empty
+// query puts a header line above the first item of each section. The cursor and
+// the ↑/↓ counters count items, never lines, so the cursor can never land on a
+// header.
+type itemFlow struct {
+	lines []itemLine
+	// items is how many items the flow covers.
+	items int
+	// firsts[i] is the line item i's first line draws on, heights[i] how many
+	// lines the item takes.
+	firsts  []int
+	heights []int
+}
+
+func newItemFlow(rows []row, grouped bool) itemFlow {
+	flow := itemFlow{
+		lines:   make([]itemLine, 0, 2*len(rows)),
+		items:   len(rows),
+		firsts:  make([]int, len(rows)),
+		heights: make([]int, len(rows)),
+	}
 	for i, r := range rows {
-		flow.starts[i] = flow.total
+		if grouped && (i == 0 || r.group != rows[i-1].group) {
+			flow.lines = append(flow.lines, itemLine{item: -1, group: r.group})
+		}
+		flow.firsts[i] = len(flow.lines)
 		flow.heights[i] = itemHeight(r.item)
-		flow.total += flow.heights[i]
+		for line := range flow.heights[i] {
+			flow.lines = append(flow.lines, itemLine{item: i, detail: line > 0})
+		}
 	}
 	return flow
 }
 
-// itemWindow is the slice of the flow one frame draws: the items to draw in
-// order and the items hidden above and below them, counted in items.
+// itemWindow is the slice of the flow one frame draws: the lines to draw in
+// order, the items it shows, and the items hidden above and below them.
 type itemWindow struct {
-	start, end int
-	above      int
-	below      int
+	lines        []itemLine
+	above, below int
+	shown        int
 }
 
 // window is the slice a frame of the given line height draws. It opens on the
-// line that centers the cursor's item where the flow allows it, and only whole
+// line that centres the cursor's item where the flow allows it, and only whole
 // items are drawn: a leftover line stays blank rather than showing half an item.
 // The cursor's item is always inside the window.
 func (f itemFlow) window(cursor, height int) itemWindow {
-	if height <= 0 || len(f.starts) == 0 {
+	if height <= 0 || f.items == 0 {
 		return itemWindow{}
 	}
-	cursor = max(0, min(cursor, len(f.starts)-1))
-	if f.total <= height {
-		return itemWindow{end: len(f.starts)}
+	cursor = max(0, min(cursor, f.items-1))
+	if len(f.lines) <= height {
+		return itemWindow{lines: f.lines, shown: f.items}
 	}
-	// The line to open on: half the room the frame has left above the cursor's
-	// own item goes above it, clamped to what the flow can spare below.
-	open := f.starts[cursor] - max(0, (height-f.heights[cursor])/2)
-	open = max(0, min(open, f.total-height))
-	start := sort.SearchInts(f.starts, open)
-	end := f.fill(start, height)
-	if end <= cursor {
-		// What precedes the cursor's item leaves no room for it: open the window
-		// on the item itself and fill from there.
-		start = cursor
-		end = f.fill(start, height)
-		if end == start {
-			// A frame too short for a two-line item still shows it, clipped, so
-			// the list is never blank.
-			end = start + 1
+	win := f.clip(f.windowStart(cursor, height), height)
+	if win.shown == 0 {
+		// A frame too short for the cursor's own item still shows it, clipped, so
+		// the list is never blank.
+		from := f.firsts[cursor]
+		return itemWindow{
+			lines: f.lines[from:min(len(f.lines), from+height)],
+			above: cursor,
+			below: f.items - cursor - 1,
+			shown: 1,
 		}
 	}
-	return itemWindow{start: start, end: end, above: start, below: len(f.starts) - end}
+	return win
 }
 
-// fill counts the whole items from start that fit in height lines.
-func (f itemFlow) fill(start, height int) (end int) {
-	lines := 0
-	for end = start; end < len(f.starts); end++ {
-		if lines+f.heights[end] > height {
+// windowStart is the first line a frame of the given budget opens on: the line
+// that keeps the cursor's item where an ungrouped list centres it. The window
+// never opens on an item's continuation line, never leaves the cursor's item out
+// of the budget, and keeps the header that introduces the cursor's item with it.
+func (f itemFlow) windowStart(cursor, budget int) int {
+	cursorLine := f.firsts[cursor]
+	cursorEnd := cursorLine + f.heights[cursor]
+	ideal := max(0, cursorLine-max(0, (budget-f.heights[cursor])/2))
+	ideal = min(ideal, len(f.lines)-budget)
+	// A start that would cut the cursor's item, or open on a line an item
+	// continues onto, cannot be drawn: try the lines around the ideal, nearest
+	// first, ahead of the ideal so the cursor's item lands where an ungrouped
+	// list puts it.
+	for _, delta := range []int{0, 1, -1, 2, -2, 3, -3} {
+		from := ideal + delta
+		if from < 0 || from > cursorLine || f.lines[from].detail {
+			continue
+		}
+		if from+budget < cursorEnd {
+			continue
+		}
+		if from > 0 && from == cursorLine && budget > f.heights[cursor] &&
+			f.lines[from-1].item < 0 {
+			return from - 1
+		}
+		return from
+	}
+	return cursorLine
+}
+
+// clip is the lines a window opening on `from` with the given budget draws, plus
+// the items it shows and the items hidden above and below them. An item that
+// would fall outside the budget is left out whole, and a section header is never
+// left stranded without the item it titles.
+func (f itemFlow) clip(from, budget int) itemWindow {
+	end := min(len(f.lines), from+budget)
+	win := itemWindow{above: f.itemsAbove(from)}
+	for i := from; i < end; {
+		line := f.lines[i]
+		if line.item < 0 {
+			// The header titles the item starting on the next line, so it needs
+			// every line of that item under it.
+			if i+1 >= end || f.itemEnd(f.lines[i+1].item) > end {
+				break
+			}
+			win.lines = append(win.lines, line)
+			i++
+			continue
+		}
+		next := f.itemEnd(line.item)
+		if next > end {
 			break
 		}
-		lines += f.heights[end]
+		win.lines = append(win.lines, f.lines[i:next]...)
+		win.shown++
+		i = next
 	}
-	return end
+	win.below = f.items - win.above - win.shown
+	return win
 }
+
+// itemEnd is the first line after the given item's lines.
+func (f itemFlow) itemEnd(item int) int { return f.firsts[item] + f.heights[item] }
+
+// itemsAbove is the number of items drawn entirely above the given line.
+func (f itemFlow) itemsAbove(line int) int { return sort.SearchInts(f.firsts, line) }
 
 // resultsRows draws the results window's inner rows and reports how many items
 // the window hides above and below its position, for the bottom border.
@@ -336,9 +412,19 @@ func (m Model) resultsRows(
 	if len(rows) == 0 {
 		return m.renderEmptyState(width, height), 0, 0
 	}
-	win := newItemFlow(rows).window(m.cursor, height)
-	for i := win.start; i < win.end; i++ {
-		lines = append(lines, m.renderItem(rows[i], width, i == m.cursor)...)
+	grouped := m.grouped(rows)
+	counts := groupCounts(rows)
+	win := newItemFlow(rows, grouped).window(m.cursor, height)
+	for _, line := range win.lines {
+		if line.item < 0 {
+			lines = append(lines, m.renderGroupHeader(line.group, counts[line.group], width))
+			continue
+		}
+		if line.detail {
+			// The item's first line drew every line the item has.
+			continue
+		}
+		lines = append(lines, m.renderItem(rows[line.item], width, line.item == m.cursor)...)
 	}
 	// Only a frame too short for the cursor's own two-line item draws more lines
 	// than it has room for; that item is clipped rather than hidden entirely.
@@ -346,6 +432,40 @@ func (m Model) resultsRows(
 		lines = lines[:height]
 	}
 	return lines, win.above, win.below
+}
+
+// groupCounts tallies the items each section holds, which is what a header line
+// reports. Counts cover the whole list, not only the rows the window draws.
+func groupCounts(rows []row) [groupCount]int {
+	var counts [groupCount]int
+	for _, r := range rows {
+		counts[r.group]++
+	}
+	return counts
+}
+
+// renderGroupHeader draws a section's header: its lowercase label under the
+// rows' icon column, in the muted header style — red and bold for the needs-you
+// section — followed by the section's dim item count. It is a display-only line:
+// the cursor never lands on one.
+func (m Model) renderGroupHeader(g group, count, width int) string {
+	labelStyle := m.styles.muted
+	if g == groupNeedsYou {
+		labelStyle = m.styles.needsYou
+	}
+	line := " " + labelStyle.Render(m.groupLabel(g)) +
+		"  " + m.styles.groupCount.Render(strconv.Itoa(count))
+	return pad(clampStyledText(line, width), width)
+}
+
+// groupLabel is the header a section draws: its fixed lowercase label, except
+// the session section, which is named the way the active backend names a session
+// ("sessions" under tmux, "workspaces" under herdr).
+func (m Model) groupLabel(g group) string {
+	if g == groupSessions {
+		return m.terms.SessionPlural
+	}
+	return g.label()
 }
 
 // resultsScrollCounter spells the items hidden above and below the visible

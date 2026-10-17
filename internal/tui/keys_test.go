@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -526,5 +527,106 @@ func TestCtrlLInvalidatesCachesAndReloads(t *testing.T) {
 		if !m.refreshInflight(source) {
 			t.Fatalf("ctrl+l did not start a refresh for %v", source)
 		}
+	}
+}
+
+func TestCursorStepsOverSectionHeaders(t *testing.T) {
+	withColor(t)
+	m := newTestModel(t)
+	m.width, m.height = 100, 30
+	m.showPreview = false
+	m = withItems(m, groupedItems())
+
+	// Section headers are display-only lines: walking the whole list lands on
+	// every item once, in the order the sections draw them, and never fails to
+	// land anywhere.
+	want := []string{"claude", "codex", "pi", "seshagy", "homelab", "~/code/demo"}
+	for i, title := range want {
+		item, ok := m.selectedItem()
+		if !ok {
+			t.Fatalf("step %d: no selection", i)
+		}
+		if got := itemTitle(item); got != title {
+			t.Fatalf("step %d: selected %q, want %q", i, got, title)
+		}
+		if m.cursor != i {
+			t.Fatalf("step %d: cursor = %d", i, m.cursor)
+		}
+		m, _ = press(t, m, "down")
+	}
+	if m.cursor != 0 {
+		t.Fatalf("walking past the last item left the cursor at %d, want a wrap to 0", m.cursor)
+	}
+
+	// The selection bands exactly the cursor's row, never a header line.
+	m = m.setCursor(2)
+	block := m.renderResultsWindow(m.viewLayout())
+	barOpen := backgroundOpen(m.styles.selectionBG)
+	banded := make([]string, 0, itemHeight(m.rows()[2].item))
+	for _, line := range block[1 : len(block)-1] {
+		if barOpen != "" && strings.Contains(line, barOpen) {
+			banded = append(banded, strings.TrimSpace(sessionmgr.StripANSI(line)))
+		}
+	}
+	if len(banded) != itemHeight(m.rows()[2].item) {
+		t.Fatalf("banded lines = %v, want the cursor row's %d lines",
+			banded, itemHeight(m.rows()[2].item))
+	}
+	if !strings.Contains(banded[0], "pi") {
+		t.Fatalf("banded line = %q, want the row under the cursor", banded[0])
+	}
+}
+
+func TestActionsActOnTheRowUnderTheCursor(t *testing.T) {
+	t.Run("enter focuses the agent under the cursor", func(t *testing.T) {
+		mux := newFakeMux()
+		m := newTestModelWith(t, mux)
+		m.width, m.height = 100, 30
+		m = withItems(m, groupedItems())
+		m = m.setCursor(2) // the agents section's first row
+		if _, cmd := m.activateSelected(); cmd == nil {
+			t.Fatal("agent activation returned no command")
+		}
+		if len(mux.visited) != 1 || mux.visited[0] != "%3" {
+			t.Fatalf("MarkAgentVisited calls = %v, want the pane under the cursor", mux.visited)
+		}
+	})
+
+	t.Run("ctrl+x arms the kill for the row under the cursor", func(t *testing.T) {
+		m := newTestModel(t)
+		m.width, m.height = 100, 30
+		m = withItems(m, groupedItems())
+		m = m.setCursor(3) // the first session row
+		m, _ = press(t, m, "ctrl+x")
+		if !m.killArmed || m.killPending.Name != "seshagy" {
+			t.Fatalf("kill armed = %v for %q, want the session under the cursor",
+				m.killArmed, m.killPending.Name)
+		}
+	})
+
+	t.Run("ctrl+r renames the row under the cursor", func(t *testing.T) {
+		m := newTestModel(t)
+		m.width, m.height = 100, 30
+		m = withItems(m, groupedItems())
+		m = m.setCursor(3) // the first session row
+		m, _ = press(t, m, "ctrl+r")
+		if !m.renameActive || m.renameFrom != "seshagy" {
+			t.Fatalf("rename active = %v from %q, want the session under the cursor",
+				m.renameActive, m.renameFrom)
+		}
+	})
+}
+
+func TestPageSizeCountsTheItemsTheWindowDraws(t *testing.T) {
+	withColor(t)
+	m := newTestModel(t)
+	m.width, m.height = 100, 20
+	m.showPreview = false
+	m = withItems(m, groupedItems())
+
+	rows := m.rows()
+	_, above, below := m.resultsRows(rows, 40, m.bodyHeight())
+	if got, want := m.pageSize(), len(rows)-above-below; got != want {
+		t.Fatalf("pageSize = %d, want the %d items the window draws", got, want)
 	}
 }

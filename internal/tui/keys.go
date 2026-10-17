@@ -160,8 +160,8 @@ func (m Model) pageSize() int {
 	if len(rows) == 0 {
 		return 1
 	}
-	win := newItemFlow(rows).window(m.cursor, m.bodyHeight())
-	return max(1, win.end-win.start)
+	win := newItemFlow(rows, m.grouped(rows)).window(m.cursor, m.bodyHeight())
+	return max(1, win.shown)
 }
 
 func (m Model) cancelRename() Model {

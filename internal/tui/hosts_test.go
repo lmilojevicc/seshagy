@@ -118,7 +118,7 @@ func TestPickerShowsHostsFromConfig(t *testing.T) {
 	}
 }
 
-func TestHostsMsgAddsHostRowsAfterDirs(t *testing.T) {
+func TestHostsMsgFilesHostRowsBeforeDirs(t *testing.T) {
 	m := newTestModel(t)
 	m = withItems(m, []sessionmgr.Item{
 		{Kind: sessionmgr.KindSession, Name: "demo", Target: "demo"},
@@ -133,9 +133,9 @@ func TestHostsMsgAddsHostRowsAfterDirs(t *testing.T) {
 	if len(rows) != 3 {
 		t.Fatalf("rows = %d, want 3", len(rows))
 	}
-	item := rows[2].item
+	item := rows[1].item
 	if item.Kind != sessionmgr.KindHost {
-		t.Fatalf("last row kind = %q, want host", item.Kind)
+		t.Fatalf("second row kind = %q, want host", item.Kind)
 	}
 	if item.Name != "homelab" || item.Location != remote.TransportSSH ||
 		item.Target != "seshagy-homelab" || item.Path != "user@192.168.1.1" {

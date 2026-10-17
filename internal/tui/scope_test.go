@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/lmilojevicc/seshagy/internal/sessionmgr"
@@ -100,7 +101,7 @@ func TestScopeIncludesKinds(t *testing.T) {
 	}
 }
 
-func TestFilterRowsOrdersByUrgencyThenSessionsThenDirs(t *testing.T) {
+func TestFilterRowsFilesItemsUnderSectionsInOrder(t *testing.T) {
 	items := []sessionmgr.Item{
 		{Kind: sessionmgr.KindFD, Path: "/tmp/fd", Name: "/tmp/fd"},
 		{Kind: sessionmgr.KindSession, Name: "dev"},
@@ -126,7 +127,10 @@ func TestFilterRowsOrdersByUrgencyThenSessionsThenDirs(t *testing.T) {
 		{Kind: sessionmgr.KindHost, Name: "box", Target: "box"},
 	}
 	rows := filterRows(items, scopeAll, "")
-	want := []string{"claude", "codex", "pi", "dev", "/tmp/z", "/tmp/fd", "box"}
+	// Sections draw in group order — needs you, agents, sessions, hosts, zoxide,
+	// find — with the established rank inside each one: a blocked agent before a
+	// working one, and the dir sources in frecency order.
+	want := []string{"claude", "codex", "pi", "dev", "box", "/tmp/z", "/tmp/fd"}
 	if len(rows) != len(want) {
 		t.Fatalf("rows = %d, want %d", len(rows), len(want))
 	}
@@ -134,6 +138,32 @@ func TestFilterRowsOrdersByUrgencyThenSessionsThenDirs(t *testing.T) {
 		if got := itemTitle(rows[i].item); got != title {
 			t.Fatalf("row %d = %q, want %q", i, got, title)
 		}
+	}
+	// The sections the rows file under, in draw order.
+	var groups []group
+	for _, r := range rows {
+		if len(groups) == 0 || groups[len(groups)-1] != r.group {
+			groups = append(groups, r.group)
+		}
+	}
+	wantGroups := []group{
+		groupNeedsYou, groupAgents, groupSessions, groupHosts, groupZoxide, groupFind,
+	}
+	if !slices.Equal(groups, wantGroups) {
+		t.Fatalf("sections = %v, want %v", groups, wantGroups)
+	}
+}
+
+func TestFilterRowsFilesFinishedAgentsUnderNeedsYou(t *testing.T) {
+	done := agentItem("codex", "%1", "api")
+	done.AgentState = sessionmgr.AgentDone
+	idle := agentItem("pi", "%2", "skills")
+	rows := filterRows([]sessionmgr.Item{idle, done}, scopeAll, "")
+	if got := rows[0].group; got != groupNeedsYou {
+		t.Fatalf("finished agent section = %v, want needs you", got)
+	}
+	if got := rows[1].group; got != groupAgents {
+		t.Fatalf("idle agent section = %v, want agents", got)
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -324,6 +325,22 @@ func (m *Model) notify(text string, sev notifSev) {
 // rows is the visible, scope-filtered, query-ranked list.
 func (m Model) rows() []row {
 	return filterRows(m.items, m.scope, m.query)
+}
+
+// grouped reports whether the results window draws its section headers. An empty
+// query files the list under its sections, and any query collapses it into one
+// ranked list. A list whose rows all fall in one section draws no header either:
+// a lone header would only repeat what the one scope already says.
+func (m Model) grouped(rows []row) bool {
+	if strings.TrimSpace(m.query) != "" {
+		return false
+	}
+	for _, r := range rows {
+		if r.group != rows[0].group {
+			return true
+		}
+	}
+	return false
 }
 
 // syncCursor keeps the selection stable across a refresh that reorders or
