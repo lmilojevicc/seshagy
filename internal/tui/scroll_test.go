@@ -43,8 +43,10 @@ func TestResultsWindowScrollsOnlyWhenTheCursorLeavesIt(t *testing.T) {
 			t.Fatalf("cursor item %d (lines %d-%d) outside the window [%d, %d)",
 				m.cursor, start, end, top, top+height)
 		}
-		if flow.lines[top].detail {
-			t.Fatalf("window opens on the continuation line %d of an item", top)
+		// The window is a full line viewport: it always draws its whole height,
+		// so the bottom line never flips between blank and drawn.
+		if lines, _, _ := m.resultsRows(rows, 80, height); len(lines) != height {
+			t.Fatalf("window drew %d lines, want %d", len(lines), height)
 		}
 		// The window only moves when the cursor's item would leave the window it
 		// had before the key press.
@@ -53,8 +55,11 @@ func TestResultsWindowScrollsOnlyWhenTheCursorLeavesIt(t *testing.T) {
 		}
 		switch msg.Type {
 		case tea.KeyDown:
-			if top < before {
-				t.Fatalf("moving down scrolled the window up: %d -> %d", before, top)
+			// Stepping past the bottom edge scrolls by exactly the lines the new
+			// item needs, never by more.
+			if want := max(before, end-height); top != want {
+				t.Fatalf("moving down onto item %d scrolled %d -> %d, want %d",
+					m.cursor, before, top, want)
 			}
 		case tea.KeyUp:
 			if top > before {

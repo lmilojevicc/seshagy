@@ -298,17 +298,20 @@ func newItemFlow(rows []row, grouped bool) itemFlow {
 // itemWindow is the slice of the flow one frame draws: the lines to draw in
 // order, the items it shows, and the items hidden above and below them.
 type itemWindow struct {
-	lines        []itemLine
+	lines []itemLine
+	// from is the flow line the window opens on.
+	from         int
 	above, below int
 	shown        int
 }
 
 // window is the slice a frame of the given line height draws when the window
-// last opened on line top. Like telescope or fzf, the window keeps its position
-// and only scrolls, by as little as possible, when the cursor's item would leave
-// it; re-centring on every move made two-line items jump by uneven amounts.
-// Only whole items are drawn: a leftover line stays blank rather than showing
-// half an item. The cursor's item is always inside the window.
+// last opened on line top. The results window is a plain line viewport, like
+// terminal scrollback or telescope: it keeps its position and only scrolls,
+// line by line, as far as the cursor's item needs to be fully visible. Items
+// cut by the top or bottom edge show their visible lines, so a step always
+// scrolls by exactly the height of the item moved onto and the bottom line never
+// flips between blank and drawn.
 func (f itemFlow) window(cursor, top, height int) itemWindow {
 	if height <= 0 || f.items == 0 {
 		return itemWindow{}
@@ -317,38 +320,34 @@ func (f itemFlow) window(cursor, top, height int) itemWindow {
 	if len(f.lines) <= height {
 		return itemWindow{lines: f.lines, shown: f.items}
 	}
-	win := f.clip(f.follow(top, cursor, height), height)
-	if win.shown == 0 {
-		// A frame too short for the cursor's own item still shows it, clipped, so
-		// the list is never blank.
-		from := f.firsts[cursor]
-		return itemWindow{
-			lines: f.lines[from:min(len(f.lines), from+height)],
-			above: cursor,
-			below: f.items - cursor - 1,
-			shown: 1,
-		}
+	from := f.follow(top, cursor, height)
+	end := min(len(f.lines), from+height)
+	win := itemWindow{lines: f.lines[from:end], from: from}
+	// An item counts as hidden only when none of its lines are in the window.
+	win.above = f.itemsAbove(from)
+	if from > 0 && f.lines[from].detail {
+		win.above-- // the item continuing onto the first line is partly shown
 	}
+	win.below = f.items - f.itemsAbove(end)
+	win.shown = f.items - win.above - win.below
 	return win
 }
 
 // follow is the line a window of the given budget opens on so the cursor's item
 // is fully visible, moving the previous top as little as possible. Scrolling up
-// onto the first item of a section brings its header along, and the window
-// never opens on an item's continuation line.
+// onto the first item of a section brings its header along when it fits.
 func (f itemFlow) follow(top, cursor, budget int) int {
 	if f.items == 0 || budget <= 0 || len(f.lines) <= budget {
 		return 0
 	}
 	cursor = max(0, min(cursor, f.items-1))
-	start := f.firsts[cursor]
-	if start > 0 && f.lines[start-1].item < 0 && f.itemEnd(cursor)-(start-1) <= budget {
-		start--
-	}
-	end := f.itemEnd(cursor)
-	if end-f.firsts[cursor] > budget {
+	start, end := f.firsts[cursor], f.itemEnd(cursor)
+	if end-start > budget {
 		// The item is taller than the window: open on its first line.
-		return min(f.firsts[cursor], len(f.lines)-1)
+		return min(start, len(f.lines)-budget)
+	}
+	if start > 0 && f.lines[start-1].item < 0 && end-(start-1) <= budget && start-1 < top {
+		start--
 	}
 	if start < top {
 		top = start
@@ -356,43 +355,7 @@ func (f itemFlow) follow(top, cursor, budget int) int {
 	if end > top+budget {
 		top = end - budget
 	}
-	top = max(0, min(top, len(f.lines)-budget))
-	if f.lines[top].detail && top < f.firsts[cursor] {
-		// Opening on the second line of the item above would show half of it.
-		top++
-	}
-	return top
-}
-
-// clip is the lines a window opening on `from` with the given budget draws, plus
-// the items it shows and the items hidden above and below them. An item that
-// would fall outside the budget is left out whole, and a section header is never
-// left stranded without the item it titles.
-func (f itemFlow) clip(from, budget int) itemWindow {
-	end := min(len(f.lines), from+budget)
-	win := itemWindow{above: f.itemsAbove(from)}
-	for i := from; i < end; {
-		line := f.lines[i]
-		if line.item < 0 {
-			// The header titles the item starting on the next line, so it needs
-			// every line of that item under it.
-			if i+1 >= end || f.itemEnd(f.lines[i+1].item) > end {
-				break
-			}
-			win.lines = append(win.lines, line)
-			i++
-			continue
-		}
-		next := f.itemEnd(line.item)
-		if next > end {
-			break
-		}
-		win.lines = append(win.lines, f.lines[i:next]...)
-		win.shown++
-		i = next
-	}
-	win.below = f.items - win.above - win.shown
-	return win
+	return max(0, min(top, len(f.lines)-budget))
 }
 
 // itemEnd is the first line after the given item's lines.
@@ -418,22 +381,25 @@ func (m Model) resultsRows(
 	}
 	grouped := m.grouped(rows)
 	counts := groupCounts(rows)
-	win := newItemFlow(rows, grouped).window(m.cursor, m.listTop, height)
-	for _, line := range win.lines {
+	flow := newItemFlow(rows, grouped)
+	win := flow.window(m.cursor, m.listTop, height)
+	drawn := -1
+	var itemLines []string
+	for i, line := range win.lines {
+		lineIndex := win.from + i
 		if line.item < 0 {
 			lines = append(lines, m.renderGroupHeader(line.group, counts[line.group], width))
 			continue
 		}
-		if line.detail {
-			// The item's first line drew every line the item has.
-			continue
+		if line.item != drawn {
+			drawn = line.item
+			itemLines = m.renderItem(rows[line.item], width, line.item == m.cursor)
 		}
-		lines = append(lines, m.renderItem(rows[line.item], width, line.item == m.cursor)...)
-	}
-	// Only a frame too short for the cursor's own two-line item draws more lines
-	// than it has room for; that item is clipped rather than hidden entirely.
-	if len(lines) > height {
-		lines = lines[:height]
+		// Draw this flow line of the item; an item cut by the window's edge
+		// shows only the lines that fall inside it.
+		if idx := lineIndex - flow.firsts[line.item]; idx < len(itemLines) {
+			lines = append(lines, itemLines[idx])
+		}
 	}
 	return lines, win.above, win.below
 }

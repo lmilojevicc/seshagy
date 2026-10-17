@@ -1355,59 +1355,6 @@ func TestResultsWindowCountersLiveInTheBottomBorder(t *testing.T) {
 	}
 }
 
-// rowsFor builds the rows a list of items draws as, in item order. The rows all
-// carry one section (the zero group), so the frame draws no header for them: a
-// lone section has none.
-func rowsFor(items []sessionmgr.Item) []row {
-	rows := make([]row, len(items))
-	for i, item := range items {
-		rows[i] = row{item: item}
-	}
-	return rows
-}
-
-// drawnItems lists the items a window draws, in order, checking that none of them
-// is drawn split apart.
-func drawnItems(t *testing.T, win itemWindow) []int {
-	t.Helper()
-	items := make([]int, 0, win.shown)
-	for i := 0; i < len(win.lines); i++ {
-		line := win.lines[i]
-		if line.item < 0 {
-			continue
-		}
-		if line.detail {
-			if i == 0 || win.lines[i-1].item != line.item {
-				t.Fatalf(
-					"item %d's continuation line is drawn on its own: %#v",
-					line.item,
-					win.lines,
-				)
-			}
-			continue
-		}
-		if i+1 < len(win.lines) && win.lines[i+1].item == line.item {
-			if !win.lines[i+1].detail {
-				t.Fatalf("item %d is drawn split apart: %#v", line.item, win.lines)
-			}
-			i++
-		}
-		items = append(items, line.item)
-	}
-	return items
-}
-
-// drawnHeaders lists the sections whose header line a window draws, in order.
-func drawnHeaders(win itemWindow) []group {
-	groups := make([]group, 0, groupCount)
-	for _, line := range win.lines {
-		if line.item < 0 {
-			groups = append(groups, line.group)
-		}
-	}
-	return groups
-}
-
 // mixedHeightItems is a list of one- and two-line items in item order: sessions
 // and agents take two lines, hosts and directories one, so the window's line
 // budget and its item counters diverge. (A model ranks and groups the same items
@@ -1430,102 +1377,6 @@ func mixedHeightItems() []sessionmgr.Item {
 	}
 }
 
-// TestItemFlowWindowKeepsWholeItemsAroundTheCursor pins the scroll math: the
-// window is measured in lines, so it never opens on an item's second line and
-// never draws half an item, the cursor's item is always inside it, and the items
-// hidden above and below are still counted in items.
-func TestItemFlowWindowKeepsWholeItemsAroundTheCursor(t *testing.T) {
-	flow := newItemFlow(rowsFor(mixedHeightItems()), false)
-	tests := []struct {
-		name                    string
-		cursor, height          int
-		wantStart, wantEnd      int
-		wantAbove, wantBelow    int
-		wantLines               int
-		clippedCursorItemTooBig bool
-	}{
-		{
-			name: "cursor at the top", cursor: 0, height: 5,
-			wantStart: 0, wantEnd: 3, wantBelow: 4, wantLines: 5,
-		},
-		{
-			// The next item is two lines tall and only one line is left over, so
-			// the last line stays blank rather than showing half an item.
-			name:      "scrolling down from the top keeps the cursor at the bottom edge",
-			cursor:    3,
-			height:    5,
-			wantStart: 1,
-			wantEnd:   4,
-			wantAbove: 1,
-			wantBelow: 3,
-			wantLines: 5,
-		},
-		{
-			// The item above the window is two lines tall and only one line is
-			// left over, so that line stays blank rather than showing half an item.
-			name: "cursor at the bottom leaves one line blank", cursor: 6, height: 5,
-			wantStart: 4, wantEnd: 7, wantAbove: 4, wantLines: 4,
-		},
-		{
-			name: "every item fits", cursor: 3, height: 11,
-			wantStart: 0, wantEnd: 7, wantLines: 11,
-		},
-		{
-			// A window too short for the cursor's own two-line item still shows
-			// it, clipped, so the list is never blank.
-			name: "two-line item in a one-line window", cursor: 6, height: 1,
-			wantStart: 6, wantEnd: 7, wantAbove: 6,
-			clippedCursorItemTooBig: true,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			win := flow.window(tt.cursor, 0, tt.height)
-			items := drawnItems(t, win)
-			if len(items) == 0 || items[0] != tt.wantStart || items[len(items)-1] != tt.wantEnd-1 {
-				t.Fatalf("window draws items %v, want [%d, %d)", items, tt.wantStart, tt.wantEnd)
-			}
-			if win.above != tt.wantAbove || win.below != tt.wantBelow {
-				t.Fatalf("hidden items = (%d above, %d below), want (%d, %d)",
-					win.above, win.below, tt.wantAbove, tt.wantBelow)
-			}
-			if win.above > 0 && items[0] != win.above {
-				t.Fatalf("window hides %d items above but opens on item %d", win.above, items[0])
-			}
-			if win.below > 0 && items[len(items)-1] != flow.items-1-win.below {
-				t.Fatalf(
-					"window hides %d items below but closes on item %d",
-					win.below,
-					items[len(items)-1],
-				)
-			}
-			if !slices.Contains(items, tt.cursor) {
-				t.Fatalf("window %v does not hold the cursor item %d", items, tt.cursor)
-			}
-			if got := win.above + win.shown + win.below; got != flow.items {
-				t.Fatalf("window accounts for %d of %d items", got, flow.items)
-			}
-			lines := 0
-			for _, item := range items {
-				lines += flow.heights[item]
-			}
-			if tt.clippedCursorItemTooBig {
-				if lines <= tt.height {
-					t.Fatalf("window draws %d lines, want more than the %d it has",
-						lines, tt.height)
-				}
-				return
-			}
-			if lines != tt.wantLines {
-				t.Fatalf("window draws %d lines, want %d", lines, tt.wantLines)
-			}
-			if lines > tt.height {
-				t.Fatalf("window draws %d lines in a %d line frame", lines, tt.height)
-			}
-		})
-	}
-}
-
 // TestResultsWindowScrollsMixedHeightItemsByLines draws the window over a
 // one- and two-line list the model ranks and groups: the cursor's item is whole
 // wherever it sits, a leftover line is left blank rather than half drawn (a
@@ -1541,14 +1392,14 @@ func TestResultsWindowScrollsMixedHeightItemsByLines(t *testing.T) {
 		wantCursorClipped bool
 	}{
 		{
-			// The sessions header and the row under it need three of the five
-			// lines, so the next row cannot be drawn and one line stays blank.
-			name: "cursor at the top with an odd leftover line", cursor: 0, height: 5,
-			wantBelow: 6, wantLines: 3,
+			// The row cut by the bottom edge shows its first line and counts as
+			// shown, so the window is always full.
+			name: "cursor at the top cuts the next row at the edge", cursor: 0, height: 5,
+			wantBelow: 5, wantLines: 5,
 		},
 		{
 			name: "cursor below the first window scrolls just far enough", cursor: 3, height: 5,
-			wantAbove: 2, wantBelow: 3, wantLines: 4,
+			wantAbove: 1, wantBelow: 3, wantLines: 5,
 		},
 		{
 			name: "cursor at the bottom", cursor: 6, height: 5,
@@ -1668,131 +1519,6 @@ func rowTitles(rows []row) []string {
 		titles[i] = itemTitle(r.item)
 	}
 	return titles
-}
-
-// sectionStart is the index of the first row in a section.
-func sectionStart(rows []row, g group) int {
-	for i, r := range rows {
-		if r.group == g {
-			return i
-		}
-	}
-	return -1
-}
-
-// TestItemFlowWindowDrawsEachHeaderWithItsFirstRow pins the grouped scroll math:
-// a header is drawn on the line above the first row of its section and never
-// without it, the cursor's item is always inside the window whole, and the
-// counters still count items.
-func TestItemFlowWindowDrawsEachHeaderWithItsFirstRow(t *testing.T) {
-	rows := filterRows(groupedItems(), scopeAll, "")
-	flow := newItemFlow(rows, true)
-	for height := 2; height <= 20; height++ {
-		for cursor := range rows {
-			win := flow.window(cursor, 0, height)
-			if len(win.lines) > height {
-				t.Fatalf("window(%d, %d) draws %d lines, over the %d it has",
-					cursor, height, len(win.lines), height)
-			}
-			items := drawnItems(t, win)
-			if !slices.Contains(items, cursor) {
-				t.Fatalf("window(%d, %d) hides the cursor item: %v", cursor, height, items)
-			}
-			// The drawn items are one contiguous run, and the counters account
-			// for every other item.
-			for i := 1; i < len(items); i++ {
-				if items[i] != items[i-1]+1 {
-					t.Fatalf("window(%d, %d) draws items %v out of order", cursor, height, items)
-				}
-			}
-			if items[0] != win.above || items[len(items)-1] != flow.items-1-win.below {
-				t.Fatalf("window(%d, %d) = items %v, above %d, below %d",
-					cursor, height, items, win.above, win.below)
-			}
-			if got := win.above + win.shown + win.below; got != flow.items {
-				t.Fatalf("window(%d, %d) accounts for %d of %d items",
-					cursor, height, got, flow.items)
-			}
-			// A header belongs to a section's first row: it is drawn directly
-			// above that row, never twice, and in section order.
-			before := group(-1)
-			for i, line := range win.lines {
-				if line.item >= 0 {
-					continue
-				}
-				if line.group <= before {
-					t.Fatalf("window(%d, %d) draws headers out of order: %v",
-						cursor, height, drawnHeaders(win))
-				}
-				before = line.group
-				if i+1 >= len(win.lines) || win.lines[i+1].item != sectionStart(rows, line.group) {
-					t.Fatalf("window(%d, %d) titles section %v without its first row",
-						cursor, height, line.group)
-				}
-			}
-		}
-	}
-}
-
-// TestItemFlowWindowLeavesALineBlankRatherThanStrandAHeader pins the grouped
-// window's bottom edge: a header is drawn only when every line of the row it
-// titles fits under it, so the leftover line stays blank instead of half an item.
-func TestItemFlowWindowLeavesALineBlankRatherThanStrandAHeader(t *testing.T) {
-	rows := filterRows(groupedItems(), scopeAll, "")
-	flow := newItemFlow(rows, true)
-
-	// Four lines hold the needs-you header and the blocked agent's two lines; the
-	// sessions header under them would be stranded without its row.
-	win := flow.window(0, 0, 4)
-	if got := drawnHeaders(win); !slices.Equal(got, []group{groupNeedsYou}) {
-		t.Fatalf("headers = %v, want the needs-you header alone", got)
-	}
-	if len(win.lines) != 3 {
-		t.Fatalf("window drew %d lines, want the header and one row's 3", len(win.lines))
-	}
-	if win.shown != 1 || win.below != flow.items-1 {
-		t.Fatalf("window shows %d items with %d below, want the first item alone",
-			win.shown, win.below)
-	}
-}
-
-// TestItemFlowWindowScrollsHeadersInAndOutWithTheirSections checks the header a
-// scrolled window draws: the header of the section the cursor sits in comes back
-// with its first row, and a header whose section scrolled past goes with it.
-func TestItemFlowWindowScrollsHeadersInAndOutWithTheirSections(t *testing.T) {
-	items := make([]sessionmgr.Item, 0, 9)
-	for i := range 6 {
-		items = append(items, agentItem("pi", fmt.Sprintf("%%%d", i), fmt.Sprintf("ws%d", i)))
-	}
-	for i := range 3 {
-		name := fmt.Sprintf("s%d", i)
-		items = append(items, sessionmgr.Item{
-			Kind: sessionmgr.KindSession, Name: name, Target: name, Windows: 2,
-		})
-	}
-	rows := filterRows(items, scopeAll, "")
-	flow := newItemFlow(rows, true)
-
-	// The top of the list opens on the agents header, above its first row.
-	if got := drawnHeaders(flow.window(0, 0, 8)); !slices.Equal(got, []group{groupAgents}) {
-		t.Fatalf("headers at the top of the list = %v, want the agents section", got)
-	}
-	// A header whose section scrolled past is not drawn.
-	if got := drawnHeaders(flow.window(4, 0, 6)); len(got) != 0 {
-		t.Fatalf("headers deep inside a section = %v, want none", got)
-	}
-	// The header comes back with the first row of its section.
-	win := flow.window(6, 0, 6)
-	if got := drawnHeaders(win); !slices.Contains(got, groupSessions) {
-		t.Fatalf("headers around the sessions section = %v, want the sessions header", got)
-	}
-	if drawn := drawnItems(t, win); !slices.Contains(drawn, 6) {
-		t.Fatalf("window around the sessions section draws items %v, want its first row", drawn)
-	}
-	// A frame with room for the cursor's item alone shows it without its header.
-	if got := drawnHeaders(flow.window(6, 0, 2)); len(got) != 0 {
-		t.Fatalf("headers in a two-line frame = %v, want none", got)
-	}
 }
 
 // TestResultsWindowDrawsTheCursorSectionsHeaderWithItsRow pins the header the
