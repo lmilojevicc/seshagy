@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	appconfig "github.com/lmilojevicc/seshagy/internal/config"
 	"github.com/lmilojevicc/seshagy/internal/sessionmgr"
 )
 
@@ -22,6 +23,37 @@ func TestNotifyPushesAndTrimsToThree(t *testing.T) {
 		if got := m.notifications[i].text; got != want {
 			t.Fatalf("notification %d = %q, want %q", i, got, want)
 		}
+	}
+}
+
+// TestLayoutFollowsConfig pins the layout the model exposes: the configured
+// token, with legacy and unknown values normalizing to horizontal.
+func TestLayoutFollowsConfig(t *testing.T) {
+	tests := []struct {
+		name       string
+		configured string
+		want       string
+	}{
+		{name: "vertical", configured: appconfig.LayoutVertical, want: appconfig.LayoutVertical},
+		{name: "dropdown", configured: appconfig.LayoutDropdown, want: appconfig.LayoutDropdown},
+		{
+			name:       "horizontal",
+			configured: appconfig.LayoutHorizontal,
+			want:       appconfig.LayoutHorizontal,
+		},
+		{name: "unset", configured: "", want: appconfig.LayoutHorizontal},
+		{name: "legacy zen", configured: "zen", want: appconfig.LayoutHorizontal},
+		{name: "unknown", configured: "tree", want: appconfig.LayoutHorizontal},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := appconfig.Default()
+			cfg.TUI.Layout = test.configured
+			m := New(WithConfig(cfg), WithMultiplexer(newFakeMux()))
+			if m.layout != test.want {
+				t.Fatalf("layout for %q = %q, want %q", test.configured, m.layout, test.want)
+			}
+		})
 	}
 }
 

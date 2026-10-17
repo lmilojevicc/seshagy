@@ -44,6 +44,15 @@ type styles struct {
 	selectedBG lipgloss.Style
 	pane       lipgloss.Style
 	panePopup  lipgloss.Style
+
+	// Telescope chrome: window borders and titles, the preview line-number
+	// gutter, and the needs-you accent.
+	border       lipgloss.Style
+	titlePrompt  lipgloss.Style
+	titleResults lipgloss.Style
+	titlePreview lipgloss.Style
+	gutter       lipgloss.Style
+	needsYou     lipgloss.Style
 }
 
 func stylesFromConfig(cfg appconfig.Config) styles {
@@ -93,6 +102,12 @@ func stylesFromConfig(cfg appconfig.Config) styles {
 		BorderForeground(border).
 		Padding(0, 1)
 	s.panePopup = s.pane.BorderForeground(themeColor(colors.PopupBorder, popupTitle))
+	s.border = lipgloss.NewStyle().Foreground(border)
+	s.titlePrompt = lipgloss.NewStyle().Foreground(info).Bold(true)
+	s.titleResults = lipgloss.NewStyle().Foreground(danger).Bold(true)
+	s.titlePreview = lipgloss.NewStyle().Foreground(success).Bold(true)
+	s.gutter = lipgloss.NewStyle().Foreground(muted).Faint(true)
+	s.needsYou = lipgloss.NewStyle().Foreground(danger).Bold(true)
 	return s
 }
 

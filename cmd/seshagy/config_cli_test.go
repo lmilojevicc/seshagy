@@ -52,11 +52,11 @@ func TestRunConfigShowTextAndJSON(t *testing.T) {
 	if payload.Config.Sources.Default != "all" {
 		t.Fatalf("config.sources.default = %q, want all", payload.Config.Sources.Default)
 	}
-	if payload.Config.TUI.Layout != appconfig.LayoutDefault {
+	if payload.Config.TUI.Layout != appconfig.LayoutHorizontal {
 		t.Fatalf(
 			"config.tui.layout = %q, want %q",
 			payload.Config.TUI.Layout,
-			appconfig.LayoutDefault,
+			appconfig.LayoutHorizontal,
 		)
 	}
 }

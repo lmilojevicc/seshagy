@@ -55,6 +55,9 @@ type Model struct {
 	width  int
 	height int
 
+	// layout is the configured [tui] layout: horizontal, vertical, or dropdown.
+	layout string
+
 	scope scope
 	query string
 
@@ -263,6 +266,7 @@ func New(optionFns ...Option) Model {
 	m := Model{
 		styles:           stylesFromConfig(cfg),
 		config:           cfg,
+		layout:           cfg.TUILayout(),
 		icons:            cfg.IconSet(),
 		mux:              mux,
 		terms:            mux.Terms(),

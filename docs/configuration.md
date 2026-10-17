@@ -104,6 +104,7 @@ manifest_fallback = true   # tmux only: capture-pane screen-rule backstop (defau
 catalog_url = ""           # defaults to the herdr public catalog when empty
 
 [tui]
+layout = "horizontal"          # horizontal | vertical | dropdown
 preview = true                 # the preview column
 
 [remote]
@@ -123,11 +124,27 @@ file = ""                     # empty: create a per-run file under XDG state
 The picker is always type-first: printable keys fuzzy-filter the merged list of
 sessions, agents, directories, and hosts, and a sigil typed on an empty prompt
 selects a filter (`@` agents, `!` needs you, `$` sessions, `*` dirs, `~` zoxide,
-`/` find, `#` hosts). `[tui] preview` is the only `[tui]` setting the picker
-reads; `layout`, `input_style`, `dim_background`, `[type_first]` and
+`/` find, `#` hosts). `[tui] preview` and `[tui] layout` are the `[tui]`
+settings the picker reads; `input_style`, `dim_background`, `[type_first]` and
 `[sources]` are still accepted in `config.toml` (and by `seshagy config init`)
 but no longer affect the TUI. See the README's TUI section for the full
 keymap.
+
+```toml
+[tui]
+layout = "horizontal"   # horizontal (default) | vertical | dropdown
+preview = true          # the preview column
+```
+
+| Value        | Arrangement                                                                 |
+| ------------ | --------------------------------------------------------------------------- |
+| `horizontal` | Search prompt and results on the left, preview on the right (default).      |
+| `vertical`   | Prompt on top, results below it, preview at the bottom.                     |
+| `dropdown`   | Prompt on top, results full width below; the preview starts hidden (`ctrl+o` shows it). |
+
+Legacy and unknown values (including the old `default` and `zen` tokens)
+normalize to `horizontal` without an error, so an existing `config.toml` keeps
+working.
 
 ### Remote hosts
 

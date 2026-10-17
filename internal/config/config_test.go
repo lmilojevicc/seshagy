@@ -291,12 +291,17 @@ func TestNormalizeStateDisplayMode(t *testing.T) {
 
 func TestNormalizeTUILayout(t *testing.T) {
 	tests := map[string]string{
-		"":               LayoutDefault,
-		"default":        LayoutDefault,
-		" DEFAULT ":      LayoutDefault,
-		"zen":            LayoutZen,
-		" ZEN ":          LayoutZen,
-		" experimental ": "experimental",
+		"":               LayoutHorizontal,
+		"horizontal":     LayoutHorizontal,
+		" HORIZONTAL ":   LayoutHorizontal,
+		"vertical":       LayoutVertical,
+		" VERTICAL ":     LayoutVertical,
+		"dropdown":       LayoutDropdown,
+		" DROPDOWN ":     LayoutDropdown,
+		"default":        LayoutHorizontal,
+		"zen":            LayoutHorizontal,
+		"tree":           LayoutHorizontal,
+		" experimental ": LayoutHorizontal,
 	}
 	for input, want := range tests {
 		cfg := Config{TUI: TUIConfig{Layout: input}}
@@ -326,16 +331,16 @@ func TestTUILayoutDefaultWhenMissing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
-	if loaded.TUI.Layout != LayoutDefault || loaded.TUILayout() != LayoutDefault {
-		t.Fatalf("layout without tui.layout = %q, want %q", loaded.TUI.Layout, LayoutDefault)
+	if loaded.TUI.Layout != LayoutHorizontal || loaded.TUILayout() != LayoutHorizontal {
+		t.Fatalf("layout without tui.layout = %q, want %q", loaded.TUI.Layout, LayoutHorizontal)
 	}
 	if loaded.TUI.InputStyle != InputStyleCmdline ||
 		loaded.TUI.DimBackground == nil || *loaded.TUI.DimBackground ||
 		loaded.TUI.Preview == nil || *loaded.TUI.Preview {
 		t.Fatalf("existing tui settings changed while defaulting layout: %#v", loaded.TUI)
 	}
-	if cfg := Default(); cfg.TUI.Layout != LayoutDefault {
-		t.Fatalf("Default().TUI.Layout = %q, want %q", cfg.TUI.Layout, LayoutDefault)
+	if cfg := Default(); cfg.TUI.Layout != LayoutHorizontal {
+		t.Fatalf("Default().TUI.Layout = %q, want %q", cfg.TUI.Layout, LayoutHorizontal)
 	}
 }
 
@@ -344,9 +349,10 @@ func TestTUILayoutRoundTrip(t *testing.T) {
 		input string
 		want  string
 	}{
-		{input: LayoutDefault, want: LayoutDefault},
-		{input: LayoutZen, want: LayoutZen},
-		{input: " Future ", want: "future"},
+		{input: LayoutHorizontal, want: LayoutHorizontal},
+		{input: LayoutVertical, want: LayoutVertical},
+		{input: LayoutDropdown, want: LayoutDropdown},
+		{input: " Future ", want: LayoutHorizontal},
 	}
 	for _, test := range tests {
 		t.Run(test.want, func(t *testing.T) {

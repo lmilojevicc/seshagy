@@ -32,8 +32,9 @@ const (
 	InputStylePopup   = "popup"
 	InputStyleCmdline = "cmdline"
 
-	LayoutDefault = "default"
-	LayoutZen     = "zen"
+	LayoutHorizontal = "horizontal"
+	LayoutVertical   = "vertical"
+	LayoutDropdown   = "dropdown"
 )
 
 type Config struct {
@@ -226,7 +227,7 @@ func Default() Config {
 		Log:       LogConfig{Level: "off"},
 		Remote:    RemoteConfig{SSHConfigHosts: ptrBool(true)},
 		TUI: TUIConfig{
-			Layout:        LayoutDefault,
+			Layout:        LayoutHorizontal,
 			InputStyle:    InputStylePopup,
 			DimBackground: ptrBool(true),
 			Preview:       ptrBool(true),
@@ -596,8 +597,8 @@ func (c Config) IconSet() sessionmgr.IconSet {
 	}
 }
 
-// TUILayout returns the normalized configured layout token. Unknown tokens are
-// preserved so the TUI can warn before falling back to the default layout.
+// TUILayout returns the normalized [tui] layout token: horizontal, vertical, or
+// dropdown. Legacy and unknown tokens normalize to horizontal without error.
 func (c Config) TUILayout() string {
 	return normalizeTUILayout(c.TUI.Layout)
 }
@@ -761,11 +762,15 @@ func normalizeKindIcon(
 }
 
 func normalizeTUILayout(layout string) string {
-	layout = strings.ToLower(strings.TrimSpace(layout))
-	if layout == "" {
-		return LayoutDefault
+	switch strings.ToLower(strings.TrimSpace(layout)) {
+	case "vertical":
+		return LayoutVertical
+	case "dropdown":
+		return LayoutDropdown
+	default:
+		// Includes the legacy "default"/"zen" tokens and anything unknown.
+		return LayoutHorizontal
 	}
-	return layout
 }
 
 func normalizeInputStyle(style string) string {
