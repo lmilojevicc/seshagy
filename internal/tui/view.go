@@ -34,14 +34,19 @@ const (
 	minResultsRows = 3
 	// footerMinHeight is the shortest frame that keeps the footer key line.
 	footerMinHeight = 6
-	// metaColumnMax caps each right-aligned meta column.
+	// metaColumnMax caps each right-flush meta column.
 	metaColumnMax = 18
-	// titleMinWidth is the room a title keeps before meta columns are dropped.
+	// titleMinWidth is the room a title keeps before its tab suffix is dropped.
 	titleMinWidth = 12
-	// previewGutterWidth is the preview window's line-number column, and
-	// previewGutterGap the blank run that separates it from the content.
-	previewGutterWidth = 3
-	previewGutterGap   = 2
+	// rowRightMargin is the blank cell the right-flush columns keep off the
+	// window's inner edge, rowGap the least blank run that separates them from
+	// the name, and rowNameFloor the least room the name keeps before the
+	// right-flush columns start being dropped.
+	rowRightMargin = 1
+	rowGap         = 1
+	rowNameFloor   = 1
+	// previewInset is the blank column the preview content starts after.
+	previewInset = 1
 	// hostIcon marks remote-machine rows.
 	hostIcon = "󰒋 "
 
@@ -250,15 +255,17 @@ func (m Model) resultsRows(
 	}
 	start, end := visibleWindow(len(rows), m.cursor, height)
 	visible := rows[start:end]
-	metas := make([][]metaCell, len(visible))
+	cells := make([]rowCells, len(visible))
 	for i, r := range visible {
-		metas[i] = m.rowMeta(r)
+		cells[i] = m.rowCells(r)
 	}
-	grid := buildRowGrid(visible, metas, width, m.rowPrefixWidth())
+	grid := buildRowGrid(visible, cells, width, m.rowPrefixWidth())
 	lines = make([]string, 0, len(visible))
 	for i, r := range visible {
-		cols := grid[r.item.Kind]
-		lines = append(lines, m.renderRow(r, metas[i], cols, width, start+i == m.cursor))
+		lines = append(
+			lines,
+			m.renderRow(r, cells[i], grid[r.item.Kind], width, start+i == m.cursor),
+		)
 	}
 	return lines, start, len(rows) - end
 }
@@ -289,8 +296,8 @@ func needsYouCount(rows []row) int {
 }
 
 // renderPreviewWindow draws the preview window: the selected item's name as the
-// window title, the captured content behind a line-number gutter inside it, and
-// the kind's footer in the bottom border.
+// window title, the captured content inside it, and the kind's footer in the
+// bottom border.
 func (m Model) renderPreviewWindow(l viewLayout) []string {
 	title := m.styles.muted.Render("Preview")
 	bottom := ""
@@ -486,97 +493,102 @@ func (m Model) hasHosts() bool {
 	return false
 }
 
-// cellSep is the gap between two meta columns; the column that starts a row's
-// run draws no separator (the title column's own gap precedes it).
+// cellSep is the gap between two row cells: every cell of a group is separated
+// by it, and a cell a row has no value for leaves its column blank instead of
+// shifting the cells after it.
 const cellSep = "  "
 
-// metaDot is the gap inside one dim context ("workspace · age"): the columns are
-// separate so they align, but the dot reads as part of the dim run around it.
-func (m Model) metaDot() string { return m.styles.muted.Render(" · ") }
-
-// metaCell is one trailing row column: the separator drawn before it, the plain
-// text its column width is measured from, and the styled text drawn.
+// metaCell is one cell of a row's trailing run: the plain text its column is
+// measured from, the styled text drawn, and whether the column pads it on the
+// left so a group of ages ends on the same column.
 type metaCell struct {
-	sep   string
 	plain string
 	text  string
+	right bool
 }
 
-// metaCol builds one column from a style and its plain text.
-func metaCol(sep string, style lipgloss.Style, text string) metaCell {
-	return metaCell{sep: sep, plain: text, text: style.Render(text)}
+// metaCol builds one left-aligned cell from a style and its plain text.
+func metaCol(style lipgloss.Style, text string) metaCell {
+	return metaCell{plain: text, text: style.Render(text)}
 }
 
-// rowMeta builds a row's trailing columns. Each kind lays out its own columns —
-// agents their workspace, age, and state, sessions their window count, attached
-// flag, and the agents inside them, hosts their transport and alias — in fixed
-// slots, so a value a row lacks leaves its column blank instead of shifting the
-// columns that follow it.
-func (m Model) rowMeta(r row) []metaCell {
+// metaRightCol builds one right-aligned cell: a run of values of different
+// lengths (the ages) ends on its column instead of starting on it.
+func metaRightCol(style lipgloss.Style, text string) metaCell {
+	return metaCell{plain: text, text: style.Render(text), right: true}
+}
+
+// rowCells is one row split by where its cells are drawn: the run that follows
+// the title — next to the name, with no dot between them — and the columns flush
+// against the window's right edge.
+type rowCells struct {
+	left  []metaCell
+	right []metaCell
+}
+
+// rowCells builds a row's cells. Each kind lays out its own: an agent keeps its
+// kind label and workspace beside its name and right-aligns its age, a session
+// right-aligns the attached flag, its window count, and the agents inside it, a
+// host right-aligns its alias and transport, and a directory has no cells at all.
+func (m Model) rowCells(r row) rowCells {
 	item := r.item
 	switch item.Kind {
 	case sessionmgr.KindAgent:
+		cells := rowCells{}
 		// The logo already says which agent this is; the colored kind label is
-		// only worth the columns when no logo is drawn.
-		label := ""
+		// only worth the columns when no logo is drawn, and a label that only
+		// repeats the name already drawn as the title is dropped, exactly like a
+		// tab label that repeats it.
 		if !m.showAgentLogos() {
-			// A label that only repeats the name already drawn as the title is
-			// dropped, exactly like a tab label that repeats it.
 			if kind := agentKey(item.AgentName); !repeatsTitle(item, kind) {
-				label = kind
+				cells.left = append(cells.left, metaCol(agentNameStyle(item.AgentName), kind))
 			}
 		}
-		workspace := ""
 		if item.Location != "" && item.Location != itemTitle(item) {
-			workspace = item.Location
+			cells.left = append(cells.left, metaCol(m.styles.muted, item.Location))
 		}
 		age := ""
 		if !item.StartedAt.IsZero() {
 			age = agentAgeAt(item.StartedAt, time.Now())
 		}
-		cells := make([]metaCell, 0, 4)
-		cells = append(cells, metaCol("", agentNameStyle(item.AgentName), label))
-		cells = append(cells, metaCol(cellSep, m.styles.muted, workspace))
-		cells = append(cells, metaCol(m.metaDot(), m.styles.muted, age))
+		cells.right = append(cells.right, metaRightCol(m.styles.muted, age))
 		if state, ok := m.agentStateCell(item.AgentState); ok {
-			cells = append(cells, state)
+			cells.right = append(cells.right, state)
 		}
 		return cells
 	case sessionmgr.KindSession:
-		// The window count comes first and the attached flag keeps its column
-		// (blank while the session is not attached) so the agent counts after
-		// them line up on every session row.
-		cells := make([]metaCell, 0, 3)
+		// The attached flag comes first and keeps its column (blank while the
+		// session is not attached) so the window count and the agent counts
+		// after it line up on every session row.
+		attached := metaCol(m.styles.muted, "")
+		if item.Attached {
+			attached = metaCol(m.styles.success, "attached")
+		}
 		count := ""
 		if item.Windows > 0 {
 			count = windowCountLabel(m.terms, item.Windows)
 		}
-		cells = append(cells, metaCol("", m.styles.muted, count))
-		attached := metaCol(cellSep, m.styles.muted, "")
-		if item.Attached {
-			attached = metaCol(cellSep, m.styles.success, "attached")
-		}
-		cells = append(cells, attached)
+		cells := rowCells{right: []metaCell{attached, metaCol(m.styles.muted, count)}}
 		if counts, ok := m.sessionAgentCountsCell(item); ok {
-			cells = append(cells, counts)
+			cells.right = append(cells.right, counts)
 		}
 		return cells
 	case sessionmgr.KindHost:
-		// The transport and the alias herdr is handed; an alias that only repeats
-		// the row's name (a host discovered in ~/.ssh/config) is dropped, which
-		// leaves the transport as the row's only column. The raw target is spelled
-		// out in the preview instead.
+		// The alias herdr is handed, then the transport. An alias that only
+		// repeats the row's name (a host discovered in ~/.ssh/config) is dropped,
+		// which leaves the transport as the row's only column. The raw target is
+		// spelled out in the preview instead.
 		alias := item.Target
 		if alias == item.DisplayName() {
 			alias = ""
 		}
-		cells := make([]metaCell, 0, 2)
-		cells = append(cells, metaCol("", m.styles.muted, item.Location))
-		cells = append(cells, metaCol(m.metaDot(), m.styles.muted, alias))
-		return cells
+		return rowCells{right: []metaCell{
+			metaCol(m.styles.muted, alias),
+			metaCol(m.styles.muted, item.Location),
+		}}
 	default:
 		// Directories are their own context: the path is the row.
-		return nil
+		return rowCells{}
 	}
 }
 
@@ -586,8 +598,8 @@ func agentNameStyle(name string) lipgloss.Style {
 	return lipgloss.NewStyle().Foreground(agentColor(name))
 }
 
-// agentStateCell is an agent row's trailing cell: the configured state glyph
-// and word, in the configured state color. State mode "none" hides agent state
+// agentStateCell is an agent row's state cell: the configured state glyph and
+// word, in the configured state color. State mode "none" hides agent state
 // entirely, and then the cell is dropped. The word is drawn as its own run so a
 // configured color covers it exactly as it covers the glyph.
 func (m Model) agentStateCell(state sessionmgr.AgentState) (metaCell, bool) {
@@ -597,19 +609,18 @@ func (m Model) agentStateCell(state sessionmgr.AgentState) (metaCell, bool) {
 	icon := m.icons.ForAgentState(state)
 	style := m.agentStateStyle(state)
 	if !m.icons.AgentStateUsesIcons() {
-		return metaCol(cellSep, style, icon.ASCII), true
+		return metaCol(style, icon.ASCII), true
 	}
 	return metaCell{
-		sep:   cellSep,
 		plain: icon.Icon + " " + icon.ASCII,
 		text:  style.Render(icon.Icon) + " " + style.Render(icon.ASCII),
 	}, true
 }
 
-// sessionAgentCountsCell is a session row's trailing cell: the agents running
-// inside the session, tallied per state as a colored glyph and its count
-// ("●1 ∅1"). States are listed in urgency order, and the cell is dropped when
-// the session has no agents.
+// sessionAgentCountsCell is a session row's last cell: the agents running inside
+// the session, tallied per state as a colored glyph and its count ("● 1 ○ 1").
+// States are listed in urgency order, and the cell is dropped when the session
+// has no agents.
 func (m Model) sessionAgentCountsCell(session sessionmgr.Item) (metaCell, bool) {
 	counts := m.sessionAgentCounts(session)
 	var plain, text strings.Builder
@@ -623,14 +634,15 @@ func (m Model) sessionAgentCountsCell(session sessionmgr.Item) (metaCell, bool) 
 			plain.WriteString(" ")
 			text.WriteString(" ")
 		}
-		plain.WriteString(glyph)
-		plain.WriteString(strconv.Itoa(n))
-		text.WriteString(m.agentStateStyle(state).Render(glyph + strconv.Itoa(n)))
+		// The glyph carries the state color; the count stays in the row's own
+		// foreground so the runs of numbers read as data, not as more glyph.
+		plain.WriteString(glyph + " " + strconv.Itoa(n))
+		text.WriteString(m.agentStateStyle(state).Render(glyph) + " " + strconv.Itoa(n))
 	}
 	if plain.Len() == 0 {
 		return metaCell{}, false
 	}
-	return metaCell{sep: cellSep, plain: plain.String(), text: text.String()}, true
+	return metaCell{plain: plain.String(), text: text.String()}, true
 }
 
 // agentCountOrder lists the agent states a session's count cell reports, most
@@ -670,138 +682,156 @@ func (m Model) stateLabel(state sessionmgr.AgentState) string {
 	return icon.ASCII
 }
 
-// metaColumnMin is the width a meta column can shrink to before its text is
-// ellipsized; metaColumnMax caps a column so one long value cannot dominate.
-const metaColumnMin = 6
+// rowGrid is one frame's row layout: the right-flush columns of every kind the
+// visible rows draw. Kinds without right cells (directories) are absent.
+type rowGrid map[sessionmgr.Kind]metaGrid
 
-// rowColumns is one item kind's resolved row layout: the shared width of its
-// title column and its trailing meta columns. Each kind resolves its own, so a
-// long agent workspace widens the agent rows instead of pushing the session
-// rows' counts to the right.
-type rowColumns struct {
-	title int
-	grid  metaGrid
-}
-
-// rowGrid is one frame's row layout: the columns of every kind the visible rows
-// draw. Kinds without meta columns (directories) only carry a title width.
-type rowGrid map[sessionmgr.Kind]rowColumns
-
-// buildRowGrid measures the visible rows and resolves each kind's columns: the
-// title column is as wide as the kind's widest title, and every meta column as
-// wide as its widest cell (capped at metaColumnMax) — both then shrink so the
-// titles keep titleMinWidth and the rows fit the list's width.
-func buildRowGrid(rows []row, metas [][]metaCell, width, prefix int) rowGrid {
-	titles := make(map[sessionmgr.Kind]int)
-	cells := make(map[sessionmgr.Kind][][]metaCell)
+// buildRowGrid measures the visible rows and resolves each kind's right-flush
+// columns. Each kind resolves its own, so a long agent workspace widens the
+// agent rows instead of pushing the session rows' counts around.
+func buildRowGrid(rows []row, cells []rowCells, width, prefix int) rowGrid {
+	kindCells := make(map[sessionmgr.Kind][][]metaCell)
 	for i, r := range rows {
 		kind := r.item.Kind
-		titles[kind] = max(titles[kind], lipgloss.Width(itemTitle(r.item)))
-		cells[kind] = append(cells[kind], metas[i])
+		kindCells[kind] = append(kindCells[kind], cells[i].right)
 	}
-	grid := make(rowGrid, len(cells))
-	for kind, kindCells := range cells {
-		// The meta columns are measured against the room the title leaves them.
-		meta := buildMetaGrid(kindCells, width-prefix-1-titleMinWidth)
-		room := max(1, width-prefix-1-meta.total())
-		grid[kind] = rowColumns{
-			title: min(max(titles[kind], titleMinWidth), room),
-			grid:  meta,
-		}
+	grid := make(rowGrid, len(kindCells))
+	for kind, metas := range kindCells {
+		grid[kind] = buildMetaGrid(metas, kindCellsBudget(width, prefix))
 	}
 	return grid
 }
 
-// metaGrid is the resolved trailing columns of one kind's visible rows: each
-// column's width and the separator drawn before it. Rows left-align their cells
-// in their kind's columns, so name, context, and state read as a table down the
-// window instead of drifting to the right edge.
-type metaGrid struct {
-	widths []int
-	seps   []string
+// kindCellsBudget is the room a row's right-flush columns may take: the window's
+// inner width less the row's prefix, its right margin, the gap before the
+// columns, and the least room the name on the left keeps.
+func kindCellsBudget(width, prefix int) int {
+	return max(1, width-prefix-rowRightMargin-rowGap-rowNameFloor)
 }
 
-// total is the columns the grid draws: every column with its separator.
+// metaGrid is the resolved right-flush columns of one kind's visible rows: each
+// column's width and whether it pads its cell on the left. The columns before
+// keep are the ones a tight window dropped, starting with the leftmost.
+type metaGrid struct {
+	widths []int
+	rights []bool
+	keep   int
+}
+
+// total is the columns the grid draws: every kept column with the gap before it.
 func (g metaGrid) total() int {
 	total := 0
-	for i, w := range g.widths {
-		total += w + lipgloss.Width(g.seps[i])
+	for i := g.keep; i < len(g.widths); i++ {
+		if i > g.keep {
+			total += len(cellSep)
+		}
+		total += g.widths[i]
 	}
 	return total
 }
 
-// buildMetaGrid measures every cell in its column (capped at metaColumnMax) and
-// then shrinks the least specific leftmost columns until the titles keep their
-// minimum room. The last column — the agent state or the session's agent counts
-// — is never squeezed below metaColumnMin.
+// buildMetaGrid measures every right-flush column over the visible rows, capped
+// at metaColumnMax, and then drops the leftmost columns until what is left fits
+// the budget. The leftmost column is the one a row can lose and stay readable —
+// the agent's age, a session's attached flag — so the name on the left is what
+// the window clamps, and the state column is the last thing to go.
 func buildMetaGrid(metas [][]metaCell, budget int) metaGrid {
 	columns := 0
 	for _, cells := range metas {
 		columns = max(columns, len(cells))
 	}
-	grid := metaGrid{widths: make([]int, columns), seps: make([]string, columns)}
+	grid := metaGrid{widths: make([]int, columns), rights: make([]bool, columns)}
 	for _, cells := range metas {
 		for i, cell := range cells {
 			if w := min(metaColumnMax, lipgloss.Width(cell.plain)); w > grid.widths[i] {
 				grid.widths[i] = w
 			}
-			if grid.seps[i] == "" {
-				grid.seps[i] = cell.sep
-			}
+			grid.rights[i] = grid.rights[i] || cell.right
 		}
 	}
-	for i := 0; i < len(grid.widths) && grid.total() > budget; i++ {
-		shortfall := min(grid.widths[i]-metaColumnMin, grid.total()-budget)
-		if shortfall > 0 {
-			grid.widths[i] -= shortfall
-		}
+	for grid.keep < len(grid.widths) && grid.total() > budget {
+		grid.keep++
 	}
 	return grid
 }
 
-// renderMetaCells draws a row's cells left-aligned in the grid's columns: each
-// cell is padded to its column (rows that stop short simply end there) and the
-// styled text is clamped, never the plain width the column was measured from. A
-// cell a row has no value for still occupies its column, so the columns that
-// follow it line up, but it draws no separator and neither does the cell that
-// starts the row's run: a missing workspace must not leave a dangling " · ".
+// renderMetaCells draws a row's right-flush cells: every kept column is padded
+// to its width, a cell a row has no value for stays blank so the columns after
+// it line up, and a row that stops short of the grid still keeps its columns.
 func renderMetaCells(cells []metaCell, grid metaGrid) string {
 	var out strings.Builder
-	content := false
-	for i, cell := range cells {
-		if i >= len(grid.widths) {
-			break
+	for i := grid.keep; i < len(grid.widths); i++ {
+		if i > grid.keep {
+			out.WriteString(cellSep)
 		}
-		switch {
-		case !content:
-			// The row's run starts here: no separator to draw in front of it.
-		case cell.plain == "":
-			out.WriteString(strings.Repeat(" ", lipgloss.Width(grid.seps[i])))
-		default:
-			out.WriteString(cell.sep)
+		var cell metaCell
+		if i < len(cells) {
+			cell = cells[i]
 		}
-		content = content || cell.plain != ""
-		out.WriteString(pad(clampStyledText(cell.text, grid.widths[i]), grid.widths[i]))
+		out.WriteString(padMetaCell(cell.text, grid.widths[i], grid.rights[i]))
 	}
 	return out.String()
 }
 
-// renderRow draws one result row: the kind icon, the title in its kind's title
-// column, and the trailing meta columns. The selected row is painted with the
-// selection bar across the full width.
-func (m Model) renderRow(r row, meta []metaCell, cols rowColumns, width int, selected bool) string {
+// padMetaCell draws one cell inside its column: a left-aligned cell starts on
+// the column, a right-aligned one ends on it.
+func padMetaCell(text string, width int, right bool) string {
+	clamped := clampStyledText(text, width)
+	padding := strings.Repeat(" ", max(0, width-lipgloss.Width(clamped)))
+	if right {
+		return padding + clamped
+	}
+	return clamped + padding
+}
+
+// renderRow draws one result row: the kind icon, the title, the cells that
+// follow it, and the right-flush columns. Every line is exactly width cells,
+// with one blank cell between the columns and the window's inner edge, and the
+// selected row is painted with the selection bar across the full width.
+func (m Model) renderRow(r row, cells rowCells, meta metaGrid, width int, selected bool) string {
 	iconWidth := m.rowIconWidth()
 	icon := pad(clampStyledText(m.rowIcon(r.item), iconWidth), iconWidth)
-	title := pad(clampStyledText(m.renderTitle(r, cols.title, selected), cols.title), cols.title)
-	line := " " + icon + " " + title
-	if len(meta) > 0 {
-		line += " " + renderMetaCells(meta, cols.grid)
+	prefix := " " + icon + " "
+	right := renderMetaCells(cells.right, meta)
+	room := width - lipgloss.Width(prefix)
+	if right != "" {
+		room -= lipgloss.Width(right) + rowRightMargin + rowGap
+	}
+	line := prefix + m.renderRowLeft(r, cells.left, max(0, room), selected)
+	if right != "" {
+		gap := max(rowGap, width-lipgloss.Width(line)-lipgloss.Width(right)-rowRightMargin)
+		line += strings.Repeat(" ", gap) + right + strings.Repeat(" ", rowRightMargin)
 	}
 	line = pad(clampStyledText(line, width), width)
 	if selected {
 		line = m.selectionBar(line, width)
 	}
 	return line
+}
+
+// renderRowLeft draws the run that follows the icon: the title with its matches
+// emphasized, then the cells an item keeps next to its name. The title keeps its
+// room first, and a cell that no longer fits — a workspace in a narrow window —
+// is clamped and then dropped rather than pushing the right-flush columns away.
+func (m Model) renderRowLeft(r row, cells []metaCell, room int, selected bool) string {
+	var out strings.Builder
+	title := m.renderTitle(r, room, selected)
+	out.WriteString(title)
+	used := lipgloss.Width(title)
+	for _, cell := range cells {
+		if cell.plain == "" {
+			continue
+		}
+		avail := room - used - len(cellSep)
+		if avail < 1 {
+			break
+		}
+		text := clampStyledText(cell.text, min(lipgloss.Width(cell.plain), avail))
+		out.WriteString(cellSep)
+		out.WriteString(text)
+		used += len(cellSep) + lipgloss.Width(text)
+	}
+	return out.String()
 }
 
 // selectionBar paints a drawn row with the configured selection background over
@@ -1061,9 +1091,8 @@ func centeredNote(width, height int, lines ...string) []string {
 // renderPreviewContent draws the captured content of the preview window: the
 // selected item's payload with its ANSI colors intact, bottom-anchored for
 // multiplexer captures and top-anchored for directory listings, always exactly
-// height lines wide enough for the window. width is the window's inner width and
-// includes the line-number gutter, so the content is clipped to what the gutter
-// leaves.
+// height lines wide enough for the window. width is the window's inner width, the
+// content starting after the window's one column of padding.
 func (m Model) renderPreviewContent(width, height int) []string {
 	item, ok := m.selectedItem()
 	if !ok || height <= 0 {
@@ -1091,10 +1120,9 @@ func (m Model) renderPreviewContent(width, height int) []string {
 		// last row, so the padding goes above it.
 		out = append(out, make([]string, height-len(lines))...)
 	}
-	// The gutter numbers the rows the window shows, from 1: a capture is already
-	// the tail of a pane, so its visible rows are what the numbers can name.
-	textWidth := max(0, width-previewGutterWidth-previewGutterGap)
-	for i, line := range lines {
+	padding := strings.Repeat(" ", previewInset)
+	textWidth := max(0, width-previewInset)
+	for _, line := range lines {
 		// Captures are raw terminal output: sanitize before clipping so no
 		// stray CR, tab, or cursor sequence reaches the frame. The cut is hard
 		// — a preview is a window onto a terminal, and an ellipsis would read
@@ -1104,20 +1132,12 @@ func (m Model) renderPreviewContent(width, height int) []string {
 		if style.GetForeground() != nil {
 			clipped = style.Render(clipped)
 		}
-		out = append(out, m.previewGutter(i+1)+clipped+previewReset)
+		out = append(out, padding+clipped+previewReset)
 	}
 	for len(out) < height {
 		out = append(out, "")
 	}
 	return out
-}
-
-// previewGutter renders one preview line number: right-aligned in the gutter
-// column, dim, and followed by the gap that keeps it off the content. Numbers
-// past the column width widen it rather than lose a digit.
-func (m Model) previewGutter(number int) string {
-	return m.styles.gutter.Render(fmt.Sprintf("%*d", previewGutterWidth, number)) +
-		strings.Repeat(" ", previewGutterGap)
 }
 
 // isTailPreviewKind reports whether a kind's preview is sourced from a

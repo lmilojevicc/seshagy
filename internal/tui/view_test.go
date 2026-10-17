@@ -782,77 +782,125 @@ func TestAgentStateNoneModeHidesGlyphAndWord(t *testing.T) {
 	}
 }
 
-func TestMetaGridShrinksLeadingColumnsBeforeSqueezingTheStateColumn(t *testing.T) {
+// TestMetaGridDropsTheLeftmostColumnsFirst pins the tight-window rule: the
+// right-flush columns are dropped starting from the leftmost, so an agent loses
+// its age before its state, and the name on the left is what a narrow row clamps
+// instead.
+func TestMetaGridDropsTheLeftmostColumnsFirst(t *testing.T) {
 	m := newTestModel(t)
 	item := agentItem("claude", "%1", "a-very-long-workspace-name")
+	item.AgentDisplayName = "claude-refactor"
+	item.StartedAt = time.Now().Add(-13 * time.Hour)
 	m = withItems(m, []sessionmgr.Item{item})
-	metas := [][]metaCell{m.rowMeta(m.rows()[0])}
-	grid := buildMetaGrid(metas, 30)
+	rows := m.rows()
+	cells := m.rowCells(rows[0])
+	metas := [][]metaCell{cells.right}
 
-	if grid.total() > 30 {
-		t.Fatalf("grid total = %d, want <= 30", grid.total())
+	grid := buildMetaGrid(metas, 40)
+	if len(grid.widths) != 2 || grid.keep != 0 {
+		t.Fatalf("grid = %+v, want both columns kept", grid)
 	}
-	if len(grid.widths) != 4 {
-		t.Fatalf("columns = %d, want 4 (no column dropped)", len(grid.widths))
+	if !grid.rights[0] || grid.rights[1] {
+		t.Fatalf("alignments = %v, want the age right-aligned", grid.rights)
 	}
-	if grid.widths[1] >= metaColumnMax {
-		t.Fatalf("workspace column not shrunk: %d", grid.widths[1])
+
+	grid = buildMetaGrid(metas, 12)
+	if grid.keep != 1 {
+		t.Fatalf("grid = %+v, want the age column dropped", grid)
 	}
-	if grid.widths[3] < metaColumnMin {
-		t.Fatalf("state column squeezed to %d", grid.widths[3])
+	if grid.total() > 12 {
+		t.Fatalf("grid total = %d, want <= 12", grid.total())
+	}
+
+	// The row keeps its state column and clamps the name instead.
+	line := sessionmgr.StripANSI(m.renderRow(rows[0], cells, grid, 20, false))
+	if got := ansi.StringWidth(line); got != 20 {
+		t.Fatalf("row width = %d, want 20: %q", got, line)
+	}
+	if !strings.Contains(line, "○ idle") {
+		t.Fatalf("state column dropped before the age: %q", line)
+	}
+	if !strings.Contains(line, "…") {
+		t.Fatalf("the name was not clamped: %q", line)
+	}
+	if strings.Contains(line, "a-very-long") {
+		t.Fatalf("the workspace was not clamped away: %q", line)
 	}
 }
 
 // TestResultRowsAlignTheirColumnsPerKind pins the row table: rows of one kind
-// share the title and meta columns, so their titles, context, and state line up
-// down the window, and the selected row is the full-width selection bar.
+// share their right-flush columns, so the ages end on one column and the state
+// glyphs line up down the window, and the block stops one cell short of the
+// window's inner edge. The selected row is the full-width selection bar.
 func TestResultRowsAlignTheirColumnsPerKind(t *testing.T) {
 	withColor(t)
 	blocked := agentItem("claude", "%1", "frontend")
 	blocked.AgentState = sessionmgr.AgentBlocked
-	blocked.AgentDisplayName = "claude"
+	blocked.AgentDisplayName = "review-blocked"
+	blocked.StartedAt = time.Now().Add(-3 * time.Hour)
 	idle := agentItem("pi", "%2", "a-very-long-workspace")
-	idle.AgentDisplayName = "pi"
+	idle.AgentDisplayName = "review-idle"
+	idle.StartedAt = time.Now().Add(-13 * time.Minute)
 	m := newTestModel(t)
 	m = withItems(m, []sessionmgr.Item{blocked, idle})
 	rows := m.rows()
 	if len(rows) != 2 {
 		t.Fatalf("rows = %d, want 2", len(rows))
 	}
-	metas := [][]metaCell{m.rowMeta(rows[0]), m.rowMeta(rows[1])}
-	grid := buildRowGrid(rows, metas, 60, m.rowPrefixWidth())
-	cols := grid[sessionmgr.KindAgent]
-	blockedLine := sessionmgr.StripANSI(m.renderRow(rows[0], metas[0], cols, 60, false))
-	idleLine := sessionmgr.StripANSI(m.renderRow(rows[1], metas[1], cols, 60, false))
+	cells := []rowCells{m.rowCells(rows[0]), m.rowCells(rows[1])}
+	meta := buildRowGrid(rows, cells, 80, m.rowPrefixWidth())[sessionmgr.KindAgent]
+	blockedLine := sessionmgr.StripANSI(m.renderRow(rows[0], cells[0], meta, 80, false))
+	idleLine := sessionmgr.StripANSI(m.renderRow(rows[1], cells[1], meta, 80, false))
 
 	for _, line := range []string{blockedLine, idleLine} {
-		if got := ansi.StringWidth(line); got != 60 {
-			t.Fatalf("row width = %d, want 60: %q", got, line)
+		if got := ansi.StringWidth(line); got != 80 {
+			t.Fatalf("row width = %d, want 80: %q", got, line)
 		}
 	}
-	// Both state cells start in the same column, and the block is left aligned:
-	// the state ends before the row does instead of being pushed to the edge.
-	column := func(line, word string) int {
+	column := func(line, text string) int {
 		t.Helper()
-		index := strings.Index(line, word)
+		index := strings.Index(line, text)
 		if index < 0 {
-			t.Fatalf("%q does not contain %q", line, word)
+			t.Fatalf("%q does not contain %q", line, text)
 		}
 		return ansi.StringWidth(line[:index])
 	}
-	blockedColumn := column(blockedLine, "∅ blocked")
-	idleColumn := column(idleLine, "○ idle")
-	if blockedColumn != idleColumn {
+	// The state cells start in the same column: the state words are left aligned
+	// in one column, so the glyphs line up whatever the words' lengths are.
+	blockedState := column(blockedLine, "∅ blocked")
+	idleState := column(idleLine, "○ idle")
+	if blockedState != idleState {
 		t.Fatalf("state columns do not line up (%d, %d):\n%q\n%q",
-			blockedColumn, idleColumn, blockedLine, idleLine)
+			blockedState, idleState, blockedLine, idleLine)
 	}
-	if end := blockedColumn + ansi.StringWidth("∅ blocked"); end >= 60 {
-		t.Fatalf("state cell is flush right (%d of 60): %q", end, blockedLine)
+	if end := blockedState + ansi.StringWidth("∅ blocked"); end != 79 {
+		t.Fatalf("state block ends at %d, want 79 (one margin cell): %q", end, blockedLine)
+	}
+	// The ages are right aligned in their column: "3h00m" and "13m" end on the
+	// same cell, one gap before the state column.
+	for _, tt := range []struct{ line, age string }{
+		{blockedLine, "3h00m"},
+		{idleLine, "13m"},
+	} {
+		end := column(tt.line, tt.age) + ansi.StringWidth(tt.age)
+		if end != blockedState-2 {
+			t.Fatalf(
+				"age %q ends at %d, want %d (right-aligned): %q",
+				tt.age, end, blockedState-2, tt.line,
+			)
+		}
+	}
+	// The name and the workspace sit next to each other, with no dot between.
+	if !strings.Contains(idleLine, "review-idle  pi  a-very-long-workspace") {
+		t.Fatalf("the left run is not name-then-workspace: %q", idleLine)
+	}
+	if strings.Contains(idleLine, "·") {
+		t.Fatalf("the left run still carries a dot: %q", idleLine)
 	}
 
 	// The selection bar covers the whole row: the bar's background is re-opened
 	// behind every cell's reset, so no cell is left unpainted.
-	selected := m.renderRow(rows[0], metas[0], cols, 60, true)
+	selected := m.renderRow(rows[0], cells[0], meta, 80, true)
 	bar := "\x1b[48;5;236m"
 	if !strings.HasPrefix(selected, bar) {
 		t.Fatalf("selected row does not open with the selection bar: %q", selected)
@@ -884,9 +932,10 @@ func TestTextIconModeHidesPrivateUseAgentGlyphs(t *testing.T) {
 	}
 }
 
-// TestSessionRowColumns pins the session row: the name, the dim window count,
-// the green attached flag (kept as a blank column when the session is detached),
-// and the agents inside the session counted per state.
+// TestSessionRowColumns pins the session row: the name on the left, then the
+// green attached flag (kept as a blank column when the session is detached), the
+// dim window count, and the agents inside the session counted per state with one
+// space between a glyph and its number.
 func TestSessionRowColumns(t *testing.T) {
 	withColor(t)
 	working := agentItem("pi", "%1", "seshagy")
@@ -922,43 +971,52 @@ func TestSessionRowColumns(t *testing.T) {
 	if len(sessions) != 2 {
 		t.Fatalf("session rows = %d, want 2", len(sessions))
 	}
-	attached := m.rowMeta(sessions[0])
-	detached := m.rowMeta(sessions[1])
+	attached := m.rowCells(sessions[0]).right
+	detached := m.rowCells(sessions[1]).right
 
-	if want := windowCountLabel(m.terms, 3); attached[0].plain != want {
-		t.Fatalf("attached session's first cell = %q, want %q", attached[0].plain, want)
+	if attached[0].plain != "attached" {
+		t.Fatalf("attached session's first cell = %q, want attached", attached[0].plain)
 	}
-	if attached[1].plain != "attached" {
-		t.Fatalf("attached session's second cell = %q, want attached", attached[1].plain)
+	if want := windowCountLabel(m.terms, 3); attached[1].plain != want {
+		t.Fatalf("attached session's second cell = %q, want %q", attached[1].plain, want)
 	}
-	if want := "●1 ∅1"; attached[len(attached)-1].plain != want {
+	if want := "● 1 ∅ 1"; attached[len(attached)-1].plain != want {
 		t.Fatalf("attached session's last cell = %q, want %q",
 			attached[len(attached)-1].plain, want)
 	}
-	if !strings.Contains(attached[1].text, m.styles.success.Render("attached")) {
-		t.Fatalf("attached is not drawn in the success accent: %q", attached[1].text)
+	if !strings.Contains(attached[0].text, m.styles.success.Render("attached")) {
+		t.Fatalf("attached is not drawn in the success accent: %q", attached[0].text)
+	}
+	// The count keeps the row's own foreground: only the state glyph carries the
+	// state color.
+	if !strings.Contains(attached[2].text, m.agentStateStyle(sessionmgr.AgentWorking).Render("●")) {
+		t.Fatalf("the working glyph is not drawn in the state color: %q", attached[2].text)
+	}
+	if want := "● 1 ∅ 1"; attached[2].plain != want {
+		t.Fatalf("counts = %q, want %q (one space between each glyph and its number)",
+			attached[2].plain, want)
 	}
 	// A detached session keeps the attached column blank so the counts that
 	// follow it still line up, and it counts only its own agents.
-	if detached[0].plain != windowCountLabel(m.terms, 5) {
-		t.Fatalf("detached session's first cell = %q", detached[0].plain)
+	if detached[0].plain != "" {
+		t.Fatalf("detached session's attached cell = %q, want empty", detached[0].plain)
 	}
-	if detached[1].plain != "" {
-		t.Fatalf("detached session's attached cell = %q, want empty", detached[1].plain)
+	if detached[1].plain != windowCountLabel(m.terms, 5) {
+		t.Fatalf("detached session's second cell = %q", detached[1].plain)
 	}
-	if want := "○1"; detached[len(detached)-1].plain != want {
+	if want := "○ 1"; detached[len(detached)-1].plain != want {
 		t.Fatalf("detached session's last cell = %q, want %q",
 			detached[len(detached)-1].plain, want)
 	}
 
 	// Both rows draw their counts in the same column, whatever the attached flag
-	// says, and no row shows the removed "current" cell.
-	grid := buildRowGrid([]row{sessions[0], sessions[1]},
-		[][]metaCell{attached, detached}, 60, m.rowPrefixWidth())
-	cols := grid[sessionmgr.KindSession]
-	attachedLine := sessionmgr.StripANSI(m.renderRow(sessions[0], attached, cols, 60, false))
-	detachedLine := sessionmgr.StripANSI(m.renderRow(sessions[1], detached, cols, 60, false))
-	countColumn := func(line, count string) int {
+	// says, and the counts are the rightmost thing the row draws.
+	cells := []rowCells{{right: attached}, {right: detached}}
+	grid := buildRowGrid([]row{sessions[0], sessions[1]}, cells, 60, m.rowPrefixWidth())
+	meta := grid[sessionmgr.KindSession]
+	attachedLine := sessionmgr.StripANSI(m.renderRow(sessions[0], cells[0], meta, 60, false))
+	detachedLine := sessionmgr.StripANSI(m.renderRow(sessions[1], cells[1], meta, 60, false))
+	column := func(line, count string) int {
 		t.Helper()
 		index := strings.Index(line, count)
 		if index < 0 {
@@ -966,15 +1024,29 @@ func TestSessionRowColumns(t *testing.T) {
 		}
 		return ansi.StringWidth(line[:index])
 	}
-	attachedColumn := countColumn(attachedLine, "●1")
-	detachedColumn := countColumn(detachedLine, "○1")
+	attachedColumn := column(attachedLine, "● 1")
+	detachedColumn := column(detachedLine, "○ 1")
 	if attachedColumn != detachedColumn {
 		t.Fatalf("agent counts are not in the same column (%d, %d):\n%q\n%q",
 			attachedColumn, detachedColumn, attachedLine, detachedLine)
 	}
 	for _, line := range []string{attachedLine, detachedLine} {
+		if got := ansi.StringWidth(line); got != 60 {
+			t.Fatalf("session row width = %d, want 60: %q", got, line)
+		}
 		if strings.Contains(line, "current") {
 			t.Fatalf("the session row still shows a current cell: %q", line)
+		}
+	}
+	// The attached flag comes first, then the window count, then the counts.
+	order := []int{
+		strings.Index(attachedLine, "attached"),
+		strings.Index(attachedLine, windowCountLabel(m.terms, 3)),
+		strings.Index(attachedLine, "● 1"),
+	}
+	for i := 1; i < len(order); i++ {
+		if order[i] <= order[i-1] {
+			t.Fatalf("the session row columns are out of order: %q", attachedLine)
 		}
 	}
 }
@@ -1059,7 +1131,7 @@ func TestDirRowSplitsParentAndBasename(t *testing.T) {
 }
 
 // TestAgentRowShowsNameContextAndState pins the agent row: the bright display
-// name, the dim `workspace · age` context, and the configured state glyph and
+// name, the dim workspace right next to it, and the configured state glyph and
 // word in the state color. A blocked or done agent renders its name bold, and a
 // visited, working, or idle one does not.
 func TestAgentRowShowsNameContextAndState(t *testing.T) {
@@ -1094,8 +1166,9 @@ func TestAgentRowShowsNameContextAndState(t *testing.T) {
 			row := resultRowLine(t, m.View(), name)
 			plain := sessionmgr.StripANSI(row)
 
-			// Name, workspace, age, state: one single-line row in that order.
-			order := []string{name, "seshagy", "·", "3m", tt.glyph, tt.word}
+			// Name, workspace, age, state: one single-line row in that order, with
+			// no dot between the name and the workspace.
+			order := []string{name, "seshagy", "3m", tt.glyph, tt.word}
 			previous := -1
 			for _, part := range order {
 				index := strings.Index(plain, part)
@@ -1299,11 +1372,10 @@ func TestPreviewWindowTitleIsTheSelectedItem(t *testing.T) {
 	}
 }
 
-// TestPreviewGutterNumbersEveryContentLine pins the preview window's line-number
-// gutter: every content line is numbered from 1, right-aligned in the three-column
-// dim gutter, and followed by the two-column gap before the content. The blank
-// lines that pad the window to its height carry no number.
-func TestPreviewGutterNumbersEveryContentLine(t *testing.T) {
+// TestPreviewContentDropsTheLineNumbers pins the rows a capture draws: every
+// line is the content itself behind the window's one column of padding, with no
+// line-number gutter and no digits of its own.
+func TestPreviewContentDropsTheLineNumbers(t *testing.T) {
 	withColor(t)
 	m := newTestModel(t)
 	m = withItems(m, []sessionmgr.Item{
@@ -1319,27 +1391,27 @@ func TestPreviewGutterNumbersEveryContentLine(t *testing.T) {
 	// A session capture is bottom-anchored, so its rows are the last content
 	// lines and the padding above them is blank.
 	if lines[0] != "" || lines[1] != "" {
-		t.Fatalf("padding lines carry a gutter: %q", lines[:2])
+		t.Fatalf("padding lines carry content: %q", lines[:2])
 	}
-	want := []string{"  1  alpha", "  2  ", "  3  charlie"}
+	want := []string{" alpha", " ", " charlie"}
 	for i, w := range want {
 		line := lines[len(lines)-len(want)+i]
-		prefix := m.styles.gutter.Render(fmt.Sprintf("%*d", previewGutterWidth, i+1)) +
-			strings.Repeat(" ", previewGutterGap)
-		if !strings.HasPrefix(line, prefix) {
-			t.Fatalf("row %d does not start with the numbered gutter %q: %q", i+1, prefix, line)
-		}
 		if got := sessionmgr.StripANSI(line); got != w {
 			t.Fatalf("row %d = %q, want %q", i+1, got, w)
 		}
 	}
+	for i, line := range lines {
+		if got := sessionmgr.StripANSI(line); strings.ContainsAny(got, "0123456789") {
+			t.Fatalf("line %d still carries a line number: %q", i, got)
+		}
+	}
 }
 
-// TestPreviewGutterKeepsTheLineExactWithANSI checks that a colored capture line
-// survives the gutter: the content keeps its color, is hard-cut to the columns the
-// gutter leaves rather than ellipsized, and the line still measures exactly the
-// window's inner width.
-func TestPreviewGutterKeepsTheLineExactWithANSI(t *testing.T) {
+// TestPreviewContentKeepsTheLineExactWithANSI checks that a colored capture line
+// survives the padding: the content keeps its color, is hard-cut to the columns
+// the window's inner width leaves rather than ellipsized, and the line still
+// measures exactly that width.
+func TestPreviewContentKeepsTheLineExactWithANSI(t *testing.T) {
 	withColor(t)
 	m := newTestModel(t)
 	m = withItems(m, []sessionmgr.Item{
@@ -1363,8 +1435,7 @@ func TestPreviewGutterKeepsTheLineExactWithANSI(t *testing.T) {
 	if strings.Contains(stripped, "…") {
 		t.Fatalf("preview line is ellipsized: %q", stripped)
 	}
-	want := "  1  " + strings.Repeat("x", 20-previewGutterWidth-previewGutterGap)
-	if stripped != want {
+	if want := " " + strings.Repeat("x", 19); stripped != want {
 		t.Fatalf("preview line = %q, want %q", stripped, want)
 	}
 }

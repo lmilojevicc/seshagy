@@ -51,13 +51,11 @@ type styles struct {
 	// themselves with paintBackground so inner resets cannot break the bar.
 	selectionBG lipgloss.TerminalColor
 
-	// Telescope chrome: window borders and titles, the preview line-number
-	// gutter, and the needs-you accent.
+	// Telescope chrome: window borders and titles, and the needs-you accent.
 	border       lipgloss.Style
 	titlePrompt  lipgloss.Style
 	titleResults lipgloss.Style
 	titlePreview lipgloss.Style
-	gutter       lipgloss.Style
 	needsYou     lipgloss.Style
 }
 
@@ -114,7 +112,6 @@ func stylesFromConfig(cfg appconfig.Config) styles {
 	s.titlePrompt = lipgloss.NewStyle().Foreground(info).Bold(true)
 	s.titleResults = lipgloss.NewStyle().Foreground(danger).Bold(true)
 	s.titlePreview = lipgloss.NewStyle().Foreground(success).Bold(true)
-	s.gutter = lipgloss.NewStyle().Foreground(muted).Faint(true)
 	s.needsYou = lipgloss.NewStyle().Foreground(danger).Bold(true)
 	return s
 }

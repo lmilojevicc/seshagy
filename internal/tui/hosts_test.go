@@ -342,15 +342,19 @@ func TestHostPreviewRendersConfigWithoutNetwork(t *testing.T) {
 	})
 }
 
-// TestHostRowShowsTheTransportAndAlias pins the host row: the bright name, then
-// the dim transport and the alias the launcher is handed. A host whose alias is
-// its own name (an ssh_config entry) shows its transport alone.
+// TestHostRowShowsTheAliasAndTransport pins the host row: the bright name on the
+// left, then the alias the launcher is handed and the transport flush against the
+// window's right edge. A host whose alias is its own name (an ssh_config entry)
+// shows its transport alone.
 func TestHostRowShowsTheTransportAndAlias(t *testing.T) {
 	m := withHosts(newTestModel(t), testHosts())
 	m.loadedOnce = true // render rows instead of the loading state
 	out := sessionmgr.StripANSI(m.View())
-	if !strings.Contains(out, "ssh · seshagy-homelab") {
-		t.Fatalf("host row missing its transport and alias:\n%s", out)
+	if !strings.Contains(out, "seshagy-homelab  ssh") {
+		t.Fatalf("host row missing its alias and transport:\n%s", out)
+	}
+	if strings.Contains(out, "ssh · seshagy-homelab") {
+		t.Fatalf("host row still leads with the transport:\n%s", out)
 	}
 
 	// A host discovered in ~/.ssh/config is used under its own name, so the alias

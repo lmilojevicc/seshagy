@@ -10,7 +10,7 @@ import (
 
 // TestStylesFromConfigChromeDefaults pins the telescope chrome styles to the
 // terminal palette: muted borders, a blue prompt title, a red results title, a
-// green preview title, a faint gutter, and a bold red needs-you accent.
+// green preview title, and a bold red needs-you accent.
 func TestStylesFromConfigChromeDefaults(t *testing.T) {
 	s := stylesFromConfig(appconfig.Default())
 	tests := []struct {
@@ -22,7 +22,6 @@ func TestStylesFromConfigChromeDefaults(t *testing.T) {
 		{"titlePrompt", s.titlePrompt.GetForeground(), lipgloss.Color("14")},
 		{"titleResults", s.titleResults.GetForeground(), lipgloss.Color("9")},
 		{"titlePreview", s.titlePreview.GetForeground(), lipgloss.Color("10")},
-		{"gutter", s.gutter.GetForeground(), lipgloss.Color("8")},
 		{"needsYou", s.needsYou.GetForeground(), lipgloss.Color("9")},
 	}
 	for _, test := range tests {
@@ -46,11 +45,8 @@ func TestStylesFromConfigChromeDefaults(t *testing.T) {
 			t.Fatalf("%s is not bold", test.name)
 		}
 	}
-	if !s.gutter.GetFaint() {
-		t.Fatal("gutter is not faint")
-	}
-	if s.border.GetBold() || s.gutter.GetBold() {
-		t.Fatal("border and gutter must not be bold")
+	if s.border.GetBold() {
+		t.Fatal("border must not be bold")
 	}
 }
 
@@ -115,12 +111,6 @@ func TestStylesFromConfigChromeOverrides(t *testing.T) {
 			mutate: func(c *appconfig.ThemeColorsConfig) { c.Success = "#444444" },
 			style:  func(s styles) lipgloss.Style { return s.titlePreview },
 			want:   lipgloss.Color("#444444"),
-		},
-		{
-			name:   "gutter follows theme.colors.muted",
-			mutate: func(c *appconfig.ThemeColorsConfig) { c.Muted = "#555555" },
-			style:  func(s styles) lipgloss.Style { return s.gutter },
-			want:   lipgloss.Color("#555555"),
 		},
 		{
 			name:   "needsYou follows theme.colors.danger",
