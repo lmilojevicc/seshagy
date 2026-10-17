@@ -1289,7 +1289,7 @@ func TestResultsWindowCountersLiveInTheBottomBorder(t *testing.T) {
 		{
 			name:         "both",
 			cursor:       20,
-			wantAbove:    "↑ 17 more · ↓ 16 more",
+			wantAbove:    "↑ 14 more · ↓ 19 more",
 			wantSelected: "s20",
 		},
 		{name: "bottom only", cursor: 39, wantAbove: "↑ 33 more", wantSelected: "s39"},
@@ -1451,8 +1451,14 @@ func TestItemFlowWindowKeepsWholeItemsAroundTheCursor(t *testing.T) {
 		{
 			// The next item is two lines tall and only one line is left over, so
 			// the last line stays blank rather than showing half an item.
-			name: "cursor in the middle leaves one line blank", cursor: 3, height: 5,
-			wantStart: 3, wantEnd: 6, wantAbove: 3, wantBelow: 1, wantLines: 4,
+			name:      "scrolling down from the top keeps the cursor at the bottom edge",
+			cursor:    3,
+			height:    5,
+			wantStart: 1,
+			wantEnd:   4,
+			wantAbove: 1,
+			wantBelow: 3,
+			wantLines: 5,
 		},
 		{
 			// The item above the window is two lines tall and only one line is
@@ -1474,7 +1480,7 @@ func TestItemFlowWindowKeepsWholeItemsAroundTheCursor(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			win := flow.window(tt.cursor, tt.height)
+			win := flow.window(tt.cursor, 0, tt.height)
 			items := drawnItems(t, win)
 			if len(items) == 0 || items[0] != tt.wantStart || items[len(items)-1] != tt.wantEnd-1 {
 				t.Fatalf("window draws items %v, want [%d, %d)", items, tt.wantStart, tt.wantEnd)
@@ -1541,8 +1547,8 @@ func TestResultsWindowScrollsMixedHeightItemsByLines(t *testing.T) {
 			wantBelow: 6, wantLines: 3,
 		},
 		{
-			name: "cursor in the middle", cursor: 3, height: 5,
-			wantAbove: 3, wantBelow: 2, wantLines: 4,
+			name: "cursor below the first window scrolls just far enough", cursor: 3, height: 5,
+			wantAbove: 2, wantBelow: 3, wantLines: 4,
 		},
 		{
 			name: "cursor at the bottom", cursor: 6, height: 5,
@@ -1683,7 +1689,7 @@ func TestItemFlowWindowDrawsEachHeaderWithItsFirstRow(t *testing.T) {
 	flow := newItemFlow(rows, true)
 	for height := 2; height <= 20; height++ {
 		for cursor := range rows {
-			win := flow.window(cursor, height)
+			win := flow.window(cursor, 0, height)
 			if len(win.lines) > height {
 				t.Fatalf("window(%d, %d) draws %d lines, over the %d it has",
 					cursor, height, len(win.lines), height)
@@ -1737,7 +1743,7 @@ func TestItemFlowWindowLeavesALineBlankRatherThanStrandAHeader(t *testing.T) {
 
 	// Four lines hold the needs-you header and the blocked agent's two lines; the
 	// sessions header under them would be stranded without its row.
-	win := flow.window(0, 4)
+	win := flow.window(0, 0, 4)
 	if got := drawnHeaders(win); !slices.Equal(got, []group{groupNeedsYou}) {
 		t.Fatalf("headers = %v, want the needs-you header alone", got)
 	}
@@ -1768,15 +1774,15 @@ func TestItemFlowWindowScrollsHeadersInAndOutWithTheirSections(t *testing.T) {
 	flow := newItemFlow(rows, true)
 
 	// The top of the list opens on the agents header, above its first row.
-	if got := drawnHeaders(flow.window(0, 8)); !slices.Equal(got, []group{groupAgents}) {
+	if got := drawnHeaders(flow.window(0, 0, 8)); !slices.Equal(got, []group{groupAgents}) {
 		t.Fatalf("headers at the top of the list = %v, want the agents section", got)
 	}
 	// A header whose section scrolled past is not drawn.
-	if got := drawnHeaders(flow.window(4, 6)); len(got) != 0 {
+	if got := drawnHeaders(flow.window(4, 0, 6)); len(got) != 0 {
 		t.Fatalf("headers deep inside a section = %v, want none", got)
 	}
 	// The header comes back with the first row of its section.
-	win := flow.window(6, 6)
+	win := flow.window(6, 0, 6)
 	if got := drawnHeaders(win); !slices.Contains(got, groupSessions) {
 		t.Fatalf("headers around the sessions section = %v, want the sessions header", got)
 	}
@@ -1784,7 +1790,7 @@ func TestItemFlowWindowScrollsHeadersInAndOutWithTheirSections(t *testing.T) {
 		t.Fatalf("window around the sessions section draws items %v, want its first row", drawn)
 	}
 	// A frame with room for the cursor's item alone shows it without its header.
-	if got := drawnHeaders(flow.window(6, 2)); len(got) != 0 {
+	if got := drawnHeaders(flow.window(6, 0, 2)); len(got) != 0 {
 		t.Fatalf("headers in a two-line frame = %v, want none", got)
 	}
 }

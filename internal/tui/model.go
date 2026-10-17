@@ -75,6 +75,9 @@ type Model struct {
 	// then the top row stays selected, so sources that stream in after startup
 	// cannot drag the cursor down the list.
 	cursorMoved bool
+	// listTop is the flow line the results window opened on in the last frame.
+	// The window keeps it and scrolls only when the cursor's item leaves it.
+	listTop int
 
 	loadedOnce bool
 
@@ -553,4 +556,17 @@ func windowCountLabel(terms sessionmgr.Terms, count int) string {
 		noun = terms.WindowNoun
 	}
 	return fmt.Sprintf("%d %s", count, noun)
+}
+
+// followCursor moves the remembered results-window top just enough to keep the
+// cursor's item fully visible, after any update that moved the cursor, changed
+// the rows, or resized the frame.
+func (m Model) followCursor() Model {
+	rows := m.rows()
+	if len(rows) == 0 {
+		m.listTop = 0
+		return m
+	}
+	m.listTop = newItemFlow(rows, m.grouped(rows)).follow(m.listTop, m.cursor, m.bodyHeight())
+	return m
 }

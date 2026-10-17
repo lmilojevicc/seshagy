@@ -303,11 +303,13 @@ type itemWindow struct {
 	shown        int
 }
 
-// window is the slice a frame of the given line height draws. It opens on the
-// line that centres the cursor's item where the flow allows it, and only whole
-// items are drawn: a leftover line stays blank rather than showing half an item.
-// The cursor's item is always inside the window.
-func (f itemFlow) window(cursor, height int) itemWindow {
+// window is the slice a frame of the given line height draws when the window
+// last opened on line top. Like telescope or fzf, the window keeps its position
+// and only scrolls, by as little as possible, when the cursor's item would leave
+// it; re-centring on every move made two-line items jump by uneven amounts.
+// Only whole items are drawn: a leftover line stays blank rather than showing
+// half an item. The cursor's item is always inside the window.
+func (f itemFlow) window(cursor, top, height int) itemWindow {
 	if height <= 0 || f.items == 0 {
 		return itemWindow{}
 	}
@@ -315,7 +317,7 @@ func (f itemFlow) window(cursor, height int) itemWindow {
 	if len(f.lines) <= height {
 		return itemWindow{lines: f.lines, shown: f.items}
 	}
-	win := f.clip(f.windowStart(cursor, height), height)
+	win := f.clip(f.follow(top, cursor, height), height)
 	if win.shown == 0 {
 		// A frame too short for the cursor's own item still shows it, clipped, so
 		// the list is never blank.
@@ -330,34 +332,36 @@ func (f itemFlow) window(cursor, height int) itemWindow {
 	return win
 }
 
-// windowStart is the first line a frame of the given budget opens on: the line
-// that keeps the cursor's item where an ungrouped list centres it. The window
-// never opens on an item's continuation line, never leaves the cursor's item out
-// of the budget, and keeps the header that introduces the cursor's item with it.
-func (f itemFlow) windowStart(cursor, budget int) int {
-	cursorLine := f.firsts[cursor]
-	cursorEnd := cursorLine + f.heights[cursor]
-	ideal := max(0, cursorLine-max(0, (budget-f.heights[cursor])/2))
-	ideal = min(ideal, len(f.lines)-budget)
-	// A start that would cut the cursor's item, or open on a line an item
-	// continues onto, cannot be drawn: try the lines around the ideal, nearest
-	// first, ahead of the ideal so the cursor's item lands where an ungrouped
-	// list puts it.
-	for _, delta := range []int{0, 1, -1, 2, -2, 3, -3} {
-		from := ideal + delta
-		if from < 0 || from > cursorLine || f.lines[from].detail {
-			continue
-		}
-		if from+budget < cursorEnd {
-			continue
-		}
-		if from > 0 && from == cursorLine && budget > f.heights[cursor] &&
-			f.lines[from-1].item < 0 {
-			return from - 1
-		}
-		return from
+// follow is the line a window of the given budget opens on so the cursor's item
+// is fully visible, moving the previous top as little as possible. Scrolling up
+// onto the first item of a section brings its header along, and the window
+// never opens on an item's continuation line.
+func (f itemFlow) follow(top, cursor, budget int) int {
+	if f.items == 0 || budget <= 0 || len(f.lines) <= budget {
+		return 0
 	}
-	return cursorLine
+	cursor = max(0, min(cursor, f.items-1))
+	start := f.firsts[cursor]
+	if start > 0 && f.lines[start-1].item < 0 && f.itemEnd(cursor)-(start-1) <= budget {
+		start--
+	}
+	end := f.itemEnd(cursor)
+	if end-f.firsts[cursor] > budget {
+		// The item is taller than the window: open on its first line.
+		return min(f.firsts[cursor], len(f.lines)-1)
+	}
+	if start < top {
+		top = start
+	}
+	if end > top+budget {
+		top = end - budget
+	}
+	top = max(0, min(top, len(f.lines)-budget))
+	if f.lines[top].detail && top < f.firsts[cursor] {
+		// Opening on the second line of the item above would show half of it.
+		top++
+	}
+	return top
 }
 
 // clip is the lines a window opening on `from` with the given budget draws, plus
@@ -414,7 +418,7 @@ func (m Model) resultsRows(
 	}
 	grouped := m.grouped(rows)
 	counts := groupCounts(rows)
-	win := newItemFlow(rows, grouped).window(m.cursor, height)
+	win := newItemFlow(rows, grouped).window(m.cursor, m.listTop, height)
 	for _, line := range win.lines {
 		if line.item < 0 {
 			lines = append(lines, m.renderGroupHeader(line.group, counts[line.group], width))
