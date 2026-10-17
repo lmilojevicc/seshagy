@@ -504,8 +504,8 @@ func TestViewFromACRLFCaptureKeepsTheFrameWidth(t *testing.T) {
 
 	l := m.viewLayout()
 	rows, _, _ := m.resultsRows(m.rows(), l.listWidth(), l.listHeight())
-	if len(rows) != 1 {
-		t.Fatalf("result rows = %d, want 1", len(rows))
+	if want := itemHeight(sessionmgr.Item{Kind: sessionmgr.KindSession}); len(rows) != want {
+		t.Fatalf("result lines = %d, want %d", len(rows), want)
 	}
 	for i, line := range rows {
 		if strings.Contains(line, "\r") {

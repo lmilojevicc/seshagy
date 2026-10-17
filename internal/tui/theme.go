@@ -57,6 +57,9 @@ type styles struct {
 	titleResults lipgloss.Style
 	titlePreview lipgloss.Style
 	needsYou     lipgloss.Style
+
+	// badgeBlocked is the red block behind a blocked agent's state badge.
+	badgeBlocked lipgloss.Style
 }
 
 func stylesFromConfig(cfg appconfig.Config) styles {
@@ -113,6 +116,7 @@ func stylesFromConfig(cfg appconfig.Config) styles {
 	s.titleResults = lipgloss.NewStyle().Foreground(danger).Bold(true)
 	s.titlePreview = lipgloss.NewStyle().Foreground(success).Bold(true)
 	s.needsYou = lipgloss.NewStyle().Foreground(danger).Bold(true)
+	s.badgeBlocked = lipgloss.NewStyle().Background(danger)
 	return s
 }
 

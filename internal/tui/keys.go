@@ -153,8 +153,15 @@ func isPrintableKey(msg tea.KeyMsg) bool {
 	return len(msg.Runes) > 0 && !msg.Alt
 }
 
+// pageSize is the items a page jump covers: the items the results window
+// currently draws, since an item is one or two lines tall.
 func (m Model) pageSize() int {
-	return max(1, m.bodyHeight())
+	rows := m.rows()
+	if len(rows) == 0 {
+		return 1
+	}
+	win := newItemFlow(rows).window(m.cursor, m.bodyHeight())
+	return max(1, win.end-win.start)
 }
 
 func (m Model) cancelRename() Model {

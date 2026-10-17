@@ -686,13 +686,16 @@ func TestAgentStateGlyphWordAndColorComeFromTheIconSet(t *testing.T) {
 		state sessionmgr.AgentState
 		glyph string
 		word  string
-		color string
+		// want are the styled runs the badge draws: the glyph and the word each
+		// in the state's color, except on the blocked badge, whose glyph and word
+		// share one red block.
+		want []string
 	}{
-		{sessionmgr.AgentBlocked, "∅", "blocked", "\x1b[91m"},
-		{sessionmgr.AgentWorking, "●", "working", "\x1b[92m"},
-		{sessionmgr.AgentDone, "◉", "done", "\x1b[96m"},
-		{sessionmgr.AgentIdle, "○", "idle", "\x1b[90m"},
-		{sessionmgr.AgentUnknown, "?", "unknown", "\x1b[90m"},
+		{sessionmgr.AgentBlocked, "∅", "blocked", []string{"\x1b[101m ∅ blocked "}},
+		{sessionmgr.AgentWorking, "●", "working", []string{"\x1b[92m●", "\x1b[92mworking"}},
+		{sessionmgr.AgentDone, "◉", "done", []string{"\x1b[96m◉", "\x1b[96mdone"}},
+		{sessionmgr.AgentIdle, "○", "idle", []string{"\x1b[90m○", "\x1b[90midle"}},
+		{sessionmgr.AgentUnknown, "?", "unknown", []string{"\x1b[90m?", "\x1b[90munknown"}},
 	}
 	for _, tt := range tests {
 		t.Run(string(tt.state), func(t *testing.T) {
@@ -709,13 +712,10 @@ func TestAgentStateGlyphWordAndColorComeFromTheIconSet(t *testing.T) {
 			if plain := sessionmgr.StripANSI(out); !strings.Contains(plain, tt.word) {
 				t.Fatalf("%s word missing:\n%s", tt.state, plain)
 			}
-			if !strings.Contains(out, tt.color+tt.glyph) {
-				t.Fatalf("%s glyph is not drawn in the configured color %q:\n%q",
-					tt.state, tt.color, out)
-			}
-			if !strings.Contains(out, tt.color+tt.word) {
-				t.Fatalf("%s word is not drawn in the configured color %q:\n%q",
-					tt.state, tt.color, out)
+			for _, want := range tt.want {
+				if !strings.Contains(out, want) {
+					t.Fatalf("%s badge missing %q:\n%q", tt.state, want, out)
+				}
 			}
 		})
 	}
@@ -724,26 +724,26 @@ func TestAgentStateGlyphWordAndColorComeFromTheIconSet(t *testing.T) {
 func TestAgentStateStyleOverrideFromConfig(t *testing.T) {
 	withColor(t)
 	cfg := defaultTestConfig()
-	cfg.Icons.AgentState.Blocked = appconfig.IconConfig{
-		Icon: "!", Label: "waiting", Color: "#ff0000",
+	cfg.Icons.AgentState.Working = appconfig.IconConfig{
+		Icon: "!", Label: "busy", Color: "#ff0000",
 	}
 	m := New(WithConfig(cfg), WithMultiplexer(newFakeMux()))
 	m.width, m.height = 120, 32
 	item := agentItem("claude", "%1", "frontend")
-	item.AgentState = sessionmgr.AgentBlocked
+	item.AgentState = sessionmgr.AgentWorking
 	m = withItems(m, []sessionmgr.Item{item})
 
 	style := lipgloss.NewStyle().Foreground(lipgloss.Color("#ff0000"))
 	out := m.View()
 	plain := sessionmgr.StripANSI(out)
-	if !strings.Contains(plain, "!") || !strings.Contains(plain, "waiting") {
-		t.Fatalf("configured blocked glyph/label missing:\n%s", plain)
+	if !strings.Contains(plain, "!") || !strings.Contains(plain, "busy") {
+		t.Fatalf("configured working glyph/label missing:\n%s", plain)
 	}
-	if strings.Contains(plain, "blocked") || strings.Contains(plain, "∅") {
-		t.Fatalf("built-in blocked vocabulary still drawn:\n%s", plain)
+	if strings.Contains(plain, "working") || strings.Contains(plain, "●") {
+		t.Fatalf("built-in working vocabulary still drawn:\n%s", plain)
 	}
-	if !strings.Contains(out, style.Render("!")) {
-		t.Fatalf("configured blocked color not applied:\n%q", out)
+	if !strings.Contains(out, style.Render("!")) || !strings.Contains(out, style.Render("busy")) {
+		t.Fatalf("configured working color not applied:\n%q", out)
 	}
 }
 
@@ -782,138 +782,389 @@ func TestAgentStateNoneModeHidesGlyphAndWord(t *testing.T) {
 	}
 }
 
-// TestMetaGridDropsTheLeftmostColumnsFirst pins the tight-window rule: the
-// right-flush columns are dropped starting from the leftmost, so an agent loses
-// its age before its state, and the name on the left is what a narrow row clamps
-// instead.
-func TestMetaGridDropsTheLeftmostColumnsFirst(t *testing.T) {
-	m := newTestModel(t)
-	item := agentItem("claude", "%1", "a-very-long-workspace-name")
-	item.AgentDisplayName = "claude-refactor"
-	item.StartedAt = time.Now().Add(-13 * time.Hour)
-	m = withItems(m, []sessionmgr.Item{item})
-	rows := m.rows()
-	cells := m.rowCells(rows[0])
-	metas := [][]metaCell{cells.right}
+// itemLines renders one item, found by key, as the results window draws it at
+// width: the styled lines and the same lines stripped. A test checks colors on
+// the styled lines and text on the plain ones.
+//
+//nolint:unparam // test helper; the width and selection are constant so far
+func itemLines(
+	t *testing.T,
+	m Model,
+	key string,
+	width int,
+	selected bool,
+) (styled, plain []string) {
+	t.Helper()
+	for _, r := range m.rows() {
+		if r.item.Key() != key {
+			continue
+		}
+		styled = m.renderItem(r, width, selected)
+		for _, line := range styled {
+			plain = append(plain, sessionmgr.StripANSI(line))
+		}
+		return styled, plain
+	}
+	t.Fatalf("no item with key %q in %v", key, m.rows())
+	return nil, nil
+}
 
-	grid := buildMetaGrid(metas, 40)
-	if len(grid.widths) != 2 || grid.keep != 0 {
-		t.Fatalf("grid = %+v, want both columns kept", grid)
-	}
-	if !grid.rights[0] || grid.rights[1] {
-		t.Fatalf("alignments = %v, want the age right-aligned", grid.rights)
-	}
-
-	grid = buildMetaGrid(metas, 12)
-	if grid.keep != 1 {
-		t.Fatalf("grid = %+v, want the age column dropped", grid)
-	}
-	if grid.total() > 12 {
-		t.Fatalf("grid total = %d, want <= 12", grid.total())
-	}
-
-	// The row keeps its state column and clamps the name instead.
-	line := sessionmgr.StripANSI(m.renderRow(rows[0], cells, grid, 20, false))
-	if got := ansi.StringWidth(line); got != 20 {
-		t.Fatalf("row width = %d, want 20: %q", got, line)
-	}
-	if !strings.Contains(line, "○ idle") {
-		t.Fatalf("state column dropped before the age: %q", line)
-	}
-	if !strings.Contains(line, "…") {
-		t.Fatalf("the name was not clamped: %q", line)
-	}
-	if strings.Contains(line, "a-very-long") {
-		t.Fatalf("the workspace was not clamped away: %q", line)
+// itemMix is one item of every kind, for the tests that render the whole
+// mixed-height results window.
+func itemMix() []sessionmgr.Item {
+	agent := agentItem("claude", "%1", "frontend")
+	agent.AgentDisplayName = "claude"
+	agent.AgentState = sessionmgr.AgentBlocked
+	agent.StartedAt = time.Now().Add(-3 * time.Minute)
+	return []sessionmgr.Item{
+		agent,
+		{Kind: sessionmgr.KindZoxide, Path: "~/code/demo", Name: "~/code/demo"},
+		{Kind: sessionmgr.KindSession, Name: "seshagy", Target: "seshagy"},
+		{Kind: sessionmgr.KindHost, Name: "termux", Target: "seshagy-termux", Location: "ssh"},
 	}
 }
 
-// TestResultRowsAlignTheirColumnsPerKind pins the row table: rows of one kind
-// share their right-flush columns, so the ages end on one column and the state
-// glyphs line up down the window, and the block stops one cell short of the
-// window's inner edge. The selected row is the full-width selection bar.
-func TestResultRowsAlignTheirColumnsPerKind(t *testing.T) {
+// TestAgentItemDrawsBoldNameStateBadgeAndContext pins the agent item: line 1 is
+// the icon, the bold display name and the state badge right after it — the
+// configured glyph and word in the state's color, a blocked agent on the design's
+// red block — and line 2 is the dim workspace and age indented under the name.
+func TestAgentItemDrawsBoldNameStateBadgeAndContext(t *testing.T) {
 	withColor(t)
-	blocked := agentItem("claude", "%1", "frontend")
-	blocked.AgentState = sessionmgr.AgentBlocked
-	blocked.AgentDisplayName = "review-blocked"
-	blocked.StartedAt = time.Now().Add(-3 * time.Hour)
-	idle := agentItem("pi", "%2", "a-very-long-workspace")
-	idle.AgentDisplayName = "review-idle"
-	idle.StartedAt = time.Now().Add(-13 * time.Minute)
+	tests := []struct {
+		state sessionmgr.AgentState
+		glyph string
+		word  string
+	}{
+		{sessionmgr.AgentBlocked, "∅", "blocked"},
+		{sessionmgr.AgentWorking, "●", "working"},
+		{sessionmgr.AgentDone, "◉", "done"},
+		{sessionmgr.AgentIdle, "○", "idle"},
+	}
+	for _, tt := range tests {
+		t.Run(string(tt.state), func(t *testing.T) {
+			item := agentItem("claude", "%1", "frontend")
+			item.AgentState = tt.state
+			item.StartedAt = time.Now().Add(-3 * time.Minute)
+			m := newTestModel(t)
+			m = withItems(m, []sessionmgr.Item{item})
+
+			styled, plain := itemLines(t, m, item.Key(), 60, false)
+			if len(styled) != 2 {
+				t.Fatalf("agent item = %d lines, want 2:\n%s",
+					len(styled), strings.Join(plain, "\n"))
+			}
+			bold := m.styles.itemName.Bold(true)
+			if !strings.Contains(styled[0], bold.Render("claude")) {
+				t.Fatalf("line 1 = %q, want the name bold", styled[0])
+			}
+			// The badge sits two columns after the name, with either the state's
+			// own colors or the blocked block.
+			if !strings.Contains(plain[0], "claude  "+tt.glyph+" "+tt.word) {
+				t.Fatalf("line 1 = %q, want %q two spaces after the name",
+					plain[0], tt.glyph+" "+tt.word)
+			}
+			if tt.state == sessionmgr.AgentBlocked {
+				badge := m.styles.badgeBlocked.Render(" " + tt.glyph + " " + tt.word + " ")
+				if !strings.Contains(styled[0], badge) {
+					t.Fatalf("line 1 = %q, want the red blocked badge %q", styled[0], badge)
+				}
+			} else {
+				style := m.agentStateStyle(tt.state)
+				if !strings.Contains(styled[0], style.Render(tt.glyph)+" "+style.Render(tt.word)) {
+					t.Fatalf("line 1 = %q, want the glyph and word in the state color", styled[0])
+				}
+			}
+			// Line 2 is the dim workspace and age, indented under the name.
+			if !strings.Contains(plain[1], "frontend · 3m") {
+				t.Fatalf("line 2 = %q, want the workspace and age", plain[1])
+			}
+			if !strings.HasPrefix(plain[1], strings.Repeat(" ", m.rowPrefixWidth())+"frontend") {
+				t.Fatalf("line 2 = %q, want it indented under the name", plain[1])
+			}
+			for _, part := range []string{"frontend", "3m"} {
+				if !strings.Contains(styled[1], m.styles.muted.Render(part)) {
+					t.Fatalf("line 2 = %q, want %q dim", styled[1], part)
+				}
+			}
+			for _, line := range styled {
+				if got := ansi.StringWidth(line); got != 60 {
+					t.Fatalf("line = %d columns, want 60: %q", got, line)
+				}
+			}
+		})
+	}
+}
+
+// TestAgentItemNamesTheAgentTypeWithoutALogo pins the fallback the dim context
+// line carries: with the logo font in use the mark says which agent this is, and
+// without one the brand key is the only place the type can show. An agent whose
+// name is already the title repeats it nowhere.
+func TestAgentItemNamesTheAgentTypeWithoutALogo(t *testing.T) {
 	m := newTestModel(t)
-	m = withItems(m, []sessionmgr.Item{blocked, idle})
-	rows := m.rows()
-	if len(rows) != 2 {
-		t.Fatalf("rows = %d, want 2", len(rows))
-	}
-	cells := []rowCells{m.rowCells(rows[0]), m.rowCells(rows[1])}
-	meta := buildRowGrid(rows, cells, 80, m.rowPrefixWidth())[sessionmgr.KindAgent]
-	blockedLine := sessionmgr.StripANSI(m.renderRow(rows[0], cells[0], meta, 80, false))
-	idleLine := sessionmgr.StripANSI(m.renderRow(rows[1], cells[1], meta, 80, false))
+	t.Setenv("SESHAGY_AGENT_ICONS", "font")
+	item := agentItem("claude", "%1", "skills")
+	item.AgentDisplayName = "review-spec"
+	m = withItems(m, []sessionmgr.Item{item})
 
-	for _, line := range []string{blockedLine, idleLine} {
-		if got := ansi.StringWidth(line); got != 80 {
-			t.Fatalf("row width = %d, want 80: %q", got, line)
-		}
+	_, plain := itemLines(t, m, item.Key(), 60, false)
+	if len(plain) != 2 || !strings.Contains(strings.Join(plain, "\n"), "skills") {
+		t.Fatalf("item = %q, want the workspace", strings.Join(plain, "\n"))
 	}
-	column := func(line, text string) int {
-		t.Helper()
-		index := strings.Index(line, text)
-		if index < 0 {
-			t.Fatalf("%q does not contain %q", line, text)
-		}
-		return ansi.StringWidth(line[:index])
+	if strings.Contains(strings.Join(plain, " "), "claude") {
+		t.Fatalf("the agent type is named beside its logo:\n%s", strings.Join(plain, "\n"))
 	}
-	// The state cells start in the same column: the state words are left aligned
-	// in one column, so the glyphs line up whatever the words' lengths are.
-	blockedState := column(blockedLine, "∅ blocked")
-	idleState := column(idleLine, "○ idle")
-	if blockedState != idleState {
-		t.Fatalf("state columns do not line up (%d, %d):\n%q\n%q",
-			blockedState, idleState, blockedLine, idleLine)
+
+	t.Setenv("SESHAGY_AGENT_ICONS", "none")
+	_, plain = itemLines(t, m, item.Key(), 60, false)
+	if !strings.Contains(plain[1], "claude") {
+		t.Fatalf("line 2 = %q, want the agent type without a logo", plain[1])
 	}
-	if end := blockedState + ansi.StringWidth("∅ blocked"); end != 79 {
-		t.Fatalf("state block ends at %d, want 79 (one margin cell): %q", end, blockedLine)
+
+	named := item
+	named.AgentDisplayName = "claude"
+	m = withItems(m, []sessionmgr.Item{named})
+	_, plain = itemLines(t, m, named.Key(), 60, false)
+	if strings.Count(strings.Join(plain, " "), "claude") != 1 {
+		t.Fatalf("item = %q, want the name once", strings.Join(plain, "\n"))
 	}
-	// The ages are right aligned in their column: "3h00m" and "13m" end on the
-	// same cell, one gap before the state column.
-	for _, tt := range []struct{ line, age string }{
-		{blockedLine, "3h00m"},
-		{idleLine, "13m"},
+}
+
+// TestSessionItemDrawsAttachedFlagAndAgentTally pins the session item: line 1 is
+// the icon, the bold name and the green attached flag one column after it — and
+// nothing at all while the session is detached — and line 2 is the window count
+// followed by the agents inside the session, one space between a state glyph and
+// its count.
+func TestSessionItemDrawsAttachedFlagAndAgentTally(t *testing.T) {
+	withColor(t)
+	working := agentItem("pi", "%1", "seshagy")
+	working.AgentState = sessionmgr.AgentWorking
+	working.Session = "seshagy"
+	idle := agentItem("codex", "%2", "seshagy")
+	idle.AgentState = sessionmgr.AgentIdle
+	idle.Session = "seshagy"
+	attached := sessionmgr.Item{
+		Kind:     sessionmgr.KindSession,
+		Name:     "seshagy",
+		Target:   "seshagy",
+		Attached: true,
+		Windows:  7,
+	}
+	detached := sessionmgr.Item{
+		Kind:    sessionmgr.KindSession,
+		Name:    "fff-cli",
+		Target:  "fff-cli",
+		Windows: 1,
+	}
+
+	m := newTestModel(t)
+	m = withItems(m, []sessionmgr.Item{working, idle, attached, detached})
+	m.terms = sessionmgr.TmuxTerms()
+
+	styled, plain := itemLines(t, m, attached.Key(), 60, false)
+	if len(styled) != 2 {
+		t.Fatalf("session item = %d lines, want 2:\n%s", len(styled), strings.Join(plain, "\n"))
+	}
+	if !strings.Contains(styled[0], m.styles.itemName.Bold(true).Render("seshagy")) {
+		t.Fatalf("line 1 = %q, want the name bold", styled[0])
+	}
+	if !strings.Contains(plain[0], "seshagy • attached") {
+		t.Fatalf("line 1 = %q, want the attached flag one space after the name", plain[0])
+	}
+	if !strings.Contains(styled[0], m.styles.success.Render("• attached")) {
+		t.Fatalf("line 1 = %q, want the attached flag in the success accent", styled[0])
+	}
+	if !strings.Contains(plain[1], "7 windows · ● 1 ○ 1") {
+		t.Fatalf("line 2 = %q, want the window count and the agent tally", plain[1])
+	}
+	for _, glyph := range []struct {
+		state sessionmgr.AgentState
+		text  string
+	}{
+		{sessionmgr.AgentWorking, "●"},
+		{sessionmgr.AgentIdle, "○"},
 	} {
-		end := column(tt.line, tt.age) + ansi.StringWidth(tt.age)
-		if end != blockedState-2 {
-			t.Fatalf(
-				"age %q ends at %d, want %d (right-aligned): %q",
-				tt.age, end, blockedState-2, tt.line,
-			)
+		want := m.agentStateStyle(glyph.state).Render(glyph.text)
+		if !strings.Contains(styled[1], want+" 1") {
+			t.Fatalf("line 2 = %q, want the %s glyph colored before its count",
+				styled[1], glyph.state)
 		}
 	}
-	// The name and the workspace sit next to each other, with no dot between.
-	if !strings.Contains(idleLine, "review-idle  pi  a-very-long-workspace") {
-		t.Fatalf("the left run is not name-then-workspace: %q", idleLine)
+
+	// A detached session shows no flag, and a session with no agents drops the
+	// tally rather than the window count.
+	_, detachedPlain := itemLines(t, m, detached.Key(), 60, false)
+	if strings.Contains(detachedPlain[0], "attached") {
+		t.Fatalf("line 1 = %q, want no flag on a detached session", detachedPlain[0])
 	}
-	if strings.Contains(idleLine, "·") {
-		t.Fatalf("the left run still carries a dot: %q", idleLine)
+	if !strings.Contains(detachedPlain[1], "1 window") ||
+		strings.Contains(detachedPlain[1], "·") {
+		t.Fatalf("line 2 = %q, want the single window count alone", detachedPlain[1])
+	}
+}
+
+// TestSessionItemFollowsTheBackendVocabulary pins the window wording on the
+// second line: the session's own backend names its windows, so herdr counts tabs
+// and tmux counts windows, and the tally never spells a kind word.
+func TestSessionItemFollowsTheBackendVocabulary(t *testing.T) {
+	tests := []struct {
+		name  string
+		terms sessionmgr.Terms
+		want  string
+	}{
+		{name: "herdr tabs", terms: sessionmgr.HerdrTerms(), want: "2 tabs"},
+		{name: "tmux windows", terms: sessionmgr.TmuxTerms(), want: "2 windows"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			session := sessionmgr.Item{
+				Kind:    sessionmgr.KindSession,
+				Name:    "skills",
+				Target:  "skills",
+				Windows: 2,
+			}
+			m := newTestModel(t)
+			m = withItems(m, []sessionmgr.Item{session})
+			m.terms = tt.terms
+
+			_, plain := itemLines(t, m, session.Key(), 60, false)
+			if !strings.Contains(plain[1], tt.want) {
+				t.Fatalf("line 2 = %q, want %q", plain[1], tt.want)
+			}
+		})
+	}
+}
+
+// TestDirItemIsOneDimParentBrightBasenameLine pins the directory item: a single
+// line of the dim parent path, trailing slash included, and the bright basename
+// it is about. The parent path is not repeated in a second line and no source
+// tag stands in for it.
+func TestDirItemIsOneDimParentBrightBasenameLine(t *testing.T) {
+	withColor(t)
+	for _, kind := range []sessionmgr.Kind{sessionmgr.KindZoxide, sessionmgr.KindFD} {
+		t.Run(string(kind), func(t *testing.T) {
+			item := sessionmgr.Item{
+				Kind: kind,
+				Path: "~/.pi/agent/extensions",
+				Name: "~/.pi/agent/extensions",
+			}
+			m := newTestModel(t)
+			m = withItems(m, []sessionmgr.Item{item})
+
+			styled, plain := itemLines(t, m, item.Key(), 60, false)
+			if len(styled) != 1 {
+				t.Fatalf("directory item = %d lines, want 1:\n%s",
+					len(styled), strings.Join(plain, "\n"))
+			}
+			if !strings.Contains(styled[0], m.styles.muted.Render("~/.pi/agent/")) {
+				t.Fatalf("line = %q, want the parent path dim", styled[0])
+			}
+			if !strings.Contains(styled[0], m.styles.itemName.Render("extensions")) {
+				t.Fatalf("line = %q, want the basename bright", styled[0])
+			}
+			if !strings.Contains(plain[0], "~/.pi/agent/extensions") {
+				t.Fatalf("line = %q, want the whole path", plain[0])
+			}
+			for _, absent := range []string{"zoxide", "fd", "find"} {
+				if strings.Contains(plain[0], absent) {
+					t.Fatalf("line = %q, want no %q tag", plain[0], absent)
+				}
+			}
+		})
+	}
+}
+
+// TestHostItemShowsTransportAndDropsItsOwnAlias pins the host item: a single line
+// of the bright name and the dim transport and alias, with the alias left out
+// when it only repeats the name (a host discovered in ~/.ssh/config uses its own
+// name).
+func TestHostItemShowsTransportAndDropsItsOwnAlias(t *testing.T) {
+	withColor(t)
+	registered := sessionmgr.Item{
+		Kind:     sessionmgr.KindHost,
+		Name:     "termux",
+		Target:   "seshagy-termux",
+		Location: "ssh",
+	}
+	discovered := sessionmgr.Item{
+		Kind:     sessionmgr.KindHost,
+		Name:     "gitbox",
+		Target:   "gitbox",
+		Location: "ssh",
+	}
+	m := newTestModel(t)
+	m = withItems(m, []sessionmgr.Item{registered, discovered})
+
+	styled, plain := itemLines(t, m, registered.Key(), 60, false)
+	if len(styled) != 1 {
+		t.Fatalf("host item = %d lines, want 1:\n%s", len(styled), strings.Join(plain, "\n"))
+	}
+	if !strings.Contains(plain[0], "termux  ssh · seshagy-termux") {
+		t.Fatalf("line = %q, want the transport and alias two spaces after the name", plain[0])
+	}
+	if !strings.Contains(styled[0], m.styles.itemName.Render("termux")) {
+		t.Fatalf("line = %q, want the name bright", styled[0])
+	}
+	if !strings.Contains(styled[0], m.styles.muted.Render("ssh · seshagy-termux")) {
+		t.Fatalf("line = %q, want the transport and alias dim", styled[0])
 	}
 
-	// The selection bar covers the whole row: the bar's background is re-opened
-	// behind every cell's reset, so no cell is left unpainted.
-	selected := m.renderRow(rows[0], cells[0], meta, 80, true)
-	bar := "\x1b[48;5;236m"
-	if !strings.HasPrefix(selected, bar) {
-		t.Fatalf("selected row does not open with the selection bar: %q", selected)
+	_, plain = itemLines(t, m, discovered.Key(), 60, false)
+	if !strings.HasSuffix(strings.TrimRight(plain[0], " "), "gitbox  ssh") {
+		t.Fatalf("line = %q, want the transport alone", plain[0])
 	}
-	if !strings.HasSuffix(selected, sgrReset) {
-		t.Fatalf("selected row does not close its style: %q", selected)
+	if strings.Contains(plain[0], "·") {
+		t.Fatalf("line = %q, want no alias column", plain[0])
 	}
-	if strings.Contains(selected, "\x1b[7m") {
-		t.Fatalf("selected row is drawn in reverse video: %q", selected)
+}
+
+// TestItemLinesSpellNoKindWords pins the wording of the results items: the kind
+// is what the icon and the name already say, so no item repeats it.
+func TestItemLinesSpellNoKindWords(t *testing.T) {
+	m := newTestModel(t)
+	m = withItems(m, itemMix())
+	out := sessionmgr.StripANSI(m.View())
+	for _, word := range []string{" · agent", " · session", " · host", " · dir"} {
+		if strings.Contains(out, word) {
+			t.Fatalf("results window spells a kind word %q:\n%s", word, out)
+		}
 	}
-	for i, part := range strings.Split(strings.TrimSuffix(selected, sgrReset), sgrReset) {
-		if i > 0 && !strings.HasPrefix(part, bar) {
-			t.Fatalf("selection bar stops at cell %d: %q", i, selected)
+}
+
+// TestItemLinesAreExactlyTheResultsWidth pins the width of every item line in
+// every layout: each line the results window draws is exactly its inner width, so
+// the frame cannot wrap.
+func TestItemLinesAreExactlyTheResultsWidth(t *testing.T) {
+	sizes := []struct{ width, height int }{{120, 34}, {80, 24}}
+	for _, size := range sizes {
+		for _, layout := range []string{
+			appconfig.LayoutHorizontal,
+			appconfig.LayoutVertical,
+			appconfig.LayoutDropdown,
+		} {
+			for _, preview := range []bool{true, false} {
+				t.Run(fmt.Sprintf("%dx%d/%s/preview=%v", size.width, size.height, layout, preview),
+					func(t *testing.T) {
+						m := newTestModel(t)
+						m.width, m.height = size.width, size.height
+						m.layout = layout
+						m.showPreview = preview
+						m = withItems(m, itemMix())
+
+						l := m.viewLayout()
+						if l.listWidth() <= 0 || l.listHeight() <= 0 {
+							t.Fatalf("results window has no room: %+v", l.results)
+						}
+						for _, r := range m.rows() {
+							for i, line := range m.renderItem(r, l.listWidth(), r.item.Key() == m.selectedKey()) {
+								if got := ansi.StringWidth(line); got != l.listWidth() {
+									t.Fatalf("item %s line %d = %d columns, want %d: %q",
+										r.item.Key(), i, got, l.listWidth(), line)
+								}
+							}
+						}
+						frameLines(t, m)
+					})
+			}
 		}
 	}
 }
@@ -929,125 +1180,6 @@ func TestTextIconModeHidesPrivateUseAgentGlyphs(t *testing.T) {
 	plain := sessionmgr.StripANSI(m.View())
 	if strings.ContainsRune(plain, rune(agentLogoBase)) {
 		t.Fatalf("private-use logo printed in text icon mode:\n%s", plain)
-	}
-}
-
-// TestSessionRowColumns pins the session row: the name on the left, then the
-// green attached flag (kept as a blank column when the session is detached), the
-// dim window count, and the agents inside the session counted per state with one
-// space between a glyph and its number.
-func TestSessionRowColumns(t *testing.T) {
-	withColor(t)
-	working := agentItem("pi", "%1", "seshagy")
-	working.AgentState = sessionmgr.AgentWorking
-	working.Session = "seshagy"
-	blocked := agentItem("claude", "%2", "seshagy")
-	blocked.AgentState = sessionmgr.AgentBlocked
-	blocked.Session = "seshagy"
-	idle := agentItem("codex", "%3", "fff-cli")
-	idle.Session = "fff-cli"
-
-	m := newTestModel(t)
-	m = withItems(m, []sessionmgr.Item{
-		working,
-		blocked,
-		idle,
-		{
-			Kind:     sessionmgr.KindSession,
-			Name:     "seshagy",
-			Target:   "seshagy",
-			Attached: true,
-			Windows:  3,
-		},
-		{Kind: sessionmgr.KindSession, Name: "fff-cli", Target: "fff-cli", Windows: 5},
-	})
-	rows := m.rows()
-	var sessions []row
-	for _, r := range rows {
-		if r.item.Kind == sessionmgr.KindSession {
-			sessions = append(sessions, r)
-		}
-	}
-	if len(sessions) != 2 {
-		t.Fatalf("session rows = %d, want 2", len(sessions))
-	}
-	attached := m.rowCells(sessions[0]).right
-	detached := m.rowCells(sessions[1]).right
-
-	if attached[0].plain != "attached" {
-		t.Fatalf("attached session's first cell = %q, want attached", attached[0].plain)
-	}
-	if want := windowCountLabel(m.terms, 3); attached[1].plain != want {
-		t.Fatalf("attached session's second cell = %q, want %q", attached[1].plain, want)
-	}
-	if want := "● 1 ∅ 1"; attached[len(attached)-1].plain != want {
-		t.Fatalf("attached session's last cell = %q, want %q",
-			attached[len(attached)-1].plain, want)
-	}
-	if !strings.Contains(attached[0].text, m.styles.success.Render("attached")) {
-		t.Fatalf("attached is not drawn in the success accent: %q", attached[0].text)
-	}
-	// The count keeps the row's own foreground: only the state glyph carries the
-	// state color.
-	if !strings.Contains(attached[2].text, m.agentStateStyle(sessionmgr.AgentWorking).Render("●")) {
-		t.Fatalf("the working glyph is not drawn in the state color: %q", attached[2].text)
-	}
-	if want := "● 1 ∅ 1"; attached[2].plain != want {
-		t.Fatalf("counts = %q, want %q (one space between each glyph and its number)",
-			attached[2].plain, want)
-	}
-	// A detached session keeps the attached column blank so the counts that
-	// follow it still line up, and it counts only its own agents.
-	if detached[0].plain != "" {
-		t.Fatalf("detached session's attached cell = %q, want empty", detached[0].plain)
-	}
-	if detached[1].plain != windowCountLabel(m.terms, 5) {
-		t.Fatalf("detached session's second cell = %q", detached[1].plain)
-	}
-	if want := "○ 1"; detached[len(detached)-1].plain != want {
-		t.Fatalf("detached session's last cell = %q, want %q",
-			detached[len(detached)-1].plain, want)
-	}
-
-	// Both rows draw their counts in the same column, whatever the attached flag
-	// says, and the counts are the rightmost thing the row draws.
-	cells := []rowCells{{right: attached}, {right: detached}}
-	grid := buildRowGrid([]row{sessions[0], sessions[1]}, cells, 60, m.rowPrefixWidth())
-	meta := grid[sessionmgr.KindSession]
-	attachedLine := sessionmgr.StripANSI(m.renderRow(sessions[0], cells[0], meta, 60, false))
-	detachedLine := sessionmgr.StripANSI(m.renderRow(sessions[1], cells[1], meta, 60, false))
-	column := func(line, count string) int {
-		t.Helper()
-		index := strings.Index(line, count)
-		if index < 0 {
-			t.Fatalf("%q does not contain %q", line, count)
-		}
-		return ansi.StringWidth(line[:index])
-	}
-	attachedColumn := column(attachedLine, "● 1")
-	detachedColumn := column(detachedLine, "○ 1")
-	if attachedColumn != detachedColumn {
-		t.Fatalf("agent counts are not in the same column (%d, %d):\n%q\n%q",
-			attachedColumn, detachedColumn, attachedLine, detachedLine)
-	}
-	for _, line := range []string{attachedLine, detachedLine} {
-		if got := ansi.StringWidth(line); got != 60 {
-			t.Fatalf("session row width = %d, want 60: %q", got, line)
-		}
-		if strings.Contains(line, "current") {
-			t.Fatalf("the session row still shows a current cell: %q", line)
-		}
-	}
-	// The attached flag comes first, then the window count, then the counts.
-	order := []int{
-		strings.Index(attachedLine, "attached"),
-		strings.Index(attachedLine, windowCountLabel(m.terms, 3)),
-		strings.Index(attachedLine, "● 1"),
-	}
-	for i := 1; i < len(order); i++ {
-		if order[i] <= order[i-1] {
-			t.Fatalf("the session row columns are out of order: %q", attachedLine)
-		}
 	}
 }
 
@@ -1122,7 +1254,7 @@ func TestDirRowSplitsParentAndBasename(t *testing.T) {
 			for _, seg := range tt.want {
 				want.WriteString(seg.style(m).Render(seg.text))
 			}
-			got := m.renderTitle(row{item: item, matches: tt.matches}, 80, false)
+			got := m.renderTitle(row{item: item, matches: tt.matches}, 80)
 			if got != want.String() {
 				t.Fatalf("title = %q, want %q", got, want.String())
 			}
@@ -1130,81 +1262,10 @@ func TestDirRowSplitsParentAndBasename(t *testing.T) {
 	}
 }
 
-// TestAgentRowShowsNameContextAndState pins the agent row: the bright display
-// name, the dim workspace right next to it, and the configured state glyph and
-// word in the state color. A blocked or done agent renders its name bold, and a
-// visited, working, or idle one does not.
-func TestAgentRowShowsNameContextAndState(t *testing.T) {
-	withColor(t)
-	const name = "review-spec"
-	tests := []struct {
-		state sessionmgr.AgentState
-		glyph string
-		word  string
-		bold  bool
-	}{
-		{sessionmgr.AgentBlocked, "∅", "blocked", true},
-		{sessionmgr.AgentDone, "◉", "done", true},
-		{sessionmgr.AgentWorking, "●", "working", false},
-		{sessionmgr.AgentIdle, "○", "idle", false},
-	}
-	for _, tt := range tests {
-		t.Run(string(tt.state), func(t *testing.T) {
-			m := newTestModel(t)
-			item := agentItem("claude", "%1", "seshagy")
-			item.AgentDisplayName = name
-			item.AgentState = tt.state
-			item.StartedAt = time.Now().Add(-3 * time.Minute)
-			m = withItems(m, []sessionmgr.Item{
-				item,
-				{Kind: sessionmgr.KindSession, Name: "other", Target: "other"},
-			})
-			// The cursor starts on the first row and bolds it; keep the agent row
-			// out of the selection so only the state decides the weight.
-			m.cursor = 1
-
-			row := resultRowLine(t, m.View(), name)
-			plain := sessionmgr.StripANSI(row)
-
-			// Name, workspace, age, state: one single-line row in that order, with
-			// no dot between the name and the workspace.
-			order := []string{name, "seshagy", "3m", tt.glyph, tt.word}
-			previous := -1
-			for _, part := range order {
-				index := strings.Index(plain, part)
-				if index <= previous {
-					t.Fatalf("agent row is out of order at %q: %q", part, plain)
-				}
-				previous = index
-			}
-
-			bold := m.styles.itemName.Bold(true)
-			if tt.bold && !strings.Contains(row, bold.Render(name)) {
-				t.Fatalf("an agent that needs you is not bold: %q", row)
-			}
-			if !tt.bold && strings.Contains(row, bold.Render(name)) {
-				t.Fatalf("a settled agent is bold: %q", row)
-			}
-			if !strings.Contains(row, m.styles.muted.Render("seshagy")) {
-				t.Fatalf("workspace is not dim: %q", row)
-			}
-			if !strings.Contains(row, m.styles.muted.Render("3m")) {
-				t.Fatalf("age is not dim: %q", row)
-			}
-			style := m.agentStateStyle(tt.state)
-			if !strings.Contains(row, style.Render(tt.glyph)) {
-				t.Fatalf("state glyph is not drawn in the state color: %q", row)
-			}
-			if !strings.Contains(row, style.Render(tt.word)) {
-				t.Fatalf("state word is not drawn in the state color: %q", row)
-			}
-		})
-	}
-}
-
 // TestResultsWindowCountersLiveInTheBottomBorder pins the results window frame:
-// every inner row is an item and the scroll counters are drawn in the bottom
-// border instead of taking rows away from the list.
+// every inner line belongs to an item and the scroll counters are drawn in the
+// bottom border instead of taking lines away from the list. The counters count
+// items even though a session spends two lines of the window.
 func TestResultsWindowCountersLiveInTheBottomBorder(t *testing.T) {
 	items := make([]sessionmgr.Item, 40)
 	for i := range items {
@@ -1221,14 +1282,14 @@ func TestResultsWindowCountersLiveInTheBottomBorder(t *testing.T) {
 		wantBelow    string
 		wantSelected string
 	}{
-		{name: "top only", cursor: 0, wantBelow: "↓ 26 more", wantSelected: "s00"},
+		{name: "top only", cursor: 0, wantBelow: "↓ 33 more", wantSelected: "s00"},
 		{
 			name:         "both",
 			cursor:       20,
-			wantAbove:    "↑ 13 more · ↓ 13 more",
+			wantAbove:    "↑ 17 more · ↓ 16 more",
 			wantSelected: "s20",
 		},
-		{name: "bottom only", cursor: 39, wantAbove: "↑ 26 more", wantSelected: "s39"},
+		{name: "bottom only", cursor: 39, wantAbove: "↑ 33 more", wantSelected: "s39"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1253,11 +1314,12 @@ func TestResultsWindowCountersLiveInTheBottomBorder(t *testing.T) {
 			if want := tt.wantAbove + tt.wantBelow; want != "" && !strings.Contains(bottom, want) {
 				t.Fatalf("results bottom border = %q, want %q", bottom, want)
 			}
-			// No inner row is spent on a counter, and the selection is visible.
-			// The bar is a background sequence, which a profile that draws no
-			// styling cannot emit: that one falls back to the accent marker.
+			// No inner line is spent on a counter, and the selected item is one
+			// solid bar over both of its lines. The bar is a background sequence,
+			// which a profile that draws no styling cannot emit: that one falls
+			// back to the accent marker.
 			barOpen := backgroundOpen(m.styles.selectionBG)
-			selected := ""
+			var selected []string
 			for _, line := range block[1 : len(block)-1] {
 				plain := sessionmgr.StripANSI(line)
 				if strings.Contains(plain, "more") {
@@ -1268,11 +1330,14 @@ func TestResultsWindowCountersLiveInTheBottomBorder(t *testing.T) {
 					isSelected = strings.Contains(line, barOpen)
 				}
 				if isSelected {
-					selected = plain
+					selected = append(selected, plain)
 				}
 			}
-			if !strings.Contains(selected, tt.wantSelected) {
-				t.Fatalf("selected row = %q, want %q", selected, tt.wantSelected)
+			if len(selected) != 2 {
+				t.Fatalf("selection bar covers %d lines, want the item's 2", len(selected))
+			}
+			if !strings.Contains(selected[0], tt.wantSelected) {
+				t.Fatalf("selected item = %q, want %q", selected[0], tt.wantSelected)
 			}
 		})
 	}
@@ -1284,6 +1349,213 @@ func TestResultsWindowCountersLiveInTheBottomBorder(t *testing.T) {
 	block := m.renderResultsWindow(m.viewLayout())
 	if out := sessionmgr.StripANSI(strings.Join(block, "\n")); strings.Contains(out, "more") {
 		t.Fatalf("counter drawn without hidden rows:\n%s", out)
+	}
+}
+
+// rowsFor builds the rows a list of items draws as, in item order.
+func rowsFor(items []sessionmgr.Item) []row {
+	rows := make([]row, len(items))
+	for i, item := range items {
+		rows[i] = row{item: item}
+	}
+	return rows
+}
+
+// mixedHeightItems is a list of one- and two-line items in the order these tests
+// hand to the flow: sessions and agents take two lines, hosts and directories one,
+// so the window's line budget and its item counters diverge. (A model ranks the
+// same items before drawing them.)
+func mixedHeightItems() []sessionmgr.Item {
+	session := func(name string) sessionmgr.Item {
+		return sessionmgr.Item{Kind: sessionmgr.KindSession, Name: name, Target: name}
+	}
+	dir := func(path string) sessionmgr.Item {
+		return sessionmgr.Item{Kind: sessionmgr.KindZoxide, Path: path, Name: path}
+	}
+	return []sessionmgr.Item{
+		session("s0"),
+		dir("~/a"),
+		agentItem("pi", "%1", "s0"),
+		session("s3"),
+		{Kind: sessionmgr.KindHost, Name: "termux", Target: "termux", Location: "ssh"},
+		dir("~/b"),
+		session("s6"),
+	}
+}
+
+// TestItemFlowWindowKeepsWholeItemsAroundTheCursor pins the scroll math: the
+// window is measured in lines, so it never opens on an item's second line and
+// never draws half an item, the cursor's item is always inside it, and the items
+// hidden above and below are still counted in items.
+func TestItemFlowWindowKeepsWholeItemsAroundTheCursor(t *testing.T) {
+	flow := newItemFlow(rowsFor(mixedHeightItems()))
+	tests := []struct {
+		name                    string
+		cursor, height          int
+		wantStart, wantEnd      int
+		wantAbove, wantBelow    int
+		wantLines               int
+		clippedCursorItemTooBig bool
+	}{
+		{
+			name: "cursor at the top", cursor: 0, height: 5,
+			wantStart: 0, wantEnd: 3, wantBelow: 4, wantLines: 5,
+		},
+		{
+			// The next item is two lines tall and only one line is left over, so
+			// the last line stays blank rather than showing half an item.
+			name: "cursor in the middle leaves one line blank", cursor: 3, height: 5,
+			wantStart: 3, wantEnd: 6, wantAbove: 3, wantBelow: 1, wantLines: 4,
+		},
+		{
+			// The item above the window is two lines tall and only one line is
+			// left over, so that line stays blank rather than showing half an item.
+			name: "cursor at the bottom leaves one line blank", cursor: 6, height: 5,
+			wantStart: 4, wantEnd: 7, wantAbove: 4, wantLines: 4,
+		},
+		{
+			name: "every item fits", cursor: 3, height: 11,
+			wantStart: 0, wantEnd: 7, wantLines: 11,
+		},
+		{
+			// A window too short for the cursor's own two-line item still shows
+			// it, clipped, so the list is never blank.
+			name: "two-line item in a one-line window", cursor: 6, height: 1,
+			wantStart: 6, wantEnd: 7, wantAbove: 6,
+			clippedCursorItemTooBig: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			win := flow.window(tt.cursor, tt.height)
+			if win.start != tt.wantStart || win.end != tt.wantEnd {
+				t.Fatalf("window = [%d, %d), want [%d, %d)",
+					win.start, win.end, tt.wantStart, tt.wantEnd)
+			}
+			if win.above != tt.wantAbove || win.below != tt.wantBelow {
+				t.Fatalf("hidden items = (%d above, %d below), want (%d, %d)",
+					win.above, win.below, tt.wantAbove, tt.wantBelow)
+			}
+			if win.start > tt.cursor || tt.cursor >= win.end {
+				t.Fatalf("window [%d, %d) does not hold the cursor item %d",
+					win.start, win.end, tt.cursor)
+			}
+			if got := win.above + (win.end - win.start) + win.below; got != len(flow.starts) {
+				t.Fatalf("window accounts for %d of %d items", got, len(flow.starts))
+			}
+			lines := 0
+			for i := win.start; i < win.end; i++ {
+				lines += flow.heights[i]
+			}
+			if tt.clippedCursorItemTooBig {
+				if lines <= tt.height {
+					t.Fatalf("window draws %d lines, want more than the %d it has",
+						lines, tt.height)
+				}
+				return
+			}
+			if lines != tt.wantLines {
+				t.Fatalf("window draws %d lines, want %d", lines, tt.wantLines)
+			}
+			if lines > tt.height {
+				t.Fatalf("window draws %d lines in a %d line frame", lines, tt.height)
+			}
+		})
+	}
+}
+
+// TestResultsWindowScrollsMixedHeightItemsByLines draws the window over a list of
+// one- and two-line items: the cursor's item is whole wherever it sits, a leftover
+// line is left blank rather than half drawn, and the counters still count items.
+func TestResultsWindowScrollsMixedHeightItemsByLines(t *testing.T) {
+	tests := []struct {
+		name              string
+		cursor, height    int
+		wantAbove         int
+		wantBelow         int
+		wantLines         int
+		wantCursorClipped bool
+	}{
+		{
+			// The next item is two lines tall and one line is left over, so that
+			// line stays blank.
+			name: "cursor at the top with an odd leftover line", cursor: 0, height: 5,
+			wantBelow: 5, wantLines: 4,
+		},
+		{
+			name: "cursor in the middle", cursor: 3, height: 5,
+			wantAbove: 3, wantLines: 5,
+		},
+		{
+			name: "cursor at the bottom", cursor: 6, height: 5,
+			wantAbove: 3, wantLines: 5,
+		},
+		{
+			name: "a one-line item in a two-line window", cursor: 5, height: 2,
+			wantAbove: 5, wantLines: 2,
+		},
+		{
+			name: "a one-line window clips the cursor's item", cursor: 3, height: 1,
+			wantAbove: 3, wantBelow: 3, wantLines: 1, wantCursorClipped: true,
+		},
+		{name: "every item fits", cursor: 3, height: 11, wantLines: 11},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			const width = 60
+			m := newTestModel(t)
+			m = withItems(m, mixedHeightItems())
+			m = m.setCursor(tt.cursor)
+			rows := m.rows()
+
+			lines, above, below := m.resultsRows(rows, width, tt.height)
+			if above != tt.wantAbove || below != tt.wantBelow {
+				t.Fatalf("counters = (%d above, %d below), want (%d, %d)",
+					above, below, tt.wantAbove, tt.wantBelow)
+			}
+			if len(lines) != tt.wantLines {
+				t.Fatalf("window drew %d lines, want %d:\n%s",
+					len(lines), tt.wantLines, strings.Join(lines, "\n"))
+			}
+			if len(lines) > tt.height {
+				t.Fatalf("window drew %d lines in a %d line frame", len(lines), tt.height)
+			}
+			for i, line := range lines {
+				if got := ansi.StringWidth(line); got != width {
+					t.Fatalf("line %d = %d columns, want %d: %q", i, got, width, line)
+				}
+			}
+			// The cursor's item is drawn whole, unless the frame is too short for
+			// it: then its first line is drawn rather than nothing at all.
+			item := m.renderItem(rows[tt.cursor], width, true)
+			drawn := 0
+			for _, want := range item {
+				for _, got := range lines {
+					if got == want {
+						drawn++
+					}
+				}
+			}
+			wantDrawn := len(item)
+			if tt.wantCursorClipped {
+				wantDrawn = 1
+			}
+			if drawn != wantDrawn {
+				t.Fatalf("the cursor item drew %d of %d lines:\n%s",
+					drawn, len(item), strings.Join(lines, "\n"))
+			}
+			// A blank line only comes from an item that cannot be drawn whole:
+			// either the next item below, or the one above the window.
+			if len(lines) < tt.height {
+				room := tt.height - len(lines)
+				if below > 0 && itemHeight(rows[len(rows)-below].item) <= room {
+					t.Fatalf("window left %d lines blank with room for the item below", room)
+				}
+				if above > 0 && itemHeight(rows[above-1].item) <= room {
+					t.Fatalf("window left %d lines blank with room for the item above", room)
+				}
+			}
+		})
 	}
 }
 
@@ -1651,12 +1923,13 @@ func TestAgentRowDropsTheRepeatedTabAndKindCells(t *testing.T) {
 
 	m := newTestModel(t)
 	m = withItems(m, []sessionmgr.Item{item})
-	row := resultRowLine(t, m.View(), "pi")
-	if strings.Contains(row, "— skills") {
-		t.Fatalf("row repeats the workspace as a tab suffix: %q", row)
+	_, plain := itemLines(t, m, item.Key(), 60, false)
+	lines := strings.Join(plain, "\n")
+	if strings.Contains(lines, "— skills") {
+		t.Fatalf("item repeats the workspace as a tab suffix: %q", lines)
 	}
-	if strings.Count(row, "skills") != 1 {
-		t.Fatalf("row shows the workspace more than once: %q", row)
+	if strings.Count(lines, "skills") != 1 {
+		t.Fatalf("item shows the workspace more than once: %q", lines)
 	}
 }
 

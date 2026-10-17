@@ -342,23 +342,23 @@ func TestHostPreviewRendersConfigWithoutNetwork(t *testing.T) {
 	})
 }
 
-// TestHostRowShowsTheAliasAndTransport pins the host row: the bright name on the
-// left, then the alias the launcher is handed and the transport flush against the
-// window's right edge. A host whose alias is its own name (an ssh_config entry)
-// shows its transport alone.
+// TestHostRowShowsTheTransportAndAlias pins the host item: the bright name and,
+// two spaces after it, the transport and the alias the launcher is handed. A host
+// whose alias is its own name (an ssh_config entry) shows its transport alone, and
+// either host is a single line.
 func TestHostRowShowsTheTransportAndAlias(t *testing.T) {
 	m := withHosts(newTestModel(t), testHosts())
 	m.loadedOnce = true // render rows instead of the loading state
 	out := sessionmgr.StripANSI(m.View())
-	if !strings.Contains(out, "seshagy-homelab  ssh") {
-		t.Fatalf("host row missing its alias and transport:\n%s", out)
+	if !strings.Contains(out, "homelab  ssh · seshagy-homelab") {
+		t.Fatalf("host row missing its transport and alias:\n%s", out)
 	}
-	if strings.Contains(out, "ssh · seshagy-homelab") {
-		t.Fatalf("host row still leads with the transport:\n%s", out)
+	if strings.Contains(out, "  ssh\n") {
+		t.Fatalf("host row spills onto a second line:\n%s", out)
 	}
 
 	// A host discovered in ~/.ssh/config is used under its own name, so the alias
-	// column is dropped and the transport is all the row has left to say.
+	// is dropped and the transport is all the row has left to say.
 	m = withHosts(newTestModel(t), []remote.Host{{
 		Name:          "gitbox",
 		Target:        "gitbox",
@@ -368,7 +368,7 @@ func TestHostRowShowsTheTransportAndAlias(t *testing.T) {
 	m.loadedOnce = true
 	out = sessionmgr.StripANSI(m.View())
 	row := resultRowLine(t, out, "gitbox")
-	if !strings.HasSuffix(row, "ssh") {
+	if !strings.HasSuffix(row, "gitbox  ssh") {
 		t.Fatalf("host row without a distinct alias = %q, want its transport", row)
 	}
 	if strings.Contains(row, "·") || strings.Contains(row, "seshagy-gitbox") {

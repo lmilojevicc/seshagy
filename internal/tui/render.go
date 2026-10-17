@@ -275,23 +275,12 @@ func trimHeight(s string, height int) string {
 	return strings.Join(lines, "\n")
 }
 
-// visibleWindow returns the [start, end) row range to draw so cursor stays
-// inside a window of the given height.
-func visibleWindow(total, cursor, height int) (int, int) {
-	if height <= 0 {
-		return 0, 0
+// spaces is n blank cells, empty for a non-positive count.
+func spaces(n int) string {
+	if n <= 0 {
+		return ""
 	}
-	if total <= height {
-		return 0, total
-	}
-	start := cursor - height/2
-	if start < 0 {
-		start = 0
-	}
-	if start+height > total {
-		start = total - height
-	}
-	return start, start + height
+	return strings.Repeat(" ", n)
 }
 
 // windowGap is the blank column between two windows drawn side by side.

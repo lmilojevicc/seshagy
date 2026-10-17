@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -34,17 +35,15 @@ const (
 	minResultsRows = 3
 	// footerMinHeight is the shortest frame that keeps the footer key line.
 	footerMinHeight = 6
-	// metaColumnMax caps each right-flush meta column.
-	metaColumnMax = 18
 	// titleMinWidth is the room a title keeps before its tab suffix is dropped.
 	titleMinWidth = 12
-	// rowRightMargin is the blank cell the right-flush columns keep off the
-	// window's inner edge, rowGap the least blank run that separates them from
-	// the name, and rowNameFloor the least room the name keeps before the
-	// right-flush columns start being dropped.
-	rowRightMargin = 1
-	rowGap         = 1
-	rowNameFloor   = 1
+	// itemNameFloor is the least room an item's name keeps before the badge
+	// beside it is dropped, and itemBadgeGap the blank run that separates them.
+	// A session's attached flag sits one column closer: it reads as part of the
+	// name rather than as a state beside it.
+	itemNameFloor   = 1
+	itemBadgeGap    = 2
+	sessionBadgeGap = 1
 	// previewInset is the blank column the preview content starts after.
 	previewInset = 1
 	// hostIcon marks remote-machine rows.
@@ -80,7 +79,7 @@ type viewLayout struct {
 // listWidth is the results window's inner width: the columns its rows draw in.
 func (l viewLayout) listWidth() int { return max(0, l.results.width-2) }
 
-// listHeight is the results window's inner height: the rows it can show.
+// listHeight is the results window's inner height: the lines it can show.
 func (l viewLayout) listHeight() int { return max(0, l.results.height-2) }
 
 // computeViewLayout splits a frame into the three telescope windows. The
@@ -155,7 +154,8 @@ func (m Model) viewLayout() viewLayout {
 	return computeViewLayout(safeWidth(m.width), m.height, m.layout, m.previewVisible())
 }
 
-// bodyHeight is the number of result rows a frame shows; page-up/down uses it.
+// bodyHeight is the results window's inner height in lines; page-up/down turns
+// it into the items it covers.
 func (m Model) bodyHeight() int {
 	return m.viewLayout().listHeight()
 }
@@ -238,7 +238,90 @@ func (m Model) renderResultsWindow(l viewLayout) []string {
 	return drawWindow(title, lines, l.results.width, l.results.height, m.styles.border, bottom)
 }
 
-// resultsRows draws the results window's inner rows and reports how many rows
+// itemHeight is the lines an item draws in the results window: two for an agent
+// or a session, whose second line carries the context the name line cannot hold,
+// and one for a host or a directory, which are their own context.
+func itemHeight(item sessionmgr.Item) int {
+	switch item.Kind {
+	case sessionmgr.KindAgent, sessionmgr.KindSession:
+		return 2
+	}
+	return 1
+}
+
+// itemFlow lays the result rows out as the lines the results window draws and
+// owns the scroll math over them. Items are one or two lines tall, so the window
+// is measured in lines while the cursor and the ↑/↓ counters count items.
+type itemFlow struct {
+	// starts[i] is the first line item i draws on, heights[i] its line count.
+	starts  []int
+	heights []int
+	total   int
+}
+
+func newItemFlow(rows []row) itemFlow {
+	flow := itemFlow{starts: make([]int, len(rows)), heights: make([]int, len(rows))}
+	for i, r := range rows {
+		flow.starts[i] = flow.total
+		flow.heights[i] = itemHeight(r.item)
+		flow.total += flow.heights[i]
+	}
+	return flow
+}
+
+// itemWindow is the slice of the flow one frame draws: the items to draw in
+// order and the items hidden above and below them, counted in items.
+type itemWindow struct {
+	start, end int
+	above      int
+	below      int
+}
+
+// window is the slice a frame of the given line height draws. It opens on the
+// line that centers the cursor's item where the flow allows it, and only whole
+// items are drawn: a leftover line stays blank rather than showing half an item.
+// The cursor's item is always inside the window.
+func (f itemFlow) window(cursor, height int) itemWindow {
+	if height <= 0 || len(f.starts) == 0 {
+		return itemWindow{}
+	}
+	cursor = max(0, min(cursor, len(f.starts)-1))
+	if f.total <= height {
+		return itemWindow{end: len(f.starts)}
+	}
+	// The line to open on: half the room the frame has left above the cursor's
+	// own item goes above it, clamped to what the flow can spare below.
+	open := f.starts[cursor] - max(0, (height-f.heights[cursor])/2)
+	open = max(0, min(open, f.total-height))
+	start := sort.SearchInts(f.starts, open)
+	end := f.fill(start, height)
+	if end <= cursor {
+		// What precedes the cursor's item leaves no room for it: open the window
+		// on the item itself and fill from there.
+		start = cursor
+		end = f.fill(start, height)
+		if end == start {
+			// A frame too short for a two-line item still shows it, clipped, so
+			// the list is never blank.
+			end = start + 1
+		}
+	}
+	return itemWindow{start: start, end: end, above: start, below: len(f.starts) - end}
+}
+
+// fill counts the whole items from start that fit in height lines.
+func (f itemFlow) fill(start, height int) (end int) {
+	lines := 0
+	for end = start; end < len(f.starts); end++ {
+		if lines+f.heights[end] > height {
+			break
+		}
+		lines += f.heights[end]
+	}
+	return end
+}
+
+// resultsRows draws the results window's inner rows and reports how many items
 // the window hides above and below its position, for the bottom border.
 func (m Model) resultsRows(
 	rows []row,
@@ -253,24 +336,19 @@ func (m Model) resultsRows(
 	if len(rows) == 0 {
 		return m.renderEmptyState(width, height), 0, 0
 	}
-	start, end := visibleWindow(len(rows), m.cursor, height)
-	visible := rows[start:end]
-	cells := make([]rowCells, len(visible))
-	for i, r := range visible {
-		cells[i] = m.rowCells(r)
+	win := newItemFlow(rows).window(m.cursor, height)
+	for i := win.start; i < win.end; i++ {
+		lines = append(lines, m.renderItem(rows[i], width, i == m.cursor)...)
 	}
-	grid := buildRowGrid(visible, cells, width, m.rowPrefixWidth())
-	lines = make([]string, 0, len(visible))
-	for i, r := range visible {
-		lines = append(
-			lines,
-			m.renderRow(r, cells[i], grid[r.item.Kind], width, start+i == m.cursor),
-		)
+	// Only a frame too short for the cursor's own two-line item draws more lines
+	// than it has room for; that item is clipped rather than hidden entirely.
+	if len(lines) > height {
+		lines = lines[:height]
 	}
-	return lines, start, len(rows) - end
+	return lines, win.above, win.below
 }
 
-// resultsScrollCounter spells the rows hidden above and below the visible
+// resultsScrollCounter spells the items hidden above and below the visible
 // window, for the results window's bottom border.
 func resultsScrollCounter(above, below int) string {
 	parts := make([]string, 0, 2)
@@ -493,102 +571,97 @@ func (m Model) hasHosts() bool {
 	return false
 }
 
-// cellSep is the gap between two row cells: every cell of a group is separated
-// by it, and a cell a row has no value for leaves its column blank instead of
-// shifting the cells after it.
-const cellSep = "  "
-
-// metaCell is one cell of a row's trailing run: the plain text its column is
-// measured from, the styled text drawn, and whether the column pads it on the
-// left so a group of ages ends on the same column.
-type metaCell struct {
-	plain string
-	text  string
-	right bool
+// itemBadge is the run an item draws beside its name on the line the name sits
+// on: an agent's colored state glyph and word, a session's green attached flag,
+// or a host's dim transport and alias. A directory carries none.
+type itemBadge struct {
+	run string
+	// gap is the blank run drawn between the name and the badge, before the
+	// columns the badge's own padding already supplies.
+	gap int
+	// pad is the columns of the badge's own background that precede its text.
+	pad int
 }
 
-// metaCol builds one left-aligned cell from a style and its plain text.
-func metaCol(style lipgloss.Style, text string) metaCell {
-	return metaCell{plain: text, text: style.Render(text)}
+// draw is the badge as the line draws it: the gap that separates it from the
+// name, then the run itself.
+func (b itemBadge) draw() string {
+	if b.run == "" {
+		return ""
+	}
+	return spaces(max(0, b.gap-b.pad)) + b.run
 }
 
-// metaRightCol builds one right-aligned cell: a run of values of different
-// lengths (the ages) ends on its column instead of starting on it.
-func metaRightCol(style lipgloss.Style, text string) metaCell {
-	return metaCell{plain: text, text: style.Render(text), right: true}
-}
+// width is the columns the badge takes beside the name.
+func (b itemBadge) width() int { return lipgloss.Width(b.draw()) }
 
-// rowCells is one row split by where its cells are drawn: the run that follows
-// the title — next to the name, with no dot between them — and the columns flush
-// against the window's right edge.
-type rowCells struct {
-	left  []metaCell
-	right []metaCell
-}
-
-// rowCells builds a row's cells. Each kind lays out its own: an agent keeps its
-// kind label and workspace beside its name and right-aligns its age, a session
-// right-aligns the attached flag, its window count, and the agents inside it, a
-// host right-aligns its alias and transport, and a directory has no cells at all.
-func (m Model) rowCells(r row) rowCells {
-	item := r.item
+// itemBadge draws the run that follows an item's name. An agent shows its state
+// — the configured glyph and word, both in the state's color, a blocked agent
+// on the design's red block — and a session shows its green attached flag while
+// it is attached. A host shows its transport and the alias herdr is handed, dim,
+// with an alias that only repeats the name (a host discovered in ~/.ssh/config)
+// dropped: the transport is then all such a host has to say. Directories show
+// nothing: the path is the whole item.
+func (m Model) itemBadge(item sessionmgr.Item) itemBadge {
 	switch item.Kind {
 	case sessionmgr.KindAgent:
-		cells := rowCells{}
-		// The logo already says which agent this is; the colored kind label is
-		// only worth the columns when no logo is drawn, and a label that only
-		// repeats the name already drawn as the title is dropped, exactly like a
-		// tab label that repeats it.
-		if !m.showAgentLogos() {
-			if kind := agentKey(item.AgentName); !repeatsTitle(item, kind) {
-				cells.left = append(cells.left, metaCol(agentNameStyle(item.AgentName), kind))
-			}
-		}
-		if item.Location != "" && item.Location != itemTitle(item) {
-			cells.left = append(cells.left, metaCol(m.styles.muted, item.Location))
-		}
-		age := ""
-		if !item.StartedAt.IsZero() {
-			age = agentAgeAt(item.StartedAt, time.Now())
-		}
-		cells.right = append(cells.right, metaRightCol(m.styles.muted, age))
-		if state, ok := m.agentStateCell(item.AgentState); ok {
-			cells.right = append(cells.right, state)
-		}
-		return cells
+		return m.agentStateBadge(item.AgentState)
 	case sessionmgr.KindSession:
-		// The attached flag comes first and keeps its column (blank while the
-		// session is not attached) so the window count and the agent counts
-		// after it line up on every session row.
-		attached := metaCol(m.styles.muted, "")
-		if item.Attached {
-			attached = metaCol(m.styles.success, "attached")
+		if !item.Attached {
+			return itemBadge{}
 		}
-		count := ""
-		if item.Windows > 0 {
-			count = windowCountLabel(m.terms, item.Windows)
-		}
-		cells := rowCells{right: []metaCell{attached, metaCol(m.styles.muted, count)}}
-		if counts, ok := m.sessionAgentCountsCell(item); ok {
-			cells.right = append(cells.right, counts)
-		}
-		return cells
+		return itemBadge{run: m.styles.success.Render("• attached"), gap: sessionBadgeGap}
 	case sessionmgr.KindHost:
-		// The alias herdr is handed, then the transport. An alias that only
-		// repeats the row's name (a host discovered in ~/.ssh/config) is dropped,
-		// which leaves the transport as the row's only column. The raw target is
-		// spelled out in the preview instead.
 		alias := item.Target
 		if alias == item.DisplayName() {
 			alias = ""
 		}
-		return rowCells{right: []metaCell{
-			metaCol(m.styles.muted, alias),
-			metaCol(m.styles.muted, item.Location),
-		}}
+		parts := make([]string, 0, 2)
+		if item.Location != "" {
+			parts = append(parts, item.Location)
+		}
+		if alias != "" {
+			parts = append(parts, alias)
+		}
+		if len(parts) == 0 {
+			return itemBadge{}
+		}
+		return itemBadge{
+			run: m.styles.muted.Render(strings.Join(parts, " · ")),
+			gap: itemBadgeGap,
+		}
 	default:
-		// Directories are their own context: the path is the row.
-		return rowCells{}
+		return itemBadge{}
+	}
+}
+
+// agentStateBadge draws an agent's state as its name-line badge: the glyph and
+// word the configured icon set resolves for the state — both in icon mode, the
+// word alone in text mode — in the state's color. State mode "none" hides agent
+// state entirely, and then there is no badge. The word is drawn as its own run so
+// a configured color covers it exactly as it covers the glyph.
+func (m Model) agentStateBadge(state sessionmgr.AgentState) itemBadge {
+	if m.icons.AgentStateHidden() {
+		return itemBadge{}
+	}
+	icon := m.icons.ForAgentState(state)
+	style := m.agentStateStyle(state)
+	if !m.icons.AgentStateUsesIcons() {
+		return itemBadge{run: style.Render(icon.ASCII), gap: itemBadgeGap}
+	}
+	if state == sessionmgr.AgentBlocked {
+		// The blocked badge paints its own red background, and the selection bar
+		// resumes after it: a selected item keeps the red block rather than
+		// losing it to the item's background.
+		return itemBadge{
+			run: m.styles.badgeBlocked.Render(" " + icon.Text + " " + icon.ASCII + " "),
+			gap: itemBadgeGap,
+			pad: 1,
+		}
+	}
+	return itemBadge{
+		run: style.Render(icon.Text) + " " + style.Render(icon.ASCII),
+		gap: itemBadgeGap,
 	}
 }
 
@@ -598,55 +671,86 @@ func agentNameStyle(name string) lipgloss.Style {
 	return lipgloss.NewStyle().Foreground(agentColor(name))
 }
 
-// agentStateCell is an agent row's state cell: the configured state glyph and
-// word, in the configured state color. State mode "none" hides agent state
-// entirely, and then the cell is dropped. The word is drawn as its own run so a
-// configured color covers it exactly as it covers the glyph.
-func (m Model) agentStateCell(state sessionmgr.AgentState) (metaCell, bool) {
-	if m.icons.AgentStateHidden() {
-		return metaCell{}, false
+// itemDetail is an item's second line: the dim context under its name — an
+// agent's workspace and age, a session's window count and the agents running
+// inside it. Directories and hosts draw no second line.
+func (m Model) itemDetail(item sessionmgr.Item, width int) string {
+	sep := m.styles.muted.Render(" · ")
+	parts := make([]string, 0, 3)
+	add := func(text string) {
+		if text != "" {
+			parts = append(parts, text)
+		}
 	}
-	icon := m.icons.ForAgentState(state)
-	style := m.agentStateStyle(state)
-	if !m.icons.AgentStateUsesIcons() {
-		return metaCol(style, icon.ASCII), true
+	switch item.Kind {
+	case sessionmgr.KindAgent:
+		add(m.styles.muted.Render(m.workspaceLabel(item.Session)))
+		if !item.StartedAt.IsZero() {
+			add(m.styles.muted.Render(agentAgeAt(item.StartedAt, time.Now())))
+		}
+		// The logo says which agent this is; without one the brand key is the
+		// only place the agent type can show.
+		if key := agentKey(item.AgentName); key != "" && !m.showAgentLogos() &&
+			!repeatsTitle(item, key) {
+			add(agentNameStyle(item.AgentName).Render(key))
+		}
+	case sessionmgr.KindSession:
+		if item.Windows > 0 {
+			add(m.styles.muted.Render(windowCountLabel(m.terms, item.Windows)))
+		}
+		add(m.itemTally(item))
 	}
-	return metaCell{
-		plain: icon.Icon + " " + icon.ASCII,
-		text:  style.Render(icon.Icon) + " " + style.Render(icon.ASCII),
-	}, true
+	return clampStyledText(strings.Join(parts, sep), width)
 }
 
-// sessionAgentCountsCell is a session row's last cell: the agents running inside
-// the session, tallied per state as a colored glyph and its count ("● 1 ○ 1").
-// States are listed in urgency order, and the cell is dropped when the session
-// has no agents.
-func (m Model) sessionAgentCountsCell(session sessionmgr.Item) (metaCell, bool) {
+// workspaceLabel names the workspace an agent runs in: the session item's label
+// for the identifier the agent carries (the herdr workspace id, or the tmux
+// session name), falling back to the identifier itself for a workspace the
+// session source has not listed.
+func (m Model) workspaceLabel(id string) string {
+	if id == "" {
+		return ""
+	}
+	for _, item := range m.items {
+		if item.Kind != sessionmgr.KindSession {
+			continue
+		}
+		if item.Name == id || item.Target == id {
+			return item.Name
+		}
+	}
+	return id
+}
+
+// itemTally is a session's agent counts for its second line ("● 1 ○ 1"): one
+// entry per state the workspace hosts, each glyph in that state's color and its
+// count in the item's own foreground, one space between a glyph and its number.
+// The entries list the states most urgent first, and a hidden state mode drops
+// the tally entirely.
+func (m Model) itemTally(session sessionmgr.Item) string {
+	if m.icons.AgentStateHidden() {
+		return ""
+	}
 	counts := m.sessionAgentCounts(session)
-	var plain, text strings.Builder
+	var out strings.Builder
 	for _, state := range agentCountOrder {
 		n := counts[state]
 		if n == 0 {
 			continue
 		}
-		glyph := m.stateLabel(state)
-		if plain.Len() > 0 {
-			plain.WriteString(" ")
-			text.WriteString(" ")
+		if out.Len() > 0 {
+			out.WriteString(" ")
 		}
-		// The glyph carries the state color; the count stays in the row's own
+		// The glyph carries the state color; the count stays in the item's own
 		// foreground so the runs of numbers read as data, not as more glyph.
-		plain.WriteString(glyph + " " + strconv.Itoa(n))
-		text.WriteString(m.agentStateStyle(state).Render(glyph) + " " + strconv.Itoa(n))
+		out.WriteString(m.agentStateStyle(state).Render(m.stateLabel(state)))
+		out.WriteString(" " + strconv.Itoa(n))
 	}
-	if plain.Len() == 0 {
-		return metaCell{}, false
-	}
-	return metaCell{plain: plain.String(), text: text.String()}, true
+	return out.String()
 }
 
-// agentCountOrder lists the agent states a session's count cell reports, most
-// urgent first; an empty state (no agents) never appears.
+// agentCountOrder lists the agent states a session's tally reports, most urgent
+// first; an empty state (no agents) never appears.
 var agentCountOrder = []sessionmgr.AgentState{
 	sessionmgr.AgentWorking,
 	sessionmgr.AgentBlocked,
@@ -682,156 +786,39 @@ func (m Model) stateLabel(state sessionmgr.AgentState) string {
 	return icon.ASCII
 }
 
-// rowGrid is one frame's row layout: the right-flush columns of every kind the
-// visible rows draw. Kinds without right cells (directories) are absent.
-type rowGrid map[sessionmgr.Kind]metaGrid
-
-// buildRowGrid measures the visible rows and resolves each kind's right-flush
-// columns. Each kind resolves its own, so a long agent workspace widens the
-// agent rows instead of pushing the session rows' counts around.
-func buildRowGrid(rows []row, cells []rowCells, width, prefix int) rowGrid {
-	kindCells := make(map[sessionmgr.Kind][][]metaCell)
-	for i, r := range rows {
-		kind := r.item.Kind
-		kindCells[kind] = append(kindCells[kind], cells[i].right)
+// renderItem draws one result item as the lines its kind takes — a name line,
+// plus the dim context line an agent or a session carries — each exactly width
+// cells. The selected item paints every line it draws with the selection bar,
+// and a badge the window has no room for is dropped rather than squeezing the
+// name away.
+func (m Model) renderItem(r row, width int, selected bool) []string {
+	prefix := m.itemPrefix(r.item)
+	badge := m.itemBadge(r.item)
+	room := max(0, width-lipgloss.Width(prefix))
+	if badge.run != "" && room < itemNameFloor+badge.width() {
+		badge = itemBadge{}
 	}
-	grid := make(rowGrid, len(kindCells))
-	for kind, metas := range kindCells {
-		grid[kind] = buildMetaGrid(metas, kindCellsBudget(width, prefix))
+	lines := []string{prefix + m.renderTitle(r, max(1, room-badge.width())) + badge.draw()}
+	if itemHeight(r.item) > 1 {
+		indent := lipgloss.Width(prefix)
+		lines = append(lines, spaces(indent)+m.itemDetail(r.item, max(1, width-indent)))
 	}
-	return grid
-}
-
-// kindCellsBudget is the room a row's right-flush columns may take: the window's
-// inner width less the row's prefix, its right margin, the gap before the
-// columns, and the least room the name on the left keeps.
-func kindCellsBudget(width, prefix int) int {
-	return max(1, width-prefix-rowRightMargin-rowGap-rowNameFloor)
-}
-
-// metaGrid is the resolved right-flush columns of one kind's visible rows: each
-// column's width and whether it pads its cell on the left. The columns before
-// keep are the ones a tight window dropped, starting with the leftmost.
-type metaGrid struct {
-	widths []int
-	rights []bool
-	keep   int
-}
-
-// total is the columns the grid draws: every kept column with the gap before it.
-func (g metaGrid) total() int {
-	total := 0
-	for i := g.keep; i < len(g.widths); i++ {
-		if i > g.keep {
-			total += len(cellSep)
+	for i, line := range lines {
+		line = pad(clampStyledText(line, width), width)
+		if selected {
+			line = m.selectionBar(line, width)
 		}
-		total += g.widths[i]
+		lines[i] = line
 	}
-	return total
+	return lines
 }
 
-// buildMetaGrid measures every right-flush column over the visible rows, capped
-// at metaColumnMax, and then drops the leftmost columns until what is left fits
-// the budget. The leftmost column is the one a row can lose and stay readable —
-// the agent's age, a session's attached flag — so the name on the left is what
-// the window clamps, and the state column is the last thing to go.
-func buildMetaGrid(metas [][]metaCell, budget int) metaGrid {
-	columns := 0
-	for _, cells := range metas {
-		columns = max(columns, len(cells))
-	}
-	grid := metaGrid{widths: make([]int, columns), rights: make([]bool, columns)}
-	for _, cells := range metas {
-		for i, cell := range cells {
-			if w := min(metaColumnMax, lipgloss.Width(cell.plain)); w > grid.widths[i] {
-				grid.widths[i] = w
-			}
-			grid.rights[i] = grid.rights[i] || cell.right
-		}
-	}
-	for grid.keep < len(grid.widths) && grid.total() > budget {
-		grid.keep++
-	}
-	return grid
-}
-
-// renderMetaCells draws a row's right-flush cells: every kept column is padded
-// to its width, a cell a row has no value for stays blank so the columns after
-// it line up, and a row that stops short of the grid still keeps its columns.
-func renderMetaCells(cells []metaCell, grid metaGrid) string {
-	var out strings.Builder
-	for i := grid.keep; i < len(grid.widths); i++ {
-		if i > grid.keep {
-			out.WriteString(cellSep)
-		}
-		var cell metaCell
-		if i < len(cells) {
-			cell = cells[i]
-		}
-		out.WriteString(padMetaCell(cell.text, grid.widths[i], grid.rights[i]))
-	}
-	return out.String()
-}
-
-// padMetaCell draws one cell inside its column: a left-aligned cell starts on
-// the column, a right-aligned one ends on it.
-func padMetaCell(text string, width int, right bool) string {
-	clamped := clampStyledText(text, width)
-	padding := strings.Repeat(" ", max(0, width-lipgloss.Width(clamped)))
-	if right {
-		return padding + clamped
-	}
-	return clamped + padding
-}
-
-// renderRow draws one result row: the kind icon, the title, the cells that
-// follow it, and the right-flush columns. Every line is exactly width cells,
-// with one blank cell between the columns and the window's inner edge, and the
-// selected row is painted with the selection bar across the full width.
-func (m Model) renderRow(r row, cells rowCells, meta metaGrid, width int, selected bool) string {
+// itemPrefix is the fixed lead every item line shares: one column of space
+// inside the window border, the kind icon column, then the gap before the name.
+func (m Model) itemPrefix(item sessionmgr.Item) string {
 	iconWidth := m.rowIconWidth()
-	icon := pad(clampStyledText(m.rowIcon(r.item), iconWidth), iconWidth)
-	prefix := " " + icon + " "
-	right := renderMetaCells(cells.right, meta)
-	room := width - lipgloss.Width(prefix)
-	if right != "" {
-		room -= lipgloss.Width(right) + rowRightMargin + rowGap
-	}
-	line := prefix + m.renderRowLeft(r, cells.left, max(0, room), selected)
-	if right != "" {
-		gap := max(rowGap, width-lipgloss.Width(line)-lipgloss.Width(right)-rowRightMargin)
-		line += strings.Repeat(" ", gap) + right + strings.Repeat(" ", rowRightMargin)
-	}
-	line = pad(clampStyledText(line, width), width)
-	if selected {
-		line = m.selectionBar(line, width)
-	}
-	return line
-}
-
-// renderRowLeft draws the run that follows the icon: the title with its matches
-// emphasized, then the cells an item keeps next to its name. The title keeps its
-// room first, and a cell that no longer fits — a workspace in a narrow window —
-// is clamped and then dropped rather than pushing the right-flush columns away.
-func (m Model) renderRowLeft(r row, cells []metaCell, room int, selected bool) string {
-	var out strings.Builder
-	title := m.renderTitle(r, room, selected)
-	out.WriteString(title)
-	used := lipgloss.Width(title)
-	for _, cell := range cells {
-		if cell.plain == "" {
-			continue
-		}
-		avail := room - used - len(cellSep)
-		if avail < 1 {
-			break
-		}
-		text := clampStyledText(cell.text, min(lipgloss.Width(cell.plain), avail))
-		out.WriteString(cellSep)
-		out.WriteString(text)
-		used += len(cellSep) + lipgloss.Width(text)
-	}
-	return out.String()
+	icon := pad(clampStyledText(m.rowIcon(item), iconWidth), iconWidth)
+	return " " + icon + " "
 }
 
 // selectionBar paints a drawn row with the configured selection background over
@@ -961,11 +948,12 @@ func repeatsTitle(item sessionmgr.Item, label string) bool {
 }
 
 // renderTitle draws the item title in its column with the fuzzy-matched runes
-// emphasized. An agent's name is bright — bold while selected or while the agent
-// waits on the user (blocked or done) — and its tab label is appended muted when
-// there is room; a directory's parent path is dimmed and its basename kept
-// bright, which is what the path's row is about.
-func (m Model) renderTitle(r row, width int, selected bool) string {
+// emphasized. An agent's or a session's name is the item's headline and is drawn
+// bold, and an agent's tab label is appended muted when there is room; a
+// directory's parent path is dimmed and its basename kept bright, which is what
+// the path's item is about. The selection does not change the weight: the bar
+// behind the item carries it.
+func (m Model) renderTitle(r row, width int) string {
 	title := itemTitle(r.item)
 	suffix := ""
 	if r.item.Kind == sessionmgr.KindAgent {
@@ -977,7 +965,8 @@ func (m Model) renderTitle(r row, width int, selected bool) string {
 		}
 	}
 	base := m.styles.itemName
-	if selected || needsAttention(r.item) {
+	switch r.item.Kind {
+	case sessionmgr.KindAgent, sessionmgr.KindSession:
 		base = base.Bold(true)
 	}
 	text := clampText(title, max(1, width-lipgloss.Width(suffix)))
