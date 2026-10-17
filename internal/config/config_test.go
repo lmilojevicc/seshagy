@@ -525,8 +525,63 @@ func TestPreviewDefaultTrueWhenMissing(t *testing.T) {
 	if loaded.TUI.Preview == nil || !*loaded.TUI.Preview {
 		t.Fatalf("preview without [tui] = %v, want true", loaded.TUI.Preview)
 	}
-	if cfg := Default(); cfg.TUI.Preview == nil || !*cfg.TUI.Preview {
-		t.Fatalf("default preview = %v, want true", cfg.TUI.Preview)
+	cfg := Default()
+	cfg.Normalize()
+	if cfg.TUI.Preview == nil || !*cfg.TUI.Preview {
+		t.Fatalf("normalized default preview = %v, want true", cfg.TUI.Preview)
+	}
+}
+
+// TestPreviewDefaultFollowsTheLayout covers the one preview default that is not
+// a plain true: the compact dropdown starts with the preview hidden until
+// ctrl+o, while an explicit [tui] preview always wins over the layout.
+func TestPreviewDefaultFollowsTheLayout(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want bool
+	}{
+		{name: "dropdown hides the preview", body: "[tui]\nlayout = \"dropdown\"\n", want: false},
+		{
+			name: "dropdown keeps an explicit preview on",
+			body: "[tui]\nlayout = \"dropdown\"\npreview = true\n",
+			want: true,
+		},
+		{
+			name: "dropdown keeps an explicit preview off",
+			body: "[tui]\nlayout = \"dropdown\"\npreview = false\n",
+			want: false,
+		},
+		{
+			name: "horizontal keeps the preview",
+			body: "[tui]\nlayout = \"horizontal\"\n",
+			want: true,
+		},
+		{name: "vertical keeps the preview", body: "[tui]\nlayout = \"vertical\"\n", want: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+			path := Path()
+			if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+				t.Fatalf("mkdir config dir: %v", err)
+			}
+			if err := os.WriteFile(path, []byte(test.body), 0o600); err != nil {
+				t.Fatalf("write config: %v", err)
+			}
+			loaded, err := Load()
+			if err != nil {
+				t.Fatalf("Load() error = %v", err)
+			}
+			if loaded.TUI.Preview == nil || *loaded.TUI.Preview != test.want {
+				t.Fatalf(
+					"preview for %q = %v, want %v",
+					test.body,
+					loaded.TUI.Preview,
+					test.want,
+				)
+			}
+		})
 	}
 }
 

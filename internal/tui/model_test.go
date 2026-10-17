@@ -85,6 +85,17 @@ func TestShowPreviewFollowsConfig(t *testing.T) {
 	if m := New(WithMultiplexer(newFakeMux())); !m.showPreview {
 		t.Fatal("showPreview = false with preview = true, want true")
 	}
+
+	// The dropdown layout starts compact: the preview is hidden until ctrl+o.
+	writeTUIConfig(t, "[tui]\nlayout = \"dropdown\"\n")
+	if m := New(WithMultiplexer(newFakeMux())); m.showPreview {
+		t.Fatal("showPreview = true with layout = dropdown, want false")
+	}
+
+	writeTUIConfig(t, "[tui]\nlayout = \"dropdown\"\npreview = true\n")
+	if m := New(WithMultiplexer(newFakeMux())); !m.showPreview {
+		t.Fatal("showPreview = false with layout = dropdown and preview = true, want true")
+	}
 }
 
 func TestSelectedItemAndCursorClamp(t *testing.T) {
@@ -149,19 +160,23 @@ func TestInitAndEmptySourceCaches(t *testing.T) {
 	}
 }
 
-func TestWindowSizeGatesPreviewColumn(t *testing.T) {
+// TestPreviewVisibilityFollowsTheToggle pins the preview's own switch. Where the
+// preview window goes — the right column or a band under the results — is the
+// layout's business, so a narrow frame shows it rather than hiding it.
+func TestPreviewVisibilityFollowsTheToggle(t *testing.T) {
 	m := newTestModel(t)
-	m.width, m.height = 99, 30
-	if m.previewVisible() {
-		t.Fatal("preview visible below the minimum width")
-	}
-	m.width = 100
+	m.width, m.height = 80, 24
 	if !m.previewVisible() {
-		t.Fatal("preview hidden at the minimum width")
+		t.Fatal("preview hidden while enabled")
 	}
 	m.showPreview = false
 	if m.previewVisible() {
 		t.Fatal("preview visible while disabled")
+	}
+	m.showPreview = true
+	m.width = 0
+	if m.previewVisible() {
+		t.Fatal("preview visible before the first size message")
 	}
 }
 

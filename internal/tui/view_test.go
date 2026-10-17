@@ -28,6 +28,39 @@ func pickerItems() []sessionmgr.Item {
 	}
 }
 
+// frameLines is the rendered frame's stripped lines, checked to be exactly the
+// frame's width and height: every window border, row, and the footer must land
+// on the planned grid.
+func frameLines(t *testing.T, m Model) []string {
+	t.Helper()
+	lines := strings.Split(sessionmgr.StripANSI(m.View()), "\n")
+	if len(lines) != m.height {
+		t.Fatalf(
+			"frame has %d lines, want %d:\n%s",
+			len(lines),
+			m.height,
+			strings.Join(lines, "\n"),
+		)
+	}
+	width := m.viewLayout().width
+	for i, line := range lines {
+		if got := ansi.StringWidth(line); got != width {
+			t.Fatalf("line %d is %d columns, want %d: %q", i, got, width, line)
+		}
+	}
+	return lines
+}
+
+// promptContentLine is the ANSI-stripped content row of the prompt window.
+func promptContentLine(t *testing.T, m Model) string {
+	t.Helper()
+	l := m.viewLayout()
+	if l.prompt.height < promptWindowRows {
+		t.Fatalf("frame has no prompt window content row (height %d)", l.prompt.height)
+	}
+	return frameLines(t, m)[l.prompt.y+1]
+}
+
 func TestViewSnapshotSanityAcrossWidths(t *testing.T) {
 	for _, width := range []int{40, 80, 140} {
 		m := newTestModel(t)
@@ -35,99 +68,201 @@ func TestViewSnapshotSanityAcrossWidths(t *testing.T) {
 		m.loadedOnce = true
 		m = withItems(m, pickerItems())
 
-		rendered := m.View()
-		out := sessionmgr.StripANSI(rendered)
-		lines := strings.Split(out, "\n")
-		if len(lines) != m.height {
-			t.Fatalf("width %d: view has %d lines, want %d", width, len(lines), m.height)
-		}
-		for i, line := range lines {
-			if got := ansi.StringWidth(line); got >= width {
-				t.Fatalf(
-					"width %d: line %d is %d columns, want < %d: %q",
-					width,
-					i,
-					got,
-					width,
-					line,
-				)
+		out := sessionmgr.StripANSI(m.View())
+		lines := frameLines(t, m)
+
+		// The prompt window is the first thing every layout draws, and its title
+		// carries the active scope; the query row sits inside it.
+		for _, text := range []string{"seshagy · all"} {
+			if !strings.Contains(lines[0], text) {
+				t.Fatalf("width %d: prompt window title missing %q: %q", width, text, lines[0])
 			}
 		}
-		// The chips share the prompt row with the query; there is no separate
-		// filter strip row, so the line under the prompt is the top rule.
-		prompt := lines[0]
-		for _, text := range []string{"❯", placeholderText, "all"} {
-			if !strings.Contains(prompt, text) {
-				t.Fatalf("width %d: prompt row missing %q: %q", width, text, prompt)
-			}
+		if !strings.HasPrefix(lines[0], "╭") {
+			t.Fatalf("width %d: prompt window has no top border: %q", width, lines[0])
 		}
-		if stripped := strings.Trim(lines[1], "─"); stripped != "" {
-			t.Fatalf("width %d: line 1 is not a rule: %q", width, lines[1])
+		promptQuery := lines[m.viewLayout().prompt.y+1]
+		for _, text := range []string{"❯", placeholderText} {
+			if !strings.Contains(promptQuery, text) {
+				t.Fatalf("width %d: prompt content missing %q: %q", width, text, promptQuery)
+			}
 		}
 
-		want := []string{
-			"❯",
-			"all",
-			"@ agents",
-			"seshagy",
-			"↑↓",
-			"4",
-		}
+		want := []string{"Results", "seshagy", "↑↓", "4"}
 		if width >= 60 {
-			want = append(want,
-				"! needs you",
-				"$ sessions",
-				"* dirs",
-				"~ zoxide",
-				"needs you",
-			)
-			// Narrow frames ellipsize titles and the placeholder; keep the
-			// full-text assertions to widths where nothing has to be clipped.
-			want = append(want, "claude-refactor", "review-spec", "~/code/demo")
-		}
-		if width >= 100 {
-			// The chips share the prompt row with the query, so the last ones
-			// only fit on a wide frame.
-			want = append(want, "/ find")
+			// Narrow frames clip titles and the placeholder; keep the full-text
+			// assertions to widths where nothing has to be clipped.
+			want = append(want, "claude-refactor", "review-spec", "need you")
 		}
 		for _, text := range want {
 			if !strings.Contains(out, text) {
 				t.Fatalf("width %d: view missing %q\n%s", width, text, out)
 			}
 		}
-		if strings.Contains(out, "# hosts") {
-			t.Fatalf("width %d: hosts chip shown without host items\n%s", width, out)
+		if strings.Contains(promptQuery, "#") {
+			t.Fatalf("width %d: hosts sigil hinted without host items: %q", width, promptQuery)
 		}
 	}
 }
 
-func TestViewHidesAndShowsHostsChip(t *testing.T) {
-	m := newTestModel(t)
-	m = withItems(m, []sessionmgr.Item{{Kind: sessionmgr.KindHost, Name: "box", Target: "box"}})
-	if out := sessionmgr.StripANSI(m.View()); !strings.Contains(out, "# hosts") {
-		t.Fatalf("hosts chip missing with a host item\n%s", out)
+// TestFrameWindowsAcrossLayoutsAndSizes pins the frame's grid: for every layout
+// and preview state, the frame is exactly the terminal height and every line is
+// exactly the frame width, with the preview window present only when it is on.
+func TestFrameWindowsAcrossLayoutsAndSizes(t *testing.T) {
+	sizes := []struct{ width, height int }{
+		{120, 34},
+		{80, 24},
+		{60, 20},
 	}
-	m = withItems(m, []sessionmgr.Item{{Kind: sessionmgr.KindSession, Name: "dev", Target: "dev"}})
-	if out := sessionmgr.StripANSI(m.View()); strings.Contains(out, "# hosts") {
-		t.Fatalf("hosts chip still shown without host items\n%s", out)
+	layouts := []string{
+		appconfig.LayoutHorizontal,
+		appconfig.LayoutVertical,
+		appconfig.LayoutDropdown,
+	}
+	for _, size := range sizes {
+		for _, layout := range layouts {
+			for _, preview := range []bool{true, false} {
+				name := fmt.Sprintf("%dx%d/%s/preview=%v", size.width, size.height, layout, preview)
+				t.Run(name, func(t *testing.T) {
+					m := newTestModel(t)
+					m.width, m.height = size.width, size.height
+					m.layout = layout
+					m.showPreview = preview
+					m = withItems(m, pickerItems())
+
+					lines := frameLines(t, m)
+					l := m.viewLayout()
+					if l.layout == appconfig.LayoutHorizontal && size.width < horizontalMinWidth {
+						t.Fatalf("horizontal kept below the %d column floor", horizontalMinWidth)
+					}
+					stacked := l.layout != appconfig.LayoutHorizontal
+					if l.prompt.y != 0 || l.results.y != l.prompt.height {
+						t.Fatalf("the prompt window does not sit above the results: %+v", l)
+					}
+					bottom := l.height
+					if l.footer {
+						bottom--
+					}
+					if stacked {
+						if l.prompt.width != l.width || l.results.width != l.width {
+							t.Fatalf("stacked windows are not full width: %+v", l)
+						}
+					} else if preview && (l.prompt.width >= l.width || l.results.width != l.prompt.width) {
+						t.Fatalf("the horizontal left column is not split off: %+v", l)
+					}
+					if !preview {
+						if l.preview.height != 0 {
+							t.Fatalf("preview window drawn with the preview off: %+v", l.preview)
+						}
+						if l.prompt.width != l.width {
+							t.Fatalf("the windows did not take the full width: %+v", l)
+						}
+						if l.results.y+l.results.height != bottom {
+							t.Fatalf("the results did not take the full height: %+v", l)
+						}
+					} else {
+						if l.preview.x+l.preview.width != l.width {
+							t.Fatalf(
+								"the preview window does not reach the right edge: %+v",
+								l.preview,
+							)
+						}
+						if l.preview.y+l.preview.height != bottom {
+							t.Fatalf("the preview window does not reach the footer: %+v", l)
+						}
+						if l.preview.height < 2 {
+							t.Fatalf("preview window height = %d", l.preview.height)
+						}
+						if l.preview.x == 0 {
+							if !stacked || l.preview.y != l.results.y+l.results.height {
+								t.Fatalf(
+									"the stacked preview does not sit under the results: %+v",
+									l,
+								)
+							}
+						} else {
+							if l.preview.y != 0 || l.preview.width < previewMinCols {
+								t.Fatalf("the preview column is misplaced: %+v", l.preview)
+							}
+							if l.prompt.width+windowGap+l.preview.width != l.width {
+								t.Fatalf("the horizontal columns do not tile the frame: %+v", l)
+							}
+						}
+					}
+					if !l.footer {
+						t.Fatalf("%dx%d dropped the footer", size.width, size.height)
+					}
+					if footer := lines[l.height-1]; !strings.Contains(footer, "↑↓ move") {
+						t.Fatalf("footer line = %q", footer)
+					}
+				})
+			}
+		}
 	}
 }
 
-func TestViewHighlightsActiveScopeChip(t *testing.T) {
+// TestPromptWindowTitleCarriesTheScope pins the prompt window title: "seshagy"
+// in the prompt accent, then the active scope, centered in the top border.
+func TestPromptWindowTitleCarriesTheScope(t *testing.T) {
 	withColor(t)
 	m := newTestModel(t)
 	m = withItems(m, pickerItems())
 	m.scope = scopeAgents
-	out := m.View()
-	plain := sessionmgr.StripANSI(out)
-	if !strings.Contains(plain, "@ agents") {
-		t.Fatalf("active chip missing:\n%s", plain)
+
+	l := m.viewLayout()
+	block := m.renderPromptWindow(l)
+	title := sessionmgr.StripANSI(block[0])
+	if !strings.Contains(title, " seshagy · @ agents ") {
+		t.Fatalf("prompt title row = %q", title)
 	}
-	if !strings.Contains(out, "\x1b[") {
-		t.Fatal("chips are rendered without styles")
+	if !strings.HasPrefix(title, "╭") || ansi.StringWidth(title) != l.prompt.width {
+		t.Fatalf("prompt title row is not a window border: %q", title)
 	}
-	if !strings.Contains(strings.Split(plain, "\n")[0], "@ agents") {
-		t.Fatal("chips are not on the prompt row")
+	if !strings.Contains(block[0], m.styles.titlePrompt.Render("seshagy")) {
+		t.Fatalf("seshagy is not drawn in the prompt accent: %q", block[0])
+	}
+	if !strings.Contains(block[0], m.styles.emphasis.Render("@ agents")) {
+		t.Fatalf("scope label is not drawn in the accent: %q", block[0])
+	}
+}
+
+func TestViewHidesAndShowsTheHostsSigil(t *testing.T) {
+	m := newTestModel(t)
+	m = withItems(m, []sessionmgr.Item{{Kind: sessionmgr.KindHost, Name: "box", Target: "box"}})
+	if out := promptContentLine(t, m); !strings.Contains(out, "#") {
+		t.Fatalf("hosts sigil missing from the hint with a host item\n%s", out)
+	}
+	m = withItems(m, []sessionmgr.Item{{Kind: sessionmgr.KindSession, Name: "dev", Target: "dev"}})
+	if out := promptContentLine(t, m); strings.Contains(out, "#") {
+		t.Fatalf("hosts sigil hinted without host items\n%s", out)
+	}
+}
+
+func TestResultsWindowTitleCountsWhatNeedsYou(t *testing.T) {
+	withColor(t)
+	m := newTestModel(t)
+	m = withItems(m, pickerItems())
+
+	l := m.viewLayout()
+	block := m.renderResultsWindow(l)
+	title := sessionmgr.StripANSI(block[0])
+	if !strings.Contains(title, " Results · 1 need you ") {
+		t.Fatalf("results title = %q, want the needs-you count", title)
+	}
+	if !strings.Contains(block[0], m.styles.needsYou.Render("1 need you")) {
+		t.Fatalf("needs-you count is not drawn in the red accent: %q", block[0])
+	}
+
+	// No agents waiting: the count disappears but the title stays.
+	m = withItems(m, []sessionmgr.Item{{
+		Kind:     sessionmgr.KindSession,
+		Name:     "dev",
+		Target:   "dev",
+		Attached: true,
+	}})
+	title = sessionmgr.StripANSI(m.renderResultsWindow(m.viewLayout())[0])
+	if !strings.Contains(title, " Results ") || strings.Contains(title, "need you") {
+		t.Fatalf("results title = %q, want the plain title", title)
 	}
 }
 
@@ -184,15 +319,15 @@ func TestEmptyStateMessages(t *testing.T) {
 	}
 }
 
-func TestPromptRowShowsShortPlaceholderOnly(t *testing.T) {
+func TestPromptShowsShortPlaceholderOnly(t *testing.T) {
 	m := newTestModel(t)
 	m = withItems(m, pickerItems())
 	plain := sessionmgr.StripANSI(m.View())
 	if !strings.Contains(plain, placeholderText) {
 		t.Fatalf("placeholder missing\n%s", plain)
 	}
-	if strings.Contains(placeholderText, "@ agents") {
-		t.Fatal("placeholder lists sigils; the chips are the only place they appear")
+	if strings.Contains(placeholderText, "@") {
+		t.Fatal("placeholder lists sigils; the hint is the only place they appear")
 	}
 }
 
@@ -211,7 +346,7 @@ func TestPromptCursorSitsInTheInputNotAfterThePlaceholder(t *testing.T) {
 	m := newTestModel(t)
 	m = withItems(m, pickerItems())
 
-	empty := m.renderPromptRow(80)
+	empty := m.renderPromptContent(80)
 	if got := cursorColumn(t, empty); got != 2 {
 		t.Fatalf("empty query: cursor column = %d, want 2: %q", got, empty)
 	}
@@ -220,42 +355,45 @@ func TestPromptCursorSitsInTheInputNotAfterThePlaceholder(t *testing.T) {
 	}
 
 	m.query = "api"
-	typed := m.renderPromptRow(80)
+	typed := m.renderPromptContent(80)
 	if got := cursorColumn(t, typed); got != 5 {
 		t.Fatalf("typed query: cursor column = %d, want 5: %q", got, typed)
 	}
 }
 
-func TestPromptRowDropsInactiveChipsFromTheEnd(t *testing.T) {
+func TestPromptContentShowsTheHintAndCount(t *testing.T) {
+	withColor(t)
 	m := newTestModel(t)
 	m = withItems(m, pickerItems())
 	m.scope = scopeAgents
 
-	row := sessionmgr.StripANSI(m.renderPromptRow(30))
-	if !strings.Contains(row, "@ agents") {
-		t.Fatalf("active chip dropped: %q", row)
-	}
-	for _, dropped := range []string{"/ find", "~ zoxide", "* dirs", "$ sessions"} {
-		if strings.Contains(row, dropped) {
-			t.Fatalf("narrow row kept %q: %q", dropped, row)
+	wide := m.renderPromptContent(78)
+	plain := sessionmgr.StripANSI(wide)
+	for _, sigil := range []string{"@", "!", "$", "*", "~", "/"} {
+		if !strings.Contains(plain, sigil) {
+			t.Fatalf("sigil hint missing %q: %q", sigil, plain)
 		}
 	}
-
-	// The active chip is the last one: it survives while the others go.
-	m = withItems(m, []sessionmgr.Item{{Kind: sessionmgr.KindHost, Name: "box", Target: "box"}})
-	m.scope = scopeHosts
-	hosts := sessionmgr.StripANSI(m.renderPromptRow(28))
-	if !strings.Contains(hosts, "# hosts") {
-		t.Fatalf("trailing active chip dropped: %q", hosts)
+	if !strings.HasSuffix(plain, "2/4") {
+		t.Fatalf("the shown/total count is not right-aligned: %q", plain)
 	}
-	if strings.Contains(hosts, "all") {
-		t.Fatalf("narrow row kept an inactive chip: %q", hosts)
+	if !strings.Contains(wide, m.styles.chipActive.Render("@")) {
+		t.Fatalf("the active scope's sigil is not accented: %q", wide)
 	}
 
-	// The query wins: a long query leaves no room for any chip.
+	// A narrow prompt window drops the hint but keeps the count.
+	narrow := sessionmgr.StripANSI(m.renderPromptContent(20))
+	if strings.Contains(narrow, "@") {
+		t.Fatalf("hint kept in a narrow prompt window: %q", narrow)
+	}
+	if !strings.Contains(narrow, "2/4") {
+		t.Fatalf("count dropped in a narrow prompt window: %q", narrow)
+	}
+
+	// The query wins: a long query leaves no room for the hint.
 	m.query = strings.Repeat("q", 40)
-	if row := sessionmgr.StripANSI(m.renderPromptRow(30)); strings.Contains(row, "all") {
-		t.Fatalf("chips overlap a long query: %q", row)
+	if row := sessionmgr.StripANSI(m.renderPromptContent(30)); strings.Contains(row, "@") {
+		t.Fatalf("hint overlaps a long query: %q", row)
 	}
 }
 
@@ -264,35 +402,47 @@ func TestFooterCounterAndHintDropping(t *testing.T) {
 	m = withItems(m, pickerItems())
 	m.scope = scopeAgents
 	m.query = "claude"
-	wide := sessionmgr.StripANSI(m.renderFooter(m.width))
-	if !strings.Contains(wide, "1/4") {
-		t.Fatalf("wide footer = %q, want the 1/4 counter", wide)
+
+	// The shown/total count lives in the prompt window, not the footer.
+	prompt := sessionmgr.StripANSI(m.renderPromptContent(m.viewLayout().listWidth()))
+	if !strings.Contains(prompt, "1/4") {
+		t.Fatalf("prompt content = %q, want the 1/4 count", prompt)
 	}
+
+	wide := sessionmgr.StripANSI(m.renderFooter(m.width))
 	if !strings.Contains(wide, "yazi") {
 		t.Fatalf("wide footer dropped hints: %q", wide)
 	}
+	if strings.Contains(wide, "1/4") {
+		t.Fatalf("footer still shows the count: %q", wide)
+	}
 
 	narrow := sessionmgr.StripANSI(m.renderFooter(40))
-	if !strings.Contains(narrow, "1/4") {
-		t.Fatalf("narrow footer = %q, want the counter kept", narrow)
-	}
 	if strings.Contains(narrow, "yazi") {
 		t.Fatalf("narrow footer kept a hint that must drop from the end: %q", narrow)
 	}
+	if !strings.Contains(narrow, "↑↓ move") {
+		t.Fatalf("narrow footer dropped every hint: %q", narrow)
+	}
 }
 
-func TestFooterKillConfirmationReplacesHints(t *testing.T) {
+func TestKillConfirmationRendersInThePromptWindow(t *testing.T) {
 	m := newTestModel(t)
 	m = withItems(
 		m,
 		[]sessionmgr.Item{{Kind: sessionmgr.KindSession, Name: "demo", Target: "demo"}},
 	)
 	m, _ = press(t, m, "ctrl+x")
-	footer := sessionmgr.StripANSI(m.renderFooter(m.width))
-	if !strings.Contains(footer, "kill session demo?") {
-		t.Fatalf("footer = %q, want the confirmation question", footer)
+
+	prompt := sessionmgr.StripANSI(m.renderPromptContent(m.viewLayout().listWidth()))
+	if !strings.Contains(prompt, "kill session demo?") {
+		t.Fatalf("prompt window = %q, want the confirmation question", prompt)
 	}
-	if !strings.Contains(footer, "⏎/y confirm · any other key cancels") {
+	if !strings.Contains(prompt, "⏎/y confirm · any other key cancels") {
+		t.Fatalf("prompt window = %q, want the confirmation keys", prompt)
+	}
+	footer := sessionmgr.StripANSI(m.renderFooter(m.width))
+	if !strings.Contains(footer, "confirm") {
 		t.Fatalf("footer = %q, want the confirmation keys", footer)
 	}
 	if strings.Contains(footer, "yazi") {
@@ -311,9 +461,9 @@ func TestFooterShowsRenameHintWhileRenaming(t *testing.T) {
 	if !strings.Contains(footer, "save") || !strings.Contains(footer, "cancel") {
 		t.Fatalf("rename footer = %q", footer)
 	}
-	prompt := sessionmgr.StripANSI(m.renderPromptRow(m.width))
+	prompt := sessionmgr.StripANSI(m.renderPromptContent(m.viewLayout().listWidth()))
 	if !strings.Contains(prompt, "rename") || !strings.Contains(prompt, "demo") {
-		t.Fatalf("rename prompt row = %q", prompt)
+		t.Fatalf("rename prompt window = %q", prompt)
 	}
 }
 
@@ -347,7 +497,11 @@ func TestRenderPreviewBottomAnchoredForCapturesAndTopForDirs(t *testing.T) {
 			m.preview = content
 			m.previewKey = tt.item.Key()
 
-			out := strings.Join(m.renderPreview(40, 6), "\n")
+			lines := m.renderPreviewContent(40, 6)
+			if len(lines) != 6 {
+				t.Fatalf("preview lines = %d, want exactly 6", len(lines))
+			}
+			out := strings.Join(lines, "\n")
 			if tt.wantLast &&
 				(!strings.Contains(out, "line09") || strings.Contains(out, "line00")) {
 				t.Fatalf("bottom-anchored preview = %q", out)
@@ -369,7 +523,7 @@ func TestPreviewClippingKeepsANSIAndWidth(t *testing.T) {
 	red := "\x1b[31m"
 	m.preview = red + strings.Repeat("x", 60) + "\x1b[0m"
 
-	lines := m.renderPreview(20, 4)
+	lines := m.renderPreviewContent(20, 4)
 	if len(lines) != 4 {
 		t.Fatalf("preview lines = %d, want 4", len(lines))
 	}
@@ -384,38 +538,99 @@ func TestPreviewClippingKeepsANSIAndWidth(t *testing.T) {
 	}
 }
 
-func TestPreviewColumnOnlyWhenWideEnough(t *testing.T) {
-	for _, tt := range []struct {
-		width     int
-		wantSplit bool
+// TestLayoutResolvesPreviewAndThresholds pins the layout split itself: the
+// horizontal split needs 100 columns and falls back to the stacked layout below
+// it, the preview column keeps its floor, and the stacked results keep their
+// share of the rows.
+func TestLayoutResolvesPreviewAndThresholds(t *testing.T) {
+	tests := []struct {
+		name       string
+		width      int
+		height     int
+		layout     string
+		preview    bool
+		wantLayout string
+		wantSplit  bool
 	}{
-		{80, false},
-		{99, false},
-		{100, true},
-		{160, true},
-	} {
-		m := newTestModel(t)
-		m.width, m.height = tt.width, 30
-		m = withItems(m, []sessionmgr.Item{
-			{Kind: sessionmgr.KindSession, Name: "demo", Target: "demo"},
+		{
+			"horizontal keeps the split",
+			120,
+			34,
+			appconfig.LayoutHorizontal,
+			true,
+			appconfig.LayoutHorizontal,
+			true,
+		},
+		{
+			"horizontal falls back below 100",
+			99,
+			34,
+			appconfig.LayoutHorizontal,
+			true,
+			appconfig.LayoutVertical,
+			false,
+		},
+		{
+			"vertical stays stacked",
+			120,
+			34,
+			appconfig.LayoutVertical,
+			true,
+			appconfig.LayoutVertical,
+			false,
+		},
+		{
+			"dropdown stays stacked",
+			120,
+			34,
+			appconfig.LayoutDropdown,
+			true,
+			appconfig.LayoutDropdown,
+			false,
+		},
+		{
+			"preview off takes the width",
+			120,
+			34,
+			appconfig.LayoutHorizontal,
+			false,
+			appconfig.LayoutHorizontal,
+			false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			l := computeViewLayout(tt.width, tt.height, tt.layout, tt.preview)
+			if l.layout != tt.wantLayout {
+				t.Fatalf("effective layout = %q, want %q", l.layout, tt.wantLayout)
+			}
+			if tt.wantSplit {
+				if l.preview.width < previewMinCols || l.preview.x != l.results.width+windowGap {
+					t.Fatalf("preview column = %+v", l.preview)
+				}
+				return
+			}
+			if l.preview.height != 0 && !tt.preview {
+				t.Fatalf("preview window drawn with the preview off: %+v", l.preview)
+			}
+			if tt.preview && l.preview.height == 0 {
+				t.Fatalf("stacked preview window missing: %+v", l)
+			}
 		})
-		l := m.viewLayout()
-		if tt.wantSplit != (l.previewWidth > 0) {
-			t.Fatalf(
-				"width %d: previewWidth = %d, want split = %v",
-				tt.width,
-				l.previewWidth,
-				tt.wantSplit,
-			)
-		}
-		if l.previewWidth > 0 && l.previewWidth < previewMinCols {
-			t.Fatalf(
-				"width %d: previewWidth = %d, below the %d column floor",
-				tt.width,
-				l.previewWidth,
-				previewMinCols,
-			)
-		}
+	}
+
+	// The stacked split keeps the results window's share of the rows.
+	l := computeViewLayout(80, 24, appconfig.LayoutVertical, true)
+	rows := 24 - 1 - promptWindowRows
+	wantResults := max(minResultsRows, rows*resultsPercent/100)
+	if l.results.height != wantResults {
+		t.Fatalf("stacked results height = %d, want %d", l.results.height, wantResults)
+	}
+	if l.preview.y != l.results.y+l.results.height {
+		t.Fatalf("preview window does not follow the results: %+v", l)
+	}
+	if l.prompt.height != promptWindowRows {
+		t.Fatalf("prompt window height = %d, want %d", l.prompt.height, promptWindowRows)
 	}
 }
 
@@ -656,81 +871,10 @@ func TestSessionRowMetaPutsAttachedFirstAndCountLast(t *testing.T) {
 	}
 }
 
-func TestListWindowReservesCounterLines(t *testing.T) {
-	tests := []struct {
-		name                             string
-		total, cursor, height            int
-		wantStart, wantEnd, wantCounters int
-	}{
-		{
-			name:         "top hides below",
-			total:        40,
-			cursor:       0,
-			height:       6,
-			wantStart:    0,
-			wantEnd:      5,
-			wantCounters: 1,
-		},
-		{
-			name:         "bottom hides above",
-			total:        40,
-			cursor:       39,
-			height:       6,
-			wantStart:    35,
-			wantEnd:      40,
-			wantCounters: 1,
-		},
-		{
-			name:         "middle hides both",
-			total:        40,
-			cursor:       20,
-			height:       6,
-			wantStart:    18,
-			wantEnd:      22,
-			wantCounters: 2,
-		},
-		{
-			name:         "everything fits",
-			total:        4,
-			cursor:       0,
-			height:       6,
-			wantStart:    0,
-			wantEnd:      4,
-			wantCounters: 2,
-		},
-		{
-			name:         "exact fit",
-			total:        6,
-			cursor:       3,
-			height:       6,
-			wantStart:    0,
-			wantEnd:      6,
-			wantCounters: 0,
-		},
-		{
-			name:         "single row list",
-			total:        40,
-			cursor:       20,
-			height:       1,
-			wantStart:    20,
-			wantEnd:      21,
-			wantCounters: 0,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			start, end, counters := listWindow(tt.total, tt.cursor, tt.height)
-			if start != tt.wantStart || end != tt.wantEnd || counters != tt.wantCounters {
-				t.Fatalf("listWindow(%d, %d, %d) = (%d, %d, %d), want (%d, %d, %d)",
-					tt.total, tt.cursor, tt.height,
-					start, end, counters,
-					tt.wantStart, tt.wantEnd, tt.wantCounters)
-			}
-		})
-	}
-}
-
-func TestRenderBodyShowsScrollCounters(t *testing.T) {
+// TestResultsWindowCountersLiveInTheBottomBorder pins the results window frame:
+// every inner row is an item and the scroll counters are drawn in the bottom
+// border instead of taking rows away from the list.
+func TestResultsWindowCountersLiveInTheBottomBorder(t *testing.T) {
 	items := make([]sessionmgr.Item, 40)
 	for i := range items {
 		items[i] = sessionmgr.Item{
@@ -742,67 +886,66 @@ func TestRenderBodyShowsScrollCounters(t *testing.T) {
 	tests := []struct {
 		name         string
 		cursor       int
-		wantFirst    string
-		wantLast     string
+		wantAbove    string
+		wantBelow    string
 		wantSelected string
 	}{
-		{name: "top only", cursor: 0, wantFirst: "s00", wantLast: "↓ 35 more", wantSelected: "s00"},
+		{name: "top only", cursor: 0, wantBelow: "↓ 26 more", wantSelected: "s00"},
 		{
 			name:         "both",
 			cursor:       20,
-			wantFirst:    "↑ 18 more",
-			wantLast:     "↓ 18 more",
+			wantAbove:    "↑ 13 more · ↓ 13 more",
 			wantSelected: "s20",
 		},
-		{
-			name:         "bottom only",
-			cursor:       39,
-			wantFirst:    "↑ 35 more",
-			wantLast:     "s39",
-			wantSelected: "s39",
-		},
+		{name: "bottom only", cursor: 39, wantAbove: "↑ 26 more", wantSelected: "s39"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m := newTestModel(t)
-			m.width, m.height = 80, 10
+			m.width, m.height = 120, 20
+			m.showPreview = false
 			m = withItems(m, items)
 			m = m.setCursor(tt.cursor)
 
 			l := m.viewLayout()
-			body := m.renderBody(l)
-			if len(body) != l.bodyHeight {
-				t.Fatalf("body lines = %d, want %d", len(body), l.bodyHeight)
+			block := m.renderResultsWindow(l)
+			if len(block) != l.results.height {
+				t.Fatalf("results window is %d lines, want %d", len(block), l.results.height)
 			}
-			first := sessionmgr.StripANSI(body[0])
-			last := sessionmgr.StripANSI(body[len(body)-1])
-			if !strings.Contains(first, tt.wantFirst) {
-				t.Fatalf("first list line = %q, want %q", first, tt.wantFirst)
+			if l.listHeight() != 14 {
+				t.Fatalf("results inner height = %d, want 14", l.listHeight())
 			}
-			if !strings.Contains(last, tt.wantLast) {
-				t.Fatalf("last list line = %q, want %q", last, tt.wantLast)
+			bottom := sessionmgr.StripANSI(block[len(block)-1])
+			if !strings.HasPrefix(bottom, "╰") || !strings.HasSuffix(bottom, "╯") {
+				t.Fatalf("results bottom border = %q", bottom)
 			}
+			if want := tt.wantAbove + tt.wantBelow; want != "" && !strings.Contains(bottom, want) {
+				t.Fatalf("results bottom border = %q, want %q", bottom, want)
+			}
+			// No inner row is spent on a counter, and the selection is visible.
 			selected := ""
-			for _, line := range body {
-				if strings.Contains(line, "\x1b[7m") || strings.Contains(line, "▌") {
-					selected = sessionmgr.StripANSI(line)
+			for _, line := range block[1 : len(block)-1] {
+				plain := sessionmgr.StripANSI(line)
+				if strings.Contains(plain, "more") {
+					t.Fatalf("counter drawn inside the results window: %q", plain)
+				}
+				if strings.Contains(line, "\x1b[7m") || strings.Contains(plain, "▌") {
+					selected = plain
 				}
 			}
 			if !strings.Contains(selected, tt.wantSelected) {
-				t.Fatalf("selected line = %q, want %q", selected, tt.wantSelected)
+				t.Fatalf("selected row = %q, want %q", selected, tt.wantSelected)
 			}
 		})
 	}
 
 	// No counters when every row fits.
 	m := newTestModel(t)
-	m.width, m.height = 80, 20
+	m.width, m.height = 120, 20
 	m = withItems(m, items[:4])
-	for _, line := range m.renderBody(m.viewLayout()) {
-		plain := sessionmgr.StripANSI(line)
-		if strings.Contains(plain, "more") {
-			t.Fatalf("counter drawn without hidden rows: %q", plain)
-		}
+	block := m.renderResultsWindow(m.viewLayout())
+	if out := sessionmgr.StripANSI(strings.Join(block, "\n")); strings.Contains(out, "more") {
+		t.Fatalf("counter drawn without hidden rows:\n%s", out)
 	}
 }
 
@@ -814,7 +957,7 @@ func TestPreviewHardCutKeepsWidthColorsAndNoEllipsis(t *testing.T) {
 	})
 	m.preview = "\x1b[31m" + strings.Repeat("x", 60) + "\x1b[0m"
 
-	lines := m.renderPreview(20, 2)
+	lines := m.renderPreviewContent(20, 2)
 	joined := strings.Join(lines, "\n")
 	if strings.Contains(joined, "…") {
 		t.Fatalf("preview shows an ellipsis:\n%q", joined)
@@ -834,18 +977,53 @@ func TestPreviewHardCutKeepsWidthColorsAndNoEllipsis(t *testing.T) {
 	}
 }
 
-func TestPreviewHeaderIsHardCutWithoutEllipsis(t *testing.T) {
+// TestPreviewWindowTitleIsTheSelectedItem pens the preview window's top border:
+// the item name is the title, it is sanitized, and a name too wide for the
+// border is clamped instead of pushing the corner out.
+func TestPreviewWindowTitleIsTheSelectedItem(t *testing.T) {
 	m := newTestModel(t)
-	long := strings.Repeat("n", 40)
+	m = withItems(m, []sessionmgr.Item{
+		{Kind: sessionmgr.KindSession, Name: "demo", Target: "demo"},
+	})
+	l := m.viewLayout()
+	title := sessionmgr.StripANSI(m.renderPreviewWindow(l)[0])
+	if !strings.Contains(title, " demo ") {
+		t.Fatalf("preview title row = %q, want the item name", title)
+	}
+	if got := ansi.StringWidth(title); got != l.preview.width {
+		t.Fatalf("preview title row is %d columns, want %d: %q", got, l.preview.width, title)
+	}
+
+	long := strings.Repeat("n", 90)
 	m = withItems(m, []sessionmgr.Item{
 		{Kind: sessionmgr.KindSession, Name: long, Target: long},
 	})
-	header := sessionmgr.StripANSI(m.renderPreview(20, 2)[0])
-	if strings.Contains(header, "…") {
-		t.Fatalf("preview header shows an ellipsis: %q", header)
+	title = sessionmgr.StripANSI(m.renderPreviewWindow(m.viewLayout())[0])
+	if got := ansi.StringWidth(title); got != l.preview.width {
+		t.Fatalf(
+			"clamped preview title row is %d columns, want %d: %q",
+			got,
+			l.preview.width,
+			title,
+		)
 	}
-	if got := ansi.StringWidth(header); got != 20 {
-		t.Fatalf("preview header width = %d, want exactly 20: %q", got, header)
+
+	// A control character in a multiplexer-supplied name never reaches the
+	// border.
+	m = withItems(m, []sessionmgr.Item{
+		{Kind: sessionmgr.KindSession, Name: "ev\x1b[1;1Hil", Target: "x"},
+	})
+	title = m.renderPreviewWindow(m.viewLayout())[0]
+	if strings.Contains(title, "\x1b[1;1H") {
+		t.Fatalf("preview title kept a cursor move: %q", title)
+	}
+	if got := ansi.StringWidth(sessionmgr.StripANSI(title)); got != l.preview.width {
+		t.Fatalf(
+			"sanitized preview title row is %d columns, want %d: %q",
+			got,
+			l.preview.width,
+			title,
+		)
 	}
 }
 

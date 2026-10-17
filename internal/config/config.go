@@ -230,7 +230,6 @@ func Default() Config {
 			Layout:        LayoutHorizontal,
 			InputStyle:    InputStylePopup,
 			DimBackground: ptrBool(true),
-			Preview:       ptrBool(true),
 		},
 	}
 }
@@ -327,7 +326,9 @@ func (c *Config) Normalize() {
 		c.TUI.DimBackground = ptrBool(true)
 	}
 	if c.TUI.Preview == nil {
-		c.TUI.Preview = ptrBool(true)
+		// The preview follows the layout unless [tui] preview says otherwise: the
+		// compact dropdown starts hidden and ctrl+o reveals it.
+		c.TUI.Preview = ptrBool(c.TUI.Layout != LayoutDropdown)
 	}
 	normalizeRemoteHosts(&c.Remote, &c.Hosts)
 }

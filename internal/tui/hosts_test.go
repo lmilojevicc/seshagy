@@ -104,10 +104,15 @@ func TestPickerShowsHostsFromConfig(t *testing.T) {
 	m = model.(Model)
 	m.loadedOnce = true // render rows instead of the loading state
 	out := sessionmgr.StripANSI(m.View())
-	for _, want := range []string{"# hosts", "homelab", "milo@192.168.1.10", "bastion"} {
+	for _, want := range []string{"homelab", "milo@192.168.1.10", "bastion"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("picker view missing %q:\n%s", want, out)
 		}
+	}
+	// The hosts scope is offered in the prompt window's sigil hint rather than
+	// as a filter chip.
+	if !strings.Contains(out, "#") {
+		t.Fatalf("hosts sigil missing from the prompt hint:\n%s", out)
 	}
 }
 

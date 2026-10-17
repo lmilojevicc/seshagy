@@ -241,12 +241,13 @@ func New(optionFns ...Option) Model {
 	for _, option := range optionFns {
 		option(&settings)
 	}
-	cfg, cfgErr := appconfig.Config{}, settings.startupErr
+	var cfg appconfig.Config
+	cfgErr := settings.startupErr
 	if settings.config != nil {
 		cfg = *settings.config
 	} else {
-		var err error
-		cfg, err = appconfig.Load()
+		loaded, err := appconfig.Load()
+		cfg = loaded
 		if cfgErr == nil {
 			cfgErr = err
 		}
@@ -446,10 +447,12 @@ func (m Model) applyAgentStarts(msg agentStartedMsg) Model {
 	return m
 }
 
-// previewVisible reports whether the preview column is drawn: enabled and wide
-// enough to keep a usable list beside it.
+// previewVisible reports whether the preview window is drawn: enabled by
+// [tui] preview and not toggled off with ctrl+o. Where it goes is the layout's
+// business — a frame too narrow for a preview column stacks it under the results
+// window instead of dropping it.
 func (m Model) previewVisible() bool {
-	return m.showPreview && m.width >= previewMinWidth
+	return m.showPreview && m.width > 0 && m.height > 0
 }
 
 // requestPreview schedules a capture for the selected item unless its payload

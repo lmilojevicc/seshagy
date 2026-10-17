@@ -7,17 +7,29 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
+	appconfig "github.com/lmilojevicc/seshagy/internal/config"
 	"github.com/lmilojevicc/seshagy/internal/integrations"
 	"github.com/lmilojevicc/seshagy/internal/sessionmgr"
 )
 
 const (
-	// previewMinWidth gates the list+preview split.
-	previewMinWidth = 100
-	// previewPercent is the preview column's share of the frame width.
+	// horizontalMinWidth is the narrowest frame the horizontal layout keeps a
+	// list column and a preview column side by side; a narrower frame stacks.
+	horizontalMinWidth = 100
+	// previewPercent is the preview column's share of a horizontal frame width.
 	previewPercent = 45
 	// previewMinCols is the narrowest usable preview column.
 	previewMinCols = 28
+	// promptWindowRows is the prompt window's height: top border, content row,
+	// bottom border.
+	promptWindowRows = 3
+	// resultsPercent is the stacked layouts' share of the rows left after the
+	// prompt window; the preview window takes the rest.
+	resultsPercent = 45
+	// minResultsRows is the shortest results window that still shows a row.
+	minResultsRows = 3
+	// footerMinHeight is the shortest frame that keeps the footer key line.
+	footerMinHeight = 6
 	// metaColumnMax caps each right-aligned meta column.
 	metaColumnMax = 18
 	// titleMinWidth is the room a title keeps before meta columns are dropped.
@@ -26,50 +38,113 @@ const (
 	hostIcon = "󰒋 "
 
 	placeholderText = "type to search"
+	// promptMinQuery is the room the query keeps in the prompt window before the
+	// sigil hint is dropped; the placeholder always fits while the hint is shown.
+	promptMinQuery = len(placeholderText) + 2
 )
 
-// viewLayout is one frame's row/column budget: a prompt row, optional rules, an
-// optional footer, and the body in between.
-type viewLayout struct {
-	width        int
-	bodyHeight   int
-	listWidth    int
-	previewWidth int
-	rules        bool
-	footer       bool
+// windowBox is one window of the frame: the cell it starts at and its size.
+type windowBox struct {
+	x, y          int
+	width, height int
 }
 
-func computeViewLayout(width, height int, preview bool) viewLayout {
-	rules := height >= 8
-	footer := height >= 6
-	chrome := 1 // prompt row (query + filter chips)
-	if rules {
-		chrome += 2
-	}
-	if footer {
-		chrome++
-	}
+// viewLayout is one frame's window budget: the prompt, results, and preview
+// windows plus the footer key line. It is resolved — the sub-horizontalMinWidth
+// fallback is applied and the preview window is empty when the preview is off.
+type viewLayout struct {
+	width  int
+	height int
+	// layout is the effective layout: horizontal, vertical, or dropdown.
+	layout string
+	footer bool
+
+	prompt  windowBox
+	results windowBox
+	preview windowBox
+}
+
+// listWidth is the results window's inner width: the columns its rows draw in.
+func (l viewLayout) listWidth() int { return max(0, l.results.width-2) }
+
+// listHeight is the results window's inner height: the rows it can show.
+func (l viewLayout) listHeight() int { return max(0, l.results.height-2) }
+
+// computeViewLayout splits a frame into the three telescope windows. The
+// horizontal layout puts the prompt window over the results window in a left
+// column and runs the preview down the right column; the vertical and dropdown
+// layouts stack the three full width. The preview window stays empty when the
+// preview is off, and the left column or the results window then take the room.
+func computeViewLayout(width, height int, layout string, preview bool) viewLayout {
 	l := viewLayout{
-		width:      width,
-		bodyHeight: max(1, height-chrome),
-		listWidth:  width,
-		rules:      rules,
-		footer:     footer,
+		width:  max(0, width),
+		height: max(0, height),
+		layout: effectiveLayout(layout, width),
 	}
-	if preview {
-		l.previewWidth = max(previewMinCols, width*previewPercent/100)
-		l.listWidth = max(1, width-l.previewWidth-3) // " │ "
+	if l.width == 0 || l.height == 0 {
+		return l
+	}
+	l.footer = l.height >= footerMinHeight
+	rows := l.height
+	if l.footer {
+		rows--
+	}
+	promptRows := min(promptWindowRows, rows)
+	switch l.layout {
+	case appconfig.LayoutVertical, appconfig.LayoutDropdown:
+		rest := rows - promptRows
+		l.prompt = windowBox{x: 0, y: 0, width: l.width, height: promptRows}
+		l.results = windowBox{x: 0, y: promptRows, width: l.width, height: rest}
+		if preview && rest > 0 {
+			resultsRows := min(rest, max(minResultsRows, rest*resultsPercent/100))
+			l.results.height = resultsRows
+			l.preview = windowBox{
+				x:      0,
+				y:      promptRows + resultsRows,
+				width:  l.width,
+				height: rest - resultsRows,
+			}
+		}
+	default:
+		left := l.width
+		if preview {
+			previewCols := min(l.width, max(previewMinCols, l.width*previewPercent/100))
+			left = max(1, l.width-previewCols-windowGap)
+			l.preview = windowBox{
+				x:      left + windowGap,
+				y:      0,
+				width:  l.width - left - windowGap,
+				height: rows,
+			}
+		}
+		l.prompt = windowBox{x: 0, y: 0, width: left, height: promptRows}
+		l.results = windowBox{x: 0, y: promptRows, width: left, height: rows - promptRows}
 	}
 	return l
 }
 
-func (m Model) viewLayout() viewLayout {
-	return computeViewLayout(safeWidth(m.width), m.height, m.previewVisible())
+// effectiveLayout resolves a configured layout against the frame width: the
+// horizontal split needs horizontalMinWidth columns, so a narrower frame stacks
+// vertically instead. Unknown tokens are horizontal.
+func effectiveLayout(layout string, width int) string {
+	switch layout {
+	case appconfig.LayoutVertical, appconfig.LayoutDropdown:
+		return layout
+	default:
+		if width < horizontalMinWidth {
+			return appconfig.LayoutVertical
+		}
+		return appconfig.LayoutHorizontal
+	}
 }
 
-// bodyHeight is the number of list rows a frame shows; page-up/down uses it.
+func (m Model) viewLayout() viewLayout {
+	return computeViewLayout(safeWidth(m.width), m.height, m.layout, m.previewVisible())
+}
+
+// bodyHeight is the number of result rows a frame shows; page-up/down uses it.
 func (m Model) bodyHeight() int {
-	return m.viewLayout().bodyHeight
+	return m.viewLayout().listHeight()
 }
 
 func (m Model) View() string {
@@ -87,36 +162,134 @@ func (m Model) View() string {
 
 func (m Model) renderPicker() string {
 	l := m.viewLayout()
-	lines := make([]string, 0, m.height)
-	lines = append(lines, m.renderPromptRow(l.width))
-	if l.rules {
-		lines = append(lines, m.renderRule(l.width))
+	frame := blankFrame(l.width, l.height)
+	place := func(lines []string, box windowBox) {
+		if len(lines) == 0 {
+			return
+		}
+		frame = overlay(frame, strings.Join(lines, "\n"), box.x, box.y)
 	}
-	lines = append(lines, m.renderBody(l)...)
-	if l.rules {
-		lines = append(lines, m.renderRule(l.width))
+	place(m.renderPromptWindow(l), l.prompt)
+	place(m.renderResultsWindow(l), l.results)
+	if l.preview.height > 0 {
+		place(m.renderPreviewWindow(l), l.preview)
 	}
 	if l.footer {
-		lines = append(lines, m.renderFooter(l.width))
+		footer := pad(clampStyledText(m.renderFooter(l.width), l.width), l.width)
+		place([]string{footer}, windowBox{y: l.height - 1})
 	}
-	return trimHeight(strings.Join(lines, "\n"), max(1, m.height))
+	return frame
 }
 
-func (m Model) renderRule(width int) string {
-	return m.styles.rule.Render(strings.Repeat("─", max(0, width)))
+// blankFrame is the l.width x l.height canvas the windows are drawn on.
+func blankFrame(width, height int) string {
+	line := strings.Repeat(" ", max(0, width))
+	lines := make([]string, max(0, height))
+	for i := range lines {
+		lines[i] = line
+	}
+	return strings.Join(lines, "\n")
 }
 
-// composeLine left-aligns left and right-aligns right inside width, dropping the
-// right side when both cannot fit.
-func composeLine(left, right string, width int, rightStyle lipgloss.Style) string {
-	if right == "" {
-		return clampStyledText(left, width)
+// renderPromptWindow draws the prompt window: the active scope in the window
+// title, the query row inside it.
+func (m Model) renderPromptWindow(l viewLayout) []string {
+	title := m.styles.titlePrompt.Render("seshagy") +
+		m.styles.muted.Render(" · ") +
+		m.styles.emphasis.Render(m.scope.chip())
+	content := m.renderPromptContent(max(0, l.prompt.width-2))
+	return drawWindow(
+		title,
+		[]string{content},
+		l.prompt.width,
+		l.prompt.height,
+		m.styles.border,
+		"",
+	)
+}
+
+// renderResultsWindow draws the results window: the item rows inside it, the
+// needs-you count in the title, and the scroll counters in the bottom border.
+func (m Model) renderResultsWindow(l viewLayout) []string {
+	rows := m.rows()
+	lines, above, below := m.resultsRows(rows, l.listWidth(), l.listHeight())
+	bottom := resultsScrollCounter(above, below)
+	if bottom != "" {
+		bottom = m.styles.muted.Render(bottom)
 	}
-	right = rightStyle.Render(right)
-	if lipgloss.Width(left)+lipgloss.Width(right)+1 > width {
-		return clampStyledText(left, width)
+	title := m.styles.titleResults.Render("Results")
+	if n := needsYouCount(rows); n > 0 {
+		title += m.styles.muted.Render(" · ") +
+			m.styles.needsYou.Render(fmt.Sprintf("%d need you", n))
 	}
-	return left + strings.Repeat(" ", width-lipgloss.Width(left)-lipgloss.Width(right)) + right
+	return drawWindow(title, lines, l.results.width, l.results.height, m.styles.border, bottom)
+}
+
+// resultsRows draws the results window's inner rows and reports how many rows
+// the window hides above and below its position, for the bottom border.
+func (m Model) resultsRows(
+	rows []row,
+	width, height int,
+) (lines []string, above, below int) {
+	if height <= 0 {
+		return nil, 0, 0
+	}
+	if !m.loadedOnce {
+		return centeredNote(width, height, m.styles.muted.Render("loading…")), 0, 0
+	}
+	if len(rows) == 0 {
+		return m.renderEmptyState(width, height), 0, 0
+	}
+	start, end := visibleWindow(len(rows), m.cursor, height)
+	visible := rows[start:end]
+	metas := make([][]metaCell, len(visible))
+	for i, r := range visible {
+		metas[i] = m.rowMeta(r)
+	}
+	grid := buildMetaGrid(metas, width-m.rowPrefixWidth()-titleMinWidth-2)
+	lines = make([]string, 0, len(visible))
+	for i, r := range visible {
+		lines = append(lines, m.renderRow(r, metas[i], grid, width, start+i == m.cursor))
+	}
+	return lines, start, len(rows) - end
+}
+
+// resultsScrollCounter spells the rows hidden above and below the visible
+// window, for the results window's bottom border.
+func resultsScrollCounter(above, below int) string {
+	parts := make([]string, 0, 2)
+	if above > 0 {
+		parts = append(parts, fmt.Sprintf("↑ %d more", above))
+	}
+	if below > 0 {
+		parts = append(parts, fmt.Sprintf("↓ %d more", below))
+	}
+	return strings.Join(parts, " · ")
+}
+
+// needsYouCount counts the rows waiting on the user: blocked agents, plus agents
+// that finished a turn nobody has looked at yet.
+func needsYouCount(rows []row) int {
+	n := 0
+	for _, r := range rows {
+		if needsAttention(r.item) {
+			n++
+		}
+	}
+	return n
+}
+
+// renderPreviewWindow draws the preview window: the selected item's name as the
+// window title and the captured content inside it.
+func (m Model) renderPreviewWindow(l viewLayout) []string {
+	title := m.styles.muted.Render("Preview")
+	if item, ok := m.selectedItem(); ok {
+		// The name comes from the multiplexer, so it is sanitized like the
+		// capture itself: a control character must not reach the border.
+		title = m.styles.titlePreview.Render(sanitizePreviewLine(itemTitle(item)))
+	}
+	lines := m.renderPreviewContent(max(0, l.preview.width-2), max(0, l.preview.height-2))
+	return drawWindow(title, lines, l.preview.width, l.preview.height, m.styles.border, "")
 }
 
 // cursorBlock is the reverse-video cell that marks the typing position.
@@ -129,16 +302,23 @@ func spinnerFrame(frame int) string {
 	return string(frames[frame%len(frames)])
 }
 
-// renderPromptRow draws the type-first prompt: the query (or the muted
-// placeholder) with the cursor block on the left, and the filter chips
-// right-aligned on the same row.
-func (m Model) renderPromptRow(width int) string {
+// renderPromptContent draws the prompt window's content row: the accent prompt
+// and the query (or the muted placeholder) with the typing cursor, the dim sigil
+// hint, and the shown/total count right-aligned. A kill confirmation or an
+// in-flight rename replaces the row.
+func (m Model) renderPromptContent(width int) string {
 	s := m.styles
+	switch {
+	case m.killArmed:
+		return m.renderKillConfirm(width)
+	case m.renameActive:
+		left := s.title.Render("rename") + " " + s.emphasis.Render("❯") + " " +
+			m.renameText + m.cursorBlock()
+		return clampStyledText(left, width)
+	}
 	prompt := s.emphasis.Render("❯") + " "
 	var left string
 	switch {
-	case m.renameActive:
-		left = s.title.Render("rename") + " " + prompt + m.renameText + m.cursorBlock()
 	case m.query != "":
 		left = prompt + m.query + m.cursorBlock()
 	default:
@@ -146,30 +326,68 @@ func (m Model) renderPromptRow(width int) string {
 		// sits right behind the prompt with the placeholder following it.
 		left = prompt + m.cursorBlock() + s.muted.Render(placeholderText)
 	}
-	// The query always wins the row: the chips only get whatever is left.
-	available := width - lipgloss.Width(left) - 1
-	spinner := ""
-	if !m.loadedOnce && m.spinnerActive {
-		spinner = spinnerFrame(m.spinnerFrame)
-		if available >= lipgloss.Width(spinner)+1 {
-			available -= lipgloss.Width(spinner) + 1
-		} else {
-			spinner = ""
-		}
+	// The count keeps the last cells: a long query is clipped with an ellipsis
+	// rather than the count, which is the only place the row reports the size.
+	right := m.promptTrailing(width)
+	if right == "" {
+		return clampStyledText(left, width)
 	}
-	right := m.renderChips(available)
-	if spinner != "" {
-		if right == "" {
-			right = spinner
-		} else {
-			right += " " + spinner
-		}
-	}
-	return composeLine(left, right, width, s.emphasis)
+	room := width - lipgloss.Width(right)
+	return clampStyledText(left, room) +
+		strings.Repeat(" ", max(0, room-lipgloss.Width(left))) + right
 }
 
-// visibleScopes lists the chips the prompt row shows, in cycle order. The
-// hosts chip only appears once host items exist.
+// promptTrailing renders the dim right side of the prompt content row: the sigil
+// hint when the query keeps its room, the shown/total count, and the spinner
+// while the first load is still running. It is empty when the window is too
+// narrow for even the count, and the query then takes the whole row.
+func (m Model) promptTrailing(width int) string {
+	spinner := ""
+	if !m.loadedOnce && m.spinnerActive {
+		spinner = " " + m.styles.emphasis.Render(spinnerFrame(m.spinnerFrame))
+	}
+	right := m.promptCount() + spinner
+	if sigils := m.sigilHint(); lipgloss.Width(sigils) > 0 &&
+		width-lipgloss.Width(right)-2-lipgloss.Width(sigils) >= promptMinQuery {
+		right = sigils + "  " + right
+	}
+	if width-1 < lipgloss.Width(right) {
+		return ""
+	}
+	return right
+}
+
+// promptCount is the "shown/total" the prompt window reports, collapsed to
+// "total" when nothing is filtered out.
+func (m Model) promptCount() string {
+	shown, total := len(m.rows()), len(m.items)
+	if shown == total {
+		return m.styles.muted.Render(fmt.Sprintf("%d", total))
+	}
+	return m.styles.itemName.Bold(true).Render(fmt.Sprintf("%d", shown)) +
+		m.styles.muted.Render(fmt.Sprintf("/%d", total))
+}
+
+// sigilHint is the dim "@ ! $ * ~ / #" reminder of the scopes that can be typed
+// on an empty query. The active scope's sigil carries the chip accent.
+func (m Model) sigilHint() string {
+	scopes := m.visibleScopes()
+	parts := make([]string, 0, len(scopes))
+	for _, sc := range scopes {
+		if sc.sigil() == 0 {
+			continue
+		}
+		style := m.styles.chipIdle
+		if sc == m.scope {
+			style = m.styles.chipActive
+		}
+		parts = append(parts, style.Render(string(sc.sigil())))
+	}
+	return strings.Join(parts, " ")
+}
+
+// visibleScopes lists the scopes the prompt window's sigil hint shows, in cycle
+// order. The hosts sigil only appears once host items exist.
 func (m Model) visibleScopes() []scope {
 	scopes := make([]scope, 0, int(scopeCount))
 	for sc := scopeAll; sc < scopeCount; sc++ {
@@ -188,63 +406,6 @@ func (m Model) hasHosts() bool {
 		}
 	}
 	return false
-}
-
-// chipSeparator joins the filter chips in the prompt row.
-const chipSeparator = "  "
-
-// renderChips renders the filter chips that fit in available columns. Inactive
-// chips drop from the end first; the active chip is kept whenever it fits at
-// all, so the current filter never disappears from the row.
-func (m Model) renderChips(available int) string {
-	scopes := m.visibleScopes()
-	if available <= 0 || len(scopes) == 0 {
-		return ""
-	}
-	active := 0
-	for i, sc := range scopes {
-		if sc == m.scope {
-			active = i
-		}
-	}
-	kept := make([]bool, len(scopes))
-	for i := range kept {
-		kept[i] = true
-	}
-	width := func() int {
-		total := 0
-		for i, sc := range scopes {
-			if !kept[i] {
-				continue
-			}
-			if total > 0 {
-				total += len(chipSeparator)
-			}
-			total += len([]rune(sc.chip()))
-		}
-		return total
-	}
-	for i := len(scopes) - 1; i >= 0 && width() > available; i-- {
-		if i == active {
-			continue
-		}
-		kept[i] = false
-	}
-	if width() > available {
-		return ""
-	}
-	parts := make([]string, 0, len(scopes))
-	for i, sc := range scopes {
-		if !kept[i] {
-			continue
-		}
-		if i == active {
-			parts = append(parts, m.styles.chipActive.Render(sc.chip()))
-			continue
-		}
-		parts = append(parts, m.styles.chipIdle.Render(sc.chip()))
-	}
-	return strings.Join(parts, chipSeparator)
 }
 
 // metaCell is one right-aligned row column: the plain text used for width
@@ -396,59 +557,6 @@ func renderMetaCells(cells []metaCell, grid metaGrid) string {
 		parts = append(parts, pad(clampStyledText(cell.text, w), w))
 	}
 	return strings.Join(parts, "  ")
-}
-
-func (m Model) renderBody(l viewLayout) []string {
-	if !m.loadedOnce {
-		return centeredNote(l, m.styles.muted.Render("loading…"))
-	}
-	rows := m.rows()
-	if len(rows) == 0 {
-		return m.renderEmptyState(l)
-	}
-	start, end, counterSlots := listWindow(len(rows), m.cursor, l.bodyHeight)
-	visible := rows[start:end]
-	metas := make([][]metaCell, len(visible))
-	for i, r := range visible {
-		metas[i] = m.rowMeta(r)
-	}
-	grid := buildMetaGrid(metas, l.listWidth-m.rowPrefixWidth()-titleMinWidth-2)
-	list := make([]string, 0, l.bodyHeight)
-	if start > 0 && counterSlots > 0 {
-		counterSlots--
-		list = append(list, m.styles.muted.Render(fmt.Sprintf("  ↑ %d more", start)))
-	}
-	for i, r := range visible {
-		list = append(list, m.renderRow(r, metas[i], grid, l.listWidth, start+i == m.cursor))
-	}
-	if end < len(rows) && counterSlots > 0 {
-		list = append(list, m.styles.muted.Render(fmt.Sprintf("  ↓ %d more", len(rows)-end)))
-	}
-	var preview []string
-	if l.previewWidth > 0 {
-		preview = m.renderPreview(l.previewWidth, l.bodyHeight)
-	}
-	out := make([]string, 0, l.bodyHeight)
-	separator := m.styles.rule.Render("│")
-	for i := 0; i < l.bodyHeight; i++ {
-		line := ""
-		if i < len(list) {
-			line = list[i]
-		}
-		line = pad(clampStyledText(line, l.listWidth), l.listWidth)
-		if l.previewWidth > 0 {
-			cell := ""
-			if i < len(preview) {
-				cell = preview[i]
-			}
-			line += " " + separator + " " + pad(
-				clampStyledText(cell, l.previewWidth),
-				l.previewWidth,
-			)
-		}
-		out = append(out, line)
-	}
-	return out
 }
 
 // renderRow draws one item: selection marker, kind icon (agents add their logo),
@@ -667,8 +775,8 @@ func shiftMatches(matches []int, offset, size int) []int {
 	return out
 }
 
-// renderEmptyState centers the "nothing here" message in the list area.
-func (m Model) renderEmptyState(l viewLayout) []string {
+// renderEmptyState centers the "nothing here" message in the results window.
+func (m Model) renderEmptyState(width, height int) []string {
 	var headline, hint string
 	switch {
 	case m.query != "":
@@ -683,40 +791,34 @@ func (m Model) renderEmptyState(l viewLayout) []string {
 		headline = m.styles.itemName.Render("nothing to jump to")
 		hint = "start an agent or open a directory"
 	}
-	return centeredNote(l, headline, m.styles.muted.Render(hint))
+	return centeredNote(width, height, headline, m.styles.muted.Render(hint))
 }
 
-// centeredNote centers one or more rendered lines in the list area.
-func centeredNote(l viewLayout, lines ...string) []string {
-	out := make([]string, 0, l.bodyHeight)
-	top := max(0, (l.bodyHeight-len(lines))/2)
-	for i := 0; i < l.bodyHeight; i++ {
+// centeredNote centers one or more rendered lines in a window of the given size.
+func centeredNote(width, height int, lines ...string) []string {
+	out := make([]string, 0, height)
+	top := max(0, (height-len(lines))/2)
+	for i := 0; i < height; i++ {
 		index := i - top
 		if index < 0 || index >= len(lines) {
 			out = append(out, "")
 			continue
 		}
-		line := clampStyledText(lines[index], l.listWidth)
-		indent := max(0, (l.listWidth-lipgloss.Width(line))/2)
-		out = append(out, pad(strings.Repeat(" ", indent)+line, l.listWidth))
+		line := clampStyledText(lines[index], width)
+		indent := max(0, (width-lipgloss.Width(line))/2)
+		out = append(out, pad(strings.Repeat(" ", indent)+line, width))
 	}
 	return out
 }
 
-// renderPreview draws the preview column: a muted header, then the captured
-// content with its ANSI colors intact, bottom-anchored for multiplexer captures
-// and top-anchored for directory listings.
-func (m Model) renderPreview(width, height int) []string {
+// renderPreviewContent draws the captured content of the preview window: the
+// selected item's payload with its ANSI colors intact, bottom-anchored for
+// multiplexer captures and top-anchored for directory listings, always exactly
+// height lines wide enough for the window.
+func (m Model) renderPreviewContent(width, height int) []string {
 	item, ok := m.selectedItem()
 	if !ok || height <= 0 {
 		return nil
-	}
-	header := m.styles.muted.Render(hardCutStyledText(sanitizePreviewLine(itemTitle(item)), width))
-	out := make([]string, 0, height)
-	out = append(out, header)
-	room := height - 1
-	if room <= 0 {
-		return out
 	}
 	content, style := m.preview, lipgloss.NewStyle()
 	switch {
@@ -726,26 +828,34 @@ func (m Model) renderPreview(width, height int) []string {
 		content, style = "loading…", m.styles.muted
 	}
 	lines := strings.Split(content, "\n")
-	if isTailPreviewKind(item.Kind) {
-		if len(lines) > room {
-			lines = lines[len(lines)-room:]
+	tail := isTailPreviewKind(item.Kind)
+	if len(lines) > height {
+		if tail {
+			lines = lines[len(lines)-height:]
+		} else {
+			lines = lines[:height]
 		}
-		out = append(out, make([]string, max(0, room-len(lines)))...)
-	} else if len(lines) > room {
-		lines = lines[:room]
+	}
+	out := make([]string, 0, height)
+	if tail {
+		// A capture is a window onto a terminal: the newest output is on the
+		// last row, so the padding goes above it.
+		out = append(out, make([]string, height-len(lines))...)
 	}
 	for _, line := range lines {
 		// Captures are raw terminal output: sanitize before clipping so no
 		// stray CR, tab, or cursor sequence reaches the frame. The cut is hard
 		// — a preview is a window onto a terminal, and an ellipsis would read
 		// as content the pane never printed. A reset closes any color the line
-		// left open so it cannot bleed into the separator, the padding, or the
-		// next row.
+		// left open so it cannot bleed into the border or the next row.
 		clipped := hardCutStyledText(sanitizePreviewLine(line), width)
 		if style.GetForeground() != nil {
 			clipped = style.Render(clipped)
 		}
 		out = append(out, clipped+previewReset)
+	}
+	for len(out) < height {
+		out = append(out, "")
 	}
 	return out
 }
@@ -773,15 +883,18 @@ var pickerHints = []footerHint{
 	{"esc", "quit"},
 }
 
+// renderFooter draws the frame's bottom key line: the picker hints, the rename
+// keys while a rename is in flight, or nothing but the confirm keys while a kill
+// is armed. Hints drop from the end until the line fits.
 func (m Model) renderFooter(width int) string {
 	switch {
 	case m.killArmed:
-		return m.renderKillConfirm(width)
+		return m.styles.key.Render("⏎/y") + " " + m.styles.muted.Render("confirm") +
+			"  " + m.styles.key.Render("esc") + " " + m.styles.muted.Render("cancel")
 	case m.renameActive:
 		return m.styles.key.Render("⏎") + " " + m.styles.muted.Render("save") +
 			"  " + m.styles.key.Render("esc") + " " + m.styles.muted.Render("cancel")
 	}
-	counter := m.footerCounter()
 	parts := make([]string, 0, len(pickerHints))
 	for _, hint := range pickerHints {
 		parts = append(parts, m.styles.key.Render(hint.key)+" "+m.styles.muted.Render(hint.label))
@@ -796,20 +909,10 @@ func (m Model) renderFooter(width int) string {
 		}
 		return total
 	}
-	for len(parts) > 0 && width2()+lipgloss.Width(counter)+2 > width {
+	for len(parts) > 0 && width2() > width {
 		parts = parts[:len(parts)-1]
 	}
-	return composeLine(strings.Join(parts, "  "), counter, width, m.styles.muted)
-}
-
-// footerCounter is "shown/total", collapsed to "total" when nothing is filtered
-// out.
-func (m Model) footerCounter() string {
-	shown, total := len(m.rows()), len(m.items)
-	if shown == total {
-		return fmt.Sprintf("%d", total)
-	}
-	return fmt.Sprintf("%d/%d", shown, total)
+	return clampStyledText(strings.Join(parts, "  "), width)
 }
 
 func (m Model) renderKillConfirm(width int) string {

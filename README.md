@@ -190,7 +190,7 @@ The picker is always type-first: printable keys filter the list, and every actio
 | `enter`                       | Attach to the session, focus the agent pane, open the directory, or switch to the host  |
 | `ctrl+r`                      | Rename the selected session/workspace or agent (inline)                                 |
 | `ctrl+x`, `delete`            | Kill the selected session/workspace or agent pane (`enter`/`y` confirms)                |
-| `ctrl+o`                      | Toggle the preview column (shown from 100 columns wide)                                 |
+| `ctrl+o`                      | Toggle the preview window (the `dropdown` layout starts with it hidden)                 |
 | `ctrl+y`                      | Pick a directory with `yazi`                                                            |
 | `ctrl+l`                      | Reload every source                                                                     |
 | `ctrl+a`                      | Open the agent integration install menu                                                 |

@@ -197,32 +197,87 @@ func visibleWindow(total, cursor, height int) (int, int) {
 	return start, start + height
 }
 
-// listWindow is the [start, end) row range a list of the given height draws,
-// plus the lines left over for the counters that report the rows hidden above
-// and below it ("↑ N more" / "↓ N more"). The rows and their counters never
-// add up to more than the list height, so a counter can never push the cursor
-// row out of the frame.
-func listWindow(total, cursor, height int) (start, end, counterSlots int) {
-	windowHeight := max(1, height)
-	// The counter count depends on the window height, which depends on the
-	// counter count; two passes settle it (shrinking the window by one line can
-	// only remove a counter, never add one).
-	for range 2 {
-		s, e := visibleWindow(total, cursor, windowHeight)
-		counters := 0
-		if s > 0 {
-			counters++
-		}
-		if e < total {
-			counters++
-		}
-		counters = min(counters, max(0, height-1))
-		if next := max(1, height-counters); next != windowHeight {
-			windowHeight = next
-			continue
-		}
-		break
+// windowGap is the blank column between two windows drawn side by side.
+const windowGap = 1
+
+// drawWindow renders one single-line-border window: a rounded top border with
+// the title centered in it (one space of padding each side), the inner lines
+// hard-cut and padded to width-2, and a rounded bottom border with bottomRight
+// right-aligned in it. title and bottomRight are pre-rendered text — already
+// styled by the caller — and are clamped rather than allowed to push the border
+// out of shape. The result is exactly height lines of exactly width columns,
+// and nil when a dimension is not positive.
+func drawWindow(
+	title string,
+	lines []string,
+	width, height int,
+	border lipgloss.Style,
+	bottomRight string,
+) []string {
+	if width <= 0 || height <= 0 {
+		return nil
 	}
-	start, end = visibleWindow(total, cursor, windowHeight)
-	return start, end, max(0, height-(end-start))
+	inner := max(0, width-2)
+	if width == 1 {
+		// No room for a horizontal edge: a one-column window keeps the border
+		// glyphs so the frame stays rectangular.
+		out := make([]string, height)
+		for i := range out {
+			switch i {
+			case 0:
+				out[i] = border.Render("╭")
+			case height - 1:
+				out[i] = border.Render("╰")
+			default:
+				out[i] = border.Render("│")
+			}
+		}
+		return out
+	}
+
+	out := make([]string, 0, height)
+	out = append(out, windowTopBorder(title, width, border))
+	for i := 1; i < height-1; i++ {
+		line := ""
+		if i-1 < len(lines) {
+			line = lines[i-1]
+		}
+		out = append(
+			out,
+			border.Render("│")+pad(hardCutStyledText(line, inner), inner)+border.Render("│"),
+		)
+	}
+	if height > 1 {
+		out = append(out, windowBottomBorder(bottomRight, width, border))
+	}
+	return out
+}
+
+// windowTopBorder draws a rounded top border with the title centered in it,
+// one space of padding on each side. Each segment is rendered on its own so the
+// title's styling never bleeds into the border and vice versa.
+func windowTopBorder(title string, width int, border lipgloss.Style) string {
+	inner := max(0, width-2)
+	text := clampStyledText(title, max(0, inner-2))
+	if text == "" {
+		return border.Render("╭" + strings.Repeat("─", inner) + "╮")
+	}
+	text = " " + text + " "
+	left := (inner - lipgloss.Width(text)) / 2
+	right := inner - lipgloss.Width(text) - left
+	return border.Render("╭"+strings.Repeat("─", left)) + text +
+		border.Render(strings.Repeat("─", right)+"╮")
+}
+
+// windowBottomBorder draws a rounded bottom border with bottomRight flush
+// against the right corner, one space of padding on each side.
+func windowBottomBorder(bottomRight string, width int, border lipgloss.Style) string {
+	inner := max(0, width-2)
+	text := clampStyledText(bottomRight, max(0, inner-2))
+	if text == "" {
+		return border.Render("╰" + strings.Repeat("─", inner) + "╯")
+	}
+	text = " " + text + " "
+	return border.Render("╰"+strings.Repeat("─", inner-lipgloss.Width(text))) + text +
+		border.Render("╯")
 }

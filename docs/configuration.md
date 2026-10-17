@@ -105,7 +105,7 @@ catalog_url = ""           # defaults to the herdr public catalog when empty
 
 [tui]
 layout = "horizontal"          # horizontal | vertical | dropdown
-preview = true                 # the preview column
+preview = true                 # the preview window (dropdown starts hidden)
 
 [remote]
 ssh_config_hosts = true        # offer the hosts of ~/.ssh/config too (default)
@@ -133,7 +133,7 @@ keymap.
 ```toml
 [tui]
 layout = "horizontal"   # horizontal (default) | vertical | dropdown
-preview = true          # the preview column
+preview = true          # the preview window (dropdown starts hidden)
 ```
 
 | Value        | Arrangement                                                                 |
@@ -141,6 +141,9 @@ preview = true          # the preview column
 | `horizontal` | Search prompt and results on the left, preview on the right (default).      |
 | `vertical`   | Prompt on top, results below it, preview at the bottom.                     |
 | `dropdown`   | Prompt on top, results full width below; the preview starts hidden (`ctrl+o` shows it). |
+
+Frames narrower than 100 columns always stack the windows (prompt, results,
+preview) instead of putting them side by side, whatever the layout says.
 
 Legacy and unknown values (including the old `default` and `zen` tokens)
 normalize to `horizontal` without an error, so an existing `config.toml` keeps
