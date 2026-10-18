@@ -292,10 +292,11 @@ func newConfigCompletionCommand() *cobra.Command {
 	addJSONFlag(command)
 	path := leafCompletionCommand("path", "print config file path", true)
 	show := leafCompletionCommand("show", "print effective config", true)
+	keys := leafCompletionCommand("keys", "print the effective picker key map", true)
 	initCommand := leafCompletionCommand("init", "initialize configuration", true)
 	initCommand.Flags().Bool("force", false, "replace existing configuration")
 	initCommand.ValidArgsFunction = commandBoundaryCompletion()
-	command.AddCommand(path, show, initCommand)
+	command.AddCommand(path, show, keys, initCommand)
 	command.ValidArgsFunction = commandBoundaryCompletion()
 	return command
 }
