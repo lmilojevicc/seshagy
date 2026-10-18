@@ -123,6 +123,7 @@ func canonicalSourceSurface(t *testing.T, overrides map[string]string) canonical
 		"config":          {"json": true},
 		"config path":     {"json": true},
 		"config show":     {"json": true},
+		"config keys":     {"json": true},
 		"config init":     {"force": true, "json": true},
 		"diagnostics":     {"json": true},
 		"version":         {"json": true},
