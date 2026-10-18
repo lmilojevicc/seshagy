@@ -471,6 +471,8 @@ func parseKeybindCommand(args []string) (keybindCommand, error) {
 			i++
 		case "--persistent":
 			cmd.persistent = true
+		default:
+			return keybindCommand{}, fmt.Errorf("unknown flag: %s", args[i])
 		}
 	}
 	if !slices.Contains(keybindTargets, cmd.target) {

@@ -1025,3 +1025,60 @@ func TestKeybindUsageBlock(t *testing.T) {
 		})
 	}
 }
+
+// TestParseKeybindCommandRejectsUnknownFlags pins that an unknown flag — a
+// misspelled one, or a real one written inline as `--key=x` — is an error
+// instead of being silently ignored and installing a binding the user did not
+// ask for.
+func TestParseKeybindCommandRejectsUnknownFlags(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		flag string
+	}{
+		{
+			name: "unknown flag",
+			args: []string{"install", "tmux", "--frobnicate"},
+			flag: "--frobnicate",
+		},
+		{
+			name: "inline value form",
+			args: []string{"install", "herdr", "--key=x"},
+			flag: "--key=x",
+		},
+		{
+			name: "inline form of a known flag",
+			args: []string{"install", "herdr", "--mode=popup"},
+			flag: "--mode=popup",
+		},
+		{
+			name: "unknown flag before a known one",
+			args: []string{"install", "tmux", "--nope", "--persistent"},
+			flag: "--nope",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := parseKeybindCommand(tc.args)
+			if err == nil {
+				t.Fatalf(
+					"parseKeybindCommand(%v) = nil error, want unknown flag %s",
+					tc.args,
+					tc.flag,
+				)
+			}
+			if want := "unknown flag: " + tc.flag; err.Error() != want {
+				t.Fatalf("parseKeybindCommand(%v) error = %q, want %q", tc.args, err, want)
+			}
+		})
+	}
+
+	// Known flags keep parsing.
+	cmd, err := parseKeybindCommand([]string{"install", "tmux", "--key", "M-s", "--persistent"})
+	if err != nil {
+		t.Fatalf("parseKeybindCommand with known flags error = %v", err)
+	}
+	if cmd.key != "M-s" || !cmd.persistent {
+		t.Fatalf("parsed keybind command = %#v", cmd)
+	}
+}
