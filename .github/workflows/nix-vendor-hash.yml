@@ -1,0 +1,62 @@
+name: Nix vendor hash
+
+# Dependabot bumps go.mod/go.sum but not vendorHash in nix/package.nix, so its
+# Go-module PRs fail the Nix build. This recomputes the hash on those PRs and
+# commits it back. A push made with GITHUB_TOKEN does not trigger CI, so the job
+# dispatches CI on the branch itself; its checks attach to the new head commit.
+# workflow_dispatch runs the same fix on any other branch.
+
+on:
+  pull_request:
+    paths:
+      - go.mod
+      - go.sum
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nix-vendor-hash-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  update:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.user.login == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
+    env:
+      BRANCH: ${{ github.head_ref || github.ref_name }}
+    steps:
+      - name: Refuse the default branch
+        if: env.BRANCH == github.event.repository.default_branch
+        run: |
+          echo "Run this on a pull request branch, not ${BRANCH}." >&2
+          exit 1
+
+      - name: Check out the branch
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ env.BRANCH }}
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31.11.1
+
+      - name: Recompute vendorHash
+        run: ./nix/update-vendor-hash.sh
+
+      - name: Commit and re-run CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |-
+          if git diff --quiet -- nix/package.nix; then
+            echo "vendorHash is already current."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "build(nix): update the vendor hash" -- nix/package.nix
+          git push origin "HEAD:${BRANCH}"
+          gh workflow run ci.yml --ref "${BRANCH}"

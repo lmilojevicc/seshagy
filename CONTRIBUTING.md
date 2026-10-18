@@ -22,6 +22,14 @@ go run ./cmd/seshagy # run the TUI from the checkout
 Runtime needs a multiplexer (`tmux` or `herdr`); optional helpers are `zoxide`,
 `fd`, `yazi`, and `eza`.
 
+### Changing Go dependencies
+
+The Nix package pins the vendored modules with `vendorHash` in
+`nix/package.nix`, so any `go.mod`/`go.sum` change needs a new hash or the Nix
+build fails. Run `./nix/update-vendor-hash.sh` (needs Nix), or run the
+"Nix vendor hash" workflow on your branch from the Actions tab. Dependabot
+Go-module PRs get the hash committed automatically.
+
 ## Development commands
 
 All tasks are defined in `mise.toml`.
