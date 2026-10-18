@@ -201,7 +201,10 @@ would type into the search (`alt+<char>` is fine); and the reserved keys
 `enter`, `esc`, `ctrl+c`, `backspace` plus their terminal aliases `ctrl+m`,
 `ctrl+i`, `ctrl+[`, `ctrl+?`. An override wins a key from a default action
 (which then loses that key), and of two overrides claiming the same key the id
-that sorts first keeps it — no key is ever bound twice.
+that sorts first keeps it — no key is ever bound twice. An entry whose every key
+is rejected keeps the action's default keys, so a typo never unbinds anything;
+only an explicit `[]` does. The footer shows `↑↓ move` while `up` and `down`
+are both bound.
 
 Issues are toasted once at start-up and `seshagy config keys` prints the
 effective table and every issue:

@@ -104,7 +104,7 @@ func TestViewSnapshotSanityAcrossWidths(t *testing.T) {
 			}
 		}
 
-		want := []string{"Results", "seshagy", "↑ move up", "4"}
+		want := []string{"Results", "seshagy", "↑↓ move", "4"}
 		if width >= 60 {
 			// Narrow frames clip titles and the placeholder; keep the full-text
 			// assertions to widths where nothing has to be clipped.
@@ -210,7 +210,7 @@ func TestFrameWindowsAcrossLayoutsAndSizes(t *testing.T) {
 					if !l.footer {
 						t.Fatalf("%dx%d dropped the footer", size.width, size.height)
 					}
-					if footer := lines[l.height-1]; !strings.Contains(footer, "↑ move up") {
+					if footer := lines[l.height-1]; !strings.Contains(footer, "↑↓ move") {
 						t.Fatalf("footer line = %q", footer)
 					}
 				})
@@ -465,7 +465,7 @@ func TestFooterDropsHintsFromTheRightAndPinsEscQuit(t *testing.T) {
 
 	wide := sessionmgr.StripANSI(m.renderFooter(160))
 	for _, want := range []string{
-		"↑ move up", "↓ move down", "⏎ open", "^r rename", "^x kill", "^o preview", "^y yazi",
+		"↑↓ move", "⏎ open", "^r rename", "^x kill", "^o preview", "^y yazi",
 		"F1 help", "esc quit",
 	} {
 		if !strings.Contains(wide, want) {
@@ -494,7 +494,7 @@ func TestFooterDropsHintsFromTheRightAndPinsEscQuit(t *testing.T) {
 		if !strings.Contains(row, "F1 help") {
 			t.Fatalf("width %d: footer dropped the pinned help hint: %q", width, row)
 		}
-		if !strings.Contains(row, "↑ move up") {
+		if !strings.Contains(row, "↑↓ move") {
 			t.Fatalf("width %d: footer dropped the leftmost hints: %q", width, row)
 		}
 	}
@@ -503,7 +503,7 @@ func TestFooterDropsHintsFromTheRightAndPinsEscQuit(t *testing.T) {
 	}
 
 	narrow := sessionmgr.StripANSI(m.renderFooter(40))
-	if !strings.Contains(narrow, "↑ move up") || strings.Contains(narrow, "rename") {
+	if !strings.Contains(narrow, "↑↓ move") || strings.Contains(narrow, "rename") {
 		t.Fatalf("narrow footer = %q, want the left hints only", narrow)
 	}
 	if !strings.HasSuffix(narrow, "esc quit") {
@@ -550,7 +550,7 @@ func TestFooterCounterAndHintDropping(t *testing.T) {
 	if strings.Contains(narrow, "yazi") {
 		t.Fatalf("narrow footer kept a hint that must drop from the right: %q", narrow)
 	}
-	if !strings.Contains(narrow, "↑ move up") || !strings.Contains(narrow, "esc quit") {
+	if !strings.Contains(narrow, "↑↓ move") || !strings.Contains(narrow, "esc quit") {
 		t.Fatalf("narrow footer dropped the hints it must keep: %q", narrow)
 	}
 }

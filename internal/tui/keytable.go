@@ -61,7 +61,16 @@ func ResolveKeys(overrides map[string]appconfig.KeyList) KeyTable {
 			))
 			continue
 		}
-		binding.keys = table.bindKeys(id, list)
+		keys := table.bindKeys(id, list)
+		if len(keys) == 0 && len(list) > 0 {
+			// Every key was rejected: a typo must not unbind the action, so it
+			// keeps its defaults. Only an explicit empty list unbinds.
+			table.issues = append(table.issues, fmt.Sprintf(
+				"tui.keys.%s: no usable key; keeping the default", id,
+			))
+			continue
+		}
+		binding.keys = keys
 		overridden[id] = true
 	}
 	table.resolveKeyConflicts(overridden)
