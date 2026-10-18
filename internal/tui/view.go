@@ -1228,7 +1228,7 @@ type footerHint struct {
 // they draw, with the sessions hint named the way the active backend names a
 // session.
 func (m Model) footerHints() []footerHint {
-	bindings := footerBindings()
+	bindings := m.keys.footerBindings()
 	hints := make([]footerHint, len(bindings))
 	for i, binding := range bindings {
 		hints[i] = footerHint{key: keyHint(binding.keys), label: m.bindingLabel(binding)}
@@ -1260,9 +1260,11 @@ func (m Model) renderFooter(width int) string {
 	}
 	// The droppable hints give way from the right; the pinned pair is measured
 	// with them, so it survives as long as the line can hold it. The help hint
-	// goes before the quit hint does.
-	body := parts[:len(parts)-footerPinnedHints]
-	pinned := parts[len(parts)-footerPinnedHints:]
+	// goes before the quit hint does. A config that unbinds footer actions can
+	// leave fewer hints than the pinned pair, and then every hint left is pinned.
+	pinnedCount := min(footerPinnedHints, len(parts))
+	body := parts[:len(parts)-pinnedCount]
+	pinned := parts[len(parts)-pinnedCount:]
 	shownWidth := func(n, p int) int {
 		width := hintsWidth(body[:n])
 		if n > 0 && p > 0 {
@@ -1270,11 +1272,11 @@ func (m Model) renderFooter(width int) string {
 		}
 		return width + hintsWidth(pinned[len(pinned)-p:])
 	}
-	n, p := len(body), footerPinnedHints
+	n, p := len(body), pinnedCount
 	for n > 0 && shownWidth(n, p) > width {
 		n--
 	}
-	if shownWidth(n, p) > width {
+	if p > 0 && shownWidth(n, p) > width {
 		p--
 	}
 	if shownWidth(n, p) > width {
