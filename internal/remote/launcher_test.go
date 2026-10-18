@@ -155,6 +155,16 @@ func TestClientArgs(t *testing.T) {
 			Target{Alias: "seshagy-homelab", Session: "work"},
 			"--remote seshagy-homelab --session work",
 		},
+		{
+			Target{Alias: "seshagy-homelab", Keybindings: KeybindingsServer},
+			"--remote seshagy-homelab --remote-keybindings server",
+		},
+		{
+			Target{Alias: "seshagy-homelab", Session: "work", Keybindings: KeybindingsLocal},
+			"--remote seshagy-homelab --session work --remote-keybindings local",
+		},
+		// The local server takes no remote flags, even with a mode set.
+		{Target{Session: "work", Keybindings: KeybindingsServer}, "--session work"},
 	}
 	for _, test := range tests {
 		got := strings.Join(clientArgs(test.target), " ")
@@ -520,5 +530,24 @@ func TestLookupHerdrSocket(t *testing.T) {
 				)
 			}
 		})
+	}
+}
+
+func TestHostLaunchTargetCarriesSessionAndKeybindings(t *testing.T) {
+	host := Host{
+		Name: "homelab", Target: "milo@192.168.1.10", Session: "work",
+		Keybindings: KeybindingsServer,
+	}
+	tests := []struct {
+		session string
+		want    Target
+	}{
+		{"", Target{Alias: "seshagy-homelab", Session: "work", Keybindings: "server"}},
+		{"other", Target{Alias: "seshagy-homelab", Session: "other", Keybindings: "server"}},
+	}
+	for _, test := range tests {
+		if got := host.LaunchTarget(test.session); got != test.want {
+			t.Errorf("LaunchTarget(%q) = %+v, want %+v", test.session, got, test.want)
+		}
 	}
 }

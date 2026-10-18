@@ -41,6 +41,9 @@ type SwitchRequest struct {
 type Target struct {
 	Alias   string
 	Session string
+	// Keybindings is passed to herdr as --remote-keybindings for a remote
+	// target; empty leaves herdr's default (local).
+	Keybindings string
 }
 
 // LaunchOptions configures RunLauncher.
@@ -253,6 +256,9 @@ func clientArgs(target Target) []string {
 		if target.Session != "" {
 			args = append(args, "--session", target.Session)
 		}
+		if target.Keybindings != "" {
+			args = append(args, "--remote-keybindings", target.Keybindings)
+		}
 		return args
 	}
 }
@@ -354,11 +360,7 @@ func (l *Launcher) resolve(request SwitchRequest) (Target, error) {
 	if !ok {
 		return Target{}, fmt.Errorf("unknown host: %s", request.Host)
 	}
-	session := request.Session
-	if session == "" {
-		session = host.Session
-	}
-	return Target{Alias: host.Alias(), Session: session}, nil
+	return host.LaunchTarget(request.Session), nil
 }
 
 func writeReply(conn net.Conn, reply switchReply) {

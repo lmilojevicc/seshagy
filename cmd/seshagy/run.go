@@ -71,11 +71,7 @@ func executeRun(cmd runCommand) error {
 	if !ok {
 		return fmt.Errorf("unknown host: %s (see `seshagy hosts`)", cmd.host)
 	}
-	session := cmd.session
-	if session == "" {
-		session = host.Session
-	}
-	opts.Initial = remote.Target{Alias: host.Alias(), Session: session}
+	opts.Initial = host.LaunchTarget(cmd.session)
 	return remote.RunLauncher(context.Background(), opts)
 }
 
@@ -85,7 +81,14 @@ func knownHosts(cfg appconfig.Config) []remote.Host {
 	for _, problem := range cfg.ValidateRemoteHosts() {
 		cli.Warn(problem)
 	}
-	return remote.Hosts(cfg.RemoteHosts(), cfg.RemoteSSHConfigHosts())
+	hosts := remote.Hosts(cfg.RemoteHosts(), cfg.RemoteSSHConfigHosts())
+	// Hosts discovered from ~/.ssh/config take the [remote] default.
+	for i := range hosts {
+		if hosts[i].Keybindings == "" {
+			hosts[i].Keybindings = cfg.Remote.Keybindings
+		}
+	}
+	return hosts
 }
 
 // runHosts dispatches `seshagy hosts`.

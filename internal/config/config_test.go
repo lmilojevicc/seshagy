@@ -1393,3 +1393,58 @@ func TestNormalizeRemoteHostTransportDefaults(t *testing.T) {
 		t.Fatalf("normalized ssh_config_hosts = %v, want true", cfg.Remote.SSHConfigHosts)
 	}
 }
+
+func TestRemoteHostKeybindings(t *testing.T) {
+	tests := []struct {
+		name        string
+		defaultMode string
+		hostMode    string
+		want        string
+		wantIssue   string
+		wantSkipped bool
+	}{
+		{name: "unset leaves herdr's default", want: ""},
+		{name: "default applies to the host", defaultMode: "server", want: "server"},
+		{
+			name:        "host overrides the default",
+			defaultMode: "server",
+			hostMode:    "local",
+			want:        "local",
+		},
+		{name: "case and spaces are normalized", hostMode: " Server ", want: "server"},
+		{
+			name: "unknown host mode skips the host", hostMode: "remote",
+			wantIssue: `unknown keybindings "remote"`, wantSkipped: true,
+		},
+		{
+			name: "unknown default is ignored with a warning", defaultMode: "both",
+			want: "", wantIssue: `remote: unknown keybindings "both"`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := Default()
+			cfg.Remote.Keybindings = tt.defaultMode
+			cfg.Hosts = []HostConfig{{
+				Name: "homelab", Target: "milo@192.168.1.10", Keybindings: tt.hostMode,
+			}}
+			issues := strings.Join(cfg.ValidateRemoteHosts(), "\n")
+			if tt.wantIssue == "" && issues != "" {
+				t.Fatalf("unexpected issues: %s", issues)
+			}
+			if !strings.Contains(issues, tt.wantIssue) {
+				t.Fatalf("issues = %q, want %q", issues, tt.wantIssue)
+			}
+			hosts := cfg.RemoteHosts()
+			if tt.wantSkipped {
+				if len(hosts) != 0 {
+					t.Fatalf("hosts = %+v, want the entry skipped", hosts)
+				}
+				return
+			}
+			if len(hosts) != 1 || hosts[0].Keybindings != tt.want {
+				t.Fatalf("hosts = %+v, want keybindings %q", hosts, tt.want)
+			}
+		})
+	}
+}
