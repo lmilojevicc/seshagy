@@ -2,7 +2,6 @@ package tui
 
 import (
 	"sort"
-	"strings"
 
 	"github.com/sahilm/fuzzy"
 
@@ -239,20 +238,22 @@ func searchFields(item sessionmgr.Item) [searchFieldCount]string {
 	}
 }
 
-// filterRows applies the scope, the agent-state filter, and the fuzzy query to
-// items. Without a query the rows follow the section order and itemRank inside
-// it, so the needs-you section leads whatever the items' own ranks say (stable
-// within a rank, so backend order such as zoxide frecency survives); with a
-// query the best fuzzy score wins and itemRank breaks ties.
+// filterRows applies the scope, the agent-state filter, and the query to items.
+// The query is read as herdr-navigator's token grammar (see queryTokens): the
+// prefix tokens narrow the list, and the plain text left over is fuzzy-matched.
+// Without plain text the rows follow the section order and itemRank inside it,
+// so the needs-you section leads whatever the items' own ranks say (stable
+// within a rank, so backend order such as zoxide frecency survives); with plain
+// text the best fuzzy score wins and itemRank breaks ties.
 func filterRows(items []sessionmgr.Item, sc scope, state stateFilter, query string) []row {
+	tokens := parseQuery(query)
 	eligible := make([]sessionmgr.Item, 0, len(items))
 	for _, item := range items {
-		if sc.includes(item) && state.matches(item) {
+		if sc.includes(item) && state.matches(item) && tokens.matches(item) {
 			eligible = append(eligible, item)
 		}
 	}
-	query = strings.TrimSpace(query)
-	if query == "" {
+	if tokens.plain == "" {
 		sort.SliceStable(eligible, func(i, j int) bool {
 			gi, gj := itemGroup(eligible[i]), itemGroup(eligible[j])
 			if gi != gj {
@@ -282,7 +283,7 @@ func filterRows(items []sessionmgr.Item, sc scope, state stateFilter, query stri
 	// works even when another field scored higher.
 	slot := make(map[int]int, len(eligible))
 	matched := make([]scored, 0, len(eligible))
-	for _, match := range fuzzy.FindNoSort(query, candidates) {
+	for _, match := range fuzzy.FindNoSort(tokens.plain, candidates) {
 		index := match.Index / searchFieldCount
 		isTitle := match.Index%searchFieldCount == 0
 		score := match.Score
