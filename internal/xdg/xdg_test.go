@@ -21,6 +21,23 @@ func TestExpandHome(t *testing.T) {
 	}
 }
 
+func TestContractHome(t *testing.T) {
+	t.Setenv("HOME", "/home/testuser")
+
+	tests := map[string]string{
+		"/home/testuser":          "~",
+		"/home/testuser/projects": "~/projects",
+		"/home/otheruser":         "/home/otheruser",
+		"/home/testuser2/x":       "/home/testuser2/x",
+		"relative/path":           "relative/path",
+	}
+	for in, want := range tests {
+		if got := ContractHome(in); got != want {
+			t.Fatalf("ContractHome(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestConfigHome(t *testing.T) {
 	t.Setenv("HOME", "/home/testuser")
 

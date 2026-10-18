@@ -48,21 +48,24 @@ func installBrokenZoxideOnPath(t *testing.T) {
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
-func TestLoadWithOptionsModeAllPartialWhenFDFails(t *testing.T) {
+func TestLoadWithBackendModeAllPartialWhenFDFails(t *testing.T) {
 	sessionLine := "dev\x1f100\x1f120\x1f/tmp/dev\x1f1\x1f2"
 	installModeAllStrictFakeTmux(t, sessionLine)
-	t.Setenv("TMUX", "/tmp/fake-tmux-sock,12345,0")
-	t.Setenv("HERDR_ENV", "")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	result, err := LoadWithOptions(ctx, ModeAll, LoadOptions{FDCommand: "sleep 30"})
+	result, err := LoadWithBackend(
+		ctx,
+		NewTmuxBackend(),
+		ModeAll,
+		LoadOptions{FDCommand: "sleep 30"},
+	)
 	if err != nil {
-		t.Fatalf("LoadWithOptions() error = %v, want partial success", err)
+		t.Fatalf("LoadWithBackend() error = %v, want partial success", err)
 	}
 	if result.Warning == "" {
-		t.Fatal("LoadWithOptions() warning = empty, want fd failure warning")
+		t.Fatal("LoadWithBackend() warning = empty, want fd failure warning")
 	}
 	if !strings.Contains(result.Warning, "fd command") {
 		t.Fatalf("warning = %q, want fd command failure", result.Warning)
@@ -76,21 +79,20 @@ func TestLoadWithOptionsModeAllPartialWhenFDFails(t *testing.T) {
 	}
 }
 
-func TestLoadWithOptionsModeAllPartialWhenZoxideFails(t *testing.T) {
+func TestLoadWithBackendModeAllPartialWhenZoxideFails(t *testing.T) {
 	sessionLine := "dev\x1f100\x1f120\x1f/tmp/dev\x1f1\x1f2"
 	installModeAllStrictFakeTmux(t, sessionLine)
 	installBrokenZoxideOnPath(t)
-	t.Setenv("TMUX", "/tmp/fake-tmux-sock,12345,0")
-	t.Setenv("HERDR_ENV", "")
 	fdDir := t.TempDir()
 
-	result, err := LoadWithOptions(
+	result, err := LoadWithBackend(
 		context.Background(),
+		NewTmuxBackend(),
 		ModeAll,
 		LoadOptions{FDCommand: "printf '%s\\n' " + fdDir},
 	)
 	if err != nil {
-		t.Fatalf("LoadWithOptions() error = %v, want partial success", err)
+		t.Fatalf("LoadWithBackend() error = %v, want partial success", err)
 	}
 	if result.Warning == "" || !strings.Contains(result.Warning, "zoxide query") {
 		t.Fatalf("warning = %q, want zoxide failure", result.Warning)
@@ -104,25 +106,23 @@ func TestLoadWithOptionsModeAllPartialWhenZoxideFails(t *testing.T) {
 	}
 }
 
-func TestLoadWithOptionsModeFDFailsWithCanceledContext(t *testing.T) {
+func TestLoadWithBackendModeFDFailsWithCanceledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, err := LoadWithOptions(ctx, ModeFD, LoadOptions{FDCommand: "sleep 30"})
+	_, err := LoadWithBackend(ctx, NewTmuxBackend(), ModeFD, LoadOptions{FDCommand: "sleep 30"})
 	if err == nil {
-		t.Fatal("LoadWithOptions() error = nil, want fd failure")
+		t.Fatal("LoadWithBackend() error = nil, want fd failure")
 	}
 	if !strings.Contains(err.Error(), "fd command") {
 		t.Fatalf("error = %q, want fd command failure", err.Error())
 	}
 }
 
-func TestLoadWithOptionsModeDispatch(t *testing.T) {
+func TestLoadWithBackendModeDispatch(t *testing.T) {
 	sessionLine := "dev\x1f100\x1f120\x1f/tmp/dev\x1f1\x1f2"
 	fdDir := t.TempDir()
 	installModeAllStrictFakeTmux(t, sessionLine)
-	t.Setenv("TMUX", "/tmp/fake-tmux-sock,12345,0")
-	t.Setenv("HERDR_ENV", "")
 
 	ctx := context.Background()
 	fdOpts := LoadOptions{FDCommand: "printf '%s\\n' " + fdDir}
@@ -184,15 +184,15 @@ func TestLoadWithOptionsModeDispatch(t *testing.T) {
 				t.Setenv("PATH", t.TempDir())
 			}
 			opts := tt.opts
-			result, err := LoadWithOptions(testCtx, tt.mode, opts)
+			result, err := LoadWithBackend(testCtx, NewTmuxBackend(), tt.mode, opts)
 			if tt.wantErr {
 				if err == nil {
-					t.Fatal("LoadWithOptions() error = nil, want error")
+					t.Fatal("LoadWithBackend() error = nil, want error")
 				}
 				return
 			}
 			if err != nil {
-				t.Fatalf("LoadWithOptions() error = %v", err)
+				t.Fatalf("LoadWithBackend() error = %v", err)
 			}
 			gotCounts := map[Kind]int{}
 			for _, item := range result.Items {

@@ -51,15 +51,3 @@ func sanitizeSessionName(name string) string {
 func ExpandHome(path string) string {
 	return xdg.ExpandHome(path)
 }
-
-func ContractHome(path string) string {
-	if home, err := os.UserHomeDir(); err == nil {
-		if path == home {
-			return "~"
-		}
-		if strings.HasPrefix(path, home+string(os.PathSeparator)) {
-			return "~" + strings.TrimPrefix(path, home)
-		}
-	}
-	return path
-}

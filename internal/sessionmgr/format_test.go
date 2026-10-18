@@ -253,8 +253,8 @@ func TestFormatLineWithIconsAgentStateHonorsMode(t *testing.T) {
 
 func TestFormatLineDefaultKindUsesDisplayName(t *testing.T) {
 	item := Item{Kind: Kind("custom"), Name: "fallback-name"}
-	if got := FormatLine(item); got != "fallback-name" {
-		t.Fatalf("FormatLine() = %q, want fallback-name", got)
+	if got := FormatLineWithIcons(item, DefaultIconSet()); got != "fallback-name" {
+		t.Fatalf("FormatLineWithIcons() = %q, want fallback-name", got)
 	}
 }
 

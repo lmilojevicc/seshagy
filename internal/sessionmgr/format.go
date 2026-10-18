@@ -228,10 +228,6 @@ func defaultIconText(kind Kind, ascii bool) string {
 	return defaults.Icon
 }
 
-func FormatLine(i Item) string {
-	return FormatLineWithIcons(i, DefaultIconSet())
-}
-
 func FormatLineWithIcons(i Item, icons IconSet) string {
 	switch i.Kind {
 	case KindSession:
@@ -293,10 +289,6 @@ func shouldInsertSeparator(left, right string) bool {
 	leftClean := StripANSI(left)
 	rightClean := StripANSI(right)
 	return !strings.HasSuffix(leftClean, " ") && !strings.HasPrefix(rightClean, " ")
-}
-
-func ParseActionLine(raw string) (Item, bool) {
-	return ParseActionLineWithIcons(raw, DefaultIconSet())
 }
 
 func ParseActionLineWithIcons(raw string, icons IconSet) (Item, bool) {

@@ -1,15 +1,24 @@
 // Package sessionmgr test helpers in this file are exported for cross-package
 // CLI tests (cmd/seshagy) and sessionmgr tests. They swap tmux hooks for an
-// in-memory fake and record matcher helpers for the duration of each test via
-// t.Cleanup.
+// in-memory fake and record matcher helpers for the duration of each test.
+// The file is not a _test.go file because cross-package tests need the
+// unexported tmuxOutput/tmuxRun seam, so it accepts the fataler interface
+// instead of *testing.T to keep the testing package out of shipped binaries.
 package sessionmgr
 
 import (
 	"context"
 	"fmt"
 	"sync"
-	"testing"
 )
+
+// fataler is the minimal testing.TB surface these fakes need; *testing.T
+// satisfies it, so callers pass their test handle unchanged.
+type fataler interface {
+	Helper()
+	Fatalf(format string, args ...any)
+	Cleanup(func())
+}
 
 // FakeTmux is an in-memory stand-in for a tmux server's pane options.
 type FakeTmux struct {
@@ -79,7 +88,7 @@ type TmuxCall struct {
 
 // StrictFakeTmux records tmuxOutput/tmuxRun calls and fails on unexpected ones.
 type StrictFakeTmux struct {
-	t              *testing.T
+	t              fataler
 	base           *FakeTmux
 	mu             sync.Mutex
 	allowOutput    []func([]string) bool
@@ -101,7 +110,7 @@ type tmuxRunHandler struct {
 }
 
 // NewStrictFakeTmux wraps base (or a new FakeTmux when nil) with call recording.
-func NewStrictFakeTmux(t *testing.T, base *FakeTmux) *StrictFakeTmux {
+func NewStrictFakeTmux(t fataler, base *FakeTmux) *StrictFakeTmux {
 	t.Helper()
 	if base == nil {
 		base = NewFakeTmux()
@@ -147,7 +156,7 @@ func (s *StrictFakeTmux) AllowPaneOptions() *StrictFakeTmux {
 }
 
 // Install swaps tmux hooks for the duration of the test.
-func (s *StrictFakeTmux) Install(t *testing.T) *FakeTmux {
+func (s *StrictFakeTmux) Install(t fataler) *FakeTmux {
 	t.Helper()
 	SetTmuxHooksForTest(t, s.output, s.run)
 	return s.base
@@ -244,7 +253,7 @@ func MatchNewSession(args []string) bool {
 
 // SetTmuxHooksForTest swaps tmuxOutput/tmuxRun for the duration of a test.
 func SetTmuxHooksForTest(
-	t *testing.T,
+	t fataler,
 	output func(context.Context, ...string) ([]byte, error),
 	run func(context.Context, ...string) error,
 ) {

@@ -206,7 +206,7 @@ func TestListFDirsWithCommandFallback(t *testing.T) {
 	}
 }
 
-func TestFDAvailable(t *testing.T) {
+func TestFdAvailable(t *testing.T) {
 	dir := t.TempDir()
 	file, err := os.Create(filepath.Join(dir, "fd"))
 	if err != nil {
@@ -217,11 +217,11 @@ func TestFDAvailable(t *testing.T) {
 		t.Fatalf("Chmod() = %v", err)
 	}
 	t.Setenv("PATH", dir)
-	if !FDAvailable() {
-		t.Fatal("FDAvailable() = false with fd on PATH")
+	if !fdAvailable() {
+		t.Fatal("fdAvailable() = false with fd on PATH")
 	}
 	t.Setenv("PATH", t.TempDir())
-	if FDAvailable() {
-		t.Fatal("FDAvailable() = true with fd absent from PATH")
+	if fdAvailable() {
+		t.Fatal("fdAvailable() = true with fd absent from PATH")
 	}
 }

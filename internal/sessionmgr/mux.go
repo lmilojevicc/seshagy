@@ -21,13 +21,9 @@ type Terms struct {
 	BackendName   string
 	SessionNoun   string
 	SessionPlural string
-	SessionTitle  string
 	WindowNoun    string
 	WindowPlural  string
-	WindowTitle   string
 	PaneNoun      string
-	PanePlural    string
-	KillVerb      string // present-tense destroy verb ("killing" / "closing")
 	KillVerbPast  string // past-tense destroy verb ("killed" / "closed")
 }
 
@@ -36,13 +32,9 @@ func TmuxTerms() Terms {
 		BackendName:   "tmux",
 		SessionNoun:   "session",
 		SessionPlural: "sessions",
-		SessionTitle:  "Session",
 		WindowNoun:    "window",
 		WindowPlural:  "windows",
-		WindowTitle:   "Window",
 		PaneNoun:      "pane",
-		PanePlural:    "panes",
-		KillVerb:      "killing",
 		KillVerbPast:  "killed",
 	}
 }
@@ -52,13 +44,9 @@ func HerdrTerms() Terms {
 		BackendName:   "herdr",
 		SessionNoun:   "workspace",
 		SessionPlural: "workspaces",
-		SessionTitle:  "Workspace",
 		WindowNoun:    "tab",
 		WindowPlural:  "tabs",
-		WindowTitle:   "Tab",
 		PaneNoun:      "pane",
-		PanePlural:    "panes",
-		KillVerb:      "closing",
 		KillVerbPast:  "closed",
 	}
 }

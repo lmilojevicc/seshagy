@@ -340,7 +340,7 @@ func WriteSSHConfig(hosts []Host) (bool, error) {
 // IncludeLine is the line users add to ~/.ssh/config so OpenSSH (and therefore
 // herdr) picks up the generated config.
 func IncludeLine() string {
-	return "Include " + contractHome(SSHConfigPath())
+	return "Include " + xdg.ContractHome(SSHConfigPath())
 }
 
 // IncludeIsSetup reports whether the generated ssh config is already included by
@@ -552,18 +552,4 @@ func splitConfigLine(line string) (string, string) {
 		return strings.ToLower(line[:i]), strings.TrimSpace(line[i:])
 	}
 	return strings.ToLower(line), ""
-}
-
-func contractHome(path string) string {
-	home := xdg.Home()
-	if home == "" || home == "." {
-		return path
-	}
-	if path == home {
-		return "~"
-	}
-	if rest, ok := strings.CutPrefix(path, home+string(filepath.Separator)); ok {
-		return "~/" + rest
-	}
-	return path
 }

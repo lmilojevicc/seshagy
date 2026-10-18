@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/lmilojevicc/seshagy/internal/xdg"
 )
 
 const DefaultFDCommand = `fd -H -a -d 2 -t d -E .Trash . "$HOME"`
@@ -22,10 +24,9 @@ const findFallbackCommand = `find "$HOME" -mindepth 1 -maxdepth 2 ` +
 	`\( -name .git -o -name node_modules -o -name .Trash \) -prune ` +
 	`-o -mindepth 1 -maxdepth 2 -type d -print`
 
-// FDAvailable reports whether the `fd` binary is on PATH. When it is missing
-// the default fd command falls back to `find`; callers use this to label the
-// resulting rows honestly.
-func FDAvailable() bool {
+// fdAvailable reports whether the `fd` binary is on PATH; resolveFDCommand
+// uses it to decide when the default fd command falls back to `find`.
+func fdAvailable() bool {
 	return commandOnPath("fd")
 }
 
@@ -64,7 +65,7 @@ func resolveFDCommand(command string) string {
 	if command == "" {
 		command = DefaultFDCommand
 	}
-	if command == DefaultFDCommand && !FDAvailable() {
+	if command == DefaultFDCommand && !fdAvailable() {
 		return findFallbackCommand
 	}
 	return command
@@ -94,7 +95,7 @@ func dirItems(out []byte, kind Kind) []Item {
 		if path == "" {
 			continue
 		}
-		label := ContractHome(path)
+		label := xdg.ContractHome(path)
 		items = append(items, Item{Kind: kind, Name: label, Target: ExpandHome(label), Path: label})
 	}
 	return items
