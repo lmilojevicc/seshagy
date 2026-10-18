@@ -86,6 +86,7 @@ seshagy hosts switch <name|local>
 
 seshagy config path
 seshagy config show
+seshagy config keys
 seshagy config init [--force]
 seshagy diagnostics [--json]
 ```

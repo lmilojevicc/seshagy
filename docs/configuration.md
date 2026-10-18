@@ -86,6 +86,7 @@ Inspect or create it with:
 ```sh
 seshagy config path
 seshagy config show
+seshagy config keys
 seshagy config init
 ```
 
@@ -124,8 +125,8 @@ sessions, agents, directories, and hosts, and `ctrl` keys select a filter
 `tab` / `shift+tab` cycle). The prompt also reads herdr-navigator style prefix
 tokens, ANDed with that filter: `!` agent name or kind, `@` workspace or state
 (`@` alone is every agent), `#` agent state, `/` path. `[tui] preview` and
-`[tui] layout` are the only `[tui]` settings the picker reads. See
-the README's TUI section for the full keymap.
+`[tui] layout` plus the `[tui.keys]` overrides are the only `[tui]` settings the
+picker reads. See the README's TUI section for the full keymap.
 
 ```toml
 [tui]
@@ -145,6 +146,81 @@ preview) instead of putting them side by side, whatever the layout says.
 Legacy and unknown values (including the old `default` and `zen` tokens)
 normalize to `horizontal` without an error, so an existing `config.toml` keeps
 working.
+
+#### Remapping the picker keys
+
+`[tui.keys]` overrides the picker's key table: one entry per action id, whose
+value is a key name or a list of them. An entry **replaces** the action's
+default keys, and an empty list unbinds the action — it stops dispatching and
+drops out of the footer and the help overlay.
+
+```toml
+[tui.keys]
+agents  = ["ctrl+a"]        # a list and a bare string both work
+remotes = "f2"
+kill    = ["ctrl+x", "delete"]
+yazi    = []                # unbind
+```
+
+| Id                | Default keys               | Action                                            |
+| ----------------- | -------------------------- | ------------------------------------------------- |
+| `agents`          | `ctrl+a`                   | Toggle the agents filter                          |
+| `state`           | `ctrl+s`                   | Cycle the agent-state filter                      |
+| `sessions`        | `ctrl+t`                   | Toggle the sessions/workspaces filter             |
+| `zoxide`          | `ctrl+z`                   | Toggle the zoxide filter                          |
+| `find`            | `ctrl+f`                   | Toggle the find filter                            |
+| `remotes`         | `ctrl+e`                   | Toggle the remote-hosts filter                    |
+| `next_filter`     | `tab`                      | Next filter                                       |
+| `previous_filter` | `shift+tab`                | Previous filter                                   |
+| `up`              | `up`, `ctrl+p`, `ctrl+k`   | Move the selection up                             |
+| `down`            | `down`, `ctrl+n`, `ctrl+j` | Move the selection down                           |
+| `page_up`         | `pgup`                     | Page up                                           |
+| `page_down`       | `pgdown`                   | Page down                                         |
+| `first`           | `home`                     | First item                                        |
+| `last`            | `end`                      | Last item                                         |
+| `rename`          | `ctrl+r`                   | Rename the selected session/workspace or agent    |
+| `kill`            | `ctrl+x`, `delete`         | Kill the selected session/workspace or agent pane |
+| `preview`         | `ctrl+o`                   | Toggle the preview window                         |
+| `yazi`            | `ctrl+y`                   | Pick a directory with yazi                        |
+| `help`            | `F1`                       | Open the help overlay                             |
+| `integrations`    | `ctrl+g`                   | Open the agent integration install menu           |
+| `refresh`         | `ctrl+l`                   | Reload every source                               |
+| `clear_query`     | `ctrl+u`                   | Clear the query                                   |
+| `delete_word`     | `ctrl+w`                   | Delete the last word                              |
+
+The footer draws an action's first key and the help overlay the rest, so a
+remap reaches both automatically. `enter` (open), `esc` (clear the query, then
+the filter, then quit), `ctrl+c` (quit), `backspace`, and the query-token rows
+are fixed: a `[tui.keys]` entry naming them is ignored.
+
+Key names follow Bubble Tea (`ctrl+a`, `alt+x`, `shift+tab`, `f2`, `pgup`,
+`home`, `up`, `tab`, …), case-insensitively, and `ctrl-a`, `C-a` and `^a` all
+mean `ctrl+a`. The picker ignores, with a warning, an unknown action id; a key
+name it does not know; a plain printable key (`a`, `?`, `/`, space), because it
+would type into the search (`alt+<char>` is fine); and the reserved keys
+`enter`, `esc`, `ctrl+c`, `backspace` plus their terminal aliases `ctrl+m`,
+`ctrl+i`, `ctrl+[`, `ctrl+?`. An override wins a key from a default action
+(which then loses that key), and of two overrides claiming the same key the id
+that sorts first keeps it — no key is ever bound twice. An entry whose every key
+is rejected keeps the action's default keys, so a typo never unbinds anything;
+only an explicit `[]` does. The footer shows `↑↓ move` while `up` and `down`
+are both bound.
+
+Issues are toasted once at start-up and `seshagy config keys` prints the
+effective table and every issue:
+
+```sh
+seshagy config keys          # id, keys, and label of every action, then the issues
+seshagy config keys --json
+```
+
+When tmux's `prefix` is `C-a`, tmux eats `ctrl+a` before the picker sees it, so
+the agents filter needs another key:
+
+```toml
+[tui.keys]
+agents = "ctrl+b"
+```
 
 ### Remote hosts
 

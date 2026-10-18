@@ -77,6 +77,39 @@ type LogConfig struct {
 type TUIConfig struct {
 	Layout  string `toml:"layout"  json:"layout"`
 	Preview *bool  `toml:"preview" json:"preview"`
+	// Keys overrides the picker's key table, one entry per action id: the entry
+	// replaces the action's default keys, and an empty list unbinds it. The
+	// picker validates the ids and key names and reports what it drops.
+	Keys map[string]KeyList `toml:"keys,omitempty" json:"keys,omitempty"`
+}
+
+// KeyList is one [tui.keys] entry's keys: a single key name or a list of them.
+// A value of any other type leaves the list nil, which the picker reports as a
+// binding issue and ignores, so one bad entry cannot fail the whole config. A
+// nil list is distinct from a present but empty one, which unbinds the action.
+type KeyList []string
+
+// UnmarshalTOML accepts a key name or an array of them. It never fails the
+// decode: an unreadable value leaves the list nil.
+func (k *KeyList) UnmarshalTOML(value any) error {
+	switch typed := value.(type) {
+	case string:
+		*k = KeyList{typed}
+	case []any:
+		keys := make(KeyList, 0, len(typed))
+		for _, entry := range typed {
+			name, ok := entry.(string)
+			if !ok {
+				*k = nil
+				return nil
+			}
+			keys = append(keys, name)
+		}
+		*k = keys
+	default:
+		*k = nil
+	}
+	return nil
 }
 
 type DirectoriesConfig struct {
@@ -245,12 +278,31 @@ func Save(cfg Config) error {
 
 func Marshal(cfg Config) ([]byte, error) {
 	cfg.Normalize()
+	// A [tui.keys] entry the decoder could not read (see KeyList) is left out:
+	// writing it back as an empty list would unbind the action the entry only
+	// meant to override, and the picker ignores the entry as it stands.
+	cfg.TUI.Keys = readableKeyLists(cfg.TUI.Keys)
 	var buf bytes.Buffer
 	err := toml.NewEncoder(&buf).Encode(cfg)
 	if err != nil {
 		return nil, err
 	}
 	return buf.Bytes(), nil
+}
+
+// readableKeyLists drops the [tui.keys] entries whose value could not be read.
+func readableKeyLists(keys map[string]KeyList) map[string]KeyList {
+	kept := make(map[string]KeyList, len(keys))
+	for id, list := range keys {
+		if list == nil {
+			continue
+		}
+		kept[id] = list
+	}
+	if len(kept) == 0 {
+		return nil
+	}
+	return kept
 }
 
 func (c *Config) Normalize() {

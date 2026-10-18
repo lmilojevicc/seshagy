@@ -140,13 +140,30 @@ func (f *fakeMux) MarkActiveDoneAgentsIdle(context.Context, []sessionmgr.Item) {
 // newTestModel returns a Model wired to a fake multiplexer at a fixed size.
 func newTestModel(t *testing.T) Model {
 	t.Helper()
+	return newTestModelWithConfig(t, appconfig.Default())
+}
+
+// newTestModelWithConfig returns a Model at a fixed size for one config.
+func newTestModelWithConfig(t *testing.T, cfg appconfig.Config) Model {
+	t.Helper()
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("HERDR_ENV", "")
 	t.Setenv("SESHAGY_AGENT_ICONS", "none")
-	m := New(WithConfig(appconfig.Default()), WithMultiplexer(newFakeMux()))
+	m := New(WithConfig(cfg), WithMultiplexer(newFakeMux()))
 	m.width, m.height = 120, 32
 	return m
 }
+
+// remappedModel returns a Model whose [tui.keys] overrides are the given ones.
+func remappedModel(t *testing.T, keys map[string]appconfig.KeyList) Model {
+	t.Helper()
+	cfg := appconfig.Default()
+	cfg.TUI.Keys = keys
+	return newTestModelWithConfig(t, cfg)
+}
+
+// defaultKeyTable is the picker's key table with no [tui.keys] overrides.
+func defaultKeyTable() KeyTable { return ResolveKeys(nil) }
 
 func newTestModelWith(t *testing.T, mux sessionmgr.Multiplexer) Model {
 	t.Helper()
@@ -196,6 +213,10 @@ func keyStringMsg(name string) tea.KeyMsg {
 		return deleteMsg()
 	case "f1":
 		return keyMsg(tea.KeyF1)
+	case "f2":
+		return keyMsg(tea.KeyF2)
+	case "f9":
+		return keyMsg(tea.KeyF9)
 	case "ctrl+c":
 		return keyMsg(tea.KeyCtrlC)
 	case "ctrl+r":

@@ -26,8 +26,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.killArmed {
 		return m.handleKillConfirmKey(msg)
 	}
-	if binding := keyBindingFor(msg.String()); binding != nil {
-		return binding.run(m, msg.String())
+	if binding, ok := m.keys.bindingFor(msg.String()); ok {
+		return binding.run(m)
 	}
 	if !isPrintableKey(msg) {
 		return m, nil

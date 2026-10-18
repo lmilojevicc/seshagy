@@ -59,6 +59,11 @@ type Model struct {
 	// layout is the configured [tui] layout: horizontal, vertical, or dropdown.
 	layout string
 
+	// keys is the effective key table: the default bindings with the configured
+	// [tui.keys] overrides applied. The dispatch, the footer and the help overlay
+	// all read it.
+	keys KeyTable
+
 	scope scope
 	// stateFilter narrows the agents scope to one agent state. It is the second
 	// filter axis ctrl+s cycles, and a switch to any other scope clears it.
@@ -282,6 +287,7 @@ func New(optionFns ...Option) Model {
 		styles:           stylesFromConfig(cfg),
 		config:           cfg,
 		layout:           cfg.TUILayout(),
+		keys:             ResolveKeys(cfg.TUI.Keys),
 		icons:            cfg.IconSet(),
 		mux:              mux,
 		terms:            mux.Terms(),
@@ -297,6 +303,9 @@ func New(optionFns ...Option) Model {
 	}
 	if cfgErr != nil {
 		m.notify(cfgErr.Error(), sevError)
+	}
+	if issues := len(m.keys.Issues()); issues > 0 {
+		m.notify(keyIssueToast(issues), sevWarning)
 	}
 	return m
 }

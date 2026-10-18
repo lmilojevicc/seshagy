@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -140,6 +141,154 @@ func TestRunConfigBareJSON(t *testing.T) {
 	}
 	if !payload.Ok || payload.Path != appconfig.Path() {
 		t.Fatalf("payload = %#v", payload)
+	}
+}
+
+// keyRow reads one row of `config keys` by its id column.
+func keyRow(t *testing.T, out, id string) string {
+	t.Helper()
+	for _, line := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
+		if fields := strings.Fields(line); len(fields) > 0 && fields[0] == id {
+			return line
+		}
+	}
+	t.Fatalf("config keys has no %q row:\n%s", id, out)
+	return ""
+}
+
+// TestRunConfigKeysListsTheEffectiveKeyMap pins the default table `config keys`
+// prints: one row per remappable action with the keys it answers, and nothing on
+// stderr for a config with no overrides.
+func TestRunConfigKeysListsTheEffectiveKeyMap(t *testing.T) {
+	manifestTestDirs(t)
+	out, err := captureStdout(t, func() error { return runConfig([]string{"keys"}) })
+	if err != nil {
+		t.Fatalf("runConfig(keys) error = %v", err)
+	}
+	rows := strings.Count(strings.TrimRight(out, "\n"), "\n") + 1
+	if rows != 23 {
+		t.Fatalf("config keys printed %d rows, want the 23 remappable actions:\n%s", rows, out)
+	}
+	for _, want := range []struct{ id, keys string }{
+		{"agents", "ctrl+a"},
+		{"remotes", "ctrl+e"},
+		{"up", "up ctrl+p ctrl+k"},
+		{"down", "down ctrl+n ctrl+j"},
+		{"kill", "ctrl+x delete"},
+		{"help", "f1"},
+	} {
+		if row := keyRow(t, out, want.id); !strings.Contains(row, want.keys) {
+			t.Errorf("config keys row %q = %q, want keys %q", want.id, row, want.keys)
+		}
+	}
+	if strings.Contains(out, "(unbound)") {
+		t.Fatalf("the default table has an unbound action:\n%s", out)
+	}
+
+	stderr, err := captureStderr(t, func() error { return runConfig([]string{"keys"}) })
+	if err != nil {
+		t.Fatalf("runConfig(keys) error = %v", err)
+	}
+	if stderr != "" {
+		t.Fatalf("runConfig(keys) warned about a clean config: %q", stderr)
+	}
+}
+
+// TestRunConfigKeysAppliesOverridesAndReportsIssues pins the rest of
+// `config keys`: the rows follow the [tui.keys] overrides, an empty list reads
+// as unbound, and every issue the picker would toast reaches stderr.
+func TestRunConfigKeysAppliesOverridesAndReportsIssues(t *testing.T) {
+	manifestTestDirs(t)
+	cfg := appconfig.Default()
+	cfg.TUI.Keys = map[string]appconfig.KeyList{
+		"agents": {"f2"},
+		"yazi":   {},
+		"nope":   {"f3"},
+	}
+	if err := appconfig.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	var out string
+	stderr, err := captureStderr(t, func() error {
+		var runErr error
+		out, runErr = captureStdout(t, func() error { return runConfig([]string{"keys"}) })
+		return runErr
+	})
+	if err != nil {
+		t.Fatalf("runConfig(keys) error = %v", err)
+	}
+	if row := keyRow(t, out, "agents"); !strings.Contains(row, "f2") ||
+		strings.Contains(row, "ctrl+a") {
+		t.Errorf("agents row = %q, want the override f2 alone", row)
+	}
+	if row := keyRow(t, out, "yazi"); !strings.Contains(row, "(unbound)") {
+		t.Errorf("yazi row = %q, want it reported unbound", row)
+	}
+	if !strings.Contains(stderr, "tui.keys.nope: unknown action; ignored") {
+		t.Errorf("stderr = %q, want the unknown-action issue", stderr)
+	}
+}
+
+// TestRunConfigKeysJSON pins the machine-readable form: the same rows, and the
+// issues in the payload rather than on stderr.
+func TestRunConfigKeysJSON(t *testing.T) {
+	manifestTestDirs(t)
+	cfg := appconfig.Default()
+	cfg.TUI.Keys = map[string]appconfig.KeyList{"agents": {"F2"}, "nope": {"f3"}}
+	if err := appconfig.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	var out string
+	stderr, err := captureStderr(t, func() error {
+		var runErr error
+		out, runErr = captureStdout(t, func() error {
+			return runConfig([]string{"keys", "--json"})
+		})
+		return runErr
+	})
+	if err != nil {
+		t.Fatalf("runConfig(keys --json) error = %v", err)
+	}
+	if stderr != "" {
+		t.Fatalf("config keys --json warned on stderr: %q", stderr)
+	}
+	var payload struct {
+		SchemaVersion int  `json:"schema_version"`
+		Ok            bool `json:"ok"`
+		Keys          []struct {
+			ID    string   `json:"id"`
+			Keys  []string `json:"keys"`
+			Label string   `json:"label"`
+		} `json:"keys"`
+		Issues []string `json:"issues"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(out)), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v, out=%q", err, out)
+	}
+	if payload.SchemaVersion != 1 || !payload.Ok {
+		t.Fatalf("envelope = schema_version:%d ok:%v", payload.SchemaVersion, payload.Ok)
+	}
+	if len(payload.Keys) != 23 {
+		t.Fatalf("keys payload has %d rows, want 23", len(payload.Keys))
+	}
+	found := false
+	for _, mapping := range payload.Keys {
+		if mapping.ID != "agents" {
+			continue
+		}
+		found = true
+		if fmt.Sprint(mapping.Keys) != "[f2]" || mapping.Label != "agents" {
+			t.Errorf("agents mapping = %#v, want normalized f2", mapping)
+		}
+	}
+	if !found {
+		t.Fatal("keys payload has no agents mapping")
+	}
+	if len(payload.Issues) != 1 ||
+		!strings.Contains(payload.Issues[0], "tui.keys.nope: unknown action") {
+		t.Errorf("issues = %q, want the unknown-action issue", payload.Issues)
 	}
 }
 

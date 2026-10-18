@@ -1228,10 +1228,23 @@ type footerHint struct {
 // they draw, with the sessions hint named the way the active backend names a
 // session.
 func (m Model) footerHints() []footerHint {
-	bindings := footerBindings()
-	hints := make([]footerHint, len(bindings))
-	for i, binding := range bindings {
-		hints[i] = footerHint{key: keyHint(binding.keys), label: m.bindingLabel(binding)}
+	bindings := m.keys.footerBindings()
+	hints := make([]footerHint, 0, len(bindings))
+	for i := 0; i < len(bindings); i++ {
+		binding := bindings[i]
+		if binding.id == "up" && i+1 < len(bindings) && bindings[i+1].id == "down" {
+			// Up and down share one hint, "↑↓ move", as long as both are bound.
+			hints = append(hints, footerHint{
+				key:   keyHint(binding.keys) + keyHint(bindings[i+1].keys),
+				label: "move",
+			})
+			i++
+			continue
+		}
+		hints = append(
+			hints,
+			footerHint{key: keyHint(binding.keys), label: m.bindingLabel(binding)},
+		)
 	}
 	return hints
 }
@@ -1260,9 +1273,11 @@ func (m Model) renderFooter(width int) string {
 	}
 	// The droppable hints give way from the right; the pinned pair is measured
 	// with them, so it survives as long as the line can hold it. The help hint
-	// goes before the quit hint does.
-	body := parts[:len(parts)-footerPinnedHints]
-	pinned := parts[len(parts)-footerPinnedHints:]
+	// goes before the quit hint does. A config that unbinds footer actions can
+	// leave fewer hints than the pinned pair, and then every hint left is pinned.
+	pinnedCount := min(footerPinnedHints, len(parts))
+	body := parts[:len(parts)-pinnedCount]
+	pinned := parts[len(parts)-pinnedCount:]
 	shownWidth := func(n, p int) int {
 		width := hintsWidth(body[:n])
 		if n > 0 && p > 0 {
@@ -1270,11 +1285,11 @@ func (m Model) renderFooter(width int) string {
 		}
 		return width + hintsWidth(pinned[len(pinned)-p:])
 	}
-	n, p := len(body), footerPinnedHints
+	n, p := len(body), pinnedCount
 	for n > 0 && shownWidth(n, p) > width {
 		n--
 	}
-	if shownWidth(n, p) > width {
+	if p > 0 && shownWidth(n, p) > width {
 		p--
 	}
 	if shownWidth(n, p) > width {

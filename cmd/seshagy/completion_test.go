@@ -157,7 +157,7 @@ func TestCompletionTreeCanonicalMetadata(t *testing.T) {
 	}
 	paths := []string{
 		"completion bash", "completion zsh", "completion fish",
-		"config", "config path", "config show", "config init", "diagnostics",
+		"config", "config path", "config show", "config keys", "config init", "diagnostics",
 		"hosts", "hosts setup", "hosts switch",
 		"integration install", "integration uninstall", "keybind install tmux",
 		"keybind install herdr", "keybind uninstall tmux", "keybind uninstall herdr",
@@ -269,6 +269,7 @@ func TestCompletionFlagAndRegistrySnapshots(t *testing.T) {
 		{"config", []string{"json"}},
 		{"config path", []string{"json"}},
 		{"config show", []string{"json"}},
+		{"config keys", []string{"json"}},
 		{"config init", []string{"force", "json"}},
 		{"diagnostics", []string{"json"}},
 		{"hosts", []string{"json"}},

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/lmilojevicc/seshagy/internal/cli"
@@ -503,6 +504,11 @@ func runConfig(args []string) error {
 		}
 		cli.Println(string(data))
 		return nil
+	case "keys":
+		if len(rest) != 1 {
+			return errors.New(joinUsage("config", "keys", "[--json]"))
+		}
+		return printKeyTable(jsonOutput)
 	case "init":
 		force := len(rest) == 2 && rest[1] == "--force"
 		if len(rest) > 2 || (len(rest) == 2 && !force) {
@@ -528,8 +534,53 @@ func runConfig(args []string) error {
 		cli.Println(appconfig.Path())
 		return nil
 	default:
-		return errors.New(joinUsage("config", "path|show|init", "[--force]", "[--json]"))
+		return errors.New(
+			joinUsage("config", "path|show|keys|init", "[--force]", "[--json]"),
+		)
 	}
+}
+
+// printKeyTable prints the effective key table `seshagy config keys` reports:
+// one row per remappable action with the keys it answers, then every problem the
+// configured [tui.keys] overrides had, so the picker's start-up toast has
+// somewhere to point. The table is the picker's own, resolved from the same
+// config the picker reads.
+func printKeyTable(jsonOutput bool) error {
+	cfg, err := appconfig.Load()
+	if err != nil {
+		return err
+	}
+	table := tui.ResolveKeys(cfg.TUI.Keys)
+	mappings := table.Mappings()
+	issues := table.Issues()
+	if issues == nil {
+		issues = []string{}
+	}
+	if jsonOutput {
+		return encodeSuccess(map[string]any{"keys": mappings, "issues": issues})
+	}
+	idWidth, keysWidth := 0, 0
+	for _, mapping := range mappings {
+		idWidth = max(idWidth, len(mapping.ID))
+		keysWidth = max(keysWidth, len(keyColumn(mapping)))
+	}
+	for _, mapping := range mappings {
+		cli.Println(fmt.Sprintf("%-*s  %-*s  %s",
+			idWidth, mapping.ID, keysWidth, keyColumn(mapping), mapping.Label))
+	}
+	for _, issue := range issues {
+		cli.Warn(issue)
+	}
+	return nil
+}
+
+// keyColumn names the keys one action answers; an action the config unbound
+// answers none, which reads better named than as an empty column.
+func keyColumn(mapping tui.KeyMapping) string {
+	if len(mapping.Keys) == 0 {
+		return "(unbound)"
+	}
+	return strings.Join(mapping.Keys, " ")
 }
 
 func printItemsWithConfig(
@@ -645,6 +696,8 @@ Usage:
                                   label, or current rendered line
   seshagy config path [--json]    print config file path
   seshagy config show [--json]    print effective config
+  seshagy config keys [--json]    print the effective picker key map and every
+                                  [tui.keys] binding issue
   seshagy config init [--force] [--json]
   seshagy run [--session <name>] [<host>]
                                   attach herdr to <host> (or the local server)

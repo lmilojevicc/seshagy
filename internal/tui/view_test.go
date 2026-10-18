@@ -104,7 +104,7 @@ func TestViewSnapshotSanityAcrossWidths(t *testing.T) {
 			}
 		}
 
-		want := []string{"Results", "seshagy", "↑↓", "4"}
+		want := []string{"Results", "seshagy", "↑↓ move", "4"}
 		if width >= 60 {
 			// Narrow frames clip titles and the placeholder; keep the full-text
 			// assertions to widths where nothing has to be clipped.

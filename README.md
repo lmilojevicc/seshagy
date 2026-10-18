@@ -209,6 +209,9 @@ The footer names the core actions only; `F1` opens the overlay with the rest of 
 | `F1`                          | Open the help overlay: the filter keys, the query tokens, and the rest of the keymap    |
 | `ctrl+c`                      | Quit                                                                                    |
 
+Every one of these can be rebound — or unbound — with `[tui.keys]`; see
+[configuration.md](docs/configuration.md#remapping-the-picker-keys).
+
 ### Filters
 
 Filter with `ctrl` keys: pressing the active filter's key returns to all, pressing another
