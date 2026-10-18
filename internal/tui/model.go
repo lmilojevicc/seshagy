@@ -139,7 +139,7 @@ type Model struct {
 }
 
 // installMenuState holds the state of the agent-integration install menu
-// overlay (first-run popup + manual ctrl+a reopen).
+// overlay (first-run popup + manual ctrl+g reopen).
 type installMenuState struct {
 	active   bool
 	cursor   int

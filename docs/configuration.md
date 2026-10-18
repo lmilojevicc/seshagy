@@ -122,13 +122,16 @@ file = ""                     # empty: create a per-run file under XDG state
 ### TUI
 
 The picker is always type-first: printable keys fuzzy-filter the merged list of
-sessions, agents, directories, and hosts, and a sigil typed on an empty prompt
-selects a filter (`@` agents, `!` needs you, `$` sessions, `*` dirs, `~` zoxide,
-`/` find, `#` hosts). `[tui] preview` and `[tui] layout` are the `[tui]`
-settings the picker reads; `input_style`, `dim_background`, `[type_first]` and
-`[sources]` are still accepted in `config.toml` (and by `seshagy config init`)
-but no longer affect the TUI. See the README's TUI section for the full
-keymap.
+sessions, agents, directories, and hosts, and `ctrl` keys select a filter
+(`ctrl+a` agents, `ctrl+s` agent state, `ctrl+t` sessions, `ctrl+z` zoxide,
+`ctrl+f` find, `ctrl+e` remotes; the active filter's key returns to all, and
+`tab` / `shift+tab` cycle). The prompt also reads herdr-navigator style prefix
+tokens, ANDed with that filter: `!` agent name or kind, `@` workspace or state
+(`@` alone is every agent), `#` agent state, `/` path. `[tui] preview` and
+`[tui] layout` are the `[tui]` settings the picker reads; `input_style`,
+`dim_background`, `[type_first]` and `[sources]` are still accepted in
+`config.toml` (and by `seshagy config init`) but no longer affect the TUI. See
+the README's TUI section for the full keymap.
 
 ```toml
 [tui]

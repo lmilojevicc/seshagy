@@ -113,7 +113,7 @@ for file, cap, retention, and locking details.
 
 ## Install menu integrations
 
-Press `ctrl+a` in the TUI to open the integration install menu (it also auto-pops on
+Press `ctrl+g` in the TUI to open the integration install menu (it also auto-pops on
 first launch). Select an integration and press `enter` to install, `u` to
 uninstall, or `a` to install all. Installs run off the UI thread and never
 block the dashboard. The available integrations are: `pi`, `codex`, `claude`,

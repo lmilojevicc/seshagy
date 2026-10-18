@@ -76,11 +76,14 @@ _(Note: You can also run `seshagy keybind install tmux` or `seshagy keybind inst
 Open the picker anytime by running `seshagy` (or pressing your new keybind!). It is type-first:
 just start typing to fuzzy-search sessions, agents, directories, and hosts.
 
-- Type a filter sigil on an empty prompt to narrow the list: `@` agents, `!` needs you,
-  `$` sessions, `*` dirs, `~` zoxide, `/` find, `#` hosts. `tab` / `shift+tab` cycle them.
+- Narrow the list with `ctrl` keys: `ctrl+a` agents, `ctrl+s` agent state, `ctrl+t` sessions,
+  `ctrl+z` zoxide, `ctrl+f` find, `ctrl+e` remotes. Pressing the active filter's key returns to
+  all, and `tab` / `shift+tab` cycle them.
+- Type prefix tokens on the prompt to narrow the query further: `!` agent name or kind,
+  `@` agent workspace or state (`@` alone is every agent), `#` agent state, `/` path.
 - Press `enter` on a session/workspace to attach, on a directory to create or switch to a
   session for it, and on an agent to focus its pane.
-- Press `ctrl+a` to open the agent integration install menu.
+- Press `ctrl+g` to open the agent integration install menu.
 
 ---
 
@@ -99,7 +102,7 @@ seshagy run homelab      # start attached to a configured host
 seshagy run --session work edge
 ```
 
-Keybind a plain terminal (not a herdr pane) to `seshagy run`, then pick a host with `#` and press
+Keybind a plain terminal (not a herdr pane) to `seshagy run`, then pick a host with `ctrl+e` and press
 `enter` to switch. `seshagy hosts switch <name|local>` does the same from a herdr pane or a script.
 
 ### Configure hosts
@@ -185,6 +188,12 @@ The picker is always type-first: printable keys filter the list, and every actio
 | ----------------------------- | -------------------------------------------------------------------------------------- |
 | _type_                        | Fuzzy-filter the list (title matches rank first)                                        |
 | `tab` / `shift+tab`           | Next / previous filter                                                                  |
+| `ctrl+a`                      | Filter to agents (press it again for all)                                               |
+| `ctrl+s`                      | Cycle the agent-state filter: blocked, done, working, idle, all agents                  |
+| `ctrl+t`                      | Filter to sessions (tmux) / workspaces (herdr)                                          |
+| `ctrl+z`                      | Filter to zoxide directories                                                            |
+| `ctrl+f`                      | Filter to `fd` (or `find`) discoveries                                                  |
+| `ctrl+e`                      | Filter to remote hosts                                                                  |
 | `↑`/`↓`, `ctrl+p`/`ctrl+n`    | Move the selection (wraps)                                                              |
 | `pgup`/`pgdown`, `home`/`end` | Page through the list / jump to its ends                                                |
 | `enter`                       | Attach to the session, focus the agent pane, open the directory, or switch to the host  |
@@ -193,26 +202,51 @@ The picker is always type-first: printable keys filter the list, and every actio
 | `ctrl+o`                      | Toggle the preview window (the `dropdown` layout starts with it hidden)                 |
 | `ctrl+y`                      | Pick a directory with `yazi`                                                            |
 | `ctrl+l`                      | Reload every source                                                                     |
-| `ctrl+a`                      | Open the agent integration install menu                                                 |
+| `ctrl+g`                      | Open the agent integration install menu                                                 |
 | `ctrl+u` / `ctrl+w`           | Clear the query / delete the last word                                                  |
 | `esc`                         | Clear the query and filter first; quit when both are empty                              |
 | `ctrl+c`                      | Quit                                                                                    |
 
 ### Filters
 
-Type a sigil on an **empty** prompt to select a filter, or cycle them with `tab`. The chips sit
-right of the prompt; `# hosts` only appears when you have hosts.
+Filter with `ctrl` keys: pressing the active filter's key returns to all, pressing another
+filter's key switches straight to it, and the typed query is kept. `tab` / `shift+tab` cycle the
+same filters; the active ones are named in the prompt window title.
 
-| Sigil | Filter      | Shows                                                      |
-| ----- | ----------- | ---------------------------------------------------------- |
-|       | `all`       | Everything, agents needing you first                       |
-| `@`   | `agents`    | Agent panes and their state                                |
-| `!`   | `needs you` | Agents that are blocked or finished a turn                 |
-| `$`   | `sessions`  | Sessions (tmux) / workspaces (herdr)                       |
-| `*`   | `dirs`      | `zoxide` history plus `fd` discoveries                     |
-| `~`   | `zoxide`    | Frecency-ranked directories                                |
-| `/`   | `find`      | `fd` (or `find` when `fd` is not installed)                |
-| `#`   | `hosts`     | Remote herdr servers (see the Remote Hosts section above)  |
+| Key      | Filter      | Shows                                                      |
+| -------- | ----------- | ---------------------------------------------------------- |
+|          | `all`       | Everything, agents needing you first                       |
+| `ctrl+a` | `agents`    | Agent panes and their state                                |
+| `ctrl+s` | agent state | Cycles blocked, done, working, idle, then all agents       |
+| `ctrl+t` | `sessions`  | Sessions (tmux) / workspaces (herdr)                       |
+| `ctrl+z` | `zoxide`    | Frecency-ranked directories                                |
+| `ctrl+f` | `find`      | `fd` (or `find` when `fd` is not installed)                |
+| `ctrl+e` | `remotes`   | Remote herdr servers (see the Remote Hosts section above)  |
+
+`ctrl+s` narrows the same list the agents filter shows: the first press lands on `blocked`, each
+later press steps one state on, and the press after `idle` clears the state filter while staying
+on agents. Switching to another filter, `esc`, or `backspace` on an empty prompt drops it.
+
+### Query tokens
+
+Type `!`, `@`, `#` or `/` on the prompt for a prefix token. Tokens are ANDed with the `ctrl`
+filter and with the plain text, so `@seshagy #idle fix` reads "the idle agents in the `seshagy`
+workspace that match `fix`".
+
+| Token | Matches                                                            |
+| ----- | ------------------------------------------------------------------ |
+| `!x`  | The agent's name or kind (`!claude`, `!fix`)                       |
+| `@`   | Every agent                                                        |
+| `@x`  | The agent's workspace label or its state (`@frontend`, `@blocked`) |
+| `#x`  | The agent's state (`#idle`)                                        |
+| `/x`  | The item's path (`/tui`)                                           |
+
+An agent token (`!x`, `@`, `@x`, `#x`) restricts the list to agents; a bare `!`, `@`, `#` or `/`
+is ignored. Plain text fuzzy-matches exactly as it does without tokens, so highlighting stays
+with the text you typed.
+
+_When tmux's `prefix` is `C-a`, tmux eats `ctrl+a` before the picker sees it — `tab` / `shift+tab`
+and `esc` reach the same filters._
 
 ---
 
