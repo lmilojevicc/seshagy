@@ -525,15 +525,6 @@ func executeKeybind(cmd keybindCommand) error {
 	return installHerdrKeybind(cmd.key, cmd.herdrMode, cmd.width, cmd.height, cmd.persistent)
 }
 
-// runKeybind dispatches `seshagy keybind <cmd>`.
-func runKeybind(args []string) error {
-	cmd, err := parseKeybindCommand(args)
-	if err != nil {
-		return err
-	}
-	return executeKeybind(cmd)
-}
-
 func warnIgnoredPopupDimensions(target, mode string, widthSet, heightSet bool) {
 	var flags []string
 	if widthSet {

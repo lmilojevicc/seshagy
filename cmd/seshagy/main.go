@@ -532,19 +532,6 @@ func runConfig(args []string) error {
 	}
 }
 
-func printItems(
-	ctx context.Context,
-	mux sessionmgr.Multiplexer,
-	mode sessionmgr.SourceMode,
-	jsonOutput bool,
-) error {
-	cfg, err := appconfig.Load()
-	if err != nil {
-		return err
-	}
-	return printItemsWithConfig(ctx, mux, mode, jsonOutput, cfg)
-}
-
 func printItemsWithConfig(
 	ctx context.Context,
 	mux sessionmgr.Multiplexer,
@@ -569,23 +556,6 @@ func printItemsWithConfig(
 		cli.Println(sessionmgr.FormatLineWithIcons(item, icons))
 	}
 	return nil
-}
-
-func deleteItem(
-	ctx context.Context,
-	mux sessionmgr.Multiplexer,
-	raw string,
-	jsonOutput bool,
-) error {
-	cfg, err := appconfig.Load()
-	if err != nil {
-		return err
-	}
-	item, err := resolveDeleteItem(ctx, mux, raw, cfg)
-	if err != nil {
-		return err
-	}
-	return deletePreparedItem(ctx, mux, item, jsonOutput)
 }
 
 func resolveDeleteItem(
@@ -729,8 +699,9 @@ TUI keys:
   ctrl keys select a filter (ctrl+a agents, ctrl+s agent state, ctrl+t sessions,
   ctrl+z zoxide, ctrl+f find, ctrl+e remotes); the active filter's key returns
   to all, and tab/shift+tab cycle them.
+  Query tokens: !agent-name  @workspace-or-state (@ = every agent)  #state  /path
   enter attach/create/focus   ctrl+r rename   ctrl+x kill   ctrl+o preview
-  ctrl+y yazi                 ctrl+l reload   ctrl+g integrations
+  ctrl+y yazi                 ctrl+l reload   ctrl+g integrations   F1 help
   esc clear query then filter, quit when both are empty   ctrl+c quit
 
 Config:
