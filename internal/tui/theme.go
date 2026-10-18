@@ -27,8 +27,6 @@ type palette struct {
 }
 
 type styles struct {
-	p palette
-
 	app       lipgloss.Style
 	itemName  lipgloss.Style
 	title     lipgloss.Style
@@ -37,7 +35,6 @@ type styles struct {
 	key       lipgloss.Style
 	bar       lipgloss.Style
 	match     lipgloss.Style
-	rule      lipgloss.Style
 	success   lipgloss.Style
 	info      lipgloss.Style
 	warning   lipgloss.Style
@@ -90,7 +87,7 @@ func stylesFromConfig(cfg appconfig.Config) styles {
 	warning := themeColor(colors.Warning, p.yellow)
 	danger := themeColor(colors.Danger, p.red)
 
-	s := styles{p: p}
+	s := styles{}
 	s.app = lipgloss.NewStyle().Foreground(p.fg).Background(p.bg)
 	s.itemName = lipgloss.NewStyle().Foreground(p.fg)
 	s.title = lipgloss.NewStyle().Foreground(popupTitle).Bold(true)
@@ -99,7 +96,6 @@ func stylesFromConfig(cfg appconfig.Config) styles {
 	s.key = lipgloss.NewStyle().Foreground(key).Bold(true)
 	s.bar = lipgloss.NewStyle().Foreground(accent)
 	s.match = lipgloss.NewStyle().Foreground(accent).Bold(true).Underline(true)
-	s.rule = lipgloss.NewStyle().Foreground(muted)
 	s.success = lipgloss.NewStyle().Foreground(success).Bold(true)
 	s.info = lipgloss.NewStyle().Foreground(info).Bold(true)
 	s.warning = lipgloss.NewStyle().Foreground(warning).Bold(true)

@@ -7,9 +7,11 @@ import (
 	"github.com/lmilojevicc/seshagy/internal/sessionmgr"
 )
 
-// pickerKeys is the key set the picker's dispatch answers, which the table must
-// cover exactly: the dispatch reads the table, so a key added or dropped without
-// a table change shows up as a failure here.
+// pickerKeys is the picker's hand-maintained key set, kept beside the table it
+// mirrors. Because the list is maintained by hand, it pins only what it names:
+// every key listed here must still resolve to a binding, and the table must not
+// bind a run-capable key the list omits. It says nothing about the table's
+// run-less query-token rows.
 var pickerKeys = []string{
 	"up", "down", "ctrl+p", "ctrl+k", "ctrl+n", "ctrl+j",
 	"pgup", "pgdown", "home", "end",
@@ -19,9 +21,9 @@ var pickerKeys = []string{
 	"ctrl+c",
 }
 
-// TestKeyBindingsCoverEveryPickerKey pins the table against the picker's key set
-// in both directions: every key the dispatch answers is bound, and every key the
-// table binds is dispatchable.
+// TestKeyBindingsCoverEveryPickerKey pins the table against the hand-maintained
+// pickerKeys list: the table's run-capable keys are exactly the ones listed, and
+// every listed key resolves to a binding.
 func TestKeyBindingsCoverEveryPickerKey(t *testing.T) {
 	bound := make([]string, 0, len(pickerKeys))
 	for _, binding := range pickerKeyBindings {

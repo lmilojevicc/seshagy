@@ -917,11 +917,6 @@ func (m Model) selectionBar(line string, width int) string {
 	return paintBackground(line, width, m.styles.selectionBG)
 }
 
-// rowPrefixWidth is the fixed inset/icon/gap prefix every row shares: one
-// column of space inside the window border, the kind icon, then the gap before
-// the title.
-func (m Model) rowPrefixWidth() int { return 1 + m.rowIconWidth() + 1 }
-
 // rowIconWidth is the icon column's width. It is one cell wider when agent logos
 // are drawn, because the icon font extends into the cell after the glyph.
 func (m Model) rowIconWidth() int {

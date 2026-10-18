@@ -97,8 +97,8 @@ func (m Model) helpBlocks() []helpBlock {
 	blocks := make([]helpBlock, 0, len(keyGroups))
 	for _, group := range keyGroups {
 		var rows []helpRow
-		for _, binding := range pickerKeyBindings {
-			if binding.footer || binding.group != group {
+		for _, binding := range helpBindings() {
+			if binding.group != group {
 				continue
 			}
 			rows = append(rows, helpRow{

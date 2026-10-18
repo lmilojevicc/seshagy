@@ -507,20 +507,6 @@ func (m Model) requestPreview() (Model, tea.Cmd) {
 	return m, m.previewCmdFor(item)
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
-
 // clampVal clamps v to the inclusive [lo, hi] range. If hi <= lo, only the
 // lower bound is enforced (v is floored at lo but not capped).
 func clampVal(v, lo, hi int) int {

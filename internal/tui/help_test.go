@@ -386,8 +386,18 @@ func TestHelpBoxScrollsWhenTallerThanTheFrame(t *testing.T) {
 		)
 	}
 	_, _, _, box := helpBox(t, m)
-	if !strings.Contains(box[len(box)-1], "↓ 17 more") {
-		t.Fatalf("the box's bottom border does not count the rows below: %q", box[len(box)-1])
+	if want := fmt.Sprintf(
+		"↓ %d more",
+		len(w.lines)-w.innerHeight(),
+	); !strings.Contains(
+		box[len(box)-1],
+		want,
+	) {
+		t.Fatalf(
+			"the box's bottom border does not count the rows below with %q: %q",
+			want,
+			box[len(box)-1],
+		)
 	}
 	if strings.Contains(strings.Join(box, "\n"), "refresh") {
 		t.Fatal("the box drew a row past its window")
@@ -407,8 +417,12 @@ func TestHelpBoxScrollsWhenTallerThanTheFrame(t *testing.T) {
 	if !strings.Contains(strings.Join(box, "\n"), "refresh") {
 		t.Fatal("the box's last window does not draw the Actions rows")
 	}
-	if !strings.Contains(box[len(box)-1], "↑ 17 more") {
-		t.Fatalf("the box's bottom border does not count the rows above: %q", box[len(box)-1])
+	if want := fmt.Sprintf("↑ %d more", w.maxTop()); !strings.Contains(box[len(box)-1], want) {
+		t.Fatalf(
+			"the box's bottom border does not count the rows above with %q: %q",
+			want,
+			box[len(box)-1],
+		)
 	}
 
 	m, _ = press(t, m, "up")

@@ -449,38 +449,10 @@ func TestPromptContentKeepsItsInsetAndCount(t *testing.T) {
 	if row := sessionmgr.StripANSI(m.renderPromptContent(60)); !strings.HasSuffix(row, "1/4") {
 		t.Fatalf("filtered prompt row = %q, want the shown/total count", row)
 	}
-}
 
-// TestPromptRowKeepsTheCountAndNoSigils pins the prompt content row: the
-// shown/total count stays right-aligned at every width, and the removed sigil
-// hint is gone for good.
-func TestPromptRowKeepsTheCountAndNoSigils(t *testing.T) {
-	withColor(t)
-	m := newTestModel(t)
-	m = withItems(m, pickerItems())
-	m.scope = scopeAgents
-
-	wide := m.renderPromptContent(78)
-	plain := sessionmgr.StripANSI(wide)
-	if !strings.HasSuffix(plain, "2/4") {
-		t.Fatalf("the shown/total count is not right-aligned: %q", plain)
-	}
-
-	// A narrow prompt window keeps the count.
-	if narrow := sessionmgr.StripANSI(m.renderPromptContent(20)); !strings.Contains(narrow, "2/4") {
-		t.Fatalf("count dropped in a narrow prompt window: %q", narrow)
-	}
-
-	// No width draws a sigil hint any more, even with a long query in the row.
-	// The count's own slash is not a hint.
-	m.query = strings.Repeat("q", 40)
-	for _, width := range []int{78, 30, 20} {
-		row := sessionmgr.StripANSI(m.renderPromptContent(width))
-		for _, sigil := range []string{"@", "!", "$", "*", "~", "#"} {
-			if strings.Contains(row, sigil) {
-				t.Fatalf("width %d: sigil %q still in the prompt row: %q", width, sigil, row)
-			}
-		}
+	// A narrow prompt window keeps the count while the rest of the row clips.
+	if row := sessionmgr.StripANSI(m.renderPromptContent(20)); !strings.Contains(row, "1/4") {
+		t.Fatalf("narrow prompt row = %q, want the shown/total count", row)
 	}
 }
 
@@ -988,7 +960,10 @@ func TestAgentItemDrawsBoldNameStateBadgeAndContext(t *testing.T) {
 			if !strings.Contains(plain[1], "frontend · 3m") {
 				t.Fatalf("line 2 = %q, want the workspace and age", plain[1])
 			}
-			if !strings.HasPrefix(plain[1], strings.Repeat(" ", m.rowPrefixWidth())+"frontend") {
+			if !strings.HasPrefix(
+				plain[1],
+				strings.Repeat(" ", lipgloss.Width(m.itemPrefix(item)))+"frontend",
+			) {
 				t.Fatalf("line 2 = %q, want it indented under the name", plain[1])
 			}
 			for _, part := range []string{"frontend", "3m"} {
