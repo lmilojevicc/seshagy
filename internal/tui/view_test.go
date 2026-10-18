@@ -77,16 +77,6 @@ func resultRowLine(t *testing.T, frame, text string) string {
 	return ""
 }
 
-// promptContentLine is the ANSI-stripped content row of the prompt window.
-func promptContentLine(t *testing.T, m Model) string {
-	t.Helper()
-	l := m.viewLayout()
-	if l.prompt.height < promptWindowRows {
-		t.Fatalf("frame has no prompt window content row (height %d)", l.prompt.height)
-	}
-	return frameLines(t, m)[l.prompt.y+1]
-}
-
 func TestViewSnapshotSanityAcrossWidths(t *testing.T) {
 	for _, width := range []int{40, 80, 140} {
 		m := newTestModel(t)
@@ -98,7 +88,7 @@ func TestViewSnapshotSanityAcrossWidths(t *testing.T) {
 		lines := frameLines(t, m)
 
 		// The prompt window is the first thing every layout draws, and its title
-		// carries the active scope; the query row sits inside it.
+		// carries the active filters; the query row sits inside it.
 		for _, text := range []string{"seshagy · all"} {
 			if !strings.Contains(lines[0], text) {
 				t.Fatalf("width %d: prompt window title missing %q: %q", width, text, lines[0])
@@ -125,8 +115,10 @@ func TestViewSnapshotSanityAcrossWidths(t *testing.T) {
 				t.Fatalf("width %d: view missing %q\n%s", width, text, out)
 			}
 		}
-		if strings.Contains(promptQuery, "#") {
-			t.Fatalf("width %d: hosts sigil hinted without host items: %q", width, promptQuery)
+		for _, sigil := range []string{"@", "!", "$", "*", "~", "#"} {
+			if strings.Contains(promptQuery, sigil) {
+				t.Fatalf("width %d: sigil hint still drawn: %q", width, promptQuery)
+			}
 		}
 	}
 }
@@ -227,9 +219,10 @@ func TestFrameWindowsAcrossLayoutsAndSizes(t *testing.T) {
 	}
 }
 
-// TestPromptWindowTitleCarriesTheScope pins the prompt window title: "seshagy"
-// in the prompt accent, then the active scope, centered in the top border.
-func TestPromptWindowTitleCarriesTheScope(t *testing.T) {
+// TestPromptWindowTitleCarriesTheFilters pins the prompt window title: "seshagy"
+// in the prompt accent, then the active scope and agent-state filter, centered
+// in the top border.
+func TestPromptWindowTitleCarriesTheFilters(t *testing.T) {
 	withColor(t)
 	m := newTestModel(t)
 	m = withItems(m, pickerItems())
@@ -238,7 +231,7 @@ func TestPromptWindowTitleCarriesTheScope(t *testing.T) {
 	l := m.viewLayout()
 	block := m.renderPromptWindow(l)
 	title := sessionmgr.StripANSI(block[0])
-	if !strings.Contains(title, " seshagy · @ agents ") {
+	if !strings.Contains(title, " seshagy · agents ") {
 		t.Fatalf("prompt title row = %q", title)
 	}
 	if !strings.HasPrefix(title, "╭") || ansi.StringWidth(title) != l.prompt.width {
@@ -247,20 +240,59 @@ func TestPromptWindowTitleCarriesTheScope(t *testing.T) {
 	if !strings.Contains(block[0], m.styles.titlePrompt.Render("seshagy")) {
 		t.Fatalf("seshagy is not drawn in the prompt accent: %q", block[0])
 	}
-	if !strings.Contains(block[0], m.styles.emphasis.Render("@ agents")) {
+	if !strings.Contains(block[0], m.styles.emphasis.Render("agents")) {
 		t.Fatalf("scope label is not drawn in the accent: %q", block[0])
+	}
+
+	// The state filter names itself after the scope.
+	m.stateFilter = stateFilterBlocked
+	title = sessionmgr.StripANSI(m.renderPromptWindow(l)[0])
+	if !strings.Contains(title, " seshagy · agents · blocked ") {
+		t.Fatalf("filtered prompt title row = %q", title)
 	}
 }
 
-func TestViewHidesAndShowsTheHostsSigil(t *testing.T) {
-	m := newTestModel(t)
-	m = withItems(m, []sessionmgr.Item{{Kind: sessionmgr.KindHost, Name: "box", Target: "box"}})
-	if out := promptContentLine(t, m); !strings.Contains(out, "#") {
-		t.Fatalf("hosts sigil missing from the hint with a host item\n%s", out)
+// TestPromptWindowTitleUsesTheBackendSessionWord pins the sessions scope's label
+// to the multiplexer's own vocabulary: "workspaces" under herdr, "sessions"
+// under tmux.
+func TestPromptWindowTitleUsesTheBackendSessionWord(t *testing.T) {
+	tests := []struct {
+		name  string
+		terms sessionmgr.Terms
+		want  string
+	}{
+		{"tmux", sessionmgr.TmuxTerms(), " seshagy · sessions "},
+		{"herdr", sessionmgr.HerdrTerms(), " seshagy · workspaces "},
 	}
-	m = withItems(m, []sessionmgr.Item{{Kind: sessionmgr.KindSession, Name: "dev", Target: "dev"}})
-	if out := promptContentLine(t, m); strings.Contains(out, "#") {
-		t.Fatalf("hosts sigil hinted without host items\n%s", out)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := newTestModel(t)
+			m.terms = tt.terms
+			m.scope = scopeSessions
+			title := sessionmgr.StripANSI(m.renderPromptWindow(m.viewLayout())[0])
+			if !strings.Contains(title, tt.want) {
+				t.Fatalf("prompt title row = %q, want %q", title, tt.want)
+			}
+		})
+	}
+}
+
+// TestHostsScopeFollowsTheHostList pins the hosts scope's availability: it is a
+// scope the picker only offers once a remote host is configured, which is what
+// the tab cycle steps over.
+func TestHostsScopeFollowsTheHostList(t *testing.T) {
+	m := newTestModel(t)
+	if m.scopeAvailable(scopeHosts) {
+		t.Fatal("the hosts scope is offered without a host")
+	}
+	m = withItems(m, []sessionmgr.Item{{Kind: sessionmgr.KindHost, Name: "box", Target: "box"}})
+	if !m.scopeAvailable(scopeHosts) {
+		t.Fatal("the hosts scope is missing with a host item")
+	}
+	for _, sc := range []scope{scopeAll, scopeAgents, scopeSessions, scopeZoxide, scopeFind} {
+		if !m.scopeAvailable(sc) {
+			t.Fatalf("scope %v reported no source", sc)
+		}
 	}
 }
 
@@ -308,6 +340,7 @@ func TestEmptyStateMessages(t *testing.T) {
 	tests := []struct {
 		name  string
 		scope scope
+		state stateFilter
 		query string
 		items []sessionmgr.Item
 		want  []string
@@ -315,7 +348,13 @@ func TestEmptyStateMessages(t *testing.T) {
 		{
 			name:  "empty scope filter",
 			scope: scopeAgents,
-			want:  []string{"nothing in", "@ agents", "⇥ next filter · ⌫ back to all"},
+			want:  []string{"nothing in", "agents", "⇥ next filter · ⌫ back to all"},
+		},
+		{
+			name:  "empty state filter names the state",
+			scope: scopeAgents,
+			state: stateFilterBlocked,
+			want:  []string{"no blocked agents", "^s next state · ⌫ back to all"},
 		},
 		{
 			name:  "no matches for the query",
@@ -334,6 +373,7 @@ func TestEmptyStateMessages(t *testing.T) {
 			m := newTestModel(t)
 			m = withItems(m, tt.items)
 			m.scope = tt.scope
+			m.stateFilter = tt.state
 			m.query = tt.query
 			out := sessionmgr.StripANSI(m.View())
 			for _, want := range tt.want {
@@ -353,7 +393,7 @@ func TestPromptShowsShortPlaceholderOnly(t *testing.T) {
 		t.Fatalf("placeholder missing\n%s", plain)
 	}
 	if strings.Contains(placeholderText, "@") {
-		t.Fatal("placeholder lists sigils; the hint is the only place they appear")
+		t.Fatal("placeholder lists sigils, which no longer select anything")
 	}
 }
 
@@ -411,7 +451,10 @@ func TestPromptContentKeepsItsInsetAndCount(t *testing.T) {
 	}
 }
 
-func TestPromptContentShowsTheHintAndCount(t *testing.T) {
+// TestPromptRowKeepsTheCountAndNoSigils pins the prompt content row: the
+// shown/total count stays right-aligned at every width, and the removed sigil
+// hint is gone for good.
+func TestPromptRowKeepsTheCountAndNoSigils(t *testing.T) {
 	withColor(t)
 	m := newTestModel(t)
 	m = withItems(m, pickerItems())
@@ -419,31 +462,93 @@ func TestPromptContentShowsTheHintAndCount(t *testing.T) {
 
 	wide := m.renderPromptContent(78)
 	plain := sessionmgr.StripANSI(wide)
-	for _, sigil := range []string{"@", "!", "$", "*", "~", "/"} {
-		if !strings.Contains(plain, sigil) {
-			t.Fatalf("sigil hint missing %q: %q", sigil, plain)
-		}
-	}
 	if !strings.HasSuffix(plain, "2/4") {
 		t.Fatalf("the shown/total count is not right-aligned: %q", plain)
 	}
-	if !strings.Contains(wide, m.styles.chipActive.Render("@")) {
-		t.Fatalf("the active scope's sigil is not accented: %q", wide)
-	}
 
-	// A narrow prompt window drops the hint but keeps the count.
-	narrow := sessionmgr.StripANSI(m.renderPromptContent(20))
-	if strings.Contains(narrow, "@") {
-		t.Fatalf("hint kept in a narrow prompt window: %q", narrow)
-	}
-	if !strings.Contains(narrow, "2/4") {
+	// A narrow prompt window keeps the count.
+	if narrow := sessionmgr.StripANSI(m.renderPromptContent(20)); !strings.Contains(narrow, "2/4") {
 		t.Fatalf("count dropped in a narrow prompt window: %q", narrow)
 	}
 
-	// The query wins: a long query leaves no room for the hint.
+	// No width draws a sigil hint any more, even with a long query in the row.
+	// The count's own slash is not a hint.
 	m.query = strings.Repeat("q", 40)
-	if row := sessionmgr.StripANSI(m.renderPromptContent(30)); strings.Contains(row, "@") {
-		t.Fatalf("hint overlaps a long query: %q", row)
+	for _, width := range []int{78, 30, 20} {
+		row := sessionmgr.StripANSI(m.renderPromptContent(width))
+		for _, sigil := range []string{"@", "!", "$", "*", "~", "#"} {
+			if strings.Contains(row, sigil) {
+				t.Fatalf("width %d: sigil %q still in the prompt row: %q", width, sigil, row)
+			}
+		}
+	}
+}
+
+// TestFooterDropsHintsFromTheRightAndPinsEscQuit pins the footer's truncation:
+// entries drop from the right when the line is short, and the quit hint stays
+// last while anything fits.
+func TestFooterDropsHintsFromTheRightAndPinsEscQuit(t *testing.T) {
+	m := newTestModel(t)
+	m = withItems(m, pickerItems())
+
+	wide := sessionmgr.StripANSI(m.renderFooter(160))
+	for _, want := range []string{
+		"↑↓ move", "⏎ open", "^a agents", "^s state", "^t sessions", "^z zoxide",
+		"^f find", "^e remotes", "^r rename", "^x kill", "^o preview", "^y yazi",
+		"^g integrations",
+	} {
+		if !strings.Contains(wide, want) {
+			t.Fatalf("wide footer missing %q: %q", want, wide)
+		}
+	}
+	if !strings.HasSuffix(wide, "esc quit") {
+		t.Fatalf("wide footer = %q, want esc quit last", wide)
+	}
+
+	// The sessions hint names the backend's own session word.
+	m.terms = sessionmgr.HerdrTerms()
+	if herdr := sessionmgr.StripANSI(
+		m.renderFooter(160),
+	); !strings.Contains(
+		herdr,
+		"^t workspaces",
+	) {
+		t.Fatalf("herdr footer = %q, want the workspaces hint", herdr)
+	}
+	m.terms = sessionmgr.TmuxTerms()
+
+	// A narrower line drops the rightmost hints first.
+	for _, width := range []int{120, 80, 60} {
+		row := sessionmgr.StripANSI(m.renderFooter(width))
+		if ansi.StringWidth(row) > width {
+			t.Fatalf("width %d: footer is %d columns: %q", width, ansi.StringWidth(row), row)
+		}
+		if !strings.HasSuffix(row, "esc quit") {
+			t.Fatalf("width %d: footer = %q, want esc quit last", width, row)
+		}
+		if strings.Contains(row, "integrations") || strings.Contains(row, "yazi") {
+			t.Fatalf("width %d: footer kept a hint that drops from the right: %q", width, row)
+		}
+		if !strings.Contains(row, "↑↓ move") {
+			t.Fatalf("width %d: footer dropped the leftmost hints: %q", width, row)
+		}
+	}
+
+	narrow := sessionmgr.StripANSI(m.renderFooter(40))
+	if !strings.Contains(narrow, "↑↓ move") || strings.Contains(narrow, "zoxide") {
+		t.Fatalf("narrow footer = %q, want the left hints only", narrow)
+	}
+	if !strings.HasSuffix(narrow, "esc quit") {
+		t.Fatalf("narrow footer = %q, want esc quit last", narrow)
+	}
+
+	// The quit hint survives alone when nothing else fits, and a line too narrow
+	// for it draws nothing at all.
+	if got := sessionmgr.StripANSI(m.renderFooter(10)); got != "esc quit" {
+		t.Fatalf("footer at 10 columns = %q, want just the quit hint", got)
+	}
+	if got := sessionmgr.StripANSI(m.renderFooter(4)); got != "" {
+		t.Fatalf("footer at 4 columns = %q, want nothing", got)
 	}
 }
 
@@ -459,7 +564,7 @@ func TestFooterCounterAndHintDropping(t *testing.T) {
 		t.Fatalf("prompt content = %q, want the 1/4 count", prompt)
 	}
 
-	wide := sessionmgr.StripANSI(m.renderFooter(m.width))
+	wide := sessionmgr.StripANSI(m.renderFooter(160))
 	if !strings.Contains(wide, "yazi") {
 		t.Fatalf("wide footer dropped hints: %q", wide)
 	}
@@ -469,10 +574,10 @@ func TestFooterCounterAndHintDropping(t *testing.T) {
 
 	narrow := sessionmgr.StripANSI(m.renderFooter(40))
 	if strings.Contains(narrow, "yazi") {
-		t.Fatalf("narrow footer kept a hint that must drop from the end: %q", narrow)
+		t.Fatalf("narrow footer kept a hint that must drop from the right: %q", narrow)
 	}
-	if !strings.Contains(narrow, "↑↓ move") {
-		t.Fatalf("narrow footer dropped every hint: %q", narrow)
+	if !strings.Contains(narrow, "↑↓ move") || !strings.Contains(narrow, "esc quit") {
+		t.Fatalf("narrow footer dropped the hints it must keep: %q", narrow)
 	}
 }
 

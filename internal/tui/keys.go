@@ -31,9 +31,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	switch msg.String() {
 	case "esc":
-		if m.query != "" || m.scope != scopeAll {
+		if m.query != "" {
 			m.query = ""
-			m.scope = scopeAll
+			return m.afterSelectionChanged()
+		}
+		if m.scope != scopeAll || m.stateFilter != stateFilterNone {
+			m = m.clearFilter()
 			return m.afterSelectionChanged()
 		}
 		return m, tea.Quit
@@ -50,10 +53,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "end":
 		return m.moveCursor(len(m.rows()) - 1)
 	case "tab":
-		m.scope = m.scope.next(1)
+		m = m.switchScope(nextScope(m.scope, 1, m.scopeAvailable))
 		return m.afterSelectionChanged()
 	case "shift+tab":
-		m.scope = m.scope.next(-1)
+		m = m.switchScope(nextScope(m.scope, -1, m.scopeAvailable))
 		return m.afterSelectionChanged()
 	case "enter":
 		return m.activateSelected()
@@ -78,6 +81,24 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m, reload = m.reloadCmd()
 		return m, reload
 	case "ctrl+a":
+		m = m.toggleAgentsScope()
+		return m.afterSelectionChanged()
+	case "ctrl+t":
+		m = m.toggleScope(scopeSessions)
+		return m.afterSelectionChanged()
+	case "ctrl+z":
+		m = m.toggleScope(scopeZoxide)
+		return m.afterSelectionChanged()
+	case "ctrl+f":
+		m = m.toggleScope(scopeFind)
+		return m.afterSelectionChanged()
+	case "ctrl+e":
+		m = m.toggleScope(scopeHosts)
+		return m.afterSelectionChanged()
+	case "ctrl+s":
+		m = m.cycleStateFilter()
+		return m.afterSelectionChanged()
+	case "ctrl+g":
 		m.openInstallMenu(false)
 		return m, nil
 	case "ctrl+u":
@@ -93,8 +114,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.query = string(runes[:len(runes)-1])
 			return m.afterSelectionChanged()
 		}
-		if m.scope != scopeAll {
-			m.scope = scopeAll
+		if m.scope != scopeAll || m.stateFilter != stateFilterNone {
+			m = m.clearFilter()
 			return m.afterSelectionChanged()
 		}
 		return m, nil
@@ -102,16 +123,54 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if !isPrintableKey(msg) {
 		return m, nil
 	}
-	// A sigil typed on an empty query selects that scope instead of being
-	// inserted; the same keystroke switches scope while one is active.
-	if m.query == "" && len(msg.Runes) == 1 {
-		if sc, ok := scopeForSigil(msg.Runes[0]); ok {
-			m.scope = sc
-			return m.afterSelectionChanged()
-		}
-	}
 	m.query += string(msg.Runes)
 	return m.afterSelectionChanged()
+}
+
+// switchScope moves to sc, dropping the agent-state filter: the filter only
+// exists inside the agents scope, so leaving agents clears it.
+func (m Model) switchScope(sc scope) Model {
+	m.scope = sc
+	if sc != scopeAgents {
+		m.stateFilter = stateFilterNone
+	}
+	return m
+}
+
+// toggleScope is the scope keys' toggle semantics: the active scope's key
+// returns to all, another scope's key switches straight to it.
+func (m Model) toggleScope(sc scope) Model {
+	if m.scope == sc {
+		return m.switchScope(scopeAll)
+	}
+	return m.switchScope(sc)
+}
+
+// toggleAgentsScope is ctrl+a: the agents scope toggles back to all, and a
+// press while the state filter is active clears the filter and stays on agents.
+func (m Model) toggleAgentsScope() Model {
+	if m.scope == scopeAgents && m.stateFilter == stateFilterNone {
+		return m.switchScope(scopeAll)
+	}
+	m.scope = scopeAgents
+	m.stateFilter = stateFilterNone
+	return m
+}
+
+// cycleStateFilter is ctrl+s: it steps the agent-state filter and narrows to the
+// agents scope to show it. From any scope the first press lands on blocked;
+// cycling past idle clears the filter and keeps the agents scope.
+func (m Model) cycleStateFilter() Model {
+	m.scope = scopeAgents
+	m.stateFilter = m.stateFilter.next()
+	return m
+}
+
+// clearFilter drops the scope and the agent-state filter.
+func (m Model) clearFilter() Model {
+	m.scope = scopeAll
+	m.stateFilter = stateFilterNone
+	return m
 }
 
 // moveCursor moves the selection and schedules the preview capture for it.

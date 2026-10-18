@@ -725,12 +725,13 @@ Scripting:
                                   remove an agent hook/extension
 
 TUI keys:
-  The picker is always type-first: printable keys fuzzy-filter the list and a
-  sigil typed on an empty prompt selects a filter (@ agents, ! needs you,
-  $ sessions, * dirs, ~ zoxide, / find, # hosts); tab/shift+tab cycle them.
+  The picker is always type-first: printable keys fuzzy-filter the list and the
+  ctrl keys select a filter (ctrl+a agents, ctrl+s agent state, ctrl+t sessions,
+  ctrl+z zoxide, ctrl+f find, ctrl+e remotes); the active filter's key returns
+  to all, and tab/shift+tab cycle them.
   enter attach/create/focus   ctrl+r rename   ctrl+x kill   ctrl+o preview
-  ctrl+y yazi                 ctrl+l reload   ctrl+a integrations
-  esc clear query and filter, quit when both are empty   ctrl+c quit
+  ctrl+y yazi                 ctrl+l reload   ctrl+g integrations
+  esc clear query then filter, quit when both are empty   ctrl+c quit
 
 Config:
   Config lives at $XDG_CONFIG_HOME/seshagy/config.toml, or

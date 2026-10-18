@@ -155,15 +155,15 @@ func TestInstallResultMsgUpdatesStatus(t *testing.T) {
 	}
 }
 
-func TestCtrlAOpensTheInstallMenuFromThePicker(t *testing.T) {
+func TestCtrlGOpensTheInstallMenuFromThePicker(t *testing.T) {
 	m := newTestModel(t)
 	var cmd tea.Cmd
-	m, cmd = press(t, m, "ctrl+a")
+	m, cmd = press(t, m, "ctrl+g")
 	if !m.installMenu.active {
-		t.Fatal("ctrl+a did not open the install menu")
+		t.Fatal("ctrl+g did not open the install menu")
 	}
 	if cmd != nil {
-		t.Fatalf("ctrl+a returned a command: %v", cmd)
+		t.Fatalf("ctrl+g returned a command: %v", cmd)
 	}
 }
 

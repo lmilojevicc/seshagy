@@ -208,6 +208,18 @@ func keyStringMsg(name string) tea.KeyMsg {
 		return keyMsg(tea.KeyCtrlL)
 	case "ctrl+a":
 		return keyMsg(tea.KeyCtrlA)
+	case "ctrl+s":
+		return keyMsg(tea.KeyCtrlS)
+	case "ctrl+t":
+		return keyMsg(tea.KeyCtrlT)
+	case "ctrl+z":
+		return keyMsg(tea.KeyCtrlZ)
+	case "ctrl+f":
+		return keyMsg(tea.KeyCtrlF)
+	case "ctrl+e":
+		return keyMsg(tea.KeyCtrlE)
+	case "ctrl+g":
+		return keyMsg(tea.KeyCtrlG)
 	case "ctrl+u":
 		return keyMsg(tea.KeyCtrlU)
 	case "ctrl+w":

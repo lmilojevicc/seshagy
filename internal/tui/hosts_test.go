@@ -111,10 +111,17 @@ func TestPickerShowsHostsFromConfig(t *testing.T) {
 			t.Fatalf("picker view missing %q:\n%s", want, out)
 		}
 	}
-	// The hosts scope is offered in the prompt window's sigil hint rather than
-	// as a filter chip.
-	if !strings.Contains(out, "#") {
-		t.Fatalf("hosts sigil missing from the prompt hint:\n%s", out)
+	// The hosts scope is reached with ctrl+e and appears in the prompt window
+	// title once it is active; it is no longer spelled out as a sigil hint.
+	m, _ = press(t, m, "ctrl+e")
+	if m.scope != scopeHosts {
+		t.Fatalf("ctrl+e: scope = %v, want the hosts scope", m.scope)
+	}
+	if !strings.Contains(sessionmgr.StripANSI(m.View()), "seshagy · remotes") {
+		t.Fatalf(
+			"hosts scope is not named in the prompt title:\n%s",
+			sessionmgr.StripANSI(m.View()),
+		)
 	}
 }
 

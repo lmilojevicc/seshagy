@@ -19,49 +19,63 @@ func isQuitCmd(cmd tea.Cmd) bool {
 	return ok
 }
 
-func TestSigilSelectsScopeOnEmptyQuery(t *testing.T) {
+func TestScopeKeysSelectAndToggleScopes(t *testing.T) {
 	tests := []struct {
-		sigil string
-		want  scope
+		key  string
+		want scope
 	}{
-		{"@", scopeAgents},
-		{"!", scopeAttention},
-		{"$", scopeSessions},
-		{"*", scopeDirs},
-		{"~", scopeZoxide},
-		{"/", scopeFind},
-		{"#", scopeHosts},
+		{"ctrl+a", scopeAgents},
+		{"ctrl+t", scopeSessions},
+		{"ctrl+e", scopeHosts},
+		{"ctrl+z", scopeZoxide},
+		{"ctrl+f", scopeFind},
 	}
 	for _, tt := range tests {
-		m := newTestModel(t)
-		m, _ = press(t, m, tt.sigil)
-		if m.scope != tt.want {
-			t.Fatalf("typed %q: scope = %v, want %v", tt.sigil, m.scope, tt.want)
-		}
-		if m.query != "" {
-			t.Fatalf("typed %q: query = %q, want empty", tt.sigil, m.query)
-		}
-		// The same sigil again is idempotent, and a different one switches.
-		m, _ = press(t, m, tt.sigil)
-		if m.scope != tt.want || m.query != "" {
-			t.Fatalf("retyped %q: scope = %v query = %q", tt.sigil, m.scope, m.query)
-		}
-		m, _ = press(t, m, "$")
-		if tt.want != scopeSessions && m.scope != scopeSessions {
-			t.Fatalf("switching with $ from %v: scope = %v", tt.want, m.scope)
-		}
+		t.Run(tt.key, func(t *testing.T) {
+			m := newTestModel(t)
+			m = withItems(m, []sessionmgr.Item{
+				{Kind: sessionmgr.KindSession, Name: "demo", Target: "demo"},
+			})
+			m, _ = press(t, m, tt.key)
+			if m.scope != tt.want {
+				t.Fatalf("%s: scope = %v, want %v", tt.key, m.scope, tt.want)
+			}
+			if m.query != "" {
+				t.Fatalf("%s: query = %q, want empty", tt.key, m.query)
+			}
+			// Pressing the active scope's key again returns to all.
+			m, _ = press(t, m, tt.key)
+			if m.scope != scopeAll {
+				t.Fatalf("%s again: scope = %v, want scopeAll", tt.key, m.scope)
+			}
+			// A switch keeps the typed query.
+			m.query = "demo"
+			m, _ = press(t, m, tt.key)
+			if m.scope != tt.want || m.query != "demo" {
+				t.Fatalf("%s with a query: scope = %v query = %q", tt.key, m.scope, m.query)
+			}
+		})
+	}
+
+	// Another scope's key switches straight to it.
+	m := newTestModel(t)
+	m, _ = press(t, m, "ctrl+t")
+	m, _ = press(t, m, "ctrl+z")
+	if m.scope != scopeZoxide {
+		t.Fatalf("ctrl+z from sessions: scope = %v, want scopeZoxide", m.scope)
 	}
 }
 
-func TestSigilInsertedMidQuery(t *testing.T) {
+func TestSigilsAreTypedIntoTheQuery(t *testing.T) {
 	m := newTestModel(t)
-	m, _ = press(t, m, "a")
-	m, _ = press(t, m, "@")
-	if m.query != "a@" {
-		t.Fatalf("query = %q, want %q", m.query, "a@")
+	for _, sigil := range []string{"@", "!", "$", "*", "~", "/", "#"} {
+		m, _ = press(t, m, sigil)
 	}
-	if m.scope != scopeAll {
-		t.Fatalf("scope = %v, want scopeAll", m.scope)
+	if want := "@!$*~/#"; m.query != want {
+		t.Fatalf("query = %q, want %q", m.query, want)
+	}
+	if m.scope != scopeAll || m.stateFilter != stateFilterNone {
+		t.Fatalf("a sigil selected a filter: scope = %v state = %v", m.scope, m.stateFilter)
 	}
 }
 
@@ -79,9 +93,9 @@ func TestTypingAppendsToQueryAndBackspaceDeletes(t *testing.T) {
 	}
 }
 
-func TestBackspaceOnEmptyQueryClearsScope(t *testing.T) {
+func TestBackspaceOnEmptyQueryClearsTheFilters(t *testing.T) {
 	m := newTestModel(t)
-	m, _ = press(t, m, "@")
+	m, _ = press(t, m, "ctrl+a")
 	if m.scope != scopeAgents {
 		t.Fatalf("scope = %v, want scopeAgents", m.scope)
 	}
@@ -89,23 +103,55 @@ func TestBackspaceOnEmptyQueryClearsScope(t *testing.T) {
 	if m.scope != scopeAll {
 		t.Fatalf("scope after backspace = %v, want scopeAll", m.scope)
 	}
+
+	// An active state filter goes with the scope.
+	m, _ = press(t, m, "ctrl+s")
+	if m.scope != scopeAgents || m.stateFilter != stateFilterBlocked {
+		t.Fatalf("ctrl+s: scope = %v state = %v", m.scope, m.stateFilter)
+	}
+	m, _ = press(t, m, "backspace")
+	if m.scope != scopeAll || m.stateFilter != stateFilterNone {
+		t.Fatalf("backspace: scope = %v state = %v, want both cleared", m.scope, m.stateFilter)
+	}
 }
 
-func TestEscClearsQueryAndScopeThenQuits(t *testing.T) {
+func TestEscClearsTheQueryThenTheFiltersThenQuits(t *testing.T) {
 	m := newTestModel(t)
-	m, _ = press(t, m, "@")
+	m, _ = press(t, m, "ctrl+a")
 	m, _ = press(t, m, "pi")
+
+	// The query goes first, the filters stay.
 	model, cmd := m.Update(escMsg())
 	m = model.(Model)
-	if m.query != "" || m.scope != scopeAll {
-		t.Fatalf("esc: query = %q scope = %v, want both cleared", m.query, m.scope)
+	if m.query != "" || m.scope != scopeAgents {
+		t.Fatalf("esc: query = %q scope = %v, want the query cleared and the scope kept",
+			m.query, m.scope)
 	}
 	if isQuitCmd(cmd) {
 		t.Fatal("esc with an active filter must not quit")
 	}
-	_, cmd = m.Update(escMsg())
-	if !isQuitCmd(cmd) {
-		t.Fatal("esc on an empty query and scope must quit")
+
+	// Then the scope and the state filter.
+	model, cmd = m.Update(escMsg())
+	m = model.(Model)
+	if m.scope != scopeAll || m.stateFilter != stateFilterNone {
+		t.Fatalf("esc: scope = %v state = %v, want both cleared", m.scope, m.stateFilter)
+	}
+	if isQuitCmd(cmd) {
+		t.Fatal("esc with an active scope must not quit")
+	}
+
+	if _, cmd = m.Update(escMsg()); !isQuitCmd(cmd) {
+		t.Fatal("esc on an empty query and no filter must quit")
+	}
+
+	// A state filter alone is a filter too.
+	m, _ = press(t, m, "ctrl+s")
+	model, cmd = m.Update(escMsg())
+	m = model.(Model)
+	if m.scope != scopeAll || m.stateFilter != stateFilterNone || isQuitCmd(cmd) {
+		t.Fatalf("esc on a state filter: scope = %v state = %v quit = %v",
+			m.scope, m.stateFilter, isQuitCmd(cmd))
 	}
 }
 
@@ -124,17 +170,100 @@ func TestCtrlCQuitsWhileRenaming(t *testing.T) {
 	}
 }
 
-func TestTabAndShiftTabCycleScopes(t *testing.T) {
+func TestTabAndShiftTabCycleTheNewScopeList(t *testing.T) {
+	// Without hosts the cycle steps over the remotes scope.
 	m := newTestModel(t)
-	for i := 1; i <= int(scopeCount); i++ {
+	m = withItems(
+		m,
+		[]sessionmgr.Item{{Kind: sessionmgr.KindSession, Name: "demo", Target: "demo"}},
+	)
+	for i, want := range []scope{scopeAgents, scopeSessions, scopeZoxide, scopeFind, scopeAll} {
 		m, _ = press(t, m, "tab")
-		if want := scope(i % int(scopeCount)); m.scope != want {
-			t.Fatalf("tab #%d: scope = %v, want %v", i, m.scope, want)
+		if m.scope != want {
+			t.Fatalf("tab #%d: scope = %v, want %v", i+1, m.scope, want)
 		}
 	}
 	m, _ = press(t, m, "shift+tab")
-	if m.scope != scopeHosts {
-		t.Fatalf("shift+tab from all: scope = %v, want scopeHosts", m.scope)
+	if m.scope != scopeFind {
+		t.Fatalf("shift+tab from all: scope = %v, want scopeFind", m.scope)
+	}
+
+	// A configured host puts the remotes scope back in the cycle.
+	hosted := newTestModel(t)
+	hosted = withItems(hosted, []sessionmgr.Item{
+		{Kind: sessionmgr.KindSession, Name: "demo", Target: "demo"},
+		{Kind: sessionmgr.KindHost, Name: "box", Target: "box"},
+	})
+	for i, want := range []scope{
+		scopeAgents, scopeSessions, scopeHosts, scopeZoxide, scopeFind, scopeAll,
+	} {
+		hosted, _ = press(t, hosted, "tab")
+		if hosted.scope != want {
+			t.Fatalf("tab #%d with a host: scope = %v, want %v", i+1, hosted.scope, want)
+		}
+	}
+}
+
+func TestCtrlSCyclesTheAgentStateFilter(t *testing.T) {
+	m := newTestModel(t)
+	m = withItems(m, pickerItems())
+
+	// From any scope the first press narrows to the agents scope on blocked.
+	m, _ = press(t, m, "ctrl+t")
+	m, _ = press(t, m, "ctrl+s")
+	if m.scope != scopeAgents || m.stateFilter != stateFilterBlocked {
+		t.Fatalf("first ctrl+s: scope = %v state = %v", m.scope, m.stateFilter)
+	}
+	rows := m.rows()
+	if len(rows) != 1 || rows[0].item.AgentState != sessionmgr.AgentBlocked {
+		t.Fatalf("blocked rows = %#v, want the blocked agent alone", rows)
+	}
+
+	// The cycle then walks done → working → idle → none, staying on agents.
+	for _, want := range []stateFilter{
+		stateFilterDone, stateFilterWorking, stateFilterIdle, stateFilterNone,
+	} {
+		m, _ = press(t, m, "ctrl+s")
+		if m.scope != scopeAgents || m.stateFilter != want {
+			t.Fatalf("ctrl+s: scope = %v state = %v, want agents/%v",
+				m.scope, m.stateFilter, want)
+		}
+	}
+	// None is every agent, not every item: the sessions and dirs stay out.
+	if rows := m.rows(); len(rows) != 2 {
+		t.Fatalf("none rows = %d, want the 2 agents", len(rows))
+	}
+
+	// Past none the cycle starts over at blocked.
+	m, _ = press(t, m, "ctrl+s")
+	if m.stateFilter != stateFilterBlocked {
+		t.Fatalf("state after none = %v, want blocked", m.stateFilter)
+	}
+
+	// ctrl+a with a state filter clears the state and stays on agents.
+	m, _ = press(t, m, "ctrl+a")
+	if m.scope != scopeAgents || m.stateFilter != stateFilterNone {
+		t.Fatalf("ctrl+a with a state: scope = %v state = %v", m.scope, m.stateFilter)
+	}
+	// ctrl+a with no state returns to all.
+	m, _ = press(t, m, "ctrl+a")
+	if m.scope != scopeAll {
+		t.Fatalf("ctrl+a with no state: scope = %v, want scopeAll", m.scope)
+	}
+
+	// A switch to another scope clears the state.
+	m, _ = press(t, m, "ctrl+s")
+	m, _ = press(t, m, "ctrl+t")
+	if m.scope != scopeSessions || m.stateFilter != stateFilterNone {
+		t.Fatalf("ctrl+t with a state: scope = %v state = %v", m.scope, m.stateFilter)
+	}
+
+	// tab leaves the agents scope the same way.
+	m, _ = press(t, m, "ctrl+z")
+	m, _ = press(t, m, "ctrl+s")
+	m, _ = press(t, m, "tab")
+	if m.scope != scopeSessions || m.stateFilter != stateFilterNone {
+		t.Fatalf("tab with a state: scope = %v state = %v", m.scope, m.stateFilter)
 	}
 }
 
@@ -436,12 +565,12 @@ func TestScopeChangeSelectsTheTopRow(t *testing.T) {
 		t.Fatalf("cursor = %d, want 1 after down", m.cursor)
 	}
 
-	m, _ = press(t, m, "@")
+	m, _ = press(t, m, "ctrl+a")
 	if m.scope != scopeAgents {
 		t.Fatalf("scope = %v, want agents", m.scope)
 	}
 	if m.cursor != 0 || m.cursorKey != blocked.Key() {
-		t.Fatalf("after @: cursor = %d key = %q, want row 0", m.cursor, m.cursorKey)
+		t.Fatalf("after ctrl+a: cursor = %d key = %q, want row 0", m.cursor, m.cursorKey)
 	}
 }
 
@@ -504,9 +633,9 @@ func TestPreviewToggleAndInstallMenuKeys(t *testing.T) {
 	if !m.showPreview {
 		t.Fatal("ctrl+o did not re-enable the preview")
 	}
-	m, _ = press(t, m, "ctrl+a")
+	m, _ = press(t, m, "ctrl+g")
 	if !m.installMenu.active {
-		t.Fatal("ctrl+a did not open the install menu")
+		t.Fatal("ctrl+g did not open the install menu")
 	}
 }
 

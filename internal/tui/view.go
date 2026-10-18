@@ -50,9 +50,6 @@ const (
 	hostIcon = "󰒋 "
 
 	placeholderText = "type to search"
-	// promptMinQuery is the room the query keeps in the prompt window before the
-	// sigil hint is dropped; the placeholder always fits while the hint is shown.
-	promptMinQuery = len(placeholderText) + 2
 )
 
 // windowBox is one window of the frame: the cell it starts at and its size.
@@ -204,12 +201,12 @@ func blankFrame(width, height int) string {
 	return strings.Join(lines, "\n")
 }
 
-// renderPromptWindow draws the prompt window: the active scope in the window
+// renderPromptWindow draws the prompt window: the active filters in the window
 // title, the query row inside it.
 func (m Model) renderPromptWindow(l viewLayout) []string {
 	title := m.styles.titlePrompt.Render("seshagy") +
 		m.styles.muted.Render(" · ") +
-		m.styles.emphasis.Render(m.scope.chip())
+		m.styles.emphasis.Render(m.filterTitle())
 	content := m.renderPromptContent(max(0, l.prompt.width-2))
 	return drawWindow(
 		title,
@@ -553,9 +550,8 @@ func spinnerFrame(frame int) string {
 
 // renderPromptContent draws the prompt window's content row: one column of
 // inset — the same the results rows carry — then the accent prompt and the query
-// (or the muted placeholder) with the typing cursor, the dim sigil hint, and the
-// shown/total count right-aligned. A kill confirmation or an in-flight rename
-// replaces the row.
+// (or the muted placeholder) with the typing cursor, and the shown/total count
+// right-aligned. A kill confirmation or an in-flight rename replaces the row.
 func (m Model) renderPromptContent(width int) string {
 	if width <= 0 {
 		return ""
@@ -592,20 +588,16 @@ func (m Model) renderPromptContent(width int) string {
 		strings.Repeat(" ", max(0, room-lipgloss.Width(left))) + right
 }
 
-// promptTrailing renders the dim right side of the prompt content row: the sigil
-// hint when the query keeps its room, the shown/total count, and the spinner
-// while the first load is still running. It is empty when the window is too
-// narrow for even the count, and the query then takes the whole row.
+// promptTrailing renders the dim right side of the prompt content row: the
+// shown/total count and the spinner while the first load is still running. It is
+// empty when the window is too narrow for the count, and the query then takes
+// the whole row.
 func (m Model) promptTrailing(width int) string {
 	spinner := ""
 	if !m.loadedOnce && m.spinnerActive {
 		spinner = " " + m.styles.emphasis.Render(spinnerFrame(m.spinnerFrame))
 	}
 	right := m.promptCount() + spinner
-	if sigils := m.sigilHint(); lipgloss.Width(sigils) > 0 &&
-		width-lipgloss.Width(right)-2-lipgloss.Width(sigils) >= promptMinQuery {
-		right = sigils + "  " + right
-	}
 	if width-1 < lipgloss.Width(right) {
 		return ""
 	}
@@ -621,35 +613,33 @@ func (m Model) promptCount() string {
 		m.styles.muted.Render(fmt.Sprintf("/%d", total))
 }
 
-// sigilHint is the dim "@ ! $ * ~ / #" reminder of the scopes that can be typed
-// on an empty query. The active scope's sigil carries the chip accent.
-func (m Model) sigilHint() string {
-	scopes := m.visibleScopes()
-	parts := make([]string, 0, len(scopes))
-	for _, sc := range scopes {
-		if sc.sigil() == 0 {
-			continue
-		}
-		style := m.styles.chipIdle
-		if sc == m.scope {
-			style = m.styles.chipActive
-		}
-		parts = append(parts, style.Render(string(sc.sigil())))
+// filterTitle names the active scope, plus the agent-state filter when one is
+// active: "agents · blocked".
+func (m Model) filterTitle() string {
+	title := m.scopeLabel(m.scope)
+	if m.stateFilter != stateFilterNone {
+		title += " · " + m.stateFilter.label()
 	}
-	return strings.Join(parts, " ")
+	return title
 }
 
-// visibleScopes lists the scopes the prompt window's sigil hint shows, in cycle
-// order. The hosts sigil only appears once host items exist.
-func (m Model) visibleScopes() []scope {
-	scopes := make([]scope, 0, int(scopeCount))
-	for sc := scopeAll; sc < scopeCount; sc++ {
-		if sc == scopeHosts && !m.hasHosts() {
-			continue
-		}
-		scopes = append(scopes, sc)
+// scopeLabel names a scope for the prompt window title and the empty state. The
+// sessions scope carries the backend's own word for a session.
+func (m Model) scopeLabel(sc scope) string {
+	if sc == scopeSessions {
+		return m.terms.SessionPlural
 	}
-	return scopes
+	return scopeLabels[sc]
+}
+
+// scopeAvailable reports whether the picker has a source for a scope: the hosts
+// scope only exists once remote hosts are configured. The tab cycle steps over
+// the scopes that have no source.
+func (m Model) scopeAvailable(sc scope) bool {
+	if sc == scopeHosts {
+		return m.hasHosts()
+	}
+	return true
 }
 
 func (m Model) hasHosts() bool {
@@ -1138,9 +1128,12 @@ func (m Model) renderEmptyState(width, height int) []string {
 	case m.query != "":
 		headline = m.styles.emphasis.Render(`no matches for "` + m.query + `"`)
 		hint = "⌫ backspace clears the query"
+	case m.stateFilter != stateFilterNone:
+		headline = m.styles.emphasis.Render("no " + m.stateFilter.label() + " agents")
+		hint = "^s next state · ⌫ back to all"
 	case m.scope != scopeAll:
 		headline = m.styles.itemName.Render("nothing in ") +
-			m.styles.emphasis.Render(m.scope.chip()) +
+			m.styles.emphasis.Render(m.scopeLabel(m.scope)) +
 			m.styles.itemName.Render(" filter")
 		hint = "⇥ next filter · ⌫ back to all"
 	default:
@@ -1231,20 +1224,34 @@ type footerHint struct {
 	label string
 }
 
-var pickerHints = []footerHint{
-	{"↑↓", "move"},
-	{"⏎", "open"},
-	{"⇥", "filter"},
-	{"^r", "rename"},
-	{"^x", "kill"},
-	{"^o", "preview"},
-	{"^y", "yazi"},
-	{"esc", "quit"},
+// pickerHints are the footer's key hints in draw order, sessions first. When the
+// line is too narrow they drop from the right, ahead of the pinned quit hint.
+func (m Model) pickerHints() []footerHint {
+	return []footerHint{
+		{"↑↓", "move"},
+		{"⏎", "open"},
+		{"^a", "agents"},
+		{"^s", "state"},
+		{"^t", m.terms.SessionPlural},
+		{"^z", "zoxide"},
+		{"^f", "find"},
+		{"^e", "remotes"},
+		{"^r", "rename"},
+		{"^x", "kill"},
+		{"^o", "preview"},
+		{"^y", "yazi"},
+		{"^g", "integrations"},
+	}
 }
+
+// pickerQuitHint is the footer's last hint. It stays pinned to the end of the
+// line while anything else fits.
+var pickerQuitHint = footerHint{"esc", "quit"}
 
 // renderFooter draws the frame's bottom key line: the picker hints, the rename
 // keys while a rename is in flight, or nothing but the confirm keys while a kill
-// is armed. Hints drop from the end until the line fits.
+// is armed. Hints drop from the right until the line fits, and the quit hint is
+// kept last while it fits at all.
 func (m Model) renderFooter(width int) string {
 	switch {
 	case m.killArmed:
@@ -1254,24 +1261,35 @@ func (m Model) renderFooter(width int) string {
 		return m.styles.key.Render("⏎") + " " + m.styles.muted.Render("save") +
 			"  " + m.styles.key.Render("esc") + " " + m.styles.muted.Render("cancel")
 	}
-	parts := make([]string, 0, len(pickerHints))
-	for _, hint := range pickerHints {
-		parts = append(parts, m.styles.key.Render(hint.key)+" "+m.styles.muted.Render(hint.label))
+	hints := m.pickerHints()
+	run := func(hint footerHint) string {
+		return m.styles.key.Render(hint.key) + " " + m.styles.muted.Render(hint.label)
 	}
-	width2 := func() int {
-		total := 0
-		for i, part := range parts {
-			if i > 0 {
-				total += 2
-			}
-			total += lipgloss.Width(part)
-		}
-		return total
+	parts := make([]string, 0, len(hints)+1)
+	for _, hint := range hints {
+		parts = append(parts, run(hint))
 	}
-	for len(parts) > 0 && width2() > width {
+	quit := run(pickerQuitHint)
+	for len(parts) > 0 && hintsWidth(parts)+2+lipgloss.Width(quit) > width {
 		parts = parts[:len(parts)-1]
 	}
+	if lipgloss.Width(quit) <= width {
+		parts = append(parts, quit)
+	}
 	return clampStyledText(strings.Join(parts, "  "), width)
+}
+
+// hintsWidth is the columns a list of joined hint runs takes, including the
+// two-space gap between entries.
+func hintsWidth(parts []string) int {
+	total := 0
+	for i, part := range parts {
+		if i > 0 {
+			total += 2
+		}
+		total += lipgloss.Width(part)
+	}
+	return total
 }
 
 func (m Model) renderKillConfirm(width int) string {

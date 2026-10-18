@@ -60,7 +60,10 @@ type Model struct {
 	layout string
 
 	scope scope
-	query string
+	// stateFilter narrows the agents scope to one agent state. It is the second
+	// filter axis ctrl+s cycles, and a switch to any other scope clears it.
+	stateFilter stateFilter
+	query       string
 
 	// hosts are the remote machines offered by the `# hosts` scope. They come
 	// from config.toml and ~/.ssh/config, so they are loaded once at startup and
@@ -327,7 +330,7 @@ func (m *Model) notify(text string, sev notifSev) {
 
 // rows is the visible, scope-filtered, query-ranked list.
 func (m Model) rows() []row {
-	return filterRows(m.items, m.scope, m.query)
+	return filterRows(m.items, m.scope, m.stateFilter, m.query)
 }
 
 // grouped reports whether the results window draws its section headers. An empty

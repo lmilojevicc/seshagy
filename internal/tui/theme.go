@@ -29,23 +29,21 @@ type palette struct {
 type styles struct {
 	p palette
 
-	app        lipgloss.Style
-	itemName   lipgloss.Style
-	title      lipgloss.Style
-	muted      lipgloss.Style
-	emphasis   lipgloss.Style
-	key        lipgloss.Style
-	bar        lipgloss.Style
-	match      lipgloss.Style
-	rule       lipgloss.Style
-	chipActive lipgloss.Style
-	chipIdle   lipgloss.Style
-	success    lipgloss.Style
-	info       lipgloss.Style
-	warning    lipgloss.Style
-	danger     lipgloss.Style
-	pane       lipgloss.Style
-	panePopup  lipgloss.Style
+	app       lipgloss.Style
+	itemName  lipgloss.Style
+	title     lipgloss.Style
+	muted     lipgloss.Style
+	emphasis  lipgloss.Style
+	key       lipgloss.Style
+	bar       lipgloss.Style
+	match     lipgloss.Style
+	rule      lipgloss.Style
+	success   lipgloss.Style
+	info      lipgloss.Style
+	warning   lipgloss.Style
+	danger    lipgloss.Style
+	pane      lipgloss.Style
+	panePopup lipgloss.Style
 
 	// selectionBG is the selected row's bar color; the rows paint it
 	// themselves with paintBackground so inner resets cannot break the bar.
@@ -102,8 +100,6 @@ func stylesFromConfig(cfg appconfig.Config) styles {
 	s.bar = lipgloss.NewStyle().Foreground(accent)
 	s.match = lipgloss.NewStyle().Foreground(accent).Bold(true).Underline(true)
 	s.rule = lipgloss.NewStyle().Foreground(muted)
-	s.chipActive = lipgloss.NewStyle().Foreground(accent).Bold(true)
-	s.chipIdle = lipgloss.NewStyle().Foreground(muted)
 	s.success = lipgloss.NewStyle().Foreground(success).Bold(true)
 	s.info = lipgloss.NewStyle().Foreground(info).Bold(true)
 	s.warning = lipgloss.NewStyle().Foreground(warning).Bold(true)

@@ -10,62 +10,60 @@ import (
 )
 
 // scope is the inline filter the list is narrowed to. Scopes replace the old
-// source tabs: typing a scope's sigil on an empty query selects it, and tab /
-// shift+tab cycle through them in order.
+// source tabs: a ctrl chord selects one (ctrl+a agents, ctrl+t sessions, ...),
+// and tab / shift+tab cycle through them in order.
 type scope int
 
 const (
 	scopeAll scope = iota
 	scopeAgents
-	scopeAttention
 	scopeSessions
-	scopeDirs
+	scopeHosts
 	scopeZoxide
 	scopeFind
-	scopeHosts
 	scopeCount
 )
 
-type scopeInfo struct {
-	sigil rune
-	label string
+// scopeOrder is the cycle tab and shift+tab walk: all → agents → sessions →
+// hosts → zoxide → find → all. A scope with no source is stepped over.
+var scopeOrder = []scope{
+	scopeAll,
+	scopeAgents,
+	scopeSessions,
+	scopeHosts,
+	scopeZoxide,
+	scopeFind,
 }
 
-var scopeInfos = [scopeCount]scopeInfo{
-	scopeAll:       {sigil: 0, label: "all"},
-	scopeAgents:    {sigil: '@', label: "agents"},
-	scopeAttention: {sigil: '!', label: "needs you"},
-	scopeSessions:  {sigil: '$', label: "sessions"},
-	scopeDirs:      {sigil: '*', label: "dirs"},
-	scopeZoxide:    {sigil: '~', label: "zoxide"},
-	scopeFind:      {sigil: '/', label: "find"},
-	scopeHosts:     {sigil: '#', label: "hosts"},
+// scopeLabels are the scope names the prompt window title and the empty state
+// draw, lowercase. The sessions scope is the exception: its label is the
+// backend's own word for a session (see Model.scopeLabel).
+var scopeLabels = [scopeCount]string{
+	scopeAll:      "all",
+	scopeAgents:   "agents",
+	scopeSessions: "sessions",
+	scopeHosts:    "remotes",
+	scopeZoxide:   "zoxide",
+	scopeFind:     "find",
 }
 
-func (s scope) sigil() rune   { return scopeInfos[s].sigil }
-func (s scope) label() string { return scopeInfos[s].label }
-
-// chip is the "<sigil> <label>" text used by the prompt row and the empty state.
-func (s scope) chip() string {
-	if s.sigil() == 0 {
-		return s.label()
-	}
-	return string(s.sigil()) + " " + s.label()
-}
-
-// scopeForSigil maps a typed rune to the scope it selects.
-func scopeForSigil(r rune) (scope, bool) {
-	for s := scopeAgents; s < scopeCount; s++ {
-		if s.sigil() == r {
-			return s, true
+// nextScope returns the scope delta steps along scopeOrder from sc, stepping
+// over the scopes the picker has no source for. It is the tab / shift+tab cycle.
+func nextScope(from scope, delta int, available func(scope) bool) scope {
+	n := len(scopeOrder)
+	at := 0
+	for i, sc := range scopeOrder {
+		if sc == from {
+			at = i
 		}
 	}
-	return scopeAll, false
-}
-
-func (s scope) next(delta int) scope {
-	n := int(scopeCount)
-	return scope(((int(s)+delta)%n + n) % n)
+	for step := 1; step <= n; step++ {
+		next := scopeOrder[((at+delta*step)%n+n)%n]
+		if available(next) {
+			return next
+		}
+	}
+	return from
 }
 
 // includes reports whether an item belongs to the scope.
@@ -73,12 +71,8 @@ func (s scope) includes(item sessionmgr.Item) bool {
 	switch s {
 	case scopeAgents:
 		return item.Kind == sessionmgr.KindAgent
-	case scopeAttention:
-		return needsAttention(item)
 	case scopeSessions:
 		return item.Kind == sessionmgr.KindSession
-	case scopeDirs:
-		return item.Kind == sessionmgr.KindZoxide || item.Kind == sessionmgr.KindFD
 	case scopeZoxide:
 		return item.Kind == sessionmgr.KindZoxide
 	case scopeFind:
@@ -88,6 +82,47 @@ func (s scope) includes(item sessionmgr.Item) bool {
 	default:
 		return true
 	}
+}
+
+// stateFilter is the picker's second narrowing axis: the agent state ctrl+s
+// cycles through. It only ever applies inside the agents scope, so a switch to
+// another scope clears it.
+type stateFilter int
+
+const (
+	stateFilterNone stateFilter = iota
+	stateFilterBlocked
+	stateFilterDone
+	stateFilterWorking
+	stateFilterIdle
+	stateFilterCount
+)
+
+// stateFilterStates maps a filter to the normalized agent state it keeps. The
+// none filter names no state: it is the absence of the filter.
+var stateFilterStates = [stateFilterCount]sessionmgr.AgentState{
+	stateFilterNone:    "",
+	stateFilterBlocked: sessionmgr.AgentBlocked,
+	stateFilterDone:    sessionmgr.AgentDone,
+	stateFilterWorking: sessionmgr.AgentWorking,
+	stateFilterIdle:    sessionmgr.AgentIdle,
+}
+
+// next is the ctrl+s cycle: blocked → done → working → idle → none → blocked.
+func (f stateFilter) next() stateFilter { return (f + 1) % stateFilterCount }
+
+// label names the filter for the prompt window title and the empty state. The
+// none filter has no name.
+func (f stateFilter) label() string { return string(stateFilterStates[f]) }
+
+// matches reports whether an item survives the filter. The none filter keeps
+// every item, so the agents scope can still show its whole list.
+func (f stateFilter) matches(item sessionmgr.Item) bool {
+	state := stateFilterStates[f]
+	if state == "" {
+		return true
+	}
+	return item.Kind == sessionmgr.KindAgent && item.AgentState == state
 }
 
 // needsAttention reports agents waiting on the user: blocked on a prompt, or
@@ -204,15 +239,15 @@ func searchFields(item sessionmgr.Item) [searchFieldCount]string {
 	}
 }
 
-// filterRows applies the scope and fuzzy query to items. Without a query the
-// rows follow the section order and itemRank inside it, so the needs-you section
-// leads whatever the items' own ranks say (stable within a rank, so backend
-// order such as zoxide frecency survives); with a query the best fuzzy score
-// wins and itemRank breaks ties.
-func filterRows(items []sessionmgr.Item, sc scope, query string) []row {
+// filterRows applies the scope, the agent-state filter, and the fuzzy query to
+// items. Without a query the rows follow the section order and itemRank inside
+// it, so the needs-you section leads whatever the items' own ranks say (stable
+// within a rank, so backend order such as zoxide frecency survives); with a
+// query the best fuzzy score wins and itemRank breaks ties.
+func filterRows(items []sessionmgr.Item, sc scope, state stateFilter, query string) []row {
 	eligible := make([]sessionmgr.Item, 0, len(items))
 	for _, item := range items {
-		if sc.includes(item) {
+		if sc.includes(item) && state.matches(item) {
 			eligible = append(eligible, item)
 		}
 	}
