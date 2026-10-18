@@ -4,6 +4,9 @@ import (
 	"time"
 )
 
+// JSONSchemaVersion is the schema version emitted in ItemsJSON.
+const JSONSchemaVersion = 1
+
 // ItemJSON is the script-friendly representation of a list item.
 type ItemJSON struct {
 	Kind      string `json:"kind"`
@@ -79,12 +82,10 @@ func ItemsToJSON(mode SourceMode, items []Item, icons IconSet, warning string) I
 		out = append(out, ItemToJSON(item, icons))
 	}
 	return ItemsJSON{
-		SchemaVersion: 1,
+		SchemaVersion: JSONSchemaVersion,
 		Ok:            true,
-		Mode:          mode.Names().ConfigToken,
+		Mode:          mode.ConfigToken(),
 		Warning:       warning,
 		Items:         out,
 	}
 }
-
-const JSONSchemaVersion = 1

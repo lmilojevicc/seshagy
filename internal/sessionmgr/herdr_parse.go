@@ -50,13 +50,31 @@ type tabInfo struct {
 // result payload directly ({"type":"pane_list","panes":[...]}). The Type
 // discriminator plus the collection/single fields let one struct handle both.
 type herdrResult struct {
-	Type       string          `json:"type"`
-	Workspaces []workspaceInfo `json:"workspaces"`
-	Tabs       []tabInfo       `json:"tabs"`
-	Panes      []paneInfo      `json:"panes"`
-	Pane       *paneInfo       `json:"pane"`
-	Workspace  *workspaceInfo  `json:"workspace"`
-	Agents     []agentInfo     `json:"agents"`
+	Type        string           `json:"type"`
+	Workspaces  []workspaceInfo  `json:"workspaces"`
+	Tabs        []tabInfo        `json:"tabs"`
+	Panes       []paneInfo       `json:"panes"`
+	Pane        *paneInfo        `json:"pane"`
+	Workspace   *workspaceInfo   `json:"workspace"`
+	Agents      []agentInfo      `json:"agents"`
+	ProcessInfo *paneProcessInfo `json:"process_info"`
+}
+
+// paneProcessInfo mirrors the `herdr pane process-info` payload: the pane's
+// shell pid and the processes currently in the foreground of the pane's tty.
+type paneProcessInfo struct {
+	PaneID                   string             `json:"pane_id"`
+	ShellPID                 int                `json:"shell_pid"`
+	ForegroundProcessGroupID int                `json:"foreground_process_group_id"`
+	ForegroundProcesses      []paneProcessEntry `json:"foreground_processes"`
+}
+
+// paneProcessEntry is one entry of paneProcessInfo.ForegroundProcesses.
+type paneProcessEntry struct {
+	PID   int    `json:"pid"`
+	Name  string `json:"name"`
+	Argv0 string `json:"argv0"`
+	Cwd   string `json:"cwd"`
 }
 
 // herdrResponse is the full wrapped envelope with a top-level "result" object.
@@ -171,6 +189,28 @@ func parseHerdrAgents(raw []byte) ([]agentInfo, error) {
 		return nil, err
 	}
 	return res.Agents, nil
+}
+
+// parseHerdrPaneProcessPID extracts the pane's foreground process pid from
+// `herdr pane process-info` output: the first foreground process, falling back
+// to the foreground process group (the same pid in practice).
+func parseHerdrPaneProcessPID(raw []byte) (int, error) {
+	res, err := unwrapResult(raw)
+	if err != nil {
+		return 0, err
+	}
+	if res.ProcessInfo == nil {
+		return 0, fmt.Errorf("no process info in herdr response")
+	}
+	for _, proc := range res.ProcessInfo.ForegroundProcesses {
+		if proc.PID > 0 {
+			return proc.PID, nil
+		}
+	}
+	if pid := res.ProcessInfo.ForegroundProcessGroupID; pid > 0 {
+		return pid, nil
+	}
+	return 0, fmt.Errorf("no foreground process in herdr response")
 }
 
 // parseHerdrWorkspaceCreated parses the `herdr workspace create` response,

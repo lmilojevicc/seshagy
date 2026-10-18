@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lmilojevicc/seshagy/internal/remote"
 	"github.com/lmilojevicc/seshagy/internal/sessionmgr"
 )
 
@@ -15,18 +16,11 @@ func TestLoadDefaultWhenMissing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
-	if cfg.TypeFirst.Enabled || cfg.PrefixKey() != DefaultPrefix {
-		t.Fatalf("type-first defaults = %#v", cfg.TypeFirst)
-	}
-	if cfg.DefaultSource() != sessionmgr.ModeAll {
-		t.Fatalf("default source = %v, want all", cfg.DefaultSource())
-	}
 	if cfg.LoadOptions().FDCommand != sessionmgr.DefaultFDCommand {
 		t.Fatalf("default fd command = %q", cfg.LoadOptions().FDCommand)
 	}
-	if cfg.Theme.Colors.PopupBorder != "13" || cfg.Theme.Colors.ActiveTab != "default" ||
+	if cfg.Theme.Colors.PopupBorder != "13" ||
 		cfg.Theme.Colors.Border != "8" ||
-		cfg.Theme.Colors.InactiveTab != "8" ||
 		cfg.Theme.Colors.Title != "12" ||
 		cfg.Theme.Colors.Accent != "13" ||
 		cfg.Theme.Colors.Key != "11" ||
@@ -34,14 +28,9 @@ func TestLoadDefaultWhenMissing(t *testing.T) {
 		cfg.Theme.Colors.Success != "10" ||
 		cfg.Theme.Colors.Info != "14" ||
 		cfg.Theme.Colors.Warning != "11" ||
-		cfg.Theme.Colors.Danger != "9" {
+		cfg.Theme.Colors.Danger != "9" ||
+		cfg.Theme.Colors.SelectionBG != "236" {
 		t.Fatalf("theme color defaults = %#v", cfg.Theme.Colors)
-	}
-	if got := cfg.Sources.Order; strings.Join(
-		got,
-		",",
-	) != "all,sessions,zoxide,fd,agents" {
-		t.Fatalf("default source order = %#v", got)
 	}
 	if cfg.Icons.Mode != IconModeIcons {
 		t.Fatalf("icon mode default = %q, want %q", cfg.Icons.Mode, IconModeIcons)
@@ -58,13 +47,9 @@ func TestSaveAndLoadConfig(t *testing.T) {
 	cfg.Icons.Mode = IconModeText
 	cfg.Icons.Session.Label = "X"
 	cfg.Icons.Session.Color = "#a6e3a1"
-	cfg.Sources.Default = "zoxide"
-	cfg.Sources.Order = []string{"sessions", "zoxide", "fd", "all"}
 	cfg.Directories.FDCommand = `printf '%s\n' /tmp/project`
 	cfg.Theme.Colors.PopupBorder = "#ff79c6"
-	cfg.Theme.Colors.ActiveTab = "#f5c2e7"
 	cfg.Theme.Colors.Border = "#313244"
-	cfg.Theme.Colors.InactiveTab = "#6c7086"
 	cfg.Theme.Colors.Title = "#b4befe"
 	cfg.Theme.Colors.Accent = "#cba6f7"
 	cfg.Theme.Colors.Key = "#f9e2af"
@@ -73,9 +58,8 @@ func TestSaveAndLoadConfig(t *testing.T) {
 	cfg.Theme.Colors.Info = "#89dceb"
 	cfg.Theme.Colors.Warning = "#f9e2af"
 	cfg.Theme.Colors.Danger = "#f38ba8"
-	cfg.TypeFirst.Enabled = true
-	cfg.TypeFirst.Prefix = "alt+x"
-	cfg.Setup.TypeFirstPromptSeen = true
+	cfg.Theme.Colors.SelectionBG = "#283457"
+	cfg.Setup.InstallMenuSeen = true
 	if err := Save(cfg); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
@@ -86,8 +70,9 @@ func TestSaveAndLoadConfig(t *testing.T) {
 	if Path() != filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "seshagy", "config.toml") {
 		t.Fatalf("Path() = %q, want config.toml under XDG_CONFIG_HOME", Path())
 	}
-	if !strings.Contains(string(data), `[type_first]`) {
-		t.Fatalf("saved config missing type_first: %s", data)
+	if !strings.Contains(string(data), `[setup]`) ||
+		!strings.Contains(string(data), `install_menu_seen = true`) {
+		t.Fatalf("saved config missing setup: %s", data)
 	}
 	if strings.Contains(string(data), `ascii`) {
 		t.Fatalf("saved config should not contain ascii keys: %s", data)
@@ -97,41 +82,28 @@ func TestSaveAndLoadConfig(t *testing.T) {
 		!strings.Contains(string(data), `#a6e3a1`) {
 		t.Fatalf("saved config missing text mode, label, or hex color: %s", data)
 	}
-	if !strings.Contains(string(data), `[sources]`) ||
-		!strings.Contains(string(data), `zoxide`) {
-		t.Fatalf("saved config missing source config: %s", data)
-	}
 	if !strings.Contains(string(data), `[directories]`) ||
 		!strings.Contains(string(data), `fd_command`) {
 		t.Fatalf("saved config missing directory config: %s", data)
 	}
 	if !strings.Contains(string(data), `[theme.colors]`) ||
 		!strings.Contains(string(data), `#ff79c6`) ||
-		!strings.Contains(string(data), `#f5c2e7`) ||
 		!strings.Contains(string(data), `#313244`) ||
 		!strings.Contains(string(data), `#7f849c`) ||
 		!strings.Contains(string(data), `#a6e3a1`) ||
-		!strings.Contains(string(data), `#f38ba8`) {
+		!strings.Contains(string(data), `#f38ba8`) ||
+		!strings.Contains(string(data), `selection_bg = "#283457"`) {
 		t.Fatalf("saved config missing theme colors: %s", data)
 	}
 	loaded, err := Load()
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
-	if loaded.DefaultSource() != sessionmgr.ModeZoxide {
-		t.Fatalf("loaded default source = %v, want zoxide", loaded.DefaultSource())
-	}
-	if order := loaded.SourceOrder(); len(order) != 5 || order[0] != sessionmgr.ModeSessions ||
-		order[3] != sessionmgr.ModeAll || order[4] != sessionmgr.ModeAgents {
-		t.Fatalf("loaded source order = %#v", order)
-	}
 	if loaded.LoadOptions().FDCommand != `printf '%s\n' /tmp/project` {
 		t.Fatalf("loaded fd command = %q", loaded.LoadOptions().FDCommand)
 	}
 	if loaded.Theme.Colors.PopupBorder != "#ff79c6" ||
-		loaded.Theme.Colors.ActiveTab != "#f5c2e7" ||
 		loaded.Theme.Colors.Border != "#313244" ||
-		loaded.Theme.Colors.InactiveTab != "#6c7086" ||
 		loaded.Theme.Colors.Title != "#b4befe" ||
 		loaded.Theme.Colors.Accent != "#cba6f7" ||
 		loaded.Theme.Colors.Key != "#f9e2af" ||
@@ -139,11 +111,11 @@ func TestSaveAndLoadConfig(t *testing.T) {
 		loaded.Theme.Colors.Success != "#a6e3a1" ||
 		loaded.Theme.Colors.Info != "#89dceb" ||
 		loaded.Theme.Colors.Warning != "#f9e2af" ||
-		loaded.Theme.Colors.Danger != "#f38ba8" {
+		loaded.Theme.Colors.Danger != "#f38ba8" ||
+		loaded.Theme.Colors.SelectionBG != "#283457" {
 		t.Fatalf("loaded theme colors = %#v", loaded.Theme.Colors)
 	}
-	if !loaded.TypeFirst.Enabled || loaded.PrefixKey() != "alt+x" ||
-		!loaded.Setup.TypeFirstPromptSeen {
+	if !loaded.Setup.InstallMenuSeen {
 		t.Fatalf("loaded config = %#v", loaded)
 	}
 	if loaded.Icons.Mode != IconModeText {
@@ -157,40 +129,78 @@ func TestSaveAndLoadConfig(t *testing.T) {
 	}
 }
 
-func TestNormalizeSourceOrder(t *testing.T) {
-	cfg := Default()
-	cfg.Sources.Default = "zoxide"
-	cfg.Sources.Order = []string{"fd", "sessions", "fd", "bad"}
-	cfg.Normalize()
-	if cfg.Sources.Default != "zoxide" {
-		t.Fatalf("normalized default source = %q", cfg.Sources.Default)
+// TestLoadToleratesRemovedConfigKeys pins that configs written by an older
+// seshagy still load: [sources], [type_first], the [tui] input_style /
+// dim_background keys and the per-pane theme colors are no longer fields, so
+// BurntSushi/toml ignores them, while the live keys keep working.
+func TestLoadToleratesRemovedConfigKeys(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	path := Path()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
 	}
-	want := []string{"fd", "sessions", "all", "zoxide", "agents"}
-	if strings.Join(cfg.Sources.Order, ",") != strings.Join(want, ",") {
-		t.Fatalf("normalized source order = %#v, want %#v", cfg.Sources.Order, want)
+	data := []byte(`
+[sources]
+default = "sessions"
+order = ["all", "sessions", "current-agents"]
+
+[type_first]
+enabled = true
+prefix = "alt+x"
+
+[setup]
+type_first_prompt_seen = true
+
+[tui]
+layout = "dropdown"
+input_style = "cmdline"
+dim_background = false
+
+[theme.colors]
+active_tab = "default"
+inactive_tab = "#6c7086"
+list_border = "#89b4fa"
+metadata_border = "#45475a"
+preview_border = "#45475a"
+list_border_title = "#cdd6f4"
+metadata_border_title = "#cdd6f4"
+preview_border_title = "#cdd6f4"
+input_border = "#89b4fa"
+workspace_tile_border = "#45475a"
+workspace_tile_title = "#cdd6f4"
+agent_tile_border = "#45475a"
+agent_tile_title = "#cdd6f4"
+`)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
 	}
-}
-
-// TestSourceOrderDropsStaleCurrentAgentsTab proves that a config persisted on
-// a prior version (where current-agents was a tab) is migrated clean: the
-// current-agents entry is dropped from both the persisted order and the
-// rendered tab list.
-func TestSourceOrderDropsStaleCurrentAgentsTab(t *testing.T) {
-	cfg := Default()
-	cfg.Sources.Order = []string{"all", "sessions", "current-agents", "agents"}
-	cfg.Normalize()
-
-	// normalizeSourceOrder must have dropped current-agents from the persisted order.
-	for _, name := range cfg.Sources.Order {
-		if name == "current-agents" {
-			t.Fatalf("current-agents still in normalized order: %#v", cfg.Sources.Order)
-		}
+	loaded, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if loaded.TUILayout() != LayoutDropdown {
+		t.Fatalf("tui.layout = %q, want %q", loaded.TUILayout(), LayoutDropdown)
+	}
+	if loaded.TUI.Preview == nil || *loaded.TUI.Preview {
+		t.Fatalf("dropdown preview = %v, want false", loaded.TUI.Preview)
 	}
 
-	// SourceOrder must not include ModeCurrentAgents as a tab.
-	for _, mode := range cfg.SourceOrder() {
-		if mode == sessionmgr.ModeCurrentAgents {
-			t.Fatalf("ModeCurrentAgents in SourceOrder: %#v", cfg.SourceOrder())
+	// A save must not resurrect the removed keys.
+	if err := Save(loaded); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	saved, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	for _, key := range []string{
+		"[sources]", "type_first", "input_style", "dim_background", "active_tab",
+		"inactive_tab", "list_border", "metadata_border", "preview_border",
+		"input_border", "workspace_tile", "agent_tile",
+	} {
+		if strings.Contains(string(saved), key) {
+			t.Fatalf("saved config still contains removed key %q:\n%s", key, saved)
 		}
 	}
 }
@@ -290,12 +300,17 @@ func TestNormalizeStateDisplayMode(t *testing.T) {
 
 func TestNormalizeTUILayout(t *testing.T) {
 	tests := map[string]string{
-		"":               LayoutDefault,
-		"default":        LayoutDefault,
-		" DEFAULT ":      LayoutDefault,
-		"zen":            LayoutZen,
-		" ZEN ":          LayoutZen,
-		" experimental ": "experimental",
+		"":               LayoutHorizontal,
+		"horizontal":     LayoutHorizontal,
+		" HORIZONTAL ":   LayoutHorizontal,
+		"vertical":       LayoutVertical,
+		" VERTICAL ":     LayoutVertical,
+		"dropdown":       LayoutDropdown,
+		" DROPDOWN ":     LayoutDropdown,
+		"default":        LayoutHorizontal,
+		"zen":            LayoutHorizontal,
+		"tree":           LayoutHorizontal,
+		" experimental ": LayoutHorizontal,
 	}
 	for input, want := range tests {
 		cfg := Config{TUI: TUIConfig{Layout: input}}
@@ -316,7 +331,7 @@ func TestTUILayoutDefaultWhenMissing(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatalf("mkdir config dir: %v", err)
 	}
-	data := []byte("[tui]\ninput_style = \"cmdline\"\ndim_background = false\npreview = false\n")
+	data := []byte("[tui]\npreview = false\n")
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
@@ -325,16 +340,14 @@ func TestTUILayoutDefaultWhenMissing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
-	if loaded.TUI.Layout != LayoutDefault || loaded.TUILayout() != LayoutDefault {
-		t.Fatalf("layout without tui.layout = %q, want %q", loaded.TUI.Layout, LayoutDefault)
+	if loaded.TUI.Layout != LayoutHorizontal || loaded.TUILayout() != LayoutHorizontal {
+		t.Fatalf("layout without tui.layout = %q, want %q", loaded.TUI.Layout, LayoutHorizontal)
 	}
-	if loaded.TUI.InputStyle != InputStyleCmdline ||
-		loaded.TUI.DimBackground == nil || *loaded.TUI.DimBackground ||
-		loaded.TUI.Preview == nil || *loaded.TUI.Preview {
+	if loaded.TUI.Preview == nil || *loaded.TUI.Preview {
 		t.Fatalf("existing tui settings changed while defaulting layout: %#v", loaded.TUI)
 	}
-	if cfg := Default(); cfg.TUI.Layout != LayoutDefault {
-		t.Fatalf("Default().TUI.Layout = %q, want %q", cfg.TUI.Layout, LayoutDefault)
+	if cfg := Default(); cfg.TUI.Layout != LayoutHorizontal {
+		t.Fatalf("Default().TUI.Layout = %q, want %q", cfg.TUI.Layout, LayoutHorizontal)
 	}
 }
 
@@ -343,9 +356,10 @@ func TestTUILayoutRoundTrip(t *testing.T) {
 		input string
 		want  string
 	}{
-		{input: LayoutDefault, want: LayoutDefault},
-		{input: LayoutZen, want: LayoutZen},
-		{input: " Future ", want: "future"},
+		{input: LayoutHorizontal, want: LayoutHorizontal},
+		{input: LayoutVertical, want: LayoutVertical},
+		{input: LayoutDropdown, want: LayoutDropdown},
+		{input: " Future ", want: LayoutHorizontal},
 	}
 	for _, test := range tests {
 		t.Run(test.want, func(t *testing.T) {
@@ -353,9 +367,7 @@ func TestTUILayoutRoundTrip(t *testing.T) {
 			t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 			cfg := Default()
 			cfg.TUI.Layout = input
-			cfg.TUI.InputStyle = InputStyleCmdline
 			falseValue := false
-			cfg.TUI.DimBackground = &falseValue
 			cfg.TUI.Preview = &falseValue
 			if err := Save(cfg); err != nil {
 				t.Fatalf("Save() error = %v", err)
@@ -385,118 +397,10 @@ func TestTUILayoutRoundTrip(t *testing.T) {
 					want,
 				)
 			}
-			if loaded.TUI.InputStyle != InputStyleCmdline ||
-				loaded.TUI.DimBackground == nil || *loaded.TUI.DimBackground ||
-				loaded.TUI.Preview == nil || *loaded.TUI.Preview {
+			if loaded.TUI.Preview == nil || *loaded.TUI.Preview {
 				t.Fatalf("existing tui settings changed in round trip: %#v", loaded.TUI)
 			}
 		})
-	}
-}
-
-func TestNormalizeInputStyle(t *testing.T) {
-	tests := map[string]string{
-		"":            InputStylePopup,
-		"popup":       InputStylePopup,
-		"floating":    InputStylePopup,
-		"float":       InputStylePopup,
-		"box":         InputStylePopup,
-		"centered":    InputStylePopup,
-		"cmdline":     InputStyleCmdline,
-		"cmd-line":    InputStyleCmdline,
-		"commandline": InputStyleCmdline,
-		"inline":      InputStyleCmdline,
-		"bar":         InputStyleCmdline,
-		"bottom":      InputStyleCmdline,
-		"unknown":     InputStylePopup,
-	}
-	for in, want := range tests {
-		if got := normalizeInputStyle(in); got != want {
-			t.Fatalf("normalizeInputStyle(%q) = %q, want %q", in, got, want)
-		}
-	}
-	if got := normalizeInputStyle(" CMDLINE "); got != InputStyleCmdline {
-		t.Fatalf("normalizeInputStyle(%q) = %q, want %q", " CMDLINE ", got, InputStyleCmdline)
-	}
-}
-
-func TestInputStyleDefaultIsPopup(t *testing.T) {
-	cfg := Default()
-	if cfg.TUI.InputStyle != InputStylePopup {
-		t.Fatalf("default input_style = %q, want %q", cfg.TUI.InputStyle, InputStylePopup)
-	}
-}
-
-func TestInputStyleRoundTripCmdline(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	cfg := Default()
-	cfg.TUI.InputStyle = InputStyleCmdline
-	if err := Save(cfg); err != nil {
-		t.Fatalf("Save() error = %v", err)
-	}
-	data, err := os.ReadFile(Path())
-	if err != nil {
-		t.Fatalf("read config: %v", err)
-	}
-	if !strings.Contains(string(data), `[tui]`) {
-		t.Fatalf("saved config missing [tui] section: %s", data)
-	}
-	if !strings.Contains(string(data), `input_style = "cmdline"`) {
-		t.Fatalf("saved config missing input_style cmdline: %s", data)
-	}
-	loaded, err := Load()
-	if err != nil {
-		t.Fatalf("Load() error = %v", err)
-	}
-	if loaded.TUI.InputStyle != InputStyleCmdline {
-		t.Fatalf("loaded input_style = %q, want cmdline", loaded.TUI.InputStyle)
-	}
-}
-
-func TestDimBackgroundDefaultTrueWhenMissing(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", dir)
-	path := Path()
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		t.Fatalf("mkdir config dir: %v", err)
-	}
-	data := []byte("\n[sources]\ndefault = \"sessions\"\n")
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
-	loaded, err := Load()
-	if err != nil {
-		t.Fatalf("Load() error = %v", err)
-	}
-	if loaded.TUI.DimBackground == nil || !*loaded.TUI.DimBackground {
-		t.Fatalf("dim_background without [tui] = %v, want true", loaded.TUI.DimBackground)
-	}
-	if cfg := Default(); cfg.TUI.DimBackground == nil || !*cfg.TUI.DimBackground {
-		t.Fatalf("default dim_background = %v, want true", cfg.TUI.DimBackground)
-	}
-}
-
-func TestDimBackgroundRoundTripFalse(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	cfg := Default()
-	falseVal := false
-	cfg.TUI.DimBackground = &falseVal
-	if err := Save(cfg); err != nil {
-		t.Fatalf("Save() error = %v", err)
-	}
-	data, err := os.ReadFile(Path())
-	if err != nil {
-		t.Fatalf("read config: %v", err)
-	}
-	if !strings.Contains(string(data), `dim_background = false`) {
-		t.Fatalf("saved config missing dim_background = false: %s", data)
-	}
-	loaded, err := Load()
-	if err != nil {
-		t.Fatalf("Load() error = %v", err)
-	}
-	if loaded.TUI.DimBackground == nil || *loaded.TUI.DimBackground {
-		t.Fatalf("loaded dim_background = %v, want false", loaded.TUI.DimBackground)
 	}
 }
 
@@ -518,8 +422,63 @@ func TestPreviewDefaultTrueWhenMissing(t *testing.T) {
 	if loaded.TUI.Preview == nil || !*loaded.TUI.Preview {
 		t.Fatalf("preview without [tui] = %v, want true", loaded.TUI.Preview)
 	}
-	if cfg := Default(); cfg.TUI.Preview == nil || !*cfg.TUI.Preview {
-		t.Fatalf("default preview = %v, want true", cfg.TUI.Preview)
+	cfg := Default()
+	cfg.Normalize()
+	if cfg.TUI.Preview == nil || !*cfg.TUI.Preview {
+		t.Fatalf("normalized default preview = %v, want true", cfg.TUI.Preview)
+	}
+}
+
+// TestPreviewDefaultFollowsTheLayout covers the one preview default that is not
+// a plain true: the compact dropdown starts with the preview hidden until
+// ctrl+o, while an explicit [tui] preview always wins over the layout.
+func TestPreviewDefaultFollowsTheLayout(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want bool
+	}{
+		{name: "dropdown hides the preview", body: "[tui]\nlayout = \"dropdown\"\n", want: false},
+		{
+			name: "dropdown keeps an explicit preview on",
+			body: "[tui]\nlayout = \"dropdown\"\npreview = true\n",
+			want: true,
+		},
+		{
+			name: "dropdown keeps an explicit preview off",
+			body: "[tui]\nlayout = \"dropdown\"\npreview = false\n",
+			want: false,
+		},
+		{
+			name: "horizontal keeps the preview",
+			body: "[tui]\nlayout = \"horizontal\"\n",
+			want: true,
+		},
+		{name: "vertical keeps the preview", body: "[tui]\nlayout = \"vertical\"\n", want: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+			path := Path()
+			if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+				t.Fatalf("mkdir config dir: %v", err)
+			}
+			if err := os.WriteFile(path, []byte(test.body), 0o600); err != nil {
+				t.Fatalf("write config: %v", err)
+			}
+			loaded, err := Load()
+			if err != nil {
+				t.Fatalf("Load() error = %v", err)
+			}
+			if loaded.TUI.Preview == nil || *loaded.TUI.Preview != test.want {
+				t.Fatalf(
+					"preview for %q = %v, want %v",
+					test.body,
+					loaded.TUI.Preview,
+					test.want,
+				)
+			}
+		})
 	}
 }
 
@@ -544,26 +503,6 @@ func TestPreviewRoundTripFalse(t *testing.T) {
 	}
 	if loaded.TUI.Preview == nil || *loaded.TUI.Preview {
 		t.Fatalf("loaded preview = %v, want false", loaded.TUI.Preview)
-	}
-}
-
-func TestInputStyleMissingSectionDefaultsPopup(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", dir)
-	path := Path()
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		t.Fatalf("mkdir config dir: %v", err)
-	}
-	data := []byte("\n[sources]\ndefault = \"sessions\"\n")
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
-	loaded, err := Load()
-	if err != nil {
-		t.Fatalf("Load() error = %v", err)
-	}
-	if loaded.TUI.InputStyle != InputStylePopup {
-		t.Fatalf("input_style without [tui] = %q, want popup", loaded.TUI.InputStyle)
 	}
 }
 
@@ -892,6 +831,32 @@ func TestNormalizeThemeColorsPopupTitleAlias(t *testing.T) {
 	}
 }
 
+// TestNormalizeThemeColorsSelectionBG covers the selected row's bar color: an
+// unset value falls back to the dark grey default, and any color lipgloss
+// accepts (ANSI index or hex) is kept as written.
+func TestNormalizeThemeColorsSelectionBG(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{name: "unset falls back to the default", in: "", want: "236"},
+		{name: "whitespace falls back to the default", in: "   ", want: "236"},
+		{name: "ansi index is kept", in: "4", want: "4"},
+		{name: "hex is kept", in: "#283457", want: "#283457"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := Default()
+			cfg.Theme.Colors.SelectionBG = tt.in
+			cfg.Normalize()
+			if got := cfg.Theme.Colors.SelectionBG; got != tt.want {
+				t.Fatalf("selection_bg = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestNormalizeThemeColorsFillsAllEmptyFields(t *testing.T) {
 	cfg := Default()
 	cfg.Theme.Colors = ThemeColorsConfig{}
@@ -904,9 +869,7 @@ func TestNormalizeThemeColorsFillsAllEmptyFields(t *testing.T) {
 		want string
 	}{
 		{"PopupBorder", cfg.Theme.Colors.PopupBorder, defaults.PopupBorder},
-		{"ActiveTab", cfg.Theme.Colors.ActiveTab, defaults.ActiveTab},
 		{"Border", cfg.Theme.Colors.Border, defaults.Border},
-		{"InactiveTab", cfg.Theme.Colors.InactiveTab, defaults.InactiveTab},
 		{"Title", cfg.Theme.Colors.Title, defaults.Title},
 		{"PopupTitle", cfg.Theme.Colors.PopupTitle, defaults.Title},
 		{"Accent", cfg.Theme.Colors.Accent, defaults.Accent},
@@ -916,73 +879,10 @@ func TestNormalizeThemeColorsFillsAllEmptyFields(t *testing.T) {
 		{"Info", cfg.Theme.Colors.Info, defaults.Info},
 		{"Warning", cfg.Theme.Colors.Warning, defaults.Warning},
 		{"Danger", cfg.Theme.Colors.Danger, defaults.Danger},
-		// Per-pane tokens inherit the relevant global when unset.
-		{"ListBorder", cfg.Theme.Colors.ListBorder, defaults.Border},
-		{"MetadataBorder", cfg.Theme.Colors.MetadataBorder, defaults.Border},
-		{"PreviewBorder", cfg.Theme.Colors.PreviewBorder, defaults.Border},
-		{"ListBorderTitle", cfg.Theme.Colors.ListBorderTitle, defaults.Border},
-		{"MetadataBorderTitle", cfg.Theme.Colors.MetadataBorderTitle, defaults.Border},
-		{"PreviewBorderTitle", cfg.Theme.Colors.PreviewBorderTitle, defaults.Border},
-		{"InputBorder", cfg.Theme.Colors.InputBorder, defaults.Border},
-		// Overview hero tiles inherit border / popup_title when unset.
-		{"WorkspaceTileBorder", cfg.Theme.Colors.WorkspaceTileBorder, defaults.Border},
-		{"AgentTileBorder", cfg.Theme.Colors.AgentTileBorder, defaults.Border},
-		{"WorkspaceTileTitle", cfg.Theme.Colors.WorkspaceTileTitle, defaults.Title},
-		{"AgentTileTitle", cfg.Theme.Colors.AgentTileTitle, defaults.Title},
+		{"SelectionBG", cfg.Theme.Colors.SelectionBG, defaults.SelectionBG},
 	} {
 		if tc.got != tc.want {
 			t.Fatalf("%s = %q, want default %q", tc.name, tc.got, tc.want)
-		}
-	}
-}
-
-func TestNormalizeThemeColorsPaneTokensInheritCustomGlobals(t *testing.T) {
-	cfg := Default()
-	cfg.Theme.Colors.PopupBorder = "#aaaaaa"
-	cfg.Theme.Colors.Border = "#bbbbbb"
-	cfg.Theme.Colors.Title = "#cccccc"
-	// Leave the per-pane + overview tokens unset so they must inherit.
-	cfg.Theme.Colors.ListBorder = ""
-	cfg.Theme.Colors.MetadataBorder = ""
-	cfg.Theme.Colors.PreviewBorder = ""
-	cfg.Theme.Colors.ListBorderTitle = ""
-	cfg.Theme.Colors.MetadataBorderTitle = ""
-	cfg.Theme.Colors.PreviewBorderTitle = ""
-	cfg.Theme.Colors.InputBorder = ""
-	cfg.Normalize()
-
-	c := cfg.Theme.Colors
-	want := map[string]string{
-		"ListBorder":          "#bbbbbb",
-		"MetadataBorder":      "#bbbbbb",
-		"PreviewBorder":       "#bbbbbb",
-		"ListBorderTitle":     "#bbbbbb",
-		"MetadataBorderTitle": "#bbbbbb",
-		"PreviewBorderTitle":  "#bbbbbb",
-		"InputBorder":         "#bbbbbb",
-		// Overview tiles: borders inherit border; titles inherit popup_title
-		// (which itself inherits the legacy title here).
-		"WorkspaceTileBorder": "#bbbbbb",
-		"AgentTileBorder":     "#bbbbbb",
-		"WorkspaceTileTitle":  "#cccccc",
-		"AgentTileTitle":      "#cccccc",
-	}
-	got := map[string]string{
-		"ListBorder":          c.ListBorder,
-		"MetadataBorder":      c.MetadataBorder,
-		"PreviewBorder":       c.PreviewBorder,
-		"ListBorderTitle":     c.ListBorderTitle,
-		"MetadataBorderTitle": c.MetadataBorderTitle,
-		"PreviewBorderTitle":  c.PreviewBorderTitle,
-		"InputBorder":         c.InputBorder,
-		"WorkspaceTileBorder": c.WorkspaceTileBorder,
-		"AgentTileBorder":     c.AgentTileBorder,
-		"WorkspaceTileTitle":  c.WorkspaceTileTitle,
-		"AgentTileTitle":      c.AgentTileTitle,
-	}
-	for k, w := range want {
-		if got[k] != w {
-			t.Fatalf("%s = %q, want inherited %q", k, got[k], w)
 		}
 	}
 }
@@ -1016,26 +916,6 @@ func TestLoadFailsWhenConfigUnreadable(t *testing.T) {
 	}
 	if _, err := Load(); err == nil {
 		t.Fatal("Load() expected error for unreadable config")
-	}
-}
-
-func TestPrefixKeyDefaultFallback(t *testing.T) {
-	cfg := Default()
-	cfg.TypeFirst.Prefix = "  "
-	if got := cfg.PrefixKey(); got != DefaultPrefix {
-		t.Fatalf("PrefixKey() = %q, want %q", got, DefaultPrefix)
-	}
-	cfg.TypeFirst.Prefix = "ctrl+a"
-	if got := cfg.PrefixKey(); got != "ctrl+a" {
-		t.Fatalf("PrefixKey() = %q, want ctrl+a", got)
-	}
-}
-
-func TestDefaultSourceInvalidFallsBackToAll(t *testing.T) {
-	cfg := Default()
-	cfg.Sources.Default = "not-a-source"
-	if got := cfg.DefaultSource(); got != sessionmgr.ModeAll {
-		t.Fatalf("DefaultSource() = %v, want all", got)
 	}
 }
 
@@ -1100,5 +980,258 @@ func TestLogConfigDefaultsAndPreservesInvalidLevel(t *testing.T) {
 	if !strings.Contains(string(data), "[log]") ||
 		!strings.Contains(string(data), `level = "off"`) {
 		t.Fatalf("marshaled config missing log section:\n%s", data)
+	}
+}
+
+func TestDefaultRemoteConfig(t *testing.T) {
+	cfg := Default()
+	if got := cfg.RemoteHosts(); len(got) != 0 {
+		t.Fatalf("Default().RemoteHosts() = %+v, want none", got)
+	}
+	if !cfg.RemoteSSHConfigHosts() {
+		t.Fatal("Default().RemoteSSHConfigHosts() = false, want true")
+	}
+	data, err := Marshal(Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	if !strings.Contains(text, "[remote]") ||
+		!strings.Contains(text, "ssh_config_hosts = true") {
+		t.Fatalf("default config missing the [remote] section:\n%s", text)
+	}
+	if strings.Contains(text, "[[hosts]]") {
+		t.Fatalf("default config must not define hosts:\n%s", text)
+	}
+}
+
+func TestLoadRemoteHosts(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	if err := os.MkdirAll(filepath.Dir(Path()), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	data := []byte(`
+[remote]
+ssh_config_hosts = false
+
+[[hosts]]
+name = "homelab"
+target = "milo@192.168.1.10:2222"
+session = "work"
+
+[[hosts]]
+name = "edge"
+target = "ssh://root@edge.example.com"
+transport = "SHH"
+
+[[hosts]]
+name = "irohbox"
+target = "8f14e45fceea167a5a36dedd4bea2543a1b2c3d4e5f60718293a4b5c6d7e8f90"
+transport = "iroh"
+proxy_command = "iroh-ssh proxy %h"
+`)
+	if err := os.WriteFile(Path(), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.RemoteSSHConfigHosts() {
+		t.Fatal("RemoteSSHConfigHosts() = true, want the configured false")
+	}
+	hosts := cfg.RemoteHosts()
+	if len(hosts) != 2 {
+		t.Fatalf("RemoteHosts() = %+v, want the two valid hosts", hosts)
+	}
+	homelab := hosts[0]
+	if homelab.Name != "homelab" || homelab.Target != "milo@192.168.1.10:2222" ||
+		homelab.Transport != remote.TransportSSH || homelab.Session != "work" ||
+		homelab.FromSSHConfig || homelab.Alias() != "seshagy-homelab" {
+		t.Fatalf("homelab = %+v", homelab)
+	}
+	if got := hosts[1]; got.Name != "irohbox" || got.Transport != remote.TransportIroh ||
+		got.ProxyCommand != "iroh-ssh proxy %h" {
+		t.Fatalf("irohbox = %+v", got)
+	}
+	// transport is normalized to lowercase, so the unknown value is reported
+	// rather than silently accepted as ssh.
+	issues := cfg.ValidateRemoteHosts()
+	if len(issues) != 2 ||
+		!strings.Contains(issues[0], `hosts "edge": unknown transport "shh"`) ||
+		!strings.Contains(
+			issues[1],
+			`hosts "irohbox": proxy_command is ignored when transport is iroh`,
+		) {
+		t.Fatalf("ValidateRemoteHosts() = %v", issues)
+	}
+}
+
+func TestValidateRemoteHosts(t *testing.T) {
+	tests := []struct {
+		name string
+		host HostConfig
+		want string
+	}{
+		{"missing name", HostConfig{Target: "host"}, "name is required"},
+		{"dashed name", HostConfig{Name: "-h", Target: "host"}, `name must not start with "-"`},
+		{"name charset", HostConfig{Name: "a b", Target: "host"}, "name may only contain"},
+		{"missing target", HostConfig{Name: "h"}, "target is required"},
+		{"dashed target", HostConfig{Name: "h", Target: "-x"}, `must not start with "-"`},
+		{
+			"newline in session",
+			HostConfig{Name: "h", Target: "host", Session: "a\nb"},
+			"session must not contain control characters",
+		},
+		{
+			"newline in proxy",
+			HostConfig{Name: "h", Target: "host", ProxyCommand: "a\nb"},
+			"proxy_command must not contain control characters",
+		},
+		{
+			"control char in target",
+			HostConfig{Name: "h", Target: "ho\x01st"},
+			"target must not contain control characters",
+		},
+		{
+			"unknown transport",
+			HostConfig{Name: "h", Target: "host", Transport: "mosh"},
+			`unknown transport "mosh"`,
+		},
+		{
+			"iwrong iroh endpoint",
+			HostConfig{Name: "h", Target: "abc", Transport: "iroh"},
+			"endpoint id",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := Default()
+			cfg.Hosts = []HostConfig{test.host}
+			issues := cfg.ValidateRemoteHosts()
+			if len(issues) == 0 || !strings.Contains(issues[0], test.want) {
+				t.Fatalf("ValidateRemoteHosts() = %v, want a %q issue", issues, test.want)
+			}
+		})
+	}
+}
+
+func TestRemoteHostsSkipInvalidEntriesButKeepWarnings(t *testing.T) {
+	cfg := Default()
+	cfg.Hosts = []HostConfig{
+		{Name: "good", Target: "milo@192.168.1.10"},
+		{Name: "", Target: "anonymous"},
+		{Name: "good", Target: "duplicate"},
+	}
+	hosts := cfg.RemoteHosts()
+	if len(hosts) != 1 || hosts[0].Name != "good" || hosts[0].Target != "milo@192.168.1.10" {
+		t.Fatalf("RemoteHosts() = %+v, want only the first valid entry", hosts)
+	}
+	if issues := cfg.ValidateRemoteHosts(); len(issues) != 2 {
+		t.Fatalf("ValidateRemoteHosts() = %v, want two issues", issues)
+	}
+}
+
+func TestSaveAndLoadRemoteHostsRoundTrip(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	cfg := Default()
+	cfg.Hosts = []HostConfig{{
+		Name: "homelab", Target: "milo@192.168.1.10", Transport: remote.TransportIroh,
+		Session: "work",
+	}}
+	cfg.Remote.SSHConfigHosts = ptrBool(false)
+	if err := Save(cfg); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	data, err := os.ReadFile(Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	if !strings.Contains(text, "[[hosts]]") || !strings.Contains(text, `name = "homelab"`) ||
+		!strings.Contains(text, `transport = "iroh"`) ||
+		!strings.Contains(text, "ssh_config_hosts = false") {
+		t.Fatalf("saved config missing host entries:\n%s", text)
+	}
+	loaded, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if loaded.RemoteSSHConfigHosts() {
+		t.Fatal("loaded ssh_config_hosts = true, want false")
+	}
+	hosts := loaded.RemoteHosts()
+	if len(hosts) != 1 || hosts[0].Transport != remote.TransportIroh || hosts[0].Session != "work" {
+		t.Fatalf("loaded hosts = %+v", hosts)
+	}
+}
+
+func TestNormalizeRemoteHostTransportDefaults(t *testing.T) {
+	cfg := Default()
+	cfg.Hosts = []HostConfig{{Name: "  homelab  ", Target: " user@host ", Transport: " SSH "}}
+	cfg.Normalize()
+	host := cfg.Hosts[0]
+	if host.Name != "homelab" || host.Target != "user@host" ||
+		host.Transport != remote.TransportSSH {
+		t.Fatalf("normalized host = %+v", host)
+	}
+	if cfg.Remote.SSHConfigHosts == nil || !*cfg.Remote.SSHConfigHosts {
+		t.Fatalf("normalized ssh_config_hosts = %v, want true", cfg.Remote.SSHConfigHosts)
+	}
+}
+
+func TestRemoteHostKeybindings(t *testing.T) {
+	tests := []struct {
+		name        string
+		defaultMode string
+		hostMode    string
+		want        string
+		wantIssue   string
+		wantSkipped bool
+	}{
+		{name: "unset leaves herdr's default", want: ""},
+		{name: "default applies to the host", defaultMode: "server", want: "server"},
+		{
+			name:        "host overrides the default",
+			defaultMode: "server",
+			hostMode:    "local",
+			want:        "local",
+		},
+		{name: "case and spaces are normalized", hostMode: " Server ", want: "server"},
+		{
+			name: "unknown host mode skips the host", hostMode: "remote",
+			wantIssue: `unknown keybindings "remote"`, wantSkipped: true,
+		},
+		{
+			name: "unknown default is ignored with a warning", defaultMode: "both",
+			want: "", wantIssue: `remote: unknown keybindings "both"`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := Default()
+			cfg.Remote.Keybindings = tt.defaultMode
+			cfg.Hosts = []HostConfig{{
+				Name: "homelab", Target: "milo@192.168.1.10", Keybindings: tt.hostMode,
+			}}
+			issues := strings.Join(cfg.ValidateRemoteHosts(), "\n")
+			if tt.wantIssue == "" && issues != "" {
+				t.Fatalf("unexpected issues: %s", issues)
+			}
+			if !strings.Contains(issues, tt.wantIssue) {
+				t.Fatalf("issues = %q, want %q", issues, tt.wantIssue)
+			}
+			hosts := cfg.RemoteHosts()
+			if tt.wantSkipped {
+				if len(hosts) != 0 {
+					t.Fatalf("hosts = %+v, want the entry skipped", hosts)
+				}
+				return
+			}
+			if len(hosts) != 1 || hosts[0].Keybindings != tt.want {
+				t.Fatalf("hosts = %+v, want keybindings %q", hosts, tt.want)
+			}
+		})
 	}
 }

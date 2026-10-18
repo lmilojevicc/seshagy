@@ -196,6 +196,13 @@ func AttachOrSwitchCommand(name string) *exec.Cmd {
 	return exec.Command("tmux", "attach-session", "-t", exactSession(name))
 }
 
+// SSHWindowCommand builds a tmux command that opens a new window running
+// `ssh <alias>`. It is how a remote host is reached on the tmux backend, where
+// seshagy has no launcher to switch the attached server.
+func SSHWindowCommand(name, alias string) *exec.Cmd {
+	return exec.Command("tmux", "new-window", "-n", name, "ssh", alias)
+}
+
 // FocusAgentCommand builds a command that focuses an agent pane. When the
 // user is inside tmux, select-window + select-pane only change server-side
 // state; the client stays put. The trailing switch-client is what actually

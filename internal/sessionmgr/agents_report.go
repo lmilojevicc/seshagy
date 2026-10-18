@@ -29,9 +29,9 @@ type AgentRelease struct {
 	Seq    int64
 }
 
-// agentPaneOptions returns all @seshagy_agent_* option names that ReportAgent writes.
-// ReleaseAgent unsets the state-bearing options (everything except @seshagy_agent_seq)
-// and writes @seshagy_agent_seq as a tombstone high-water mark.
+// agentPaneOptions returns every @seshagy_agent_* option ReleaseAgent unsets
+// (everything except @seshagy_agent_seq, which is written as the tombstone
+// high-water mark).
 func agentPaneOptions() []string {
 	return []string{
 		"@seshagy_agent_name", "@seshagy_agent_state", "@seshagy_agent_message",

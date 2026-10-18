@@ -18,6 +18,7 @@ Navigating the terminal shouldn't break your flow, and managing AI coding agents
 - **Never lose track of your AI agents:** Running Pi, Claude Code, Codex, or Opencode in the background? `seshagy` automatically tracks their states across all panes. Instantly see if an agent is _working_, _blocked_ (needs your input), _done_, or _idle_ — without hunting for windows.
 - **Zero friction, zero clutter:** Designed to be invisible until you need it. Pop it open with a keybind, find your destination, and hit enter. The dashboard instantly vanishes.
 - **Universal multiplexer support:** Native, auto-detecting support for both **tmux** and **herdr**. It just works.
+- **Remote servers in reach:** Bring your homelab, edge box, or a Tailscale/iroh machine into the same picker and switch a herdr client to it with one key.
 
 ## 🚀 Quick Start
 
@@ -72,12 +73,80 @@ _(Note: You can also run `seshagy keybind install tmux` or `seshagy keybind inst
 
 ### 3. Basic Usage
 
-Open the dashboard anytime by running `seshagy` (or pressing your new keybind!).
+Open the picker anytime by running `seshagy` (or pressing your new keybind!). It is type-first:
+just start typing to fuzzy-search sessions, agents, directories, and hosts.
 
-- Press `z` or `f` to browse project directories from `zoxide` or `fd`.
-- Press `enter` on a directory to create or switch to a session/workspace for it.
-- Press `a` (all) / `t` (sessions) / `z` (zoxide) / `f` (fd) to filter sources.
-- Press `h` to open the agent integration install menu.
+- Narrow the list with `ctrl` keys: `ctrl+a` agents, `ctrl+s` agent state, `ctrl+t` sessions,
+  `ctrl+z` zoxide, `ctrl+f` find, `ctrl+e` remotes. Pressing the active filter's key returns to
+  all, and `tab` / `shift+tab` cycle them.
+- Type prefix tokens on the prompt to narrow the query further: `!` agent name or kind,
+  `@` agent workspace or state (`@` alone is every agent), `#` agent state, `/` path.
+- Press `enter` on a session/workspace to attach, on a directory to create or switch to a
+  session for it, and on an agent to focus its pane.
+- Press `ctrl+g` to open the agent integration install menu.
+
+---
+
+## 🖥️ Remote Hosts
+
+seshagy can switch a full-screen [herdr](https://herdr.dev) client between servers, so you can
+jump from your laptop to a homelab box in one keystroke.
+
+Because a herdr popup/plugin pane is a child of the herdr **server**, it cannot move your terminal
+to another server by itself. `seshagy run` owns the terminal instead: it attaches the herdr client,
+stays in the background, and switches (or returns to local) on request.
+
+```sh
+seshagy run              # local herdr server, switching enabled
+seshagy run homelab      # start attached to a configured host
+seshagy run --session work edge
+```
+
+Keybind a plain terminal (not a herdr pane) to `seshagy run`, then pick a host with `ctrl+e` and press
+`enter` to switch. `seshagy hosts switch <name|local>` does the same from a herdr pane or a script.
+
+### Configure hosts
+
+```toml
+[remote]
+ssh_config_hosts = true   # also offer the Host entries of ~/.ssh/config (default)
+
+# Plain OpenSSH: [user@]host[:port] or ssh://user@host:port
+[[hosts]]
+name = "homelab"            # unique, [A-Za-z0-9._-]+; the ssh alias is seshagy-<name>
+target = "milo@192.168.1.10:2222"
+session = "work"            # optional: remote herdr session to attach
+
+# Tailscale MagicDNS (or Tailscale SSH) is an ordinary ssh target
+[[hosts]]
+name = "tailnet"
+target = "milo@homelab.tailnet.ts.net"
+
+# iroh-ssh: target is the endpoint id; seshagy writes `ProxyCommand iroh-ssh proxy %h`
+[[hosts]]
+name = "edge"
+target = "8f14e45fceea167a5a36dedd4bea2543a1b2c3d4e5f60718293a4b5c6d7e8f90"
+transport = "iroh"
+
+# A custom transport keeps full control of the ProxyCommand (%h / %p expand)
+[[hosts]]
+name = "jumpbox"
+target = "10.0.0.5"
+proxy_command = "ssh -W %h:%p bastion"
+```
+
+Targets are `[user@]host[:port]` or `ssh://user@host:port`. Render the generated ssh config and
+let OpenSSH use it:
+
+```sh
+seshagy hosts            # list configured + discovered hosts
+seshagy hosts setup      # write ~/.config/seshagy/ssh_config and Include it from ~/.ssh/config
+```
+
+`seshagy hosts setup` is the only command that edits `~/.ssh/config` (it prepends one `Include`
+line and backs the file up once to `~/.ssh/config.seshagy.bak`). Hosts defined in your own
+`~/.ssh/config` are used as-is, so anything OpenSSH already supports — including Tailscale SSH and
+`ProxyCommand` transports — works without extra seshagy config.
 
 ---
 
@@ -101,22 +170,95 @@ _How does it work?_ `seshagy` supports both `tmux` and `herdr` backends with dif
 - Under **tmux**, it runs its own custom herdr-like detection.
 - Under **herdr**, it defers completely to the native agent detection provided directly by herdr.
 
+### Agent logos
+
+Agent rows can show each vendor's mark from the **Herdr Agent Icons Max** font
+([herdr-radar](https://github.com/hhdebb/herdr-radar), MIT; the vendor marks belong to their owners).
+Install that font and seshagy uses it automatically; without it, rows fall back to the state glyph and
+the agent's name. `SESHAGY_AGENT_ICONS=auto|font|none` overrides the detection, and `[icons] mode =
+"text"` (or `"none"`) never prints private-use glyphs.
+
 ---
 
-## ⌨️ TUI Keybindings
+## ⌨️ TUI
 
-| Key                         | Action                                        |
-| --------------------------- | --------------------------------------------- |
-| `enter`                     | Jump to session/directory or focus agent pane |
-| `j`/`k`, `↓`/`↑`            | Navigate list                                 |
-| `a`, `t`, `z`, `f`          | Filter by: All / Sessions / Zoxide / fd       |
-| `o`                         | Toggle agent scope (current session vs all)   |
-| `/`                         | Filter list by typing                         |
-| `R`                         | Rename selected session                       |
-| `x`                         | Kill selected session or pane                 |
-| `h`                         | Open agent integration install menu           |
-| `p` (`alt+p` in type-first) | Toggle Preview when the layout supports it    |
-| `q` / `esc`                 | Quit                                          |
+The picker is always type-first: printable keys filter the list, and every action is a chord.
+The footer names the core actions only; `F1` opens the overlay with the rest of the keymap.
+
+| Key                           | Action                                                                                 |
+| ----------------------------- | -------------------------------------------------------------------------------------- |
+| _type_                        | Fuzzy-filter the list (title matches rank first)                                        |
+| `tab` / `shift+tab`           | Next / previous filter                                                                  |
+| `ctrl+a`                      | Filter to agents (press it again for all)                                               |
+| `ctrl+s`                      | Cycle the agent-state filter: blocked, done, working, idle, all agents                  |
+| `ctrl+t`                      | Filter to sessions (tmux) / workspaces (herdr)                                          |
+| `ctrl+z`                      | Filter to zoxide directories                                                            |
+| `ctrl+f`                      | Filter to `fd` (or `find`) discoveries                                                  |
+| `ctrl+e`                      | Filter to remote hosts                                                                  |
+| `↑`/`↓`, `ctrl+p`/`ctrl+n`    | Move the selection (wraps)                                                              |
+| `pgup`/`pgdown`, `home`/`end` | Page through the list / jump to its ends                                                |
+| `enter`                       | Attach to the session, focus the agent pane, open the directory, or switch to the host  |
+| `ctrl+r`                      | Rename the selected session/workspace or agent (inline)                                 |
+| `ctrl+x`, `delete`            | Kill the selected session/workspace or agent pane (`enter`/`y` confirms)                |
+| `ctrl+o`                      | Toggle the preview window (the `dropdown` layout starts with it hidden)                 |
+| `ctrl+y`                      | Pick a directory with `yazi`                                                            |
+| `ctrl+l`                      | Reload every source                                                                     |
+| `ctrl+g`                      | Open the agent integration install menu                                                 |
+| `ctrl+u` / `ctrl+w`           | Clear the query / delete the last word                                                  |
+| `esc`                         | Clear the query and filter first; quit when both are empty                              |
+| `F1`                          | Open the help overlay: the filter keys, the query tokens, and the rest of the keymap    |
+| `ctrl+c`                      | Quit                                                                                    |
+
+### Filters
+
+Filter with `ctrl` keys: pressing the active filter's key returns to all, pressing another
+filter's key switches straight to it, and the typed query is kept. `tab` / `shift+tab` cycle the
+same filters; the active ones are named in the prompt window title.
+
+| Key      | Filter      | Shows                                                      |
+| -------- | ----------- | ---------------------------------------------------------- |
+|          | `all`       | Everything, agents needing you first                       |
+| `ctrl+a` | `agents`    | Agent panes and their state                                |
+| `ctrl+s` | agent state | Cycles blocked, done, working, idle, then all agents       |
+| `ctrl+t` | `sessions`  | Sessions (tmux) / workspaces (herdr)                       |
+| `ctrl+z` | `zoxide`    | Frecency-ranked directories                                |
+| `ctrl+f` | `find`      | `fd` (or `find` when `fd` is not installed)                |
+| `ctrl+e` | `remotes`   | Remote herdr servers (see the Remote Hosts section above)  |
+
+`ctrl+s` narrows the same list the agents filter shows: the first press lands on `blocked`, each
+later press steps one state on, and the press after `idle` clears the state filter while staying
+on agents. Switching to another filter, `esc`, or `backspace` on an empty prompt drops it.
+
+### Query tokens
+
+Type `!`, `@`, `#` or `/` on the prompt for a prefix token. Tokens are ANDed with the `ctrl`
+filter and with the plain text, so `@seshagy #idle fix` reads "the idle agents in the `seshagy`
+workspace that match `fix`".
+
+| Token | Matches                                                            |
+| ----- | ------------------------------------------------------------------ |
+| `!x`  | The agent's name or kind (`!claude`, `!fix`)                       |
+| `@`   | Every agent                                                        |
+| `@x`  | The agent's workspace label or its state (`@frontend`, `@blocked`) |
+| `#x`  | The agent's state (`#idle`)                                        |
+| `/x`  | The item's path (`/tui`)                                           |
+
+An agent token (`!x`, `@`, `@x`, `#x`) restricts the list to agents; a bare `!`, `@`, `#` or `/`
+is ignored. Plain text fuzzy-matches exactly as it does without tokens, so highlighting stays
+with the text you typed.
+
+### Help
+
+The footer stays down to the core actions: `↑↓ move`, `⏎ open`, `^r rename`, `^x kill`, `^o preview`,
+`^y yazi`, `F1 help`, `esc quit`. Hints drop from the right on a short line, but `F1 help` and
+`esc quit` stay as long as anything fits. Everything else lives in the overlay `F1` opens: the filter
+keys (with the one in effect highlighted and the state `ctrl+s` is on), the query tokens, and the
+remaining keys. It opens centered over the picker, scrolls with `↑`/`↓` when it is taller than the
+frame, and closes on `F1`, `esc`, or `q`; other keys are swallowed, so the query and filter behind it
+never change.
+
+_When tmux's `prefix` is `C-a`, tmux eats `ctrl+a` before the picker sees it — `tab` / `shift+tab`
+and `esc` reach the same filters._
 
 ---
 
@@ -144,13 +286,11 @@ seshagy config init
 From there, you can:
 
 - Customize theme colors and icons to match your terminal rice.
-- Theme each pane independently — list, metadata, and preview borders and titles are configurable under `[theme.colors]` (see `docs/configuration.md`).
-- Tweak `fd` commands.
-- Enable `type_first` mode to instantly filter lists by typing without prefix keys.
-- Choose the Default or Zen TUI layout and a shared popup or cmdline input style.
-- Reorder the source tabs.
+- Tweak `fd` commands and the agent manifest catalog.
+- Enable or disable the preview column.
+- Define `[[hosts]]` for remote herdr servers (see the Remote Hosts section above).
 
-See the [configuration guide](docs/configuration.md#tui-layouts) for layout behavior and settings. In Zen, Preview is unavailable and its shortcut shows a brief notice instead of toggling a pane.
+See the [configuration guide](docs/configuration.md) for every key.
 
 ---
 
@@ -185,7 +325,7 @@ seshagy keybind install tmux --mode pane-zoomed --persistent
 By default, installed keybinds launch `seshagy --ephemeral` and auto-dismiss on
 focus loss. Pass `--persistent` when installing either a tmux or herdr keybind
 to launch `seshagy` without focus-loss auto-dismiss; it stays open until you
-explicitly quit with `q`.
+explicitly quit with `esc` or `ctrl+c`.
 
 Herdr popup `--width` and `--height` accept either terminal cell counts (for
 example, `120`) or percentages (for example, `80%`) and both default to `80%`.

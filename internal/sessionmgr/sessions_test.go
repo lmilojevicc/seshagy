@@ -250,6 +250,19 @@ func TestAttachOrSwitchCommandUsesTmuxContext(t *testing.T) {
 	}
 }
 
+func TestSSHWindowCommandOpensANamedWindow(t *testing.T) {
+	cmd := SSHWindowCommand("homelab", "seshagy-homelab")
+	want := []string{"tmux", "new-window", "-n", "homelab", "ssh", "seshagy-homelab"}
+	if len(cmd.Args) != len(want) {
+		t.Fatalf("args = %#v, want %#v", cmd.Args, want)
+	}
+	for i, arg := range want {
+		if cmd.Args[i] != arg {
+			t.Fatalf("args = %#v, want %#v", cmd.Args, want)
+		}
+	}
+}
+
 func TestFocusAgentCommandSwitchesClientInTmux(t *testing.T) {
 	t.Setenv("TMUX", "/tmp/tmux-123/default,1,0")
 	t.Setenv("HERDR_ENV", "")

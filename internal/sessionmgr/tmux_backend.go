@@ -70,6 +70,10 @@ func (tmuxBackend) ListAgents(ctx context.Context, sessionFilter string) ([]Item
 	return ListAgents(ctx, sessionFilter)
 }
 
+func (tmuxBackend) AgentPID(_ context.Context, item Item) (int, error) {
+	return item.AgentPID, nil
+}
+
 func (tmuxBackend) CaptureAgentPane(ctx context.Context, paneID string, lines int) (string, error) {
 	return CaptureAgentPane(ctx, paneID, lines)
 }

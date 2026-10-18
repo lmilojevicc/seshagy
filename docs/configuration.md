@@ -92,60 +92,117 @@ seshagy config init
 Common settings:
 
 ```toml
-[sources]
-default = "all"
-order = ["all", "sessions", "zoxide", "fd", "agents"]
-
 [directories]
 fd_command = 'fd -H -a -d 2 -t d -E .Trash . "$HOME"'
-
-[type_first]
-enabled = false
-prefix = "ctrl+x"
 
 [agents]
 manifest_fallback = true   # tmux only: capture-pane screen-rule backstop (default on)
 catalog_url = ""           # defaults to the herdr public catalog when empty
 
 [tui]
-layout = "default"             # default | zen
-input_style = "popup"          # popup | cmdline
-dim_background = true           # dim the dashboard behind popup input (popup mode only)
-preview = true                  # enable Preview when the layout supports it
+layout = "horizontal"          # horizontal | vertical | dropdown
+preview = true                 # the preview window (dropdown starts hidden)
+
+[remote]
+ssh_config_hosts = true        # offer the hosts of ~/.ssh/config too (default)
+
+[[hosts]]
+name = "homelab"
+target = "milo@192.168.1.10"
 
 [log]
 level = "off"                 # off | debug | info | warn | error
 file = ""                     # empty: create a per-run file under XDG state
 ```
 
-### TUI layouts
+### TUI
 
-Choose a built-in layout at startup with the flat `[tui]` setting:
+The picker is always type-first: printable keys fuzzy-filter the merged list of
+sessions, agents, directories, and hosts, and `ctrl` keys select a filter
+(`ctrl+a` agents, `ctrl+s` agent state, `ctrl+t` sessions, `ctrl+z` zoxide,
+`ctrl+f` find, `ctrl+e` remotes; the active filter's key returns to all, and
+`tab` / `shift+tab` cycle). The prompt also reads herdr-navigator style prefix
+tokens, ANDed with that filter: `!` agent name or kind, `@` workspace or state
+(`@` alone is every agent), `#` agent state, `/` path. `[tui] preview` and
+`[tui] layout` are the only `[tui]` settings the picker reads. See
+the README's TUI section for the full keymap.
 
 ```toml
 [tui]
-layout = "default"             # default | zen
-preview = true
-input_style = "popup"          # popup | cmdline
-dim_background = true
+layout = "horizontal"   # horizontal (default) | vertical | dropdown
+preview = true          # the preview window (dropdown starts hidden)
 ```
 
-Both layouts retain the shared Sources, Collection, Search, and Actions surfaces.
-Beyond those shared surfaces:
+| Value        | Arrangement                                                                 |
+| ------------ | --------------------------------------------------------------------------- |
+| `horizontal` | Search prompt and results on the left, preview on the right (default).      |
+| `vertical`   | Prompt on top, results below it, preview at the bottom.                     |
+| `dropdown`   | Prompt on top, results full width below; the preview starts hidden (`ctrl+o` shows it). |
 
-- **Default** composes Overview, Details, and Preview.
-- **Zen** is centered and borderless and composes Overview only.
+Frames narrower than 100 columns always stack the windows (prompt, results,
+preview) instead of putting them side by side, whatever the layout says.
 
-`preview` is a global preference that takes effect only when the selected layout
-supports Preview. Selecting Zen leaves that preference unchanged, so switching
-the startup setting back to Default restores it. Pressing `p` (or `alt+p` in
-type-first mode) in Zen shows a brief unavailable notice and does not perform
-Preview capture work.
+Legacy and unknown values (including the old `default` and `zen` tokens)
+normalize to `horizontal` without an error, so an existing `config.toml` keeps
+working.
 
-The popup/cmdline `input_style` setting and popup `dim_background` behavior are
-shared by both layouts. Layout selection is read from configuration at startup;
-there is no runtime layout switch. An unknown layout value produces one warning
-and falls back to Default.
+### Remote hosts
+
+`[remote]` and `[[hosts]]` describe remote herdr servers that `seshagy run` can
+switch the attached client to. See the README's Remote Hosts section for the
+workflow.
+
+```toml
+[remote]
+ssh_config_hosts = true   # list the non-wildcard Host entries of ~/.ssh/config (default)
+keybindings = "server"    # optional default --remote-keybindings for every host: local | server
+
+[[hosts]]
+name = "homelab"            # unique, [A-Za-z0-9._-]+; the generated ssh alias is seshagy-<name>
+target = "milo@192.168.1.10:2222"
+transport = "ssh"           # ssh (default) | iroh
+proxy_command = ""          # optional ProxyCommand (%h / %p expand)
+session = "work"            # optional remote herdr session to attach
+keybindings = "server"      # optional: local | server; overrides [remote] keybindings
+
+[[hosts]]
+name = "laptop"
+target = "milo@<64-hex iroh endpoint id>"
+transport = "iroh"
+keybindings = "server"
+```
+
+The two hosts above make `seshagy run` attach with
+`herdr --remote seshagy-homelab --session work --remote-keybindings server` and
+`herdr --remote seshagy-laptop --remote-keybindings server`; the generated ssh
+config supplies the user, port, and (for iroh) `ProxyCommand iroh-ssh proxy %h`.
+
+| Key                 | Purpose                                                                    |
+| ------------------- | -------------------------------------------------------------------------- |
+| `name`              | Required. Unique `[A-Za-z0-9._-]+` name; the alias handed to herdr is `seshagy-<name>`. |
+| `target`            | Required. `[user@]host[:port]` or `ssh://user@host:port`.                   |
+| `transport`         | `ssh` (default) or `iroh`. `iroh` writes `ProxyCommand iroh-ssh proxy %h`, so `target` is the 64-hex endpoint id. |
+| `proxy_command`     | Custom transport; exclusive with `transport = "iroh"`.                       |
+| `session`           | Remote herdr session to attach; empty uses the remote default.             |
+| `keybindings`       | `local` or `server`, passed as `herdr --remote-keybindings`. Empty uses `[remote] keybindings`, then herdr's default (`local`). |
+
+`[remote] keybindings` also applies to hosts discovered from `~/.ssh/config`.
+An unknown `[remote] keybindings` value is ignored with a warning; an unknown
+host `keybindings` value skips that host.
+
+Entries that fail validation (bad name, target, or transport; control
+characters) are skipped with a warning from `seshagy`, `seshagy hosts`, and
+`seshagy run`; an iroh target that does not look like an endpoint id, or a
+`proxy_command` alongside `transport = "iroh"`, only warns. Configured hosts are
+rendered into `$XDG_CONFIG_HOME/seshagy/ssh_config`, which `seshagy hosts setup`
+writes and Includes from `~/.ssh/config`:
+
+```sh
+seshagy hosts            # name, transport, target, and source of every host
+seshagy hosts setup      # write the generated ssh config and add its Include line
+seshagy hosts switch <name|local>
+seshagy run [--session <name>] [<host>]
+```
 
 ### Diagnostic logging
 
@@ -172,10 +229,9 @@ never uploaded automatically and are not guaranteed to be free of identifying
 multiplexer IDs; inspect the file before sharing, then disable logging and
 delete it when finished.
 
-The default `order` lists tabs left→right (`agents` last). `current-agents` is
-not a tab; it is a CLI-only scope (`--get-current-session-agents`), reachable in
-the TUI via the `o` key (toggles the agents source between the current session
-and all).
+`current-agents` is a CLI-only scope (`--get-current-session-agents`) that
+narrows the agent list to the multiplexer session hosting the call; the picker
+shows the current session's agents inline instead.
 
 ### Theme colors
 
@@ -183,13 +239,11 @@ and all).
 
 - an ANSI palette index (`"8"`, `"13"`, …),
 - a hex color (`"#cba6f7"`),
-- or `"default"` to inherit the terminal foreground (used by `active_tab` by default).
+- or `"default"` to inherit the terminal foreground.
 
 | Key              | Used for                             |
 | ---------------- | ------------------------------------ |
 | `popup_border`   | border on setup/install dialogs only       |
-| `active_tab`     | selected source tab label            |
-| `inactive_tab`   | unselected source tabs               |
 | `border`         | pane borders                         |
 | `popup_title`    | popup / dialog headings (input prompt, setup, install menu) |
 | `title`          | deprecated alias for `popup_title`   |
@@ -200,30 +254,7 @@ and all).
 | `info`           | informational status messages        |
 | `warning`        | warning status messages              |
 | `danger`         | error/danger status messages         |
-
-Per-pane borders, border titles, input fields, and overview tiles can be themed
-independently. Each defaults to the relevant global when unset (`list_border`,
-`metadata_border`, `preview_border`, `input_border`, `workspace_tile_border`,
-and `agent_tile_border` inherit `border`; each `*_border_title` inherits its
-pane's `*_border`; workspace and agent tile titles inherit `popup_title`), so
-the default look is unchanged unless set.
-
-| Key                     | Used for                                                 |
-| ----------------------- | -------------------------------------------------------- |
-| `list_border`           | list pane border (default: inherits `border`)            |
-| `metadata_border`       | metadata/detail pane border (default: inherits `border`) |
-| `preview_border`        | preview pane border (default: inherits `border`)         |
-| `input_border`          | search/rename input border (default: inherits `border`)  |
-| `list_border_title`     | list pane border-title text (default: inherits `list_border`) |
-| `metadata_border_title` | metadata pane border-title text (default: inherits `metadata_border`) |
-| `preview_border_title`  | preview pane border-title text (default: inherits `preview_border`) |
-| `workspace_tile_border` | workspace tile border (default: inherits `border`)       |
-| `workspace_tile_title`  | workspace tile title (default: inherits `popup_title`)   |
-| `agent_tile_border`     | agent tile border (default: inherits `border`)           |
-| `agent_tile_title`      | agent tile title (default: inherits `popup_title`)       |
-
-When a `*_border_title` differs from its `*_border`, only the title text uses
-the title color; the corners and dashes keep the border color.
+| `selection_bg`   | background bar under the selected result row (default `236`, a 256-color dark grey) |
 
 Example:
 
@@ -231,9 +262,7 @@ Example:
 [theme]
   [theme.colors]
     popup_border = "#cba6f7"
-    active_tab = "default"
     border = "#313244"
-    inactive_tab = "#6c7086"
     popup_title = "#b4befe"
     accent = "#cba6f7"
     key = "#f9e2af"
@@ -242,20 +271,16 @@ Example:
     info = "#89dceb"
     warning = "#f9e2af"
     danger = "#f38ba8"
-    # Per-pane borders and border titles. Each inherits when unset
-    # (list_border -> border; metadata/preview_border -> border;
-    # *_border_title -> its pane border), so these are optional.
-    # list_border = "#89b4fa"
-    # metadata_border = "#45475a"
-    # preview_border = "#45475a"
-    # list_border_title = "#cdd6f4"
-    # metadata_border_title = "#cdd6f4"
-    # preview_border_title = "#cdd6f4"
+    # The solid bar behind the selected result row. Any color lipgloss
+    # accepts (ANSI index or hex) works; "default" leaves the row unbarred.
+    selection_bg = "236"
 ```
 
-The TUI keeps the terminal's default foreground/background for list text and
-selection (reverse video), so changing your terminal theme still rethemes most
-of seshagy without extra config.
+The TUI keeps the terminal's default foreground/background for list text, so
+changing your terminal theme still rethemes most of seshagy without extra
+config. The selected row is drawn as a solid background bar (`selection_bg`)
+with the row's own foreground colors on top; set it to `"default"` to drop the
+bar and mark the selection with the accent `▌` instead.
 
 ### Icons
 

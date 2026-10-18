@@ -14,18 +14,23 @@ import (
 type modeCache struct {
 	items     []sessionmgr.Item
 	fetchedAt time.Time
-	err       error
-	warning   string
 }
 
+// cacheTTL is how long a source's results stay usable before the 1s tick
+// refreshes it. Agents are polled fast for state changes, sessions are cheap,
+// and directory listings barely move.
 func cacheTTL(mode sessionmgr.SourceMode) time.Duration {
 	switch mode {
-	case sessionmgr.ModeAll:
-		return 2 * time.Second
 	case sessionmgr.ModeAgents:
-		return 2 * time.Second // fast poll for state changes
-	default:
+		return time.Second
+	case sessionmgr.ModeSessions:
+		return 2 * time.Second
+	case sessionmgr.ModeZoxide:
 		return 15 * time.Second
+	case sessionmgr.ModeFD:
+		return time.Minute
+	default:
+		return 5 * time.Second
 	}
 }
 
@@ -45,35 +50,42 @@ func (m Model) cacheFresh(mode sessionmgr.SourceMode) bool {
 	return time.Since(entry.fetchedAt) < cacheTTL(mode)
 }
 
-// overviewItems returns the ModeAll item list used by the top overview hero
-// band, so its counts stay correct regardless of the active source tab. The
-// active tab's own list (m.items) is used directly when ModeAll is active;
-// otherwise the warmed ModeAll cache is read. Returns nil before the first
-// ModeAll load completes (the hero hides itself in that case).
-func (m Model) overviewItems() []sessionmgr.Item {
-	if m.source == sessionmgr.ModeAll {
-		return m.items
+// mergedItems rebuilds the visible list from every loaded source: sessions and
+// agents first (itemRank then sorts by urgency), then the directory sources with
+// fd discoveries already covered by zoxide dropped, then the remote hosts.
+func (m Model) mergedItems() []sessionmgr.Item {
+	merged := make([]sessionmgr.Item, 0, len(m.items))
+	for _, mode := range tuiSources {
+		entry, ok := m.cacheEntry(mode)
+		if !ok {
+			continue
+		}
+		merged = append(merged, entry.items...)
 	}
-	entry, ok := m.cacheEntry(sessionmgr.ModeAll)
-	if !ok {
-		return nil
-	}
-	return entry.items
+	merged = append(merged, hostItems(m.hosts)...)
+	merged = dedupeDirs(merged)
+	return m.stampAgentStarts(merged)
 }
 
-func (m Model) applyCacheEntry(mode sessionmgr.SourceMode) Model {
-	entry, ok := m.cacheEntry(mode)
-	if !ok {
-		return m
+// stampAgentStarts fills in the agent process start time each row's age column
+// is computed from. The cache is keyed by pane id, and an entry resolved from a
+// pid the pane no longer hosts is skipped so a replaced agent never inherits the
+// previous process's age.
+func (m Model) stampAgentStarts(items []sessionmgr.Item) []sessionmgr.Item {
+	if len(m.agentStarted) == 0 {
+		return items
 	}
-	m.items = entry.items
-	if entry.err != nil {
-		m.notify(entry.err.Error(), sevError)
-	} else if entry.warning != "" {
-		m.notify(entry.warning, sevWarning)
+	for i := range items {
+		if items[i].Kind != sessionmgr.KindAgent {
+			continue
+		}
+		start, ok := m.agentStarted[items[i].PaneID]
+		if !ok || (items[i].AgentPID > 0 && start.pid != items[i].AgentPID) {
+			continue
+		}
+		items[i].StartedAt = start.started
 	}
-	m.clampCursor()
-	return m
+	return items
 }
 
 func (m Model) invalidateAllCaches() Model {
@@ -87,24 +99,15 @@ func (m Model) invalidateAllCaches() Model {
 	}
 	m.inflightRefresh = make(map[sessionmgr.SourceMode]uint64)
 	m.cache = make(map[sessionmgr.SourceMode]modeCache)
+	m.reportedWarnings = make(map[sessionmgr.SourceMode]string)
 	return m
 }
 
-func (m Model) storeCache(
-	mode sessionmgr.SourceMode,
-	items []sessionmgr.Item,
-	warning string,
-	err error,
-) Model {
+func (m Model) storeCache(mode sessionmgr.SourceMode, items []sessionmgr.Item) Model {
 	if m.cache == nil {
 		m.cache = make(map[sessionmgr.SourceMode]modeCache)
 	}
-	m.cache[mode] = modeCache{
-		items:     items,
-		fetchedAt: time.Now(),
-		err:       err,
-		warning:   warning,
-	}
+	m.cache[mode] = modeCache{items: items, fetchedAt: time.Now()}
 	return m
 }
 
@@ -115,7 +118,7 @@ func (m Model) beginRefresh(source sessionmgr.SourceMode, force bool) (Model, te
 	if m.refreshGen == nil {
 		m.refreshGen = make(map[sessionmgr.SourceMode]uint64)
 	}
-	if force && m.inflightRefresh != nil {
+	if force {
 		delete(m.inflightRefresh, source)
 	}
 	if m.inflightRefresh[source] != 0 {
@@ -156,13 +159,35 @@ func (m Model) anyRefreshInflight() bool {
 	return false
 }
 
+// reportSourceFailure toasts a source failure once per distinct message so a
+// persistently broken source (missing fd, unreachable multiplexer) does not
+// re-toast every second.
+func (m Model) reportSourceFailure(
+	source sessionmgr.SourceMode,
+	message string,
+	sev notifSev,
+) Model {
+	if message == "" {
+		return m
+	}
+	if m.reportedWarnings == nil {
+		m.reportedWarnings = make(map[sessionmgr.SourceMode]string)
+	}
+	if m.reportedWarnings[source] == message {
+		return m
+	}
+	m.reportedWarnings[source] = message
+	m.notify(message, sev)
+	return m
+}
+
 func (m Model) handleRefreshMsg(msg refreshMsg) (Model, tea.Cmd) {
 	if m.inflightRefresh == nil || msg.gen != m.inflightRefresh[msg.source] {
 		ctx := context.Background()
 		if m.logger.Enabled(ctx, slog.LevelDebug) {
 			logging.LogAttrs(ctx, m.logger, slog.LevelDebug,
 				logging.EventTUIRefreshStale, logging.ComponentTUI,
-				slog.String("source", msg.source.Names().ConfigToken),
+				slog.String("source", msg.source.ConfigToken()),
 				slog.Int64("generation", int64(msg.gen)),
 				slog.Int64("current_generation", int64(m.refreshGen[msg.source])),
 			)
@@ -170,22 +195,30 @@ func (m Model) handleRefreshMsg(msg refreshMsg) (Model, tea.Cmd) {
 		return m, nil
 	}
 	m = m.finishRefresh(msg.source, msg.gen)
-	m = m.storeCache(msg.source, msg.items, msg.warning, msg.err)
-
-	if msg.source != m.source {
-		return m, nil
+	m = m.storeCache(msg.source, msg.items)
+	m.items = m.mergedItems()
+	m.loadedOnce = true
+	m.syncCursor()
+	switch {
+	case msg.err != nil:
+		m = m.reportSourceFailure(msg.source, msg.err.Error(), sevError)
+	case msg.warning != "":
+		m = m.reportSourceFailure(msg.source, msg.warning, sevWarning)
 	}
-
-	m.loading = false
-	if msg.err != nil {
-		m.notify(msg.err.Error(), sevError)
-		return m, nil
+	var preview tea.Cmd
+	m, preview = m.requestPreview()
+	cmds := make([]tea.Cmd, 0, 2)
+	if preview != nil {
+		cmds = append(cmds, preview)
 	}
-	m.items = msg.items
-	m.currentSession = msg.currentSession
-	m.clampCursor()
-	if msg.warning != "" {
-		m.notify(msg.warning, sevWarning)
+	// New agent panes (and panes whose agent was replaced) need their process
+	// start time before the age column can show it.
+	if msg.source == sessionmgr.ModeAgents && msg.err == nil {
+		var starts tea.Cmd
+		m, starts = m.resolveAgentStarts()
+		if starts != nil {
+			cmds = append(cmds, starts)
+		}
 	}
-	return m, m.previewForSelection()
+	return m, tea.Batch(cmds...)
 }

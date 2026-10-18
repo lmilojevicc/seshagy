@@ -23,6 +23,7 @@ func (noopBackend) CurrentSession(context.Context) (string, error)   { return ""
 
 func (noopBackend) ListSessions(context.Context) ([]Item, error)       { return nil, nil }
 func (noopBackend) ListAgents(context.Context, string) ([]Item, error) { return nil, nil }
+func (noopBackend) AgentPID(context.Context, Item) (int, error)        { return 0, nil }
 
 func (noopBackend) HasSession(context.Context, string) (bool, error) { return false, nil }
 func (noopBackend) CreateSessionFromDir(context.Context, string) (Item, bool, error) {

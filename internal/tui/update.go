@@ -11,12 +11,13 @@ import (
 )
 
 // ephemeralTickMsg drives the --ephemeral focus-loss poll. It uses a faster
-// cadence (150ms) than the regular data-refresh tick (1-5s) so dismissal feels
+// cadence (150ms) than the regular data-refresh tick (1s) so dismissal feels
 // instant when the user switches focus away from the dashboard.
 type ephemeralTickMsg time.Time
 
 const (
 	ephemeralTickInterval    = 150 * time.Millisecond
+	refreshTickInterval      = time.Second
 	notificationTickInterval = time.Second
 	notificationTTL          = 4 * time.Second
 	spinnerTickInterval      = 120 * time.Millisecond
@@ -45,45 +46,31 @@ func spinnerTickCmd() tea.Cmd {
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	next, cmd := m.update(msg)
+	if model, ok := next.(Model); ok {
+		return model.followCursor(), cmd
+	}
+	return next, cmd
+}
+
+func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.searchInput.Width = max(20, msg.Width/2)
-		m.renameInput.Width = max(20, msg.Width/2)
-		return m, m.previewForSelection()
+		var preview tea.Cmd
+		m, preview = m.requestPreview()
+		return m, preview
 	case tickMsg:
-		interval := tickIntervalFor(m.source)
-		if m.setup.active {
-			return m, tea.Tick(interval, func(t time.Time) tea.Msg { return tickMsg(t) })
-		}
-		if m.installMenu.active {
-			return m, tea.Tick(interval, func(t time.Time) tea.Msg { return tickMsg(t) })
-		}
-		if m.cacheFresh(m.source) {
-			// Even when the active source is fresh, keep the ModeAll cache warm
-			// when the active layout requests Overview on another tab.
-			cmds := []tea.Cmd{tea.Tick(interval, func(t time.Time) tea.Msg { return tickMsg(t) })}
-			if m.needsOverviewWarm() && !m.cacheFresh(sessionmgr.ModeAll) {
-				var mc tea.Cmd
-				m, mc = m.beginRefresh(sessionmgr.ModeAll, false)
-				if mc != nil {
-					cmds = append(cmds, mc)
-				}
+		cmds := []tea.Cmd{tickCmd()}
+		for _, source := range tuiSources {
+			if m.cacheFresh(source) || m.refreshInflight(source) {
+				continue
 			}
-			return m, tea.Batch(cmds...)
-		}
-		var cmd tea.Cmd
-		m, cmd = m.beginRefresh(m.source, false)
-		cmds := []tea.Cmd{
-			cmd,
-			tea.Tick(interval, func(t time.Time) tea.Msg { return tickMsg(t) }),
-		}
-		if m.needsOverviewWarm() && !m.cacheFresh(sessionmgr.ModeAll) {
-			var mc tea.Cmd
-			m, mc = m.beginRefresh(sessionmgr.ModeAll, false)
-			if mc != nil {
-				cmds = append(cmds, mc)
+			var cmd tea.Cmd
+			m, cmd = m.beginRefresh(source, false)
+			if cmd != nil {
+				cmds = append(cmds, cmd)
 			}
 		}
 		return m, tea.Batch(cmds...)
@@ -138,24 +125,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, ephemeralTickCmd()
 		}
-	case setupMsg:
-		if msg.err != nil {
-			m.notify(msg.err.Error(), sevError)
-			return m, nil
-		}
-		if msg.prompt {
-			m.openInputModePrompt(false)
-			return m, nil
-		}
-		return m, nil
 	case installMenuMsg:
 		if msg.show {
-			if m.setup.active {
-				m.pendingInstall = true
-				return m, nil
-			}
 			m.openInstallMenu(true)
-			return m, nil
 		}
 		return m, nil
 	case installResultMsg:
@@ -181,17 +153,46 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if updated > 0 {
 			m.notify(fmt.Sprintf("agent rules updated (%d)", updated), sevInfo)
 			m = m.invalidateAllCaches()
-			var refresh tea.Cmd
-			m, refresh = m.beginRefresh(m.source, true)
-			return m, tea.Batch(refresh, m.previewForSelection())
+			var reload tea.Cmd
+			m, reload = m.reloadCmd()
+			return m, reload
 		}
 		return m, nil
 	case refreshMsg:
 		return m.handleRefreshMsg(msg)
+	case agentStartedMsg:
+		m = m.applyAgentStarts(msg)
+		m.syncCursor()
+		return m, nil
+	case hostsMsg:
+		m.hosts = msg.hosts
+		m.items = m.mergedItems()
+		m.syncCursor()
+		var preview tea.Cmd
+		m, preview = m.requestPreview()
+		return m, preview
+	case hostSwitchMsg:
+		if msg.err != nil {
+			return m.reportHostFailure(msg.err), nil
+		}
+		// The launcher replied before detaching this client, so the picker's
+		// terminal is about to be handed to the new server.
+		return m, tea.Quit
+	case hostWindowMsg:
+		if msg.err != nil {
+			return m.reportHostFailure(msg.err), nil
+		}
+		return m, nil
 	case previewMsg:
 		if msg.key != m.selectedKey() {
+			// The selection moved on while the capture ran; drop the payload
+			// and let a later re-selection request it again.
+			if m.previewPendingKey == msg.key {
+				m.previewPendingKey = ""
+			}
 			return m, nil
 		}
+		m.previewPendingKey = ""
 		m.previewKey = msg.key
 		m.previewError = ""
 		if msg.err != nil {
@@ -219,25 +220,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.notify("returned from "+m.terms.BackendName, sevInfo)
 		}
 		m = m.invalidateAllCaches()
-		var refresh tea.Cmd
-		m, refresh = m.beginRefresh(m.source, true)
-		return m, tea.Batch(refresh, m.previewForSelection())
+		var reload tea.Cmd
+		m, reload = m.reloadCmd()
+		return m, reload
 	case actionDoneMsg:
 		if msg.kind == actionKill {
 			m.killInFlight = false
 		}
 		if msg.err != nil {
 			m.notify(msg.err.Error(), sevError)
-			m = m.invalidateAllCaches()
-			var refresh tea.Cmd
-			m, refresh = m.beginRefresh(m.source, true)
-			return m, tea.Batch(refresh, m.previewForSelection())
+		} else {
+			m.notify(msg.status, sevInfo)
 		}
-		m.notify(msg.status, sevInfo)
 		m = m.invalidateAllCaches()
-		var refresh tea.Cmd
-		m, refresh = m.beginRefresh(m.source, true)
-		return m, tea.Batch(refresh, m.previewForSelection())
+		var reload tea.Cmd
+		m, reload = m.reloadCmd()
+		return m, reload
 	case yaziDoneMsg:
 		if msg.err != nil {
 			m.notify(msg.err.Error(), sevError)
@@ -249,19 +247,34 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, createSessionCmd(m.mux, msg.path)
 	case tea.KeyMsg:
-		if m.setup.active {
-			model, cmd := m.handleSetupKey(msg)
-			if mm, ok := model.(Model); ok && !mm.setup.active && mm.pendingInstall {
-				mm.pendingInstall = false
-				mm.openInstallMenu(true)
-				return mm, nil
-			}
-			return model, cmd
-		}
 		if m.installMenu.active {
 			return m.handleInstallMenuKey(msg)
+		}
+		if m.helpOpen {
+			return m.handleHelpKey(msg)
 		}
 		return m.handleKey(msg)
 	}
 	return m, nil
+}
+
+// reloadCmd forces a refresh of every source plus the selected preview. It is
+// used after an action (attach, kill, rename) or a manifest update so the list
+// reflects the multiplexer's new state.
+func (m Model) reloadCmd() (Model, tea.Cmd) {
+	cmds := make([]tea.Cmd, 0, len(tuiSources)+2)
+	for _, source := range tuiSources {
+		var cmd tea.Cmd
+		m, cmd = m.beginRefresh(source, true)
+		if cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	}
+	cmds = append(cmds, hostsCmd(m.config))
+	var preview tea.Cmd
+	m, preview = m.requestPreview()
+	if preview != nil {
+		cmds = append(cmds, preview)
+	}
+	return m, tea.Batch(cmds...)
 }

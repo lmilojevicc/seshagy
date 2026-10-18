@@ -43,3 +43,20 @@ func ExpandHome(path string) string {
 	}
 	return path
 }
+
+// ContractHome replaces a leading home-directory prefix with ~, so paths are
+// presented relative to the user's home. It is a no-op when home is undetermined
+// (Home returns ".").
+func ContractHome(path string) string {
+	home := Home()
+	if home == "" || home == "." {
+		return path
+	}
+	if path == home {
+		return "~"
+	}
+	if rest, ok := strings.CutPrefix(path, home+string(filepath.Separator)); ok {
+		return "~/" + rest
+	}
+	return path
+}

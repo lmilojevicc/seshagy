@@ -21,9 +21,9 @@ import (
 )
 
 type testCompletionProvider struct {
-	panes, dirs, agents, sources, deletes []completionCandidate
-	delay                                 time.Duration
-	err                                   error
+	panes, dirs, agents, sources, deletes, hosts []completionCandidate
+	delay                                        time.Duration
+	err                                          error
 }
 
 func (p testCompletionProvider) result(
@@ -58,6 +58,10 @@ func (p testCompletionProvider) Sources(ctx context.Context) ([]completionCandid
 
 func (p testCompletionProvider) DeleteTargets(ctx context.Context) ([]completionCandidate, error) {
 	return p.result(ctx, p.deletes)
+}
+
+func (p testCompletionProvider) Hosts(ctx context.Context) ([]completionCandidate, error) {
+	return p.result(ctx, p.hosts)
 }
 
 func completionOutput(t *testing.T, provider completionProvider, args ...string) string {
@@ -154,8 +158,10 @@ func TestCompletionTreeCanonicalMetadata(t *testing.T) {
 	paths := []string{
 		"completion bash", "completion zsh", "completion fish",
 		"config", "config path", "config show", "config init", "diagnostics",
+		"hosts", "hosts setup", "hosts switch",
 		"integration install", "integration uninstall", "keybind install tmux",
 		"keybind install herdr", "keybind uninstall tmux", "keybind uninstall herdr",
+		"run",
 		"version", "help", "__get_all", "__get_sessions", "__get_zoxide", "__get_fd",
 		"__get_agents", "__get_current_session_agents", "__report_agent", "__release_agent",
 		"__delete_item",
@@ -265,6 +271,10 @@ func TestCompletionFlagAndRegistrySnapshots(t *testing.T) {
 		{"config show", []string{"json"}},
 		{"config init", []string{"force", "json"}},
 		{"diagnostics", []string{"json"}},
+		{"hosts", []string{"json"}},
+		{"hosts setup", []string{"json"}},
+		{"hosts switch", []string{"json"}},
+		{"run", []string{"session"}},
 		{"version", []string{"json"}},
 		{"keybind install tmux", []string{"key", "mode", "persistent"}},
 		{"keybind install herdr", []string{"height", "key", "mode", "persistent", "width"}},
@@ -340,6 +350,41 @@ func TestCompletionFlagAndRegistrySnapshots(t *testing.T) {
 
 func integrationsForTest() []string {
 	return []string{"pi", "codex", "claude", "droid", "opencode"}
+}
+
+func TestRunAndHostsCompleteHostNamesAndLocal(t *testing.T) {
+	provider := testCompletionProvider{hosts: []completionCandidate{
+		{"homelab", "ssh milo@192.168.1.10"},
+		{"host.tailnet.ts.net", "ssh config host"},
+	}}
+	root := newCompletionRoot(provider, "")
+	for _, path := range [][]string{{"run"}, {"hosts", "switch"}} {
+		command, _, err := root.Find(path)
+		if err != nil {
+			t.Fatalf("find %q: %v", path, err)
+		}
+		got, directive := command.ValidArgsFunction(command, nil, "")
+		want := cobra.ShellCompDirectiveNoFileComp | cobra.ShellCompDirectiveKeepOrder
+		if directive != want {
+			t.Errorf("%q directive = %d, want %d", path, directive, want)
+		}
+		for _, value := range []string{"homelab", "host.tailnet.ts.net", "local"} {
+			if !candidateExists(got, value) {
+				t.Errorf("%q missing %q: %q", path, value, got)
+			}
+		}
+		// A flag prefix must not list hosts.
+		if flags, _ := command.ValidArgsFunction(command, nil, "-"); len(flags) != 0 {
+			t.Errorf("%q flag completion leaked hosts: %q", path, flags)
+		}
+	}
+
+	out := completionOutput(
+		t, provider, cobra.ShellCompRequestCmd, "hosts", "switch", "home",
+	)
+	if !strings.Contains(out, "homelab\t") || strings.Contains(out, "local\t") {
+		t.Fatalf("switch prefix completion = %q", out)
+	}
 }
 
 func candidateExists(candidates []string, value string) bool {

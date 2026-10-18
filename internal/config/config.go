@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/BurntSushi/toml"
 
+	"github.com/lmilojevicc/seshagy/internal/remote"
 	"github.com/lmilojevicc/seshagy/internal/sessionmgr"
 	"github.com/lmilojevicc/seshagy/internal/xdg"
 )
@@ -17,7 +19,6 @@ import (
 const (
 	appDirName     = "seshagy"
 	configFileName = "config.toml"
-	DefaultPrefix  = "ctrl+x"
 	IconModeIcons  = "icons"
 	IconModeText   = "text"
 	IconModeNone   = "none"
@@ -27,23 +28,43 @@ const (
 	StateDisplayModeText    = "text"
 	StateDisplayModeNone    = "none"
 
-	InputStylePopup   = "popup"
-	InputStyleCmdline = "cmdline"
-
-	LayoutDefault = "default"
-	LayoutZen     = "zen"
+	LayoutHorizontal = "horizontal"
+	LayoutVertical   = "vertical"
+	LayoutDropdown   = "dropdown"
 )
 
 type Config struct {
-	Sources     SourcesConfig     `toml:"sources"     json:"sources"`
-	Directories DirectoriesConfig `toml:"directories" json:"directories"`
-	Theme       ThemeConfig       `toml:"theme"       json:"theme"`
-	Icons       IconsConfig       `toml:"icons"       json:"icons"`
-	TypeFirst   TypeFirstConfig   `toml:"type_first"  json:"type_first"`
-	Setup       SetupConfig       `toml:"setup"       json:"setup"`
-	Agents      AgentsConfig      `toml:"agents"      json:"agents"`
-	TUI         TUIConfig         `toml:"tui"         json:"tui"`
-	Log         LogConfig         `toml:"log"         json:"log"`
+	Directories DirectoriesConfig `toml:"directories"     json:"directories"`
+	Theme       ThemeConfig       `toml:"theme"           json:"theme"`
+	Icons       IconsConfig       `toml:"icons"           json:"icons"`
+	Setup       SetupConfig       `toml:"setup"           json:"setup"`
+	Agents      AgentsConfig      `toml:"agents"          json:"agents"`
+	TUI         TUIConfig         `toml:"tui"             json:"tui"`
+	Log         LogConfig         `toml:"log"             json:"log"`
+	Remote      RemoteConfig      `toml:"remote"          json:"remote"`
+	Hosts       []HostConfig      `toml:"hosts,omitempty" json:"hosts,omitempty"`
+}
+
+// RemoteConfig holds remote-host discovery settings.
+type RemoteConfig struct {
+	// SSHConfigHosts lists non-wildcard Host entries of ~/.ssh/config alongside
+	// the configured [[hosts]]. Defaults to true.
+	SSHConfigHosts *bool `toml:"ssh_config_hosts" json:"ssh_config_hosts"`
+	// Keybindings is the default `herdr --remote-keybindings` mode (local or
+	// server) for every host; a [[hosts]] keybindings value overrides it.
+	// Empty leaves herdr's default (local).
+	Keybindings string `toml:"keybindings,omitempty" json:"keybindings,omitempty"`
+}
+
+// HostConfig is one `[[hosts]]` entry: a remote herdr server seshagy can attach
+// to through the `seshagy run` launcher.
+type HostConfig struct {
+	Name         string `toml:"name"                  json:"name"`
+	Target       string `toml:"target"                json:"target"`
+	Transport    string `toml:"transport"             json:"transport"`
+	ProxyCommand string `toml:"proxy_command"         json:"proxy_command"`
+	Session      string `toml:"session"               json:"session"`
+	Keybindings  string `toml:"keybindings,omitempty" json:"keybindings,omitempty"`
 }
 
 // LogConfig controls opt-in, file-only structured diagnostics.
@@ -54,15 +75,8 @@ type LogConfig struct {
 
 // TUIConfig holds TUI rendering settings.
 type TUIConfig struct {
-	Layout        string `toml:"layout"         json:"layout"`
-	InputStyle    string `toml:"input_style"    json:"input_style"`
-	DimBackground *bool  `toml:"dim_background" json:"dim_background"`
-	Preview       *bool  `toml:"preview"        json:"preview"`
-}
-
-type SourcesConfig struct {
-	Default string   `toml:"default" json:"default"`
-	Order   []string `toml:"order"   json:"order"`
+	Layout  string `toml:"layout"  json:"layout"`
+	Preview *bool  `toml:"preview" json:"preview"`
 }
 
 type DirectoriesConfig struct {
@@ -74,32 +88,18 @@ type ThemeConfig struct {
 }
 
 type ThemeColorsConfig struct {
-	PopupBorder         string `toml:"popup_border"          json:"popup_border"`
-	ActiveTab           string `toml:"active_tab"            json:"active_tab"`
-	Border              string `toml:"border"                json:"border"`
-	InactiveTab         string `toml:"inactive_tab"          json:"inactive_tab"`
-	PopupTitle          string `toml:"popup_title"           json:"popup_title"`
-	Title               string `toml:"title"                 json:"title"` // deprecated alias for popup_title
-	Accent              string `toml:"accent"                json:"accent"`
-	Key                 string `toml:"key"                   json:"key"`
-	Muted               string `toml:"muted"                 json:"muted"`
-	Success             string `toml:"success"               json:"success"`
-	Info                string `toml:"info"                  json:"info"`
-	Warning             string `toml:"warning"               json:"warning"`
-	Danger              string `toml:"danger"                json:"danger"`
-	ListBorder          string `toml:"list_border"           json:"list_border"`
-	MetadataBorder      string `toml:"metadata_border"       json:"metadata_border"`
-	PreviewBorder       string `toml:"preview_border"        json:"preview_border"`
-	ListBorderTitle     string `toml:"list_border_title"     json:"list_border_title"`
-	MetadataBorderTitle string `toml:"metadata_border_title" json:"metadata_border_title"`
-	PreviewBorderTitle  string `toml:"preview_border_title"  json:"preview_border_title"`
-	InputBorder         string `toml:"input_border"          json:"input_border"`
-
-	// Overview hero tiles (workspaces + agents).
-	WorkspaceTileBorder string `toml:"workspace_tile_border" json:"workspace_tile_border"`
-	WorkspaceTileTitle  string `toml:"workspace_tile_title"  json:"workspace_tile_title"`
-	AgentTileBorder     string `toml:"agent_tile_border"     json:"agent_tile_border"`
-	AgentTileTitle      string `toml:"agent_tile_title"      json:"agent_tile_title"`
+	PopupBorder string `toml:"popup_border" json:"popup_border"`
+	Border      string `toml:"border"       json:"border"`
+	PopupTitle  string `toml:"popup_title"  json:"popup_title"`
+	Title       string `toml:"title"        json:"title"` // deprecated alias for popup_title
+	Accent      string `toml:"accent"       json:"accent"`
+	Key         string `toml:"key"          json:"key"`
+	Muted       string `toml:"muted"        json:"muted"`
+	Success     string `toml:"success"      json:"success"`
+	Info        string `toml:"info"         json:"info"`
+	Warning     string `toml:"warning"      json:"warning"`
+	Danger      string `toml:"danger"       json:"danger"`
+	SelectionBG string `toml:"selection_bg" json:"selection_bg"` // selected row highlight bar
 }
 
 type IconsConfig struct {
@@ -136,14 +136,8 @@ type IconConfig struct {
 	Color string `toml:"color"           json:"color"`
 }
 
-type TypeFirstConfig struct {
-	Enabled bool   `toml:"enabled" json:"enabled"`
-	Prefix  string `toml:"prefix"  json:"prefix"`
-}
-
 type SetupConfig struct {
-	TypeFirstPromptSeen bool `toml:"type_first_prompt_seen" json:"type_first_prompt_seen"`
-	InstallMenuSeen     bool `toml:"install_menu_seen"      json:"install_menu_seen"`
+	InstallMenuSeen bool `toml:"install_menu_seen" json:"install_menu_seen"`
 }
 
 // AgentsConfig holds agent-detection options. ManifestFallback enables the
@@ -176,13 +170,10 @@ func (c Config) CatalogURL() string {
 
 func Default() Config {
 	return Config{
-		Sources:     SourcesConfig{Default: "all", Order: defaultSourceOrderNames()},
 		Directories: DirectoriesConfig{FDCommand: sessionmgr.DefaultFDCommand},
 		Theme: ThemeConfig{Colors: ThemeColorsConfig{
 			PopupBorder: "13",
-			ActiveTab:   "default",
 			Border:      "8",
-			InactiveTab: "8",
 			Title:       "12",
 			Accent:      "13",
 			Key:         "11",
@@ -191,6 +182,9 @@ func Default() Config {
 			Info:        "14",
 			Warning:     "11",
 			Danger:      "9",
+			// The selected row's bar: a 256-color dark grey chosen to sit behind
+			// the row's own foreground colors.
+			SelectionBG: "236",
 		}},
 		Icons: IconsConfig{
 			Mode:       IconModeIcons,
@@ -201,13 +195,10 @@ func Default() Config {
 			Zoxide:     IconConfig{Icon: sessionmgr.IconZoxide + " ", Label: "Z", Color: "14"},
 			FD:         IconConfig{Icon: sessionmgr.IconFD + " ", Label: "F", Color: "11"},
 		},
-		TypeFirst: TypeFirstConfig{Enabled: false, Prefix: DefaultPrefix},
-		Log:       LogConfig{Level: "off"},
+		Log:    LogConfig{Level: "off"},
+		Remote: RemoteConfig{SSHConfigHosts: ptrBool(true)},
 		TUI: TUIConfig{
-			Layout:        LayoutDefault,
-			InputStyle:    InputStylePopup,
-			DimBackground: ptrBool(true),
-			Preview:       ptrBool(true),
+			Layout: LayoutHorizontal,
 		},
 	}
 }
@@ -264,12 +255,6 @@ func Marshal(cfg Config) ([]byte, error) {
 
 func (c *Config) Normalize() {
 	defaults := Default()
-	c.Sources.Order = normalizeSourceOrder(c.Sources.Order)
-	if mode, ok := sourceModeFromName(c.Sources.Default); ok {
-		c.Sources.Default = SourceModeName(mode)
-	} else {
-		c.Sources.Default = defaults.Sources.Default
-	}
 	if strings.TrimSpace(c.Directories.FDCommand) == "" {
 		c.Directories.FDCommand = defaults.Directories.FDCommand
 	}
@@ -290,36 +275,194 @@ func (c *Config) Normalize() {
 	normalizeKindIcon(&c.Icons.FD, defaults.Icons.FD, sessionmgr.IconFD)
 	normalizeTmuxStatesConfig(&c.Icons.TmuxState, defaults.Icons.TmuxState)
 	normalizeAgentStatesConfig(&c.Icons.AgentState, defaults.Icons.AgentState)
-	if strings.TrimSpace(c.TypeFirst.Prefix) == "" {
-		c.TypeFirst.Prefix = DefaultPrefix
-	}
 	c.Log.Level = strings.ToLower(strings.TrimSpace(c.Log.Level))
 	if c.Log.Level == "" {
 		c.Log.Level = "off"
 	}
 	c.Log.File = strings.TrimSpace(c.Log.File)
 	c.TUI.Layout = normalizeTUILayout(c.TUI.Layout)
-	c.TUI.InputStyle = normalizeInputStyle(c.TUI.InputStyle)
-	if c.TUI.DimBackground == nil {
-		c.TUI.DimBackground = ptrBool(true)
-	}
 	if c.TUI.Preview == nil {
-		c.TUI.Preview = ptrBool(true)
+		// The preview follows the layout unless [tui] preview says otherwise: the
+		// compact dropdown starts hidden and ctrl+o reveals it.
+		c.TUI.Preview = ptrBool(c.TUI.Layout != LayoutDropdown)
+	}
+	normalizeRemoteHosts(&c.Remote, &c.Hosts)
+}
+
+func normalizeRemoteHosts(remoteCfg *RemoteConfig, hosts *[]HostConfig) {
+	if remoteCfg.SSHConfigHosts == nil {
+		remoteCfg.SSHConfigHosts = ptrBool(true)
+	}
+	remoteCfg.Keybindings = strings.ToLower(strings.TrimSpace(remoteCfg.Keybindings))
+	for i := range *hosts {
+		host := &(*hosts)[i]
+		host.Name = strings.TrimSpace(host.Name)
+		host.Target = strings.TrimSpace(host.Target)
+		host.Transport = strings.ToLower(strings.TrimSpace(host.Transport))
+		if host.Transport == "" {
+			host.Transport = remote.TransportSSH
+		}
+		host.ProxyCommand = strings.TrimSpace(host.ProxyCommand)
+		host.Session = strings.TrimSpace(host.Session)
+		host.Keybindings = strings.ToLower(strings.TrimSpace(host.Keybindings))
 	}
 }
+
+// RemoteSSHConfigHosts reports whether hosts defined in ~/.ssh/config are
+// listed alongside the configured [[hosts]]. Defaults to true.
+func (c Config) RemoteSSHConfigHosts() bool {
+	c.Normalize()
+	return *c.Remote.SSHConfigHosts
+}
+
+// RemoteHosts returns the configured [[hosts]] as remote hosts, skipping
+// entries that fail validation (reported by ValidateRemoteHosts).
+func (c Config) RemoteHosts() []remote.Host {
+	hosts, _ := c.remoteHosts()
+	return hosts
+}
+
+// ValidateRemoteHosts reports problems with configured [[hosts]] entries. They
+// are warnings, not fatal errors: the CLI prints them with cli.Warn and the
+// offending entry is skipped by RemoteHosts.
+func (c Config) ValidateRemoteHosts() []string {
+	_, issues := c.remoteHosts()
+	return issues
+}
+
+func (c Config) remoteHosts() ([]remote.Host, []string) {
+	c.Normalize()
+	var hosts []remote.Host
+	var issues []string
+	seen := map[string]bool{}
+	defaultKeybindings := c.Remote.Keybindings
+	if !validKeybindings(defaultKeybindings) {
+		issues = append(issues, fmt.Sprintf(
+			"remote: unknown keybindings %q (want local or server); ignored",
+			defaultKeybindings,
+		))
+		defaultKeybindings = ""
+	}
+	for i, configured := range c.Hosts {
+		address, err := validateHostConfig(configured, seen[configured.Name])
+		if err != nil {
+			issues = append(issues, hostConfigIssue(configured, i, err))
+			continue
+		}
+		seen[configured.Name] = true
+		for _, warning := range hostConfigWarnings(configured, address) {
+			issues = append(issues, hostConfigIssue(configured, i, warning))
+		}
+		keybindings := configured.Keybindings
+		if keybindings == "" {
+			keybindings = defaultKeybindings
+		}
+		hosts = append(hosts, remote.Host{
+			Name:         configured.Name,
+			Target:       configured.Target,
+			Transport:    configured.Transport,
+			ProxyCommand: configured.ProxyCommand,
+			Session:      configured.Session,
+			Keybindings:  keybindings,
+		})
+	}
+	return hosts, issues
+}
+
+// hostConfigIssue labels a problem with the [[hosts]] entry the user wrote.
+func hostConfigIssue(host HostConfig, index int, problem error) string {
+	if host.Name != "" {
+		return fmt.Sprintf("hosts %q: %v", host.Name, problem)
+	}
+	return fmt.Sprintf("hosts[%d]: %v", index, problem)
+}
+
+// validateHostConfig checks one [[hosts]] entry and returns the parsed target
+// address. It is the hard validation: a failure means the entry is skipped.
+func validateHostConfig(host HostConfig, duplicate bool) (remote.Address, error) {
+	for _, field := range []struct{ name, value string }{
+		{"name", host.Name},
+		{"target", host.Target},
+		{"transport", host.Transport},
+		{"proxy_command", host.ProxyCommand},
+		{"session", host.Session},
+		{"keybindings", host.Keybindings},
+	} {
+		if strings.ContainsFunc(field.value, isControlRune) {
+			return remote.Address{}, fmt.Errorf(
+				"%s must not contain control characters", field.name,
+			)
+		}
+	}
+	switch {
+	case host.Name == "":
+		return remote.Address{}, errors.New("name is required")
+	case strings.HasPrefix(host.Name, "-"):
+		return remote.Address{}, errors.New(`name must not start with "-"`)
+	case !remoteHostNamePattern.MatchString(host.Name):
+		return remote.Address{}, errors.New("name may only contain [A-Za-z0-9._-]")
+	case duplicate:
+		return remote.Address{}, fmt.Errorf("duplicate host name %q", host.Name)
+	}
+	if host.Target == "" {
+		return remote.Address{}, errors.New("target is required")
+	}
+	if !validKeybindings(host.Keybindings) {
+		return remote.Address{}, fmt.Errorf(
+			"unknown keybindings %q (want local or server)", host.Keybindings,
+		)
+	}
+	address, err := remote.ParseAddress(host.Target)
+	if err != nil {
+		return remote.Address{}, err
+	}
+	switch host.Transport {
+	case remote.TransportSSH, remote.TransportIroh:
+		return address, nil
+	default:
+		return remote.Address{}, fmt.Errorf(
+			"unknown transport %q (want ssh or iroh)",
+			host.Transport,
+		)
+	}
+}
+
+// hostConfigWarnings collects problems that do not make the host unusable, so
+// the host is still listed and the transporter keeps working.
+func hostConfigWarnings(host HostConfig, address remote.Address) []error {
+	if host.Transport != remote.TransportIroh {
+		return nil
+	}
+	var warnings []error
+	if !irohEndpointPattern.MatchString(address.Host) {
+		warnings = append(warnings, errors.New(
+			"iroh target host does not look like a 64-character endpoint id",
+		))
+	}
+	if host.ProxyCommand != "" {
+		warnings = append(warnings, errors.New(
+			"proxy_command is ignored when transport is iroh",
+		))
+	}
+	return warnings
+}
+
+func isControlRune(r rune) bool { return r < 0x20 || r == 0x7f }
+
+var (
+	remoteHostNamePattern = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
+	// irohEndpointPattern matches the hex endpoint ids `iroh-ssh proxy` takes
+	// as %h; a mismatch is a warning, not an error, because the check is
+	// format-sensitive.
+	irohEndpointPattern = regexp.MustCompile(`^[0-9a-fA-F]{64}$`)
+)
 
 func normalizeThemeColors(colors *ThemeColorsConfig, defaults ThemeColorsConfig) {
 	if strings.TrimSpace(colors.PopupBorder) == "" {
 		colors.PopupBorder = defaults.PopupBorder
 	}
-	if strings.TrimSpace(colors.ActiveTab) == "" {
-		colors.ActiveTab = defaults.ActiveTab
-	}
 	if strings.TrimSpace(colors.Border) == "" {
 		colors.Border = defaults.Border
-	}
-	if strings.TrimSpace(colors.InactiveTab) == "" {
-		colors.InactiveTab = defaults.InactiveTab
 	}
 	if strings.TrimSpace(colors.Title) == "" {
 		colors.Title = defaults.Title
@@ -350,46 +493,8 @@ func normalizeThemeColors(colors *ThemeColorsConfig, defaults ThemeColorsConfig)
 	if strings.TrimSpace(colors.Danger) == "" {
 		colors.Danger = defaults.Danger
 	}
-	// Per-pane borders and border titles inherit the relevant global (or the
-	// pane's own border, for titles) when unset, so omitting them preserves
-	// today's look. The globals above are already resolved, so these read the
-	// user's final values rather than the hardcoded defaults.
-	if strings.TrimSpace(colors.ListBorder) == "" {
-		colors.ListBorder = colors.Border
-	}
-	if strings.TrimSpace(colors.MetadataBorder) == "" {
-		colors.MetadataBorder = colors.Border
-	}
-	if strings.TrimSpace(colors.PreviewBorder) == "" {
-		colors.PreviewBorder = colors.Border
-	}
-	if strings.TrimSpace(colors.ListBorderTitle) == "" {
-		colors.ListBorderTitle = colors.ListBorder
-	}
-	if strings.TrimSpace(colors.MetadataBorderTitle) == "" {
-		colors.MetadataBorderTitle = colors.MetadataBorder
-	}
-	if strings.TrimSpace(colors.PreviewBorderTitle) == "" {
-		colors.PreviewBorderTitle = colors.PreviewBorder
-	}
-	// Search/rename input popup border defaults to the base border so it matches
-	// the dashboard tiles out of the box while staying independently themeable.
-	if strings.TrimSpace(colors.InputBorder) == "" {
-		colors.InputBorder = colors.Border
-	}
-	// Overview hero tiles inherit border / popup_title so the default look is
-	// unchanged unless themed.
-	if strings.TrimSpace(colors.WorkspaceTileBorder) == "" {
-		colors.WorkspaceTileBorder = colors.Border
-	}
-	if strings.TrimSpace(colors.AgentTileBorder) == "" {
-		colors.AgentTileBorder = colors.Border
-	}
-	if strings.TrimSpace(colors.WorkspaceTileTitle) == "" {
-		colors.WorkspaceTileTitle = colors.PopupTitle
-	}
-	if strings.TrimSpace(colors.AgentTileTitle) == "" {
-		colors.AgentTileTitle = colors.PopupTitle
+	if strings.TrimSpace(colors.SelectionBG) == "" {
+		colors.SelectionBG = defaults.SelectionBG
 	}
 }
 
@@ -426,50 +531,10 @@ func (c Config) IconSet() sessionmgr.IconSet {
 	}
 }
 
-// TUILayout returns the normalized configured layout token. Unknown tokens are
-// preserved so the TUI can warn before falling back to the default layout.
+// TUILayout returns the normalized [tui] layout token: horizontal, vertical, or
+// dropdown. Legacy and unknown tokens normalize to horizontal without error.
 func (c Config) TUILayout() string {
 	return normalizeTUILayout(c.TUI.Layout)
-}
-
-func (c Config) PrefixKey() string {
-	prefix := strings.TrimSpace(c.TypeFirst.Prefix)
-	if prefix == "" {
-		return DefaultPrefix
-	}
-	return prefix
-}
-
-func (c Config) SourceOrder() []sessionmgr.SourceMode {
-	c.Normalize()
-	modes := make([]sessionmgr.SourceMode, 0, len(c.Sources.Order))
-	for _, name := range c.Sources.Order {
-		if mode, ok := sourceModeFromName(name); ok {
-			modes = append(modes, mode)
-		}
-	}
-	if len(modes) == 0 {
-		return defaultSourceOrder()
-	}
-	// ModeCurrentAgents is CLI-only (--get-current-session-agents passes the
-	// mode directly and bypasses SourceOrder). It must never render as a tab,
-	// even when a stale config persists it in [sources].order.
-	filtered := modes[:0]
-	for _, mode := range modes {
-		if mode == sessionmgr.ModeCurrentAgents {
-			continue
-		}
-		filtered = append(filtered, mode)
-	}
-	return filtered
-}
-
-func (c Config) DefaultSource() sessionmgr.SourceMode {
-	c.Normalize()
-	if mode, ok := sourceModeFromName(c.Sources.Default); ok {
-		return mode
-	}
-	return sessionmgr.ModeAll
 }
 
 func (c Config) LoadOptions() sessionmgr.LoadOptions {
@@ -477,76 +542,6 @@ func (c Config) LoadOptions() sessionmgr.LoadOptions {
 	return sessionmgr.LoadOptions{
 		FDCommand:        c.Directories.FDCommand,
 		ManifestFallback: c.ManifestFallback(),
-	}
-}
-
-func SourceModeName(mode sessionmgr.SourceMode) string {
-	return mode.Names().ConfigToken
-}
-
-func normalizeSourceOrder(names []string) []string {
-	seen := map[sessionmgr.SourceMode]bool{}
-	order := make([]string, 0, len(defaultSourceOrderNames()))
-	for _, name := range names {
-		mode, ok := sourceModeFromName(name)
-		if !ok || seen[mode] {
-			continue
-		}
-		// ModeCurrentAgents is never a tab; mark it seen so it is dropped from
-		// the persisted order on Save() without being re-added by defaults.
-		seen[mode] = true
-		if mode == sessionmgr.ModeCurrentAgents {
-			continue
-		}
-		order = append(order, SourceModeName(mode))
-	}
-	for _, mode := range defaultSourceOrder() {
-		if seen[mode] {
-			continue
-		}
-		order = append(order, SourceModeName(mode))
-	}
-	return order
-}
-
-func defaultSourceOrder() []sessionmgr.SourceMode {
-	return []sessionmgr.SourceMode{
-		sessionmgr.ModeAll,
-		sessionmgr.ModeSessions,
-		sessionmgr.ModeZoxide,
-		sessionmgr.ModeFD,
-		sessionmgr.ModeAgents,
-	}
-}
-
-func defaultSourceOrderNames() []string {
-	modes := defaultSourceOrder()
-	names := make([]string, 0, len(modes))
-	for _, mode := range modes {
-		names = append(names, SourceModeName(mode))
-	}
-	return names
-}
-
-func sourceModeFromName(name string) (sessionmgr.SourceMode, bool) {
-	normalized := strings.ToLower(strings.TrimSpace(name))
-	normalized = strings.ReplaceAll(normalized, "_", "-")
-	normalized = strings.ReplaceAll(normalized, " ", "-")
-	switch normalized {
-	case "all":
-		return sessionmgr.ModeAll, true
-	case "sessions", "session":
-		return sessionmgr.ModeSessions, true
-	case "zoxide", "z":
-		return sessionmgr.ModeZoxide, true
-	case "fd", "f":
-		return sessionmgr.ModeFD, true
-	case "agents", "agent":
-		return sessionmgr.ModeAgents, true
-	case "current-agents", "current-agent":
-		return sessionmgr.ModeCurrentAgents, true
-	default:
-		return sessionmgr.ModeAll, false
 	}
 }
 
@@ -591,21 +586,14 @@ func normalizeKindIcon(
 }
 
 func normalizeTUILayout(layout string) string {
-	layout = strings.ToLower(strings.TrimSpace(layout))
-	if layout == "" {
-		return LayoutDefault
-	}
-	return layout
-}
-
-func normalizeInputStyle(style string) string {
-	switch strings.ToLower(strings.TrimSpace(style)) {
-	case "", "popup", "floating", "float", "box", "centered":
-		return InputStylePopup
-	case "cmdline", "cmd-line", "commandline", "inline", "bar", "bottom":
-		return InputStyleCmdline
+	switch strings.ToLower(strings.TrimSpace(layout)) {
+	case "vertical":
+		return LayoutVertical
+	case "dropdown":
+		return LayoutDropdown
 	default:
-		return InputStylePopup
+		// Includes the legacy "default"/"zen" tokens and anything unknown.
+		return LayoutHorizontal
 	}
 }
 
@@ -714,5 +702,16 @@ func projectAgentStateStyles(states AgentStatesConfig) sessionmgr.AgentStateStyl
 			ASCII: states.Unknown.Label,
 			Color: states.Unknown.Color,
 		},
+	}
+}
+
+// validKeybindings reports whether value is a `herdr --remote-keybindings` mode
+// or empty (herdr's default).
+func validKeybindings(value string) bool {
+	switch value {
+	case "", remote.KeybindingsLocal, remote.KeybindingsServer:
+		return true
+	default:
+		return false
 	}
 }

@@ -4,28 +4,17 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"sort"
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/list"
-	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 
 	appconfig "github.com/lmilojevicc/seshagy/internal/config"
+	"github.com/lmilojevicc/seshagy/internal/remote"
 	"github.com/lmilojevicc/seshagy/internal/sessionmgr"
 )
 
-type inputMode int
-
 type notifSev int
-
-const (
-	modeNormal inputMode = iota
-	modeSearch
-	modeRename
-)
 
 const (
 	sevInfo notifSev = iota
@@ -41,12 +30,24 @@ type notification struct {
 
 const spinnerFrames = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 
-const searchableFieldCount = 7
+// tuiSources are the independent sources the picker loads and merges, each with
+// its own cache entry, TTL, and generation. ModeAll stays for the CLI's
+// --get-* output; the TUI never uses it.
+var tuiSources = []sessionmgr.SourceMode{
+	sessionmgr.ModeAgents,
+	sessionmgr.ModeSessions,
+	sessionmgr.ModeZoxide,
+	sessionmgr.ModeFD,
+}
 
+// Model is the type-first picker. It keeps one merged item list and narrows it
+// with the inline scope filter and the query typed into the prompt line.
 type Model struct {
 	styles styles
 	config appconfig.Config
-	layout layoutSpec
+	// icons is the configured icon set, resolved once per model instead of once
+	// per rendered row.
+	icons sessionmgr.IconSet
 
 	mux    sessionmgr.Multiplexer
 	terms  sessionmgr.Terms
@@ -55,39 +56,70 @@ type Model struct {
 	width  int
 	height int
 
-	source sessionmgr.SourceMode
-	items  []sessionmgr.Item
-	cursor int
+	// layout is the configured [tui] layout: horizontal, vertical, or dropdown.
+	layout string
 
-	prefixArmed bool
+	scope scope
+	// stateFilter narrows the agents scope to one agent state. It is the second
+	// filter axis ctrl+s cycles, and a switch to any other scope clears it.
+	stateFilter stateFilter
+	query       string
 
-	query           string
-	searchInput     textinput.Model
-	renameInput     textinput.Model
+	// hosts are the remote machines offered by the `# hosts` scope. They come
+	// from config.toml and ~/.ssh/config, so they are loaded once at startup and
+	// on an explicit reload instead of by the source poll.
+	hosts []remote.Host
+
+	items     []sessionmgr.Item
+	cursor    int
+	cursorKey string
+	// cursorMoved records an explicit up/down/page/home/end since the last scope
+	// or query change. Only then does a refresh follow the selected key; until
+	// then the top row stays selected, so sources that stream in after startup
+	// cannot drag the cursor down the list.
+	cursorMoved bool
+	// listTop is the flow line the results window opened on in the last frame.
+	// The window keeps it and scrolls only when the cursor's item leaves it.
+	listTop int
+
+	loadedOnce bool
+
+	showPreview       bool
+	preview           string
+	previewError      string
+	previewKey        string // item key whose payload is loaded
+	previewPendingKey string // item key of an in-flight capture
+
+	renameActive    bool
+	renameText      string
 	renameFrom      string
 	renameTarget    string
 	renameKind      sessionmgr.Kind
 	renameSession   string
 	renameAgentType string
-	inputMode       inputMode
 
-	preview       string
-	previewError  string
-	previewKey    string
-	showPreview   bool
-	showHelp      bool
-	loading       bool
+	killArmed   bool
+	killPending sessionmgr.Item
+
 	spinnerFrame  int
 	spinnerActive bool
+
 	notifications []notification
 
-	agentsCurrentOnly bool
-	currentSession    string
-	agentsStateFilter sessionmgr.AgentState
+	// agentStarted caches when each agent pane's process started, keyed by pane
+	// id. The pid it was resolved from is cached with it, so a pane hosting a
+	// new agent process is resolved again. Ages render from these values.
+	agentStarted map[string]agentStart
+	// agentStartPending guards the in-flight start-time resolution so the 1s
+	// tick cannot queue a second ps call while one is running.
+	agentStartPending bool
 
 	cache           map[sessionmgr.SourceMode]modeCache
 	refreshGen      map[sessionmgr.SourceMode]uint64
 	inflightRefresh map[sessionmgr.SourceMode]uint64
+	// reportedWarnings remembers the last non-fatal message shown per source so
+	// a repeated source failure is not toasted on every refresh.
+	reportedWarnings map[sessionmgr.SourceMode]string
 
 	checkPopup func(context.Context) (bool, error)
 
@@ -99,17 +131,22 @@ type Model struct {
 	herdrWorkspaceID string
 
 	// killInFlight suppresses the ephemeral focus-loss dismissal while a
-	// session/workspace or agent-pane kill (x) is in flight, so the close's
+	// session/workspace or agent-pane kill is in flight, so the close's
 	// refocus doesn't quit seshagy before the action completes.
 	killInFlight bool
 
-	setup          setupPrompt
-	installMenu    installMenuState
-	pendingInstall bool
+	// helpOpen is the F1 help overlay. It keeps the picker's own state — query,
+	// filters, cursor, scroll — untouched behind it, and swallows every key but
+	// its scroll and close chords.
+	helpOpen bool
+	// helpTop is the help row the overlay's window opens on.
+	helpTop int
+
+	installMenu installMenuState
 }
 
 // installMenuState holds the state of the agent-integration install menu
-// overlay (first-run popup + manual `h` reopen).
+// overlay (first-run popup + manual ctrl+g reopen).
 type installMenuState struct {
 	active   bool
 	cursor   int
@@ -117,27 +154,40 @@ type installMenuState struct {
 	message  string
 }
 
-// setupPrompt holds the state of the first-launch / manual input-mode prompt.
-type setupPrompt struct {
-	active bool
-	manual bool
-	cursor int
+type refreshMsg struct {
+	source  sessionmgr.SourceMode
+	gen     uint64
+	items   []sessionmgr.Item
+	warning string
+	err     error
 }
 
-type refreshMsg struct {
-	source         sessionmgr.SourceMode
-	gen            uint64
-	items          []sessionmgr.Item
-	currentSession string
-	warning        string
-	err            error
+// agentStart is a resolved agent process start time plus the pid it came from.
+type agentStart struct {
+	pid     int
+	started time.Time
 }
+
+// agentStartedMsg carries the agent start times resolved in the background,
+// keyed by pane id. A pane whose process could not be resolved is absent from
+// the map, which renders as no age cell.
+type agentStartedMsg struct{ starts map[string]agentStart }
 
 type previewMsg struct {
 	key     string
 	preview string
 	err     error
 }
+
+// hostsMsg carries the remote hosts the picker offers.
+type hostsMsg struct{ hosts []remote.Host }
+
+// hostSwitchMsg reports the outcome of asking the `seshagy run` launcher to
+// switch its client; a nil error means the launcher is detaching this client.
+type hostSwitchMsg struct{ err error }
+
+// hostWindowMsg reports the outcome of opening a tmux window on a host.
+type hostWindowMsg struct{ err error }
 
 type actionKind string
 
@@ -166,13 +216,6 @@ type (
 		err  error
 	}
 )
-
-type tickMsg time.Time
-
-type setupMsg struct {
-	prompt bool
-	err    error
-}
 
 type options struct {
 	config     *appconfig.Config
@@ -212,12 +255,13 @@ func New(optionFns ...Option) Model {
 	for _, option := range optionFns {
 		option(&settings)
 	}
-	cfg, cfgErr := appconfig.Config{}, settings.startupErr
+	var cfg appconfig.Config
+	cfgErr := settings.startupErr
 	if settings.config != nil {
 		cfg = *settings.config
 	} else {
-		var err error
-		cfg, err = appconfig.Load()
+		loaded, err := appconfig.Load()
+		cfg = loaded
 		if cfgErr == nil {
 			cfgErr = err
 		}
@@ -230,48 +274,29 @@ func New(optionFns ...Option) Model {
 	if logger == nil {
 		logger = slog.New(slog.DiscardHandler)
 	}
-	search := textinput.New()
-	search.Placeholder = "filter sessions, directories"
-	search.Prompt = "/ "
-	search.CharLimit = 256
-	rename := textinput.New()
-	rename.Placeholder = "new name"
-	rename.Prompt = "rename > "
-	rename.CharLimit = 128
 	showPreview := true
 	if cfg.TUI.Preview != nil {
 		showPreview = *cfg.TUI.Preview
 	}
-	layoutName := cfg.TUILayout()
-	layout, layoutKnown := resolveLayout(layoutName)
 	m := Model{
-		styles:          stylesFromConfig(cfg),
-		config:          cfg,
-		layout:          layout,
-		mux:             mux,
-		terms:           mux.Terms(),
-		logger:          logger,
-		source:          cfg.DefaultSource(),
-		showPreview:     showPreview,
-		showHelp:        true,
-		searchInput:     search,
-		renameInput:     rename,
-		cache:           make(map[sessionmgr.SourceMode]modeCache),
-		refreshGen:      make(map[sessionmgr.SourceMode]uint64),
-		inflightRefresh: make(map[sessionmgr.SourceMode]uint64),
-		checkPopup:      mux.InMultiplexerPopup,
-		setup:           setupPrompt{cursor: 1},
-		loading:         true,
-		spinnerActive:   true,
-		ephemeral:       settings.ephemeral,
+		styles:           stylesFromConfig(cfg),
+		config:           cfg,
+		layout:           cfg.TUILayout(),
+		icons:            cfg.IconSet(),
+		mux:              mux,
+		terms:            mux.Terms(),
+		logger:           logger,
+		showPreview:      showPreview,
+		cache:            make(map[sessionmgr.SourceMode]modeCache),
+		refreshGen:       make(map[sessionmgr.SourceMode]uint64),
+		inflightRefresh:  make(map[sessionmgr.SourceMode]uint64),
+		reportedWarnings: make(map[sessionmgr.SourceMode]string),
+		agentStarted:     make(map[string]agentStart),
+		checkPopup:       mux.InMultiplexerPopup,
+		ephemeral:        settings.ephemeral,
 	}
-	m.refreshGen[m.source] = 1
-	m.inflightRefresh[m.source] = 1
 	if cfgErr != nil {
 		m.notify(cfgErr.Error(), sevError)
-	}
-	if !layoutKnown {
-		m.notify(fmt.Sprintf("unknown tui layout %q; using default", layoutName), sevWarning)
 	}
 	return m
 }
@@ -285,18 +310,16 @@ func Run(opts ...Option) error {
 
 func (m Model) Init() tea.Cmd {
 	cmds := []tea.Cmd{
-		refreshCmd(m.mux, m.source, m.inflightRefresh[m.source], m.config.LoadOptions()),
-		startupSetupCmd(m.config),
-		startupInstallMenuCmd(m.config),
-		refreshCatalogsCmd(m.config),
 		tickCmd(),
 		notificationTickCmd(),
-		spinnerTickCmd(),
+		refreshCatalogsCmd(m.config),
+		hostsCmd(m.config),
+		startupInstallMenuCmd(m.config),
 	}
-	// Keep the ModeAll cache warm when the active layout requests Overview,
-	// so its counts stay correct even when another source tab is active.
-	if m.needsOverviewWarm() {
-		if _, cmd := m.beginRefresh(sessionmgr.ModeAll, false); cmd != nil {
+	for _, source := range tuiSources {
+		var cmd tea.Cmd
+		m, cmd = m.beginRefresh(source, false)
+		if cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 	}
@@ -313,18 +336,187 @@ func (m *Model) notify(text string, sev notifSev) {
 	}
 }
 
-func (m *Model) clampCursor() {
-	vis := m.visibleItems()
-	if len(vis) == 0 {
+// rows is the visible, scope-filtered, query-ranked list.
+func (m Model) rows() []row {
+	return filterRows(m.items, m.scope, m.stateFilter, m.query)
+}
+
+// grouped reports whether the results window draws its section headers. An empty
+// query files the list under its sections, and any query collapses it into one
+// ranked list. A list whose rows all fall in one section draws no header either:
+// a lone header would only repeat what the one scope already says.
+func (m Model) grouped(rows []row) bool {
+	if strings.TrimSpace(m.query) != "" {
+		return false
+	}
+	for _, r := range rows {
+		if r.group != rows[0].group {
+			return true
+		}
+	}
+	return false
+}
+
+// syncCursor keeps the selection stable across a refresh that reorders or
+// shortens the list. Until the user has moved the cursor it holds row 0, the
+// most urgent item, because the key seen so far came from a partially loaded
+// list rather than from a choice. Afterwards the cursor follows the selected key
+// and clamps by index when that item is gone.
+func (m *Model) syncCursor() {
+	rows := m.rows()
+	if len(rows) == 0 {
 		m.cursor = 0
+		m.cursorKey = ""
 		return
 	}
-	if m.cursor < 0 {
+	if !m.cursorMoved {
 		m.cursor = 0
+		m.cursorKey = rows[0].item.Key()
+		return
 	}
-	if m.cursor >= len(vis) {
-		m.cursor = len(vis) - 1
+	for i := range rows {
+		if rows[i].item.Key() == m.cursorKey {
+			m.cursor = i
+			return
+		}
 	}
+	m.cursor = clampVal(m.cursor, 0, len(rows)-1)
+	m.cursorKey = rows[m.cursor].item.Key()
+}
+
+// setCursor moves the cursor to index (clamped) and records the selected key.
+// The move is explicit, so later refreshes follow that key.
+func (m Model) setCursor(index int) Model {
+	m.cursorMoved = true
+	rows := m.rows()
+	if len(rows) == 0 {
+		m.cursor = 0
+		m.cursorKey = ""
+		return m
+	}
+	m.cursor = clampVal(index, 0, len(rows)-1)
+	m.cursorKey = rows[m.cursor].item.Key()
+	return m
+}
+
+func (m Model) selectedItem() (sessionmgr.Item, bool) {
+	rows := m.rows()
+	if m.cursor < 0 || m.cursor >= len(rows) {
+		return sessionmgr.Item{}, false
+	}
+	return rows[m.cursor].item, true
+}
+
+func (m Model) selectedKey() string {
+	item, ok := m.selectedItem()
+	if !ok {
+		return ""
+	}
+	return item.Key()
+}
+
+// hostByName resolves a host row back to its registry entry, which carries the
+// session and proxy details the row does not.
+func (m Model) hostByName(name string) (remote.Host, bool) {
+	return remote.Find(m.hosts, name)
+}
+
+// previewCmdFor picks the source of a row's preview: hosts are rendered from
+// local config, every other kind is captured from the multiplexer.
+func (m Model) previewCmdFor(item sessionmgr.Item) tea.Cmd {
+	if item.Kind == sessionmgr.KindHost {
+		if host, ok := m.hostByName(item.Name); ok {
+			return hostPreviewCmd(host)
+		}
+	}
+	return previewCmd(m.mux, item)
+}
+
+// resolveAgentStarts schedules the background resolution of the agent start
+// times that are not cached yet. It is a no-op while a resolution is in flight.
+func (m Model) resolveAgentStarts() (Model, tea.Cmd) {
+	if m.agentStartPending {
+		return m, nil
+	}
+	pending := m.pendingAgentStarts()
+	if len(pending) == 0 {
+		return m, nil
+	}
+	m.agentStartPending = true
+	return m, agentStartTimesCmd(m.mux, pending)
+}
+
+// pendingAgentStarts lists the agent items whose process start time is missing
+// from the cache, or was resolved from a pid the pane no longer hosts (a pane
+// that restarted its agent).
+func (m Model) pendingAgentStarts() []sessionmgr.Item {
+	pending := make([]sessionmgr.Item, 0, len(m.items))
+	for _, item := range m.items {
+		if item.Kind != sessionmgr.KindAgent || item.PaneID == "" {
+			continue
+		}
+		if cached, ok := m.agentStarted[item.PaneID]; ok &&
+			(item.AgentPID == 0 || cached.pid == item.AgentPID) {
+			continue
+		}
+		pending = append(pending, item)
+	}
+	return pending
+}
+
+// applyAgentStarts stores resolved start times and re-stamps the item list so
+// the age column renders from them.
+func (m Model) applyAgentStarts(msg agentStartedMsg) Model {
+	m.agentStartPending = false
+	if m.agentStarted == nil {
+		m.agentStarted = make(map[string]agentStart)
+	}
+	for pane, start := range msg.starts {
+		m.agentStarted[pane] = start
+	}
+	m.items = m.mergedItems()
+	return m
+}
+
+// previewVisible reports whether the preview window is drawn: enabled by
+// [tui] preview and not toggled off with ctrl+o. Where it goes is the layout's
+// business — a frame too narrow for a preview column stacks it under the results
+// window instead of dropping it.
+func (m Model) previewVisible() bool {
+	return m.showPreview && m.width > 0 && m.height > 0
+}
+
+// requestPreview schedules a capture for the selected item unless its payload
+// is already loaded or already in flight, so a source refresh every second does
+// not re-capture the same pane. It is a no-op when the preview column is hidden.
+func (m Model) requestPreview() (Model, tea.Cmd) {
+	if !m.previewVisible() {
+		return m, nil
+	}
+	item, ok := m.selectedItem()
+	if !ok {
+		return m, nil
+	}
+	key := item.Key()
+	if key == m.previewKey || key == m.previewPendingKey {
+		return m, nil
+	}
+	m.previewPendingKey = key
+	m.preview = ""
+	m.previewError = ""
+	return m, m.previewCmdFor(item)
+}
+
+// clampVal clamps v to the inclusive [lo, hi] range. If hi <= lo, only the
+// lower bound is enforced (v is floored at lo but not capped).
+func clampVal(v, lo, hi int) int {
+	if v < lo {
+		return lo
+	}
+	if hi > lo && v > hi {
+		return hi
+	}
+	return v
 }
 
 func wrapCursorUp(cursor, count int) int {
@@ -353,190 +545,25 @@ func wrapCursorDown(cursor, count int) int {
 	return cursor + 1
 }
 
-func (m Model) visibleItems() []sessionmgr.Item {
-	// The current-session scope filter ('o' in the Agents tab) applies
-	// client-side here and composes with the search query. ModeAgents loads
-	// every agent pane; this just hides those outside the current tmux
-	// session.
-	scope := m.source == sessionmgr.ModeAgents && m.agentsCurrentOnly &&
-		m.currentSession != ""
-	stateFilter := m.source == sessionmgr.ModeAgents && m.agentsStateFilter != ""
-	if m.query == "" && !scope && !stateFilter {
-		return m.items
+// windowCountLabel names a session's window count in the multiplexer's own
+// vocabulary: "2 tabs" under herdr, "3 windows" under tmux.
+func windowCountLabel(terms sessionmgr.Terms, count int) string {
+	noun := terms.WindowPlural
+	if count == 1 {
+		noun = terms.WindowNoun
 	}
-
-	eligible := make([]sessionmgr.Item, 0, len(m.items))
-	for _, item := range m.items {
-		if scope && item.Session != m.currentSession {
-			continue
-		}
-		if stateFilter && item.AgentState != m.agentsStateFilter {
-			continue
-		}
-		eligible = append(eligible, item)
-	}
-	if m.query == "" {
-		return eligible
-	}
-
-	candidates := make([]string, 0, len(eligible)*searchableFieldCount)
-	for _, item := range eligible {
-		candidates = append(candidates,
-			string(item.Kind),
-			item.Name,
-			item.Path,
-			item.Location,
-			item.AgentName,
-			item.AgentDisplayName,
-			string(item.AgentState),
-		)
-	}
-
-	out := make([]sessionmgr.Item, 0, len(eligible))
-	seen := make([]bool, len(eligible))
-	for _, rank := range list.DefaultFilter(m.query, candidates) {
-		itemIndex := rank.Index / searchableFieldCount
-		if seen[itemIndex] {
-			continue
-		}
-		seen[itemIndex] = true
-		out = append(out, eligible[itemIndex])
-	}
-	return out
+	return fmt.Sprintf("%d %s", count, noun)
 }
 
-func (m Model) selectedItem() (sessionmgr.Item, bool) {
-	vis := m.visibleItems()
-	if len(vis) == 0 || m.cursor < 0 || m.cursor >= len(vis) {
-		return sessionmgr.Item{}, false
+// followCursor moves the remembered results-window top just enough to keep the
+// cursor's item fully visible, after any update that moved the cursor, changed
+// the rows, or resized the frame.
+func (m Model) followCursor() Model {
+	rows := m.rows()
+	if len(rows) == 0 {
+		m.listTop = 0
+		return m
 	}
-	return vis[m.cursor], true
-}
-
-func (m Model) selectedKey() string {
-	item, ok := m.selectedItem()
-	if !ok {
-		return ""
-	}
-	return item.Key()
-}
-
-// currentSessionLabel returns a human-facing label for the current session id.
-// Under herdr the id is opaque (e.g. "wB"); agent items in the same session
-// carry the resolved workspace label in Location, so we look it up from the
-// loaded items and fall back to the raw id when nothing better is available.
-// Under tmux the id IS the name, so this returns it unchanged.
-func (m Model) currentSessionLabel() string {
-	if m.currentSession == "" {
-		return ""
-	}
-	for _, item := range m.items {
-		if item.Kind == sessionmgr.KindAgent && item.Session == m.currentSession &&
-			item.Location != "" {
-			return item.Location
-		}
-	}
-	return m.currentSession
-}
-
-func (m Model) layoutSpec() layoutSpec {
-	if m.layout.render == nil {
-		return defaultLayout
-	}
-	return m.layout
-}
-
-func (m Model) needsOverviewWarm() bool {
-	return m.layoutSpec().needs.Overview && m.source != sessionmgr.ModeAll
-}
-
-func (m Model) previewAvailable() bool {
-	return m.layoutSpec().needs.Preview
-}
-
-func (m Model) previewEnabled() bool {
-	return m.previewAvailable() && m.showPreview
-}
-
-func (m Model) previewForSelection() tea.Cmd {
-	if !m.previewEnabled() {
-		return nil
-	}
-	item, ok := m.selectedItem()
-	if !ok {
-		return nil
-	}
-	return previewCmd(m.mux, item)
-}
-
-func sortedCounts(items []sessionmgr.Item) map[sessionmgr.Kind]int {
-	counts := map[sessionmgr.Kind]int{}
-	for _, item := range items {
-		counts[item.Kind]++
-	}
-	return counts
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
-
-// clampVal clamps v to the inclusive [lo, hi] range. If hi <= lo, only the
-// lower bound is enforced (v is floored at lo but not capped).
-func clampVal(v, lo, hi int) int {
-	if v < lo {
-		return lo
-	}
-	if hi > lo && v > hi {
-		return hi
-	}
-	return v
-}
-
-func clampText(s string, w int) string {
-	if w <= 0 {
-		return ""
-	}
-	if lipgloss.Width(s) <= w {
-		return s
-	}
-	runes := []rune(s)
-	for len(runes) > 0 && lipgloss.Width(string(runes))+1 > w {
-		runes = runes[:len(runes)-1]
-	}
-	return string(runes) + "…"
-}
-
-func modeRank(k sessionmgr.Kind) int {
-	switch k {
-	case sessionmgr.KindSession:
-		return 0
-	case sessionmgr.KindAgent:
-		return 1
-	case sessionmgr.KindZoxide:
-		return 2
-	case sessionmgr.KindFD:
-		return 3
-	default:
-		return 9
-	}
-}
-
-func SortItems(items []sessionmgr.Item) {
-	sort.SliceStable(items, func(i, j int) bool {
-		if modeRank(items[i].Kind) != modeRank(items[j].Kind) {
-			return modeRank(items[i].Kind) < modeRank(items[j].Kind)
-		}
-		return strings.ToLower(items[i].DisplayName()) < strings.ToLower(items[j].DisplayName())
-	})
+	m.listTop = newItemFlow(rows, m.grouped(rows)).follow(m.listTop, m.cursor, m.bodyHeight())
+	return m
 }

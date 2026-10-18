@@ -9,7 +9,7 @@ buildGoModule {
   inherit version;
 
   src = lib.cleanSource ../.;
-  vendorHash = "sha256-PDXCYpYmmGB9sGI5e0iCXFnicIzhGAUjTiLOoLySFvc=";
+  vendorHash = "sha256-J5qw4J2ISwHH1FFhTM+/32iVU2HiTImYO48Xpf3Z5sI=";
 
   subPackages = ["cmd/seshagy"];
   env.CGO_ENABLED = 0;

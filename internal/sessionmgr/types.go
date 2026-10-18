@@ -16,6 +16,9 @@ const (
 	KindZoxide  Kind = "zoxide"
 	KindFD      Kind = "fd"
 	KindAgent   Kind = "agent"
+	// KindHost is a remote machine (ssh, iroh, tailscale, ...) the user can
+	// switch a full-screen herdr client to via `seshagy run`.
+	KindHost Kind = "host"
 )
 
 // AgentState is the lifecycle state of a discovered agent pane.
@@ -60,6 +63,12 @@ type Item struct {
 	AgentUpdated     time.Time
 	AgentSeq         int64
 	AgentSource      string
+	// AgentPID is the agent process discovery matched in the pane (tmux's
+	// process-tree walk). herdr panes leave it zero and resolve it on demand.
+	AgentPID int
+	// StartedAt is when the agent process started. It is not part of discovery:
+	// the caller resolves it with one batched ps call and stamps it on the item.
+	StartedAt time.Time
 }
 
 // ActionTarget returns the multiplexer-actionable identifier for an item: the
@@ -84,6 +93,8 @@ func (i Item) Key() string {
 		return string(i.Kind) + ":" + i.Name
 	case KindAgent:
 		return string(i.Kind) + ":" + i.PaneID
+	case KindHost:
+		return string(i.Kind) + ":" + i.Name
 	default:
 		return string(i.Kind) + ":" + i.Path
 	}

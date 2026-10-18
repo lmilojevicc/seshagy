@@ -162,9 +162,6 @@ func (p *Printer) Note(msg string) {
 	write(p.errStream(), p.errSt.note.Render("note")+": "+msg+"\n")
 }
 
-// Notef is the formatted variant of Note.
-func (p *Printer) Notef(format string, args ...any) { p.Note(fmt.Sprintf(format, args...)) }
-
 // Success colors the leading verb of msg bold bright-green and leaves the rest
 // of the message in the default color; written to stdout. Mirrors cargo's
 // status-verb styling (there is no "success:" token upstream).
@@ -228,9 +225,6 @@ func Warnf(format string, args ...any) { Default.Warnf(format, args...) }
 
 // Note prints "note: <msg>" to stderr via Default.
 func Note(msg string) { Default.Note(msg) }
-
-// Notef is the formatted variant of Note.
-func Notef(format string, args ...any) { Default.Notef(format, args...) }
 
 // Success colors the leading verb of msg via Default.
 func Success(msg string) { Default.Success(msg) }

@@ -72,6 +72,10 @@ func run(args []string) error {
 		return runConfig(args[1:])
 	case "diagnostics":
 		return runDiagnostics(args[1:])
+	case "run":
+		return runRun(args[1:])
+	case "hosts":
+		return runHosts(args[1:])
 	}
 
 	parsed, err := parseOperationalCommand(args)
@@ -528,19 +532,6 @@ func runConfig(args []string) error {
 	}
 }
 
-func printItems(
-	ctx context.Context,
-	mux sessionmgr.Multiplexer,
-	mode sessionmgr.SourceMode,
-	jsonOutput bool,
-) error {
-	cfg, err := appconfig.Load()
-	if err != nil {
-		return err
-	}
-	return printItemsWithConfig(ctx, mux, mode, jsonOutput, cfg)
-}
-
 func printItemsWithConfig(
 	ctx context.Context,
 	mux sessionmgr.Multiplexer,
@@ -565,23 +556,6 @@ func printItemsWithConfig(
 		cli.Println(sessionmgr.FormatLineWithIcons(item, icons))
 	}
 	return nil
-}
-
-func deleteItem(
-	ctx context.Context,
-	mux sessionmgr.Multiplexer,
-	raw string,
-	jsonOutput bool,
-) error {
-	cfg, err := appconfig.Load()
-	if err != nil {
-		return err
-	}
-	item, err := resolveDeleteItem(ctx, mux, raw, cfg)
-	if err != nil {
-		return err
-	}
-	return deletePreparedItem(ctx, mux, item, jsonOutput)
 }
 
 func resolveDeleteItem(
@@ -672,6 +646,16 @@ Usage:
   seshagy config path [--json]    print config file path
   seshagy config show [--json]    print effective config
   seshagy config init [--force] [--json]
+  seshagy run [--session <name>] [<host>]
+                                  attach herdr to <host> (or the local server)
+                                  through this terminal; switching hosts from
+                                  inside herdr goes through this launcher
+  seshagy hosts [--json]          list configured and ~/.ssh/config hosts
+  seshagy hosts setup [--json]    write the generated ssh config and add its
+                                  Include line to ~/.ssh/config
+  seshagy hosts switch <name|local> [--json]
+                                  ask the running seshagy run launcher to switch
+                                  (used from inside a herdr pane)
   seshagy diagnostics [--json]   show logging status and bug-report guidance
   seshagy keybind install tmux [--key <key>] [--mode popup|window|pane|pane-zoomed] [--persistent]
                                   bind prefix+<key> (default: s) to launch
@@ -711,16 +695,19 @@ Scripting:
                                   remove an agent hook/extension
 
 TUI keys:
-  enter attach/create/focus   q quit   / filter   r refresh   R rename
-  x kill session/pane         y yazi   m mode     1-5 modes
-  o agent scope               p preview   ? help
+  The picker is always type-first: printable keys fuzzy-filter the list and the
+  ctrl keys select a filter (ctrl+a agents, ctrl+s agent state, ctrl+t sessions,
+  ctrl+z zoxide, ctrl+f find, ctrl+e remotes); the active filter's key returns
+  to all, and tab/shift+tab cycle them.
+  Query tokens: !agent-name  @workspace-or-state (@ = every agent)  #state  /path
+  enter attach/create/focus   ctrl+r rename   ctrl+x kill   ctrl+o preview
+  ctrl+y yazi                 ctrl+l reload   ctrl+g integrations   F1 help
+  esc clear query then filter, quit when both are empty   ctrl+c quit
 
 Config:
   Config lives at $XDG_CONFIG_HOME/seshagy/config.toml, or
-  ~/.config/seshagy/config.toml when XDG_CONFIG_HOME is unset. It controls
-  source order/default source, fd command, theme colors, Nerd Font icons, text
-  label mode, no-icons mode, icon colors, type-first mode, and the action
-  prefix key.
-  In type-first mode, enter and arrow/page/home/end navigation keys do not need a prefix.
+  ~/.config/seshagy/config.toml when XDG_CONFIG_HOME is unset. It controls the
+  preview column, theme colors, the agent-state and source icons (and their
+  mode and colors), the fd command, remote hosts, and diagnostic logging.
 `
 }

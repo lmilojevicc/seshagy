@@ -90,16 +90,16 @@ func TestDetectTmuxPopup(t *testing.T) {
 }
 
 func TestFormatLineColorsIconsButKeepsParseableText(t *testing.T) {
-	line := FormatLine(Item{Kind: KindSession, Name: "demo"})
+	line := FormatLineWithIcons(Item{Kind: KindSession, Name: "demo"}, DefaultIconSet())
 	if !strings.Contains(line, "\x1b[38;5;10m"+IconSession+" \x1b[0m") {
 		t.Fatalf("session icon does not use terminal bright green: %q", line)
 	}
 	if clean := StripANSI(line); clean != IconSession+" demo" {
 		t.Fatalf("StripANSI(%q) = %q", line, clean)
 	}
-	item, ok := ParseActionLine(line)
+	item, ok := ParseActionLineWithIcons(line, DefaultIconSet())
 	if !ok || item.Kind != KindSession || item.Name != "demo" {
-		t.Fatalf("ParseActionLine(%q) = %#v, %v", line, item, ok)
+		t.Fatalf("ParseActionLineWithIcons(%q) = %#v, %v", line, item, ok)
 	}
 }
 
@@ -139,7 +139,7 @@ func TestDefaultIconsCarryConfiguredDisplaySpacing(t *testing.T) {
 		}
 	}
 
-	line := FormatLine(Item{Kind: KindSession, Name: "demo"})
+	line := FormatLineWithIcons(Item{Kind: KindSession, Name: "demo"}, DefaultIconSet())
 	if clean := StripANSI(line); clean != IconSession+" demo" {
 		t.Fatalf("default icon spacing = %q, want one display space", clean)
 	}

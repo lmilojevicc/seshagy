@@ -33,13 +33,6 @@ const (
 	ModeCurrentAgents
 )
 
-// LoadWithOptions is a compatibility wrapper that detects the active
-// multiplexer from the environment and delegates to LoadWithBackend. Existing
-// callers under $TMUX keep identical behaviour.
-func LoadWithOptions(ctx context.Context, mode SourceMode, opts LoadOptions) (LoadResult, error) {
-	return LoadWithBackend(ctx, Detect(), mode, opts)
-}
-
 // LoadWithBackend dispatches item loading across sources, routing the
 // multiplexer-backed modes (sessions, agents) through the supplied backend.
 // Directory modes (zoxide, fd) are backend-independent. The capture-pane
@@ -60,7 +53,7 @@ func LoadWithBackend(
 		defer func() {
 			attrs := []slog.Attr{
 				slog.String("backend", string(mux.Kind())),
-				slog.String("source", mode.Names().ConfigToken),
+				slog.String("source", mode.ConfigToken()),
 				slog.Int64("duration_ms", time.Since(started).Milliseconds()),
 			}
 			if err != nil {

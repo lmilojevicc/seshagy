@@ -2,7 +2,11 @@
 
 ## Project Structure & Module Organization
 
-This is a Go CLI/TUI project for `seshagy`, an agent-aware terminal dashboard that supports both tmux and [herdr](https://herdr.dev) as multiplexer backends. The command entry point is `cmd/seshagy/`. Core packages live under `internal/`: `config` for TOML config, `sessionmgr` for the `Multiplexer` backend abstraction (tmux/herdr/noop), tmux sessions and agent pane metadata + detection engine, `integrations` for hook/plugin installs, and `tui` for Bubble Tea UI state/rendering. Tests sit beside code as `*_test.go` files. The active backend is auto-detected from the environment (`$HERDR_ENV=1` → herdr wins; else `$TMUX` → tmux; else noop).
+This is a Go CLI/TUI project for `seshagy`, an agent-aware terminal dashboard that supports both tmux and [herdr](https://herdr.dev) as multiplexer backends. The command entry point is `cmd/seshagy/`. Core packages live under `internal/`: `config` for TOML config, `sessionmgr` for the `Multiplexer` backend abstraction (tmux/herdr/noop), tmux sessions and agent pane metadata + detection engine, `integrations` for hook/plugin installs, `remote` for remote hosts and the `seshagy run` launcher, and `tui` for the Bubble Tea picker. Tests sit beside code as `*_test.go` files. The active backend is auto-detected from the environment (`$HERDR_ENV=1` → herdr wins; else `$TMUX` → tmux; else noop).
+
+### TUI picker
+
+The TUI (`internal/tui/`) is a single type-first picker. Printable runes always fuzzy-filter the merged item list; a ctrl chord selects an inline scope instead (`ctrl+a` agents, `ctrl+s` agent state, `ctrl+t` sessions, `ctrl+z` zoxide, `ctrl+f` find, `ctrl+e` remotes, `ctrl+g` integrations), pressing the active scope's chord returns to all, and tab/shift+tab cycle scopes. `F1` opens a centered help overlay (`help.go`) that holds what the footer does not — the filter keys with the active one highlighted and the current `ctrl+s` state, the query tokens, and the remaining keys — closing on F1/esc/q and swallowing every other key; the footer (`view.go`) keeps only the core actions (`↑↓ move`, `⏎ open`, `^r rename`, `^x kill`, `^o preview`, `^y yazi`, `F1 help`, `esc quit`) and drops its hints from the right. `keymap.go` is the one binding table: `keys.go` dispatch, the footer hints, and the help rows all read it, and every handled key is either a footer hint or a help row. The query itself reads herdr-navigator prefix tokens, ANDed with the scope and state filter: `!x` agent name or kind, `@` every agent, `@x` agent workspace or state, `#x` agent state, `/x` item path; a bare prefix is ignored and the remaining tokens are plain fuzzy text. `scope.go` owns the scope enum, `filterRows`, `itemRank`, and `dedupeDirs`; `query.go` the token grammar (`parseQuery`, `queryTokens.matches`); `model.go` the picker state; `commands.go` the tea.Cmds; `refresh_cache.go` the per-source cache/TTL/generation; `view.go` and `theme.go` the rendering; `icons.go` the agent logos (Herdr Agent Icons Max font, MIT, herdr-radar). Sessions, agents, zoxide, and fd load as independent sources with their own cache entry; hosts load once at startup and on reload. ModeAll remains for the CLI's `--get-*` output only.
 
 ### Agent detection subsystem
 
@@ -30,6 +34,15 @@ Integrations live in `internal/integrations/`:
 - `assets/seshagy-agent-state.ts` — Pi TypeScript extension.
 - `assets/seshagy-opencode-plugin.ts` — OpenCode TS plugin (session.idle/permission.ask/tool.execute).
 
+### Remote hosts subsystem
+
+Remote herdr servers live in `internal/remote/`:
+
+- `host.go` — the host registry (`Host`, `Alias`, `Find`, `Hosts`), the generated ssh config (`RenderSSHConfig`/`WriteSSHConfig`/`IncludeLine`/`EnsureUserSSHConfigInclude`, 0600 atomic write), and `~/.ssh/config` discovery (`DiscoverSSHConfigHosts`, one level of `Include`, no wildcards, `seshagy-*` aliases skipped). Configured hosts use the generated alias `seshagy-<name>`.
+- `launcher.go` / `launcher_windows.go` — the `seshagy run` launcher. Only a launcher owns the terminal, so only it can switch the herdr client between the local server and a remote host. It runs one attached `herdr` client at a time, advertises itself as `<pid>.json` + `<pid>.sock` under `$XDG_STATE_HOME/seshagy/launchers/`, accepts `SwitchRequest`s on that unix socket (`RequestSwitch`, `ErrNoLauncher` when none is attached), replies before SIGTERMing the client (a clean detach), then starts the pending target and falls back remote→local when a remote client exits. It refuses to run under `HERDR_ENV=1`.
+- `internal/config` composes the list (`RemoteHosts`/`ValidateRemoteHosts`); `remote` never imports `config`. The `seshagy run` / `seshagy hosts [setup|switch]` commands live in `cmd/seshagy/run.go`.
+- The TUI (`internal/tui/commands.go`) feeds `# hosts` rows from `remote.Hosts`, and `enter` on a host either asks the launcher to switch (herdr) or opens `tmux new-window ... ssh <alias>` (tmux).
+
 ## Build, Test, and Development Commands
 
 - `mise run verify`: runs the fast deterministic checks (`fmt:check`, `lint`, `vet`, `test`, `build`).
@@ -40,7 +53,7 @@ Integrations live in `internal/integrations/`:
 - `make build`: builds the local `./seshagy` binary from `./cmd/seshagy`.
 - `go run ./cmd/seshagy`: runs the TUI from the checkout.
 
-Go 1.26.6 or newer is required by `go.mod`. Runtime behavior expects a multiplexer (`tmux` or `herdr`); optional tools include `zoxide`, `fd`, `yazi`, and `eza`.
+Go 1.26.9 or newer is required by `go.mod`. Runtime behavior expects a multiplexer (`tmux` or `herdr`); optional tools include `zoxide`, `fd`, `yazi`, and `eza`.
 
 ## Coding Style & Naming Conventions
 

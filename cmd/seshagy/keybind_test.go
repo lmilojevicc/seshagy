@@ -9,6 +9,17 @@ import (
 	"testing"
 )
 
+// dispatchKeybind mirrors the `keybind` case of run(): parse the arguments,
+// then execute. It keeps these tests on the production entry points now that
+// the CLI dispatches parseKeybindCommand + executeKeybind inline.
+func dispatchKeybind(args []string) error {
+	cmd, err := parseKeybindCommand(args)
+	if err != nil {
+		return err
+	}
+	return executeKeybind(cmd)
+}
+
 func writeTempConfig(t *testing.T, content string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -279,7 +290,7 @@ func TestRunKeybindTmuxPersistentAndDefaultModes(t *testing.T) {
 			path := writeTempConfig(t, "")
 			t.Setenv("TMUX_CONF_PATH", path)
 
-			if err := runKeybind([]string{
+			if err := dispatchKeybind([]string{
 				"install", "tmux", "--mode", string(mode), "--persistent",
 			}); err != nil {
 				t.Fatalf("persistent install: %v", err)
@@ -292,7 +303,7 @@ func TestRunKeybindTmuxPersistentAndDefaultModes(t *testing.T) {
 				t.Fatalf("persistent %s binding contains --ephemeral\n%s", mode, got)
 			}
 
-			if err := runKeybind([]string{
+			if err := dispatchKeybind([]string{
 				"install", "tmux", "--mode", string(mode),
 			}); err != nil {
 				t.Fatalf("default reinstall: %v", err)
@@ -610,7 +621,7 @@ func TestRunKeybindHerdrPersistentModesAndDefault(t *testing.T) {
 				args = append(args, "--persistent")
 			}
 
-			if err := runKeybind(args); err != nil {
+			if err := dispatchKeybind(args); err != nil {
 				t.Fatalf("install: %v", err)
 			}
 			got := readConfig(t, path)
@@ -810,7 +821,7 @@ func TestRunKeybindPopupDimensions(t *testing.T) {
 	stubHerdrVersion(t, "herdr 0.7.4\n", nil)
 
 	stdout, err := captureOutput(t, &os.Stdout, func() error {
-		return runKeybind([]string{
+		return dispatchKeybind([]string{
 			"install", "herdr", "--mode", "popup",
 			"--width", "60%", "--height", "50%",
 		})
@@ -843,7 +854,9 @@ func TestRunKeybindPopupDimensionsRejectInvalidValues(t *testing.T) {
 			path := writeTempHerdrConfig(t, "")
 			t.Setenv("HERDR_CONFIG_PATH", path)
 
-			err := runKeybind([]string{"install", "herdr", "--mode", "popup", tc.flag, tc.value})
+			err := dispatchKeybind(
+				[]string{"install", "herdr", "--mode", "popup", tc.flag, tc.value},
+			)
 			if err == nil {
 				t.Fatalf("expected invalid %s %q to fail", tc.flag, tc.value)
 			}
@@ -859,7 +872,7 @@ func TestRunKeybindPopupDimensionsIgnoredOutsideHerdrPopup(t *testing.T) {
 	herdrPath := writeTempHerdrConfig(t, "")
 	t.Setenv("HERDR_CONFIG_PATH", herdrPath)
 	herdrWarning, err := captureOutput(t, &os.Stderr, func() error {
-		return runKeybind([]string{
+		return dispatchKeybind([]string{
 			"install", "herdr", "--mode", "pane",
 			"--width", "invalid", "--height", "also-invalid",
 		})
@@ -879,7 +892,7 @@ func TestRunKeybindPopupDimensionsIgnoredOutsideHerdrPopup(t *testing.T) {
 	tmuxPath := writeTempConfig(t, "")
 	t.Setenv("TMUX_CONF_PATH", tmuxPath)
 	tmuxWarning, err := captureOutput(t, &os.Stderr, func() error {
-		return runKeybind([]string{
+		return dispatchKeybind([]string{
 			"install", "tmux", "--mode", "popup",
 			"--width", "invalid", "--height", "also-invalid",
 		})
@@ -956,7 +969,7 @@ func TestRunKeybindRoutesModePerBackend(t *testing.T) {
 	stubHerdrVersion(t, "herdr 0.7.4\n", nil)
 
 	// herdr + --mode popup -> popup binding.
-	if err := runKeybind([]string{"install", "herdr", "--mode", "popup"}); err != nil {
+	if err := dispatchKeybind([]string{"install", "herdr", "--mode", "popup"}); err != nil {
 		t.Fatalf("herdr popup install: %v", err)
 	}
 	herdrGot := readConfig(t, herdrPath)
@@ -965,12 +978,12 @@ func TestRunKeybindRoutesModePerBackend(t *testing.T) {
 	}
 
 	// herdr + invalid mode -> error.
-	if err := runKeybind([]string{"install", "herdr", "--mode", "window"}); err == nil {
+	if err := dispatchKeybind([]string{"install", "herdr", "--mode", "window"}); err == nil {
 		t.Fatal("herdr --mode window should error")
 	}
 
 	// tmux + --mode popup -> tmux display-popup binding (no regression).
-	if err := runKeybind([]string{"install", "tmux", "--mode", "popup"}); err != nil {
+	if err := dispatchKeybind([]string{"install", "tmux", "--mode", "popup"}); err != nil {
 		t.Fatalf("tmux popup install: %v", err)
 	}
 	tmuxGot := readConfig(t, tmuxPath)
@@ -979,7 +992,7 @@ func TestRunKeybindRoutesModePerBackend(t *testing.T) {
 	}
 
 	// tmux + invalid mode -> error.
-	if err := runKeybind([]string{"install", "tmux", "--mode", "frobnicate"}); err == nil {
+	if err := dispatchKeybind([]string{"install", "tmux", "--mode", "frobnicate"}); err == nil {
 		t.Fatal("tmux --mode frobnicate should error")
 	}
 }
@@ -999,9 +1012,9 @@ func TestKeybindUsageBlock(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := runKeybind(tc.args)
+			err := dispatchKeybind(tc.args)
 			if err == nil {
-				t.Fatalf("runKeybind(%v) expected usage error, got nil", tc.args)
+				t.Fatalf("dispatchKeybind(%v) expected usage error, got nil", tc.args)
 			}
 			msg := err.Error()
 			// "usage:" prefix must be intact (JSON code detection relies on it).
@@ -1023,5 +1036,62 @@ func TestKeybindUsageBlock(t *testing.T) {
 				t.Fatalf("no-subcommand usage must list uninstall form:\n%s", msg)
 			}
 		})
+	}
+}
+
+// TestParseKeybindCommandRejectsUnknownFlags pins that an unknown flag — a
+// misspelled one, or a real one written inline as `--key=x` — is an error
+// instead of being silently ignored and installing a binding the user did not
+// ask for.
+func TestParseKeybindCommandRejectsUnknownFlags(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		flag string
+	}{
+		{
+			name: "unknown flag",
+			args: []string{"install", "tmux", "--frobnicate"},
+			flag: "--frobnicate",
+		},
+		{
+			name: "inline value form",
+			args: []string{"install", "herdr", "--key=x"},
+			flag: "--key=x",
+		},
+		{
+			name: "inline form of a known flag",
+			args: []string{"install", "herdr", "--mode=popup"},
+			flag: "--mode=popup",
+		},
+		{
+			name: "unknown flag before a known one",
+			args: []string{"install", "tmux", "--nope", "--persistent"},
+			flag: "--nope",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := parseKeybindCommand(tc.args)
+			if err == nil {
+				t.Fatalf(
+					"parseKeybindCommand(%v) = nil error, want unknown flag %s",
+					tc.args,
+					tc.flag,
+				)
+			}
+			if want := "unknown flag: " + tc.flag; err.Error() != want {
+				t.Fatalf("parseKeybindCommand(%v) error = %q, want %q", tc.args, err, want)
+			}
+		})
+	}
+
+	// Known flags keep parsing.
+	cmd, err := parseKeybindCommand([]string{"install", "tmux", "--key", "M-s", "--persistent"})
+	if err != nil {
+		t.Fatalf("parseKeybindCommand with known flags error = %v", err)
+	}
+	if cmd.key != "M-s" || !cmd.persistent {
+		t.Fatalf("parsed keybind command = %#v", cmd)
 	}
 }

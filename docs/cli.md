@@ -79,6 +79,11 @@ Other commands:
 seshagy integration install <name>
 seshagy integration uninstall <name>
 
+seshagy run [--session <name>] [<host>]
+seshagy hosts [--json]
+seshagy hosts setup
+seshagy hosts switch <name|local>
+
 seshagy config path
 seshagy config show
 seshagy config init [--force]
@@ -108,11 +113,15 @@ for file, cap, retention, and locking details.
 
 ## Install menu integrations
 
-Press `h` in the TUI to open the integration install menu (it also auto-pops on
+Press `ctrl+g` in the TUI to open the integration install menu (it also auto-pops on
 first launch). Select an integration and press `enter` to install, `u` to
 uninstall, or `a` to install all. Installs run off the UI thread and never
 block the dashboard. The available integrations are: `pi`, `codex`, `claude`,
 `droid`, `opencode`.
+
+These integrations are tmux-only: their hooks/plugins report agent state to
+tmux, and under herdr the backend detects agent state itself, so the menu says
+so on both.
 
 You can also install/uninstall from the CLI:
 

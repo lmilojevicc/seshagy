@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 
 	appconfig "github.com/lmilojevicc/seshagy/internal/config"
 	"github.com/lmilojevicc/seshagy/internal/integrations"
+	"github.com/lmilojevicc/seshagy/internal/remote"
 	"github.com/lmilojevicc/seshagy/internal/sessionmgr"
 )
 
@@ -36,30 +38,51 @@ func refreshCmd(
 			warning: result.Warning,
 			err:     err,
 		}
-		// Resolve the current multiplexer session once per agent refresh so
-		// the current-session scope filter (toggled with 'o') can match
-		// without a per-render call. Runs in this background goroutine; a
-		// missing session (not in tmux/herdr) leaves currentSession empty.
-		if source == sessionmgr.ModeAgents {
-			if session, err := mux.CurrentSession(ctx); err == nil {
-				msg.currentSession = session
-			}
-		}
 		return msg
-	}
-}
-
-func startupSetupCmd(cfg appconfig.Config) tea.Cmd {
-	return func() tea.Msg {
-		if cfg.Setup.TypeFirstPromptSeen {
-			return setupMsg{}
-		}
-		return setupMsg{prompt: true}
 	}
 }
 
 type installMenuMsg struct {
 	show bool
+}
+
+// agentStartTimesCmd resolves when the agents in items started: the agent pid
+// per pane (a CLI call under herdr, already known under tmux) and then ONE
+// batched ps call for every pid. Failures resolve nothing rather than erroring:
+// the row simply shows no age.
+func agentStartTimesCmd(mux sessionmgr.Multiplexer, items []sessionmgr.Item) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		panePIDs := make(map[string]int, len(items))
+		pids := make([]int, 0, len(items))
+		for _, item := range items {
+			pid := item.AgentPID
+			if pid <= 0 {
+				resolved, err := mux.AgentPID(ctx, item)
+				if err != nil || resolved <= 0 {
+					continue
+				}
+				pid = resolved
+			}
+			panePIDs[item.PaneID] = pid
+			pids = append(pids, pid)
+		}
+		if len(pids) == 0 {
+			return agentStartedMsg{}
+		}
+		starts, err := sessionmgr.ProcessStartTimes(ctx, pids, time.Now())
+		if err != nil {
+			return agentStartedMsg{}
+		}
+		resolved := make(map[string]agentStart, len(panePIDs))
+		for pane, pid := range panePIDs {
+			if started, ok := starts[pid]; ok {
+				resolved[pane] = agentStart{pid: pid, started: started}
+			}
+		}
+		return agentStartedMsg{starts: resolved}
+	}
 }
 
 type installResultMsg struct {
@@ -104,6 +127,106 @@ func installIntegrationCmd(name, action string) tea.Cmd {
 }
 
 const noPreviewAvailableText = "no preview available"
+
+// loadRemoteHosts resolves the picker's host list: the configured [[hosts]]
+// first, then the hosts already defined in ~/.ssh/config. It reads local files
+// only. It is a seam so tests do not depend on the developer's ssh config.
+var loadRemoteHosts = func(cfg appconfig.Config) []remote.Host {
+	return remote.Hosts(cfg.RemoteHosts(), cfg.RemoteSSHConfigHosts())
+}
+
+// hostsCmd loads the remote hosts the picker offers. Hosts are read once at
+// startup and again on an explicit reload; there is no poll because they cannot
+// change without an edit to config.toml or ~/.ssh/config.
+func hostsCmd(cfg appconfig.Config) tea.Cmd {
+	return func() tea.Msg { return hostsMsg{hosts: loadRemoteHosts(cfg)} }
+}
+
+// hostItem is the picker's row for a remote host: the name is the title, the
+// ssh alias is the target herdr is handed, and the transport plus the raw target
+// fill the meta columns and the fuzzy-search fields.
+func hostItem(host remote.Host) sessionmgr.Item {
+	return sessionmgr.Item{
+		Kind:     sessionmgr.KindHost,
+		Name:     host.Name,
+		Target:   host.Alias(),
+		Location: host.Transport,
+		Path:     host.Target,
+	}
+}
+
+func hostItems(hosts []remote.Host) []sessionmgr.Item {
+	if len(hosts) == 0 {
+		return nil
+	}
+	items := make([]sessionmgr.Item, 0, len(hosts))
+	for _, host := range hosts {
+		items = append(items, hostItem(host))
+	}
+	return items
+}
+
+// switchHostCmd asks the `seshagy run` launcher attached to this herdr server to
+// switch its client to host. It must run inside a herdr pane, where
+// HERDR_SOCKET_PATH identifies the server the launcher is attached to.
+func switchHostCmd(host remote.Host) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		err := requestSwitch(ctx, remote.SwitchRequest{
+			Host:    host.Name,
+			Session: host.Session,
+		}, os.Getenv("HERDR_SOCKET_PATH"))
+		return hostSwitchMsg{err: err}
+	}
+}
+
+// requestSwitch asks a running launcher to switch servers; tests replace it so
+// they need no launcher socket.
+var requestSwitch = remote.RequestSwitch
+
+// runSSHWindow opens the tmux window that reaches a host; tests replace it.
+var runSSHWindow = func(name, alias string) error {
+	return sessionmgr.SSHWindowCommand(name, alias).Run()
+}
+
+// openSSHWindowCmd opens a new tmux window running `ssh <alias>` on the tmux
+// backend, where there is no launcher that can switch servers in place.
+func openSSHWindowCmd(host remote.Host) tea.Cmd {
+	return func() tea.Msg {
+		return hostWindowMsg{err: runSSHWindow(host.Name, host.Alias())}
+	}
+}
+
+// hostPreviewCmd renders a host's connection details from local config, so the
+// preview is instant and needs no network access.
+func hostPreviewCmd(host remote.Host) tea.Cmd {
+	key := hostItem(host).Key()
+	preview := hostPreviewText(host)
+	return func() tea.Msg { return previewMsg{key: key, preview: preview} }
+}
+
+func hostPreviewText(host remote.Host) string {
+	line := func(label, value string) string { return fmt.Sprintf("%-11s%s", label, value) }
+	lines := []string{
+		line("transport", host.Transport),
+		line("target", host.Target),
+	}
+	if host.Session != "" {
+		lines = append(lines, line("session", host.Session))
+	}
+	lines = append(lines, line("alias", host.Alias()))
+	if host.FromSSHConfig {
+		return strings.Join(
+			append(lines, "", "# defined in ~/.ssh/config"), "\n")
+	}
+	block, err := remote.RenderSSHConfig([]remote.Host{host})
+	if err != nil {
+		return strings.Join(
+			append(lines, "", "cannot render ssh config: "+err.Error()), "\n")
+	}
+	return strings.Join(lines, "\n") + "\n\n" + block
+}
 
 func previewCmd(mux sessionmgr.Multiplexer, item sessionmgr.Item) tea.Cmd {
 	key := item.Key()
@@ -226,17 +349,10 @@ func renameAgentCmd(
 	}
 }
 
-const tickInterval = 5 * time.Second
+type tickMsg time.Time
 
+// tickCmd drives the source-refresh poll; every tick refreshes whichever
+// sources are stale and not already in flight.
 func tickCmd() tea.Cmd {
-	return tea.Tick(tickInterval, func(t time.Time) tea.Msg { return tickMsg(t) })
-}
-
-// tickIntervalFor returns the tick interval for a source. Agents mode uses 1s
-// for near-instant state-detection; all other modes use the default 5s.
-func tickIntervalFor(source sessionmgr.SourceMode) time.Duration {
-	if source == sessionmgr.ModeAgents {
-		return 1 * time.Second
-	}
-	return tickInterval
+	return tea.Tick(refreshTickInterval, func(t time.Time) tea.Msg { return tickMsg(t) })
 }

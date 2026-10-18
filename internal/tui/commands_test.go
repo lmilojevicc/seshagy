@@ -267,21 +267,6 @@ func TestPreviewCmdAgentEmptyPaneIDFallsBack(t *testing.T) {
 	}
 }
 
-func TestStartupSetupCommands(t *testing.T) {
-	cfg := appconfig.Default()
-	cfg.Setup.TypeFirstPromptSeen = false
-	msg := startupSetupCmd(cfg)().(setupMsg)
-	if !msg.prompt || msg.err != nil {
-		t.Fatalf("startupSetupCmd unseen = %#v", msg)
-	}
-
-	cfg.Setup.TypeFirstPromptSeen = true
-	msg = startupSetupCmd(cfg)().(setupMsg)
-	if msg.prompt || msg.err != nil {
-		t.Fatalf("startupSetupCmd seen = %#v", msg)
-	}
-}
-
 func TestRefreshCmdLoadsItems(t *testing.T) {
 	dir := t.TempDir()
 	cfg := appconfig.Default()

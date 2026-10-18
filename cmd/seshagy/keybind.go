@@ -471,6 +471,8 @@ func parseKeybindCommand(args []string) (keybindCommand, error) {
 			i++
 		case "--persistent":
 			cmd.persistent = true
+		default:
+			return keybindCommand{}, fmt.Errorf("unknown flag: %s", args[i])
 		}
 	}
 	if !slices.Contains(keybindTargets, cmd.target) {
@@ -521,15 +523,6 @@ func executeKeybind(cmd keybindCommand) error {
 		)
 	}
 	return installHerdrKeybind(cmd.key, cmd.herdrMode, cmd.width, cmd.height, cmd.persistent)
-}
-
-// runKeybind dispatches `seshagy keybind <cmd>`.
-func runKeybind(args []string) error {
-	cmd, err := parseKeybindCommand(args)
-	if err != nil {
-		return err
-	}
-	return executeKeybind(cmd)
 }
 
 func warnIgnoredPopupDimensions(target, mode string, widthSet, heightSet bool) {
