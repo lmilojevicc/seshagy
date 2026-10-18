@@ -21,7 +21,7 @@ func TestRunConfigShowTextAndJSON(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runConfig(show) error = %v", err)
 	}
-	if !strings.Contains(out, "[sources]") || !strings.Contains(out, `default = "all"`) {
+	if !strings.Contains(out, "[directories]") || !strings.Contains(out, "fd_command") {
 		t.Fatalf("show text output missing config sections:\n%s", out)
 	}
 
@@ -35,9 +35,9 @@ func TestRunConfigShowTextAndJSON(t *testing.T) {
 		SchemaVersion int `json:"schema_version"`
 		Ok            bool
 		Config        struct {
-			Sources struct {
-				Default string `json:"default"`
-			} `json:"sources"`
+			Directories struct {
+				FDCommand string `json:"fd_command"`
+			} `json:"directories"`
 			TUI struct {
 				Layout string `json:"layout"`
 			} `json:"tui"`
@@ -49,8 +49,12 @@ func TestRunConfigShowTextAndJSON(t *testing.T) {
 	if payload.SchemaVersion != 1 || !payload.Ok {
 		t.Fatalf("envelope = schema_version:%d ok:%v", payload.SchemaVersion, payload.Ok)
 	}
-	if payload.Config.Sources.Default != "all" {
-		t.Fatalf("config.sources.default = %q, want all", payload.Config.Sources.Default)
+	if payload.Config.Directories.FDCommand != appconfig.Default().Directories.FDCommand {
+		t.Fatalf(
+			"config.directories.fd_command = %q, want %q",
+			payload.Config.Directories.FDCommand,
+			appconfig.Default().Directories.FDCommand,
+		)
 	}
 	if payload.Config.TUI.Layout != appconfig.LayoutHorizontal {
 		t.Fatalf(
@@ -114,7 +118,7 @@ func TestRunConfigInitForce(t *testing.T) {
 	if strings.Contains(string(data), "custom = true") {
 		t.Fatalf("forced init did not replace config:\n%s", data)
 	}
-	if !strings.Contains(string(data), "[sources]") {
+	if !strings.Contains(string(data), "[directories]") {
 		t.Fatalf("forced init did not write default config:\n%s", data)
 	}
 }

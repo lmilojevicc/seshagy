@@ -81,7 +81,7 @@ func ItemsToJSON(mode SourceMode, items []Item, icons IconSet, warning string) I
 	return ItemsJSON{
 		SchemaVersion: 1,
 		Ok:            true,
-		Mode:          mode.Names().ConfigToken,
+		Mode:          mode.ConfigToken(),
 		Warning:       warning,
 		Items:         out,
 	}

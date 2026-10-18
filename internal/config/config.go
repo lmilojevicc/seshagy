@@ -19,7 +19,6 @@ import (
 const (
 	appDirName     = "seshagy"
 	configFileName = "config.toml"
-	DefaultPrefix  = "ctrl+x"
 	IconModeIcons  = "icons"
 	IconModeText   = "text"
 	IconModeNone   = "none"
@@ -29,20 +28,15 @@ const (
 	StateDisplayModeText    = "text"
 	StateDisplayModeNone    = "none"
 
-	InputStylePopup   = "popup"
-	InputStyleCmdline = "cmdline"
-
 	LayoutHorizontal = "horizontal"
 	LayoutVertical   = "vertical"
 	LayoutDropdown   = "dropdown"
 )
 
 type Config struct {
-	Sources     SourcesConfig     `toml:"sources"         json:"sources"`
 	Directories DirectoriesConfig `toml:"directories"     json:"directories"`
 	Theme       ThemeConfig       `toml:"theme"           json:"theme"`
 	Icons       IconsConfig       `toml:"icons"           json:"icons"`
-	TypeFirst   TypeFirstConfig   `toml:"type_first"      json:"type_first"`
 	Setup       SetupConfig       `toml:"setup"           json:"setup"`
 	Agents      AgentsConfig      `toml:"agents"          json:"agents"`
 	TUI         TUIConfig         `toml:"tui"             json:"tui"`
@@ -81,15 +75,8 @@ type LogConfig struct {
 
 // TUIConfig holds TUI rendering settings.
 type TUIConfig struct {
-	Layout        string `toml:"layout"         json:"layout"`
-	InputStyle    string `toml:"input_style"    json:"input_style"`
-	DimBackground *bool  `toml:"dim_background" json:"dim_background"`
-	Preview       *bool  `toml:"preview"        json:"preview"`
-}
-
-type SourcesConfig struct {
-	Default string   `toml:"default" json:"default"`
-	Order   []string `toml:"order"   json:"order"`
+	Layout  string `toml:"layout"  json:"layout"`
+	Preview *bool  `toml:"preview" json:"preview"`
 }
 
 type DirectoriesConfig struct {
@@ -101,33 +88,18 @@ type ThemeConfig struct {
 }
 
 type ThemeColorsConfig struct {
-	PopupBorder         string `toml:"popup_border"          json:"popup_border"`
-	ActiveTab           string `toml:"active_tab"            json:"active_tab"`
-	Border              string `toml:"border"                json:"border"`
-	InactiveTab         string `toml:"inactive_tab"          json:"inactive_tab"`
-	PopupTitle          string `toml:"popup_title"           json:"popup_title"`
-	Title               string `toml:"title"                 json:"title"` // deprecated alias for popup_title
-	Accent              string `toml:"accent"                json:"accent"`
-	Key                 string `toml:"key"                   json:"key"`
-	Muted               string `toml:"muted"                 json:"muted"`
-	Success             string `toml:"success"               json:"success"`
-	Info                string `toml:"info"                  json:"info"`
-	Warning             string `toml:"warning"               json:"warning"`
-	Danger              string `toml:"danger"                json:"danger"`
-	SelectionBG         string `toml:"selection_bg"          json:"selection_bg"` // selected row highlight bar
-	ListBorder          string `toml:"list_border"           json:"list_border"`
-	MetadataBorder      string `toml:"metadata_border"       json:"metadata_border"`
-	PreviewBorder       string `toml:"preview_border"        json:"preview_border"`
-	ListBorderTitle     string `toml:"list_border_title"     json:"list_border_title"`
-	MetadataBorderTitle string `toml:"metadata_border_title" json:"metadata_border_title"`
-	PreviewBorderTitle  string `toml:"preview_border_title"  json:"preview_border_title"`
-	InputBorder         string `toml:"input_border"          json:"input_border"`
-
-	// Overview hero tiles (workspaces + agents).
-	WorkspaceTileBorder string `toml:"workspace_tile_border" json:"workspace_tile_border"`
-	WorkspaceTileTitle  string `toml:"workspace_tile_title"  json:"workspace_tile_title"`
-	AgentTileBorder     string `toml:"agent_tile_border"     json:"agent_tile_border"`
-	AgentTileTitle      string `toml:"agent_tile_title"      json:"agent_tile_title"`
+	PopupBorder string `toml:"popup_border" json:"popup_border"`
+	Border      string `toml:"border"       json:"border"`
+	PopupTitle  string `toml:"popup_title"  json:"popup_title"`
+	Title       string `toml:"title"        json:"title"` // deprecated alias for popup_title
+	Accent      string `toml:"accent"       json:"accent"`
+	Key         string `toml:"key"          json:"key"`
+	Muted       string `toml:"muted"        json:"muted"`
+	Success     string `toml:"success"      json:"success"`
+	Info        string `toml:"info"         json:"info"`
+	Warning     string `toml:"warning"      json:"warning"`
+	Danger      string `toml:"danger"       json:"danger"`
+	SelectionBG string `toml:"selection_bg" json:"selection_bg"` // selected row highlight bar
 }
 
 type IconsConfig struct {
@@ -164,14 +136,8 @@ type IconConfig struct {
 	Color string `toml:"color"           json:"color"`
 }
 
-type TypeFirstConfig struct {
-	Enabled bool   `toml:"enabled" json:"enabled"`
-	Prefix  string `toml:"prefix"  json:"prefix"`
-}
-
 type SetupConfig struct {
-	TypeFirstPromptSeen bool `toml:"type_first_prompt_seen" json:"type_first_prompt_seen"`
-	InstallMenuSeen     bool `toml:"install_menu_seen"      json:"install_menu_seen"`
+	InstallMenuSeen bool `toml:"install_menu_seen" json:"install_menu_seen"`
 }
 
 // AgentsConfig holds agent-detection options. ManifestFallback enables the
@@ -204,13 +170,10 @@ func (c Config) CatalogURL() string {
 
 func Default() Config {
 	return Config{
-		Sources:     SourcesConfig{Default: "all", Order: defaultSourceOrderNames()},
 		Directories: DirectoriesConfig{FDCommand: sessionmgr.DefaultFDCommand},
 		Theme: ThemeConfig{Colors: ThemeColorsConfig{
 			PopupBorder: "13",
-			ActiveTab:   "default",
 			Border:      "8",
-			InactiveTab: "8",
 			Title:       "12",
 			Accent:      "13",
 			Key:         "11",
@@ -232,13 +195,10 @@ func Default() Config {
 			Zoxide:     IconConfig{Icon: sessionmgr.IconZoxide + " ", Label: "Z", Color: "14"},
 			FD:         IconConfig{Icon: sessionmgr.IconFD + " ", Label: "F", Color: "11"},
 		},
-		TypeFirst: TypeFirstConfig{Enabled: false, Prefix: DefaultPrefix},
-		Log:       LogConfig{Level: "off"},
-		Remote:    RemoteConfig{SSHConfigHosts: ptrBool(true)},
+		Log:    LogConfig{Level: "off"},
+		Remote: RemoteConfig{SSHConfigHosts: ptrBool(true)},
 		TUI: TUIConfig{
-			Layout:        LayoutHorizontal,
-			InputStyle:    InputStylePopup,
-			DimBackground: ptrBool(true),
+			Layout: LayoutHorizontal,
 		},
 	}
 }
@@ -295,12 +255,6 @@ func Marshal(cfg Config) ([]byte, error) {
 
 func (c *Config) Normalize() {
 	defaults := Default()
-	c.Sources.Order = normalizeSourceOrder(c.Sources.Order)
-	if mode, ok := sourceModeFromName(c.Sources.Default); ok {
-		c.Sources.Default = SourceModeName(mode)
-	} else {
-		c.Sources.Default = defaults.Sources.Default
-	}
 	if strings.TrimSpace(c.Directories.FDCommand) == "" {
 		c.Directories.FDCommand = defaults.Directories.FDCommand
 	}
@@ -321,19 +275,12 @@ func (c *Config) Normalize() {
 	normalizeKindIcon(&c.Icons.FD, defaults.Icons.FD, sessionmgr.IconFD)
 	normalizeTmuxStatesConfig(&c.Icons.TmuxState, defaults.Icons.TmuxState)
 	normalizeAgentStatesConfig(&c.Icons.AgentState, defaults.Icons.AgentState)
-	if strings.TrimSpace(c.TypeFirst.Prefix) == "" {
-		c.TypeFirst.Prefix = DefaultPrefix
-	}
 	c.Log.Level = strings.ToLower(strings.TrimSpace(c.Log.Level))
 	if c.Log.Level == "" {
 		c.Log.Level = "off"
 	}
 	c.Log.File = strings.TrimSpace(c.Log.File)
 	c.TUI.Layout = normalizeTUILayout(c.TUI.Layout)
-	c.TUI.InputStyle = normalizeInputStyle(c.TUI.InputStyle)
-	if c.TUI.DimBackground == nil {
-		c.TUI.DimBackground = ptrBool(true)
-	}
 	if c.TUI.Preview == nil {
 		// The preview follows the layout unless [tui] preview says otherwise: the
 		// compact dropdown starts hidden and ctrl+o reveals it.
@@ -514,14 +461,8 @@ func normalizeThemeColors(colors *ThemeColorsConfig, defaults ThemeColorsConfig)
 	if strings.TrimSpace(colors.PopupBorder) == "" {
 		colors.PopupBorder = defaults.PopupBorder
 	}
-	if strings.TrimSpace(colors.ActiveTab) == "" {
-		colors.ActiveTab = defaults.ActiveTab
-	}
 	if strings.TrimSpace(colors.Border) == "" {
 		colors.Border = defaults.Border
-	}
-	if strings.TrimSpace(colors.InactiveTab) == "" {
-		colors.InactiveTab = defaults.InactiveTab
 	}
 	if strings.TrimSpace(colors.Title) == "" {
 		colors.Title = defaults.Title
@@ -554,47 +495,6 @@ func normalizeThemeColors(colors *ThemeColorsConfig, defaults ThemeColorsConfig)
 	}
 	if strings.TrimSpace(colors.SelectionBG) == "" {
 		colors.SelectionBG = defaults.SelectionBG
-	}
-	// Per-pane borders and border titles inherit the relevant global (or the
-	// pane's own border, for titles) when unset, so omitting them preserves
-	// today's look. The globals above are already resolved, so these read the
-	// user's final values rather than the hardcoded defaults.
-	if strings.TrimSpace(colors.ListBorder) == "" {
-		colors.ListBorder = colors.Border
-	}
-	if strings.TrimSpace(colors.MetadataBorder) == "" {
-		colors.MetadataBorder = colors.Border
-	}
-	if strings.TrimSpace(colors.PreviewBorder) == "" {
-		colors.PreviewBorder = colors.Border
-	}
-	if strings.TrimSpace(colors.ListBorderTitle) == "" {
-		colors.ListBorderTitle = colors.ListBorder
-	}
-	if strings.TrimSpace(colors.MetadataBorderTitle) == "" {
-		colors.MetadataBorderTitle = colors.MetadataBorder
-	}
-	if strings.TrimSpace(colors.PreviewBorderTitle) == "" {
-		colors.PreviewBorderTitle = colors.PreviewBorder
-	}
-	// Search/rename input popup border defaults to the base border so it matches
-	// the dashboard tiles out of the box while staying independently themeable.
-	if strings.TrimSpace(colors.InputBorder) == "" {
-		colors.InputBorder = colors.Border
-	}
-	// Overview hero tiles inherit border / popup_title so the default look is
-	// unchanged unless themed.
-	if strings.TrimSpace(colors.WorkspaceTileBorder) == "" {
-		colors.WorkspaceTileBorder = colors.Border
-	}
-	if strings.TrimSpace(colors.AgentTileBorder) == "" {
-		colors.AgentTileBorder = colors.Border
-	}
-	if strings.TrimSpace(colors.WorkspaceTileTitle) == "" {
-		colors.WorkspaceTileTitle = colors.PopupTitle
-	}
-	if strings.TrimSpace(colors.AgentTileTitle) == "" {
-		colors.AgentTileTitle = colors.PopupTitle
 	}
 }
 
@@ -637,121 +537,11 @@ func (c Config) TUILayout() string {
 	return normalizeTUILayout(c.TUI.Layout)
 }
 
-func (c Config) PrefixKey() string {
-	prefix := strings.TrimSpace(c.TypeFirst.Prefix)
-	if prefix == "" {
-		return DefaultPrefix
-	}
-	return prefix
-}
-
-func (c Config) SourceOrder() []sessionmgr.SourceMode {
-	c.Normalize()
-	modes := make([]sessionmgr.SourceMode, 0, len(c.Sources.Order))
-	for _, name := range c.Sources.Order {
-		if mode, ok := sourceModeFromName(name); ok {
-			modes = append(modes, mode)
-		}
-	}
-	if len(modes) == 0 {
-		return defaultSourceOrder()
-	}
-	// ModeCurrentAgents is CLI-only (--get-current-session-agents passes the
-	// mode directly and bypasses SourceOrder). It must never render as a tab,
-	// even when a stale config persists it in [sources].order.
-	filtered := modes[:0]
-	for _, mode := range modes {
-		if mode == sessionmgr.ModeCurrentAgents {
-			continue
-		}
-		filtered = append(filtered, mode)
-	}
-	return filtered
-}
-
-func (c Config) DefaultSource() sessionmgr.SourceMode {
-	c.Normalize()
-	if mode, ok := sourceModeFromName(c.Sources.Default); ok {
-		return mode
-	}
-	return sessionmgr.ModeAll
-}
-
 func (c Config) LoadOptions() sessionmgr.LoadOptions {
 	c.Normalize()
 	return sessionmgr.LoadOptions{
 		FDCommand:        c.Directories.FDCommand,
 		ManifestFallback: c.ManifestFallback(),
-	}
-}
-
-func SourceModeName(mode sessionmgr.SourceMode) string {
-	return mode.Names().ConfigToken
-}
-
-func normalizeSourceOrder(names []string) []string {
-	seen := map[sessionmgr.SourceMode]bool{}
-	order := make([]string, 0, len(defaultSourceOrderNames()))
-	for _, name := range names {
-		mode, ok := sourceModeFromName(name)
-		if !ok || seen[mode] {
-			continue
-		}
-		// ModeCurrentAgents is never a tab; mark it seen so it is dropped from
-		// the persisted order on Save() without being re-added by defaults.
-		seen[mode] = true
-		if mode == sessionmgr.ModeCurrentAgents {
-			continue
-		}
-		order = append(order, SourceModeName(mode))
-	}
-	for _, mode := range defaultSourceOrder() {
-		if seen[mode] {
-			continue
-		}
-		order = append(order, SourceModeName(mode))
-	}
-	return order
-}
-
-func defaultSourceOrder() []sessionmgr.SourceMode {
-	return []sessionmgr.SourceMode{
-		sessionmgr.ModeAll,
-		sessionmgr.ModeSessions,
-		sessionmgr.ModeZoxide,
-		sessionmgr.ModeFD,
-		sessionmgr.ModeAgents,
-	}
-}
-
-func defaultSourceOrderNames() []string {
-	modes := defaultSourceOrder()
-	names := make([]string, 0, len(modes))
-	for _, mode := range modes {
-		names = append(names, SourceModeName(mode))
-	}
-	return names
-}
-
-func sourceModeFromName(name string) (sessionmgr.SourceMode, bool) {
-	normalized := strings.ToLower(strings.TrimSpace(name))
-	normalized = strings.ReplaceAll(normalized, "_", "-")
-	normalized = strings.ReplaceAll(normalized, " ", "-")
-	switch normalized {
-	case "all":
-		return sessionmgr.ModeAll, true
-	case "sessions", "session":
-		return sessionmgr.ModeSessions, true
-	case "zoxide", "z":
-		return sessionmgr.ModeZoxide, true
-	case "fd", "f":
-		return sessionmgr.ModeFD, true
-	case "agents", "agent":
-		return sessionmgr.ModeAgents, true
-	case "current-agents", "current-agent":
-		return sessionmgr.ModeCurrentAgents, true
-	default:
-		return sessionmgr.ModeAll, false
 	}
 }
 
@@ -804,17 +594,6 @@ func normalizeTUILayout(layout string) string {
 	default:
 		// Includes the legacy "default"/"zen" tokens and anything unknown.
 		return LayoutHorizontal
-	}
-}
-
-func normalizeInputStyle(style string) string {
-	switch strings.ToLower(strings.TrimSpace(style)) {
-	case "", "popup", "floating", "float", "box", "centered":
-		return InputStylePopup
-	case "cmdline", "cmd-line", "commandline", "inline", "bar", "bottom":
-		return InputStyleCmdline
-	default:
-		return InputStylePopup
 	}
 }
 

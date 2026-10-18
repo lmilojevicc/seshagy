@@ -60,7 +60,7 @@ func LoadWithBackend(
 		defer func() {
 			attrs := []slog.Attr{
 				slog.String("backend", string(mux.Kind())),
-				slog.String("source", mode.Names().ConfigToken),
+				slog.String("source", mode.ConfigToken()),
 				slog.Int64("duration_ms", time.Since(started).Milliseconds()),
 			}
 			if err != nil {

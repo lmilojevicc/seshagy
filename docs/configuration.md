@@ -92,10 +92,6 @@ seshagy config init
 Common settings:
 
 ```toml
-[sources]
-default = "all"
-order = ["all", "sessions", "zoxide", "fd", "agents"]
-
 [directories]
 fd_command = 'fd -H -a -d 2 -t d -E .Trash . "$HOME"'
 
@@ -128,9 +124,7 @@ sessions, agents, directories, and hosts, and `ctrl` keys select a filter
 `tab` / `shift+tab` cycle). The prompt also reads herdr-navigator style prefix
 tokens, ANDed with that filter: `!` agent name or kind, `@` workspace or state
 (`@` alone is every agent), `#` agent state, `/` path. `[tui] preview` and
-`[tui] layout` are the `[tui]` settings the picker reads; `input_style`,
-`dim_background`, `[type_first]` and `[sources]` are still accepted in
-`config.toml` (and by `seshagy config init`) but no longer affect the TUI. See
+`[tui] layout` are the only `[tui]` settings the picker reads. See
 the README's TUI section for the full keymap.
 
 ```toml
@@ -245,13 +239,11 @@ shows the current session's agents inline instead.
 
 - an ANSI palette index (`"8"`, `"13"`, …),
 - a hex color (`"#cba6f7"`),
-- or `"default"` to inherit the terminal foreground (used by `active_tab` by default).
+- or `"default"` to inherit the terminal foreground.
 
 | Key              | Used for                             |
 | ---------------- | ------------------------------------ |
 | `popup_border`   | border on setup/install dialogs only       |
-| `active_tab`     | selected source tab label            |
-| `inactive_tab`   | unselected source tabs               |
 | `border`         | pane borders                         |
 | `popup_title`    | popup / dialog headings (input prompt, setup, install menu) |
 | `title`          | deprecated alias for `popup_title`   |
@@ -264,39 +256,13 @@ shows the current session's agents inline instead.
 | `danger`         | error/danger status messages         |
 | `selection_bg`   | background bar under the selected result row (default `236`, a 256-color dark grey) |
 
-Per-pane borders, border titles, input fields, and overview tiles can be themed
-independently. Each defaults to the relevant global when unset (`list_border`,
-`metadata_border`, `preview_border`, `input_border`, `workspace_tile_border`,
-and `agent_tile_border` inherit `border`; each `*_border_title` inherits its
-pane's `*_border`; workspace and agent tile titles inherit `popup_title`), so
-the default look is unchanged unless set.
-
-| Key                     | Used for                                                 |
-| ----------------------- | -------------------------------------------------------- |
-| `list_border`           | list pane border (default: inherits `border`)            |
-| `metadata_border`       | metadata/detail pane border (default: inherits `border`) |
-| `preview_border`        | preview pane border (default: inherits `border`)         |
-| `input_border`          | search/rename input border (default: inherits `border`)  |
-| `list_border_title`     | list pane border-title text (default: inherits `list_border`) |
-| `metadata_border_title` | metadata pane border-title text (default: inherits `metadata_border`) |
-| `preview_border_title`  | preview pane border-title text (default: inherits `preview_border`) |
-| `workspace_tile_border` | workspace tile border (default: inherits `border`)       |
-| `workspace_tile_title`  | workspace tile title (default: inherits `popup_title`)   |
-| `agent_tile_border`     | agent tile border (default: inherits `border`)           |
-| `agent_tile_title`      | agent tile title (default: inherits `popup_title`)       |
-
-When a `*_border_title` differs from its `*_border`, only the title text uses
-the title color; the corners and dashes keep the border color.
-
 Example:
 
 ```toml
 [theme]
   [theme.colors]
     popup_border = "#cba6f7"
-    active_tab = "default"
     border = "#313244"
-    inactive_tab = "#6c7086"
     popup_title = "#b4befe"
     accent = "#cba6f7"
     key = "#f9e2af"
@@ -305,15 +271,6 @@ Example:
     info = "#89dceb"
     warning = "#f9e2af"
     danger = "#f38ba8"
-    # Per-pane borders and border titles. Each inherits when unset
-    # (list_border -> border; metadata/preview_border -> border;
-    # *_border_title -> its pane border), so these are optional.
-    # list_border = "#89b4fa"
-    # metadata_border = "#45475a"
-    # preview_border = "#45475a"
-    # list_border_title = "#cdd6f4"
-    # metadata_border_title = "#cdd6f4"
-    # preview_border_title = "#cdd6f4"
     # The solid bar behind the selected result row. Any color lipgloss
     # accepts (ANSI index or hex) works; "default" leaves the row unbarred.
     selection_bg = "236"

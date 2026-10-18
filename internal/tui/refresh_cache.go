@@ -187,7 +187,7 @@ func (m Model) handleRefreshMsg(msg refreshMsg) (Model, tea.Cmd) {
 		if m.logger.Enabled(ctx, slog.LevelDebug) {
 			logging.LogAttrs(ctx, m.logger, slog.LevelDebug,
 				logging.EventTUIRefreshStale, logging.ComponentTUI,
-				slog.String("source", msg.source.Names().ConfigToken),
+				slog.String("source", msg.source.ConfigToken()),
 				slog.Int64("generation", int64(msg.gen)),
 				slog.Int64("current_generation", int64(m.refreshGen[msg.source])),
 			)

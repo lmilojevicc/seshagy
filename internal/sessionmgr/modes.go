@@ -1,54 +1,21 @@
 package sessionmgr
 
-// ModeNames holds the config- and human-facing labels for a SourceMode. It is
-// the single source of truth for mode naming across config and the TUI.
-type ModeNames struct {
-	ConfigToken string // stable token persisted in config (e.g. "sessions")
-	Tab         string // short tab label (e.g. "Sessions")
-	Title       string // panel title (e.g. "Sessions")
-	List        string // lowercase status phrasing (e.g. "sessions")
+// modeConfigTokens holds the stable token of each SourceMode, persisted in
+// config and emitted in JSON.
+var modeConfigTokens = map[SourceMode]string{
+	ModeAll:           "all",
+	ModeSessions:      "sessions",
+	ModeZoxide:        "zoxide",
+	ModeFD:            "fd",
+	ModeAgents:        "agents",
+	ModeCurrentAgents: "current-agents",
 }
 
-var modeNames = map[SourceMode]ModeNames{
-	ModeAll:      {ConfigToken: "all", Tab: "All", Title: "All", List: "all"},
-	ModeSessions: {ConfigToken: "sessions", Tab: "Sessions", Title: "Sessions", List: "sessions"},
-	ModeZoxide:   {ConfigToken: "zoxide", Tab: "Zoxide", Title: "Zoxide", List: "zoxide"},
-	ModeFD:       {ConfigToken: "fd", Tab: "fd", Title: "fd", List: "fd"},
-	ModeAgents: {
-		ConfigToken: "agents", Tab: "Agents",
-		Title: "Agents", List: "agents",
-	},
-	ModeCurrentAgents: {
-		ConfigToken: "current-agents", Tab: "Current",
-		Title: "Current Agents", List: "current agents",
-	},
-}
-
-// Names returns the label set for mode, falling back to the ModeAll labels for
-// unknown values (preserving the previous default-branch behavior).
-func (m SourceMode) Names() ModeNames {
-	if n, ok := modeNames[m]; ok {
-		return n
+// ConfigToken returns the stable token for mode, falling back to "all" for
+// unknown values.
+func (m SourceMode) ConfigToken() string {
+	if token, ok := modeConfigTokens[m]; ok {
+		return token
 	}
-	return modeNames[ModeAll]
-}
-
-// DisplayNames returns the human-facing labels adapted to the active
-// multiplexer vocabulary. ConfigToken is always taken from Names() so config
-// and JSON tokens stay stable regardless of backend.
-func (m SourceMode) DisplayNames(terms Terms) ModeNames {
-	n := m.Names()
-	if terms.SessionPlural == "" || terms.SessionPlural == "sessions" {
-		return n // tmux/neutral: identical to config labels
-	}
-	switch m {
-	case ModeSessions:
-		n.Tab = terms.SessionTitle + "s"
-		n.Title = terms.SessionTitle + "s"
-		n.List = terms.SessionPlural
-	case ModeCurrentAgents:
-		n.Title = "Current Agents"
-		n.List = "current " + terms.SessionNoun + " agents"
-	}
-	return n
+	return modeConfigTokens[ModeAll]
 }
