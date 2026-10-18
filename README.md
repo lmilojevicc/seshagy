@@ -2,7 +2,7 @@
 
 # Seshagy
 
-![cover](.github/assets/cover.gif)
+![cover](./assets/cover.png)
 
 _The agent-aware terminal dashboard for modern developer workflows._
 
@@ -109,30 +109,30 @@ Keybind a plain terminal (not a herdr pane) to `seshagy run`, then pick a host w
 
 ```toml
 [remote]
-ssh_config_hosts = true   # also offer the Host entries of ~/.ssh/config (default)
+  ssh_config_hosts = true # also offer the Host entries of ~/.ssh/config (default)
 
 # Plain OpenSSH: [user@]host[:port] or ssh://user@host:port
 [[hosts]]
-name = "homelab"            # unique, [A-Za-z0-9._-]+; the ssh alias is seshagy-<name>
-target = "milo@192.168.1.10:2222"
-session = "work"            # optional: remote herdr session to attach
+  name = "homelab"                  # unique, [A-Za-z0-9._-]+; the ssh alias is seshagy-<name>
+  target = "milo@192.168.1.10:2222"
+  session = "work"                  # optional: remote herdr session to attach
 
 # Tailscale MagicDNS (or Tailscale SSH) is an ordinary ssh target
 [[hosts]]
-name = "tailnet"
-target = "milo@homelab.tailnet.ts.net"
+  name = "tailnet"
+  target = "milo@homelab.tailnet.ts.net"
 
 # iroh-ssh: target is the endpoint id; seshagy writes `ProxyCommand iroh-ssh proxy %h`
 [[hosts]]
-name = "edge"
-target = "8f14e45fceea167a5a36dedd4bea2543a1b2c3d4e5f60718293a4b5c6d7e8f90"
-transport = "iroh"
+  name = "edge"
+  target = "8f14e45fceea167a5a36dedd4bea2543a1b2c3d4e5f60718293a4b5c6d7e8f90"
+  transport = "iroh"
 
 # A custom transport keeps full control of the ProxyCommand (%h / %p expand)
 [[hosts]]
-name = "jumpbox"
-target = "10.0.0.5"
-proxy_command = "ssh -W %h:%p bastion"
+  name = "jumpbox"
+  target = "10.0.0.5"
+  proxy_command = "ssh -W %h:%p bastion"
 ```
 
 Targets are `[user@]host[:port]` or `ssh://user@host:port`. Render the generated ssh config and
