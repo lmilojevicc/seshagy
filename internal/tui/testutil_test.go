@@ -194,6 +194,8 @@ func keyStringMsg(name string) tea.KeyMsg {
 		return backspaceMsg()
 	case "delete":
 		return deleteMsg()
+	case "f1":
+		return keyMsg(tea.KeyF1)
 	case "ctrl+c":
 		return keyMsg(tea.KeyCtrlC)
 	case "ctrl+r":

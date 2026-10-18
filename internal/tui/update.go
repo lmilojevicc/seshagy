@@ -250,6 +250,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.installMenu.active {
 			return m.handleInstallMenuKey(msg)
 		}
+		if m.helpOpen {
+			return m.handleHelpKey(msg)
+		}
 		return m.handleKey(msg)
 	}
 	return m, nil

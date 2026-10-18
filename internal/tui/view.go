@@ -166,6 +166,11 @@ func (m Model) View() string {
 		frame = m.renderInstallMenu(m.height)
 	} else {
 		frame = m.renderPicker()
+		if m.helpOpen {
+			// The help box floats over the rendered picker instead of joining it,
+			// so the frame's styling cannot reach inside the box.
+			frame = m.renderHelpOverlay(frame)
+		}
 	}
 	return m.overlayNotifications(m.styles.app.Render(frame))
 }
@@ -1224,34 +1229,26 @@ type footerHint struct {
 	label string
 }
 
-// pickerHints are the footer's key hints in draw order, sessions first. When the
-// line is too narrow they drop from the right, ahead of the pinned quit hint.
-func (m Model) pickerHints() []footerHint {
-	return []footerHint{
-		{"↑↓", "move"},
-		{"⏎", "open"},
-		{"^a", "agents"},
-		{"^s", "state"},
-		{"^t", m.terms.SessionPlural},
-		{"^z", "zoxide"},
-		{"^f", "find"},
-		{"^e", "remotes"},
-		{"^r", "rename"},
-		{"^x", "kill"},
-		{"^o", "preview"},
-		{"^y", "yazi"},
-		{"^g", "integrations"},
+// footerHints are the footer's hints: the table's footer entries, in the order
+// they draw, with the sessions hint named the way the active backend names a
+// session.
+func (m Model) footerHints() []footerHint {
+	bindings := footerBindings()
+	hints := make([]footerHint, len(bindings))
+	for i, binding := range bindings {
+		hints[i] = footerHint{key: keyHint(binding.keys), label: m.bindingLabel(binding)}
 	}
+	return hints
 }
 
-// pickerQuitHint is the footer's last hint. It stays pinned to the end of the
-// line while anything else fits.
-var pickerQuitHint = footerHint{"esc", "quit"}
+// footerPinnedHints is how many trailing hints the footer keeps while anything
+// else fits: F1 help and esc quit, the two keys that reach everything else.
+const footerPinnedHints = 2
 
-// renderFooter draws the frame's bottom key line: the picker hints, the rename
-// keys while a rename is in flight, or nothing but the confirm keys while a kill
-// is armed. Hints drop from the right until the line fits, and the quit hint is
-// kept last while it fits at all.
+// renderFooter draws the frame's bottom key line: the core action hints, the
+// rename keys while a rename is in flight, or nothing but the confirm keys while
+// a kill is armed. Hints drop from the right until the line fits, and the help
+// and quit hints are pinned last.
 func (m Model) renderFooter(width int) string {
 	switch {
 	case m.killArmed:
@@ -1261,22 +1258,36 @@ func (m Model) renderFooter(width int) string {
 		return m.styles.key.Render("⏎") + " " + m.styles.muted.Render("save") +
 			"  " + m.styles.key.Render("esc") + " " + m.styles.muted.Render("cancel")
 	}
-	hints := m.pickerHints()
-	run := func(hint footerHint) string {
-		return m.styles.key.Render(hint.key) + " " + m.styles.muted.Render(hint.label)
+	hints := m.footerHints()
+	parts := make([]string, len(hints))
+	for i, hint := range hints {
+		parts[i] = m.styles.key.Render(hint.key) + " " + m.styles.muted.Render(hint.label)
 	}
-	parts := make([]string, 0, len(hints)+1)
-	for _, hint := range hints {
-		parts = append(parts, run(hint))
+	// The droppable hints give way from the right; the pinned pair is measured
+	// with them, so it survives as long as the line can hold it. The help hint
+	// goes before the quit hint does.
+	body := parts[:len(parts)-footerPinnedHints]
+	pinned := parts[len(parts)-footerPinnedHints:]
+	shownWidth := func(n, p int) int {
+		width := hintsWidth(body[:n])
+		if n > 0 && p > 0 {
+			width += 2
+		}
+		return width + hintsWidth(pinned[len(pinned)-p:])
 	}
-	quit := run(pickerQuitHint)
-	for len(parts) > 0 && hintsWidth(parts)+2+lipgloss.Width(quit) > width {
-		parts = parts[:len(parts)-1]
+	n, p := len(body), footerPinnedHints
+	for n > 0 && shownWidth(n, p) > width {
+		n--
 	}
-	if lipgloss.Width(quit) <= width {
-		parts = append(parts, quit)
+	if shownWidth(n, p) > width {
+		p--
 	}
-	return clampStyledText(strings.Join(parts, "  "), width)
+	if shownWidth(n, p) > width {
+		n, p = 0, 0
+	}
+	visible := append(make([]string, 0, n+p), body[:n]...)
+	visible = append(visible, pinned[len(pinned)-p:]...)
+	return clampStyledText(strings.Join(visible, "  "), width)
 }
 
 // hintsWidth is the columns a list of joined hint runs takes, including the

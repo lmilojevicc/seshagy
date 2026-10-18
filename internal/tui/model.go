@@ -135,6 +135,13 @@ type Model struct {
 	// refocus doesn't quit seshagy before the action completes.
 	killInFlight bool
 
+	// helpOpen is the F1 help overlay. It keeps the picker's own state — query,
+	// filters, cursor, scroll — untouched behind it, and swallows every key but
+	// its scroll and close chords.
+	helpOpen bool
+	// helpTop is the help row the overlay's window opens on.
+	helpTop int
+
 	installMenu installMenuState
 }
 

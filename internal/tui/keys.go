@@ -16,9 +16,9 @@ import (
 	"github.com/lmilojevicc/seshagy/internal/sessionmgr"
 )
 
-// handleKey routes a key press in the picker. The picker is always type-first:
-// printable runes extend the query, and every action is a ctrl/arrow/tab/enter
-// chord.
+// handleKey routes a key press in the picker through the key table (keymap.go).
+// The picker is always type-first: printable runes extend the query, and every
+// action is a ctrl/arrow/tab/enter chord the table binds.
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.renameActive {
 		return m.handleRenameKey(msg)
@@ -26,105 +26,132 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.killArmed {
 		return m.handleKillConfirmKey(msg)
 	}
-	if msg.String() == "ctrl+c" {
-		return m, tea.Quit
-	}
-	switch msg.String() {
-	case "esc":
-		if m.query != "" {
-			m.query = ""
-			return m.afterSelectionChanged()
-		}
-		if m.scope != scopeAll || m.stateFilter != stateFilterNone {
-			m = m.clearFilter()
-			return m.afterSelectionChanged()
-		}
-		return m, tea.Quit
-	case "up", "ctrl+p", "ctrl+k":
-		return m.moveCursor(wrapCursorUp(m.cursor, len(m.rows())))
-	case "down", "ctrl+n", "ctrl+j":
-		return m.moveCursor(wrapCursorDown(m.cursor, len(m.rows())))
-	case "pgup":
-		return m.moveCursor(m.cursor - m.pageSize())
-	case "pgdown":
-		return m.moveCursor(m.cursor + m.pageSize())
-	case "home":
-		return m.moveCursor(0)
-	case "end":
-		return m.moveCursor(len(m.rows()) - 1)
-	case "tab":
-		m = m.switchScope(nextScope(m.scope, 1, m.scopeAvailable))
-		return m.afterSelectionChanged()
-	case "shift+tab":
-		m = m.switchScope(nextScope(m.scope, -1, m.scopeAvailable))
-		return m.afterSelectionChanged()
-	case "enter":
-		return m.activateSelected()
-	case "ctrl+r":
-		return m.startRename()
-	case "ctrl+x", "delete":
-		return m.armKill()
-	case "ctrl+o":
-		m.showPreview = !m.showPreview
-		if !m.previewVisible() {
-			return m, nil
-		}
-		// Toggling the preview keeps the selection where it is.
-		var preview tea.Cmd
-		m, preview = m.requestPreview()
-		return m, preview
-	case "ctrl+y":
-		return m.startYazi()
-	case "ctrl+l":
-		m = m.invalidateAllCaches()
-		var reload tea.Cmd
-		m, reload = m.reloadCmd()
-		return m, reload
-	case "ctrl+a":
-		m = m.toggleAgentsScope()
-		return m.afterSelectionChanged()
-	case "ctrl+t":
-		m = m.toggleScope(scopeSessions)
-		return m.afterSelectionChanged()
-	case "ctrl+z":
-		m = m.toggleScope(scopeZoxide)
-		return m.afterSelectionChanged()
-	case "ctrl+f":
-		m = m.toggleScope(scopeFind)
-		return m.afterSelectionChanged()
-	case "ctrl+e":
-		m = m.toggleScope(scopeHosts)
-		return m.afterSelectionChanged()
-	case "ctrl+s":
-		m = m.cycleStateFilter()
-		return m.afterSelectionChanged()
-	case "ctrl+g":
-		m.openInstallMenu(false)
-		return m, nil
-	case "ctrl+u":
-		if m.query == "" {
-			return m, nil
-		}
-		m.query = ""
-		return m.afterSelectionChanged()
-	case "ctrl+w":
-		return m.deleteQueryWord()
-	case "backspace":
-		if runes := []rune(m.query); len(runes) > 0 {
-			m.query = string(runes[:len(runes)-1])
-			return m.afterSelectionChanged()
-		}
-		if m.scope != scopeAll || m.stateFilter != stateFilterNone {
-			m = m.clearFilter()
-			return m.afterSelectionChanged()
-		}
-		return m, nil
+	if binding := keyBindingFor(msg.String()); binding != nil {
+		return binding.run(m, msg.String())
 	}
 	if !isPrintableKey(msg) {
 		return m, nil
 	}
 	m.query += string(msg.Runes)
 	return m.afterSelectionChanged()
+}
+
+// escapeKey is esc: the query goes first, then the filters, and only a picker
+// already showing everything quits.
+func (m Model) escapeKey() (tea.Model, tea.Cmd) {
+	if m.query != "" {
+		m.query = ""
+		return m.afterSelectionChanged()
+	}
+	if m.scope != scopeAll || m.stateFilter != stateFilterNone {
+		m = m.clearFilter()
+		return m.afterSelectionChanged()
+	}
+	return m, tea.Quit
+}
+
+// quitKey is ctrl+c, which quits from anywhere the table answers.
+func (m Model) quitKey() (tea.Model, tea.Cmd) { return m, tea.Quit }
+
+func (m Model) moveUp() (tea.Model, tea.Cmd) {
+	return m.moveCursor(wrapCursorUp(m.cursor, len(m.rows())))
+}
+
+func (m Model) moveDown() (tea.Model, tea.Cmd) {
+	return m.moveCursor(wrapCursorDown(m.cursor, len(m.rows())))
+}
+
+func (m Model) pageUp() (tea.Model, tea.Cmd) { return m.moveCursor(m.cursor - m.pageSize()) }
+
+func (m Model) pageDown() (tea.Model, tea.Cmd) { return m.moveCursor(m.cursor + m.pageSize()) }
+
+func (m Model) firstRow() (tea.Model, tea.Cmd) { return m.moveCursor(0) }
+
+func (m Model) lastRow() (tea.Model, tea.Cmd) { return m.moveCursor(len(m.rows()) - 1) }
+
+// nextScopeKey and previousScopeKey are tab and shift+tab: the scope order
+// walked one step, stepping over the scopes the picker has no source for.
+func (m Model) nextScopeKey() (tea.Model, tea.Cmd) { return m.cycleScope(1) }
+
+func (m Model) previousScopeKey() (tea.Model, tea.Cmd) { return m.cycleScope(-1) }
+
+func (m Model) cycleScope(delta int) (tea.Model, tea.Cmd) {
+	m = m.switchScope(nextScope(m.scope, delta, m.scopeAvailable))
+	return m.afterSelectionChanged()
+}
+
+// The scope keys share the toggle semantics of toggleScope: the active scope's
+// key returns to all, another scope's key switches straight to it.
+func (m Model) sessionsScopeKey() (tea.Model, tea.Cmd) { return m.toggleScopeKey(scopeSessions) }
+
+func (m Model) zoxideScopeKey() (tea.Model, tea.Cmd) { return m.toggleScopeKey(scopeZoxide) }
+
+func (m Model) findScopeKey() (tea.Model, tea.Cmd) { return m.toggleScopeKey(scopeFind) }
+
+func (m Model) hostsScopeKey() (tea.Model, tea.Cmd) { return m.toggleScopeKey(scopeHosts) }
+
+func (m Model) toggleScopeKey(sc scope) (tea.Model, tea.Cmd) {
+	m = m.toggleScope(sc)
+	return m.afterSelectionChanged()
+}
+
+func (m Model) toggleAgentsKey() (tea.Model, tea.Cmd) {
+	m = m.toggleAgentsScope()
+	return m.afterSelectionChanged()
+}
+
+func (m Model) cycleStateFilterKey() (tea.Model, tea.Cmd) {
+	m = m.cycleStateFilter()
+	return m.afterSelectionChanged()
+}
+
+// backspaceKey edits the query, and clears the filters once there is nothing
+// left to delete.
+func (m Model) backspaceKey() (tea.Model, tea.Cmd) {
+	if runes := []rune(m.query); len(runes) > 0 {
+		m.query = string(runes[:len(runes)-1])
+		return m.afterSelectionChanged()
+	}
+	if m.scope != scopeAll || m.stateFilter != stateFilterNone {
+		m = m.clearFilter()
+		return m.afterSelectionChanged()
+	}
+	return m, nil
+}
+
+// clearQuery empties the prompt line.
+func (m Model) clearQuery() (tea.Model, tea.Cmd) {
+	if m.query == "" {
+		return m, nil
+	}
+	m.query = ""
+	return m.afterSelectionChanged()
+}
+
+// togglePreview flips the preview pane. The selection stays where it is, so only
+// a visible preview captures the selected item.
+func (m Model) togglePreview() (tea.Model, tea.Cmd) {
+	m.showPreview = !m.showPreview
+	if !m.previewVisible() {
+		return m, nil
+	}
+	var preview tea.Cmd
+	m, preview = m.requestPreview()
+	return m, preview
+}
+
+// refreshAll drops every cache and reloads the sources.
+func (m Model) refreshAll() (tea.Model, tea.Cmd) {
+	m = m.invalidateAllCaches()
+	var reload tea.Cmd
+	m, reload = m.reloadCmd()
+	return m, reload
+}
+
+// openIntegrations opens the install menu from ctrl+g.
+func (m Model) openIntegrations() (tea.Model, tea.Cmd) {
+	m.openInstallMenu(false)
+	return m, nil
 }
 
 // switchScope moves to sc, dropping the agent-state filter: the filter only

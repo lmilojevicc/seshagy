@@ -183,6 +183,7 @@ the agent's name. `SESHAGY_AGENT_ICONS=auto|font|none` overrides the detection, 
 ## ⌨️ TUI
 
 The picker is always type-first: printable keys filter the list, and every action is a chord.
+The footer names the core actions only; `F1` opens the overlay with the rest of the keymap.
 
 | Key                           | Action                                                                                 |
 | ----------------------------- | -------------------------------------------------------------------------------------- |
@@ -205,6 +206,7 @@ The picker is always type-first: printable keys filter the list, and every actio
 | `ctrl+g`                      | Open the agent integration install menu                                                 |
 | `ctrl+u` / `ctrl+w`           | Clear the query / delete the last word                                                  |
 | `esc`                         | Clear the query and filter first; quit when both are empty                              |
+| `F1`                          | Open the help overlay: the filter keys, the query tokens, and the rest of the keymap    |
 | `ctrl+c`                      | Quit                                                                                    |
 
 ### Filters
@@ -244,6 +246,16 @@ workspace that match `fix`".
 An agent token (`!x`, `@`, `@x`, `#x`) restricts the list to agents; a bare `!`, `@`, `#` or `/`
 is ignored. Plain text fuzzy-matches exactly as it does without tokens, so highlighting stays
 with the text you typed.
+
+### Help
+
+The footer stays down to the core actions: `↑↓ move`, `⏎ open`, `^r rename`, `^x kill`, `^o preview`,
+`^y yazi`, `F1 help`, `esc quit`. Hints drop from the right on a short line, but `F1 help` and
+`esc quit` stay as long as anything fits. Everything else lives in the overlay `F1` opens: the filter
+keys (with the one in effect highlighted and the state `ctrl+s` is on), the query tokens, and the
+remaining keys. It opens centered over the picker, scrolls with `↑`/`↓` when it is taller than the
+frame, and closes on `F1`, `esc`, or `q`; other keys are swallowed, so the query and filter behind it
+never change.
 
 _When tmux's `prefix` is `C-a`, tmux eats `ctrl+a` before the picker sees it — `tab` / `shift+tab`
 and `esc` reach the same filters._

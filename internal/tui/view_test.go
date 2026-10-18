@@ -485,17 +485,16 @@ func TestPromptRowKeepsTheCountAndNoSigils(t *testing.T) {
 }
 
 // TestFooterDropsHintsFromTheRightAndPinsEscQuit pins the footer's truncation:
-// entries drop from the right when the line is short, and the quit hint stays
-// last while anything fits.
+// the core action hints drop from the right when the line is short, and the help
+// and quit hints are the last to go.
 func TestFooterDropsHintsFromTheRightAndPinsEscQuit(t *testing.T) {
 	m := newTestModel(t)
 	m = withItems(m, pickerItems())
 
 	wide := sessionmgr.StripANSI(m.renderFooter(160))
 	for _, want := range []string{
-		"↑↓ move", "⏎ open", "^a agents", "^s state", "^t sessions", "^z zoxide",
-		"^f find", "^e remotes", "^r rename", "^x kill", "^o preview", "^y yazi",
-		"^g integrations",
+		"↑↓ move", "⏎ open", "^r rename", "^x kill", "^o preview", "^y yazi",
+		"F1 help", "esc quit",
 	} {
 		if !strings.Contains(wide, want) {
 			t.Fatalf("wide footer missing %q: %q", want, wide)
@@ -504,20 +503,14 @@ func TestFooterDropsHintsFromTheRightAndPinsEscQuit(t *testing.T) {
 	if !strings.HasSuffix(wide, "esc quit") {
 		t.Fatalf("wide footer = %q, want esc quit last", wide)
 	}
-
-	// The sessions hint names the backend's own session word.
-	m.terms = sessionmgr.HerdrTerms()
-	if herdr := sessionmgr.StripANSI(
-		m.renderFooter(160),
-	); !strings.Contains(
-		herdr,
-		"^t workspaces",
-	) {
-		t.Fatalf("herdr footer = %q, want the workspaces hint", herdr)
+	// The filter keys live in the help overlay, never in the footer.
+	for _, gone := range []string{"agents", "state", "zoxide", "find", "remotes", "integrations"} {
+		if strings.Contains(wide, gone) {
+			t.Fatalf("footer still shows the %q filter hint: %q", gone, wide)
+		}
 	}
-	m.terms = sessionmgr.TmuxTerms()
 
-	// A narrower line drops the rightmost hints first.
+	// A narrower line drops the rightmost hints first, but keeps the pinned pair.
 	for _, width := range []int{120, 80, 60} {
 		row := sessionmgr.StripANSI(m.renderFooter(width))
 		if ansi.StringWidth(row) > width {
@@ -526,20 +519,29 @@ func TestFooterDropsHintsFromTheRightAndPinsEscQuit(t *testing.T) {
 		if !strings.HasSuffix(row, "esc quit") {
 			t.Fatalf("width %d: footer = %q, want esc quit last", width, row)
 		}
-		if strings.Contains(row, "integrations") || strings.Contains(row, "yazi") {
-			t.Fatalf("width %d: footer kept a hint that drops from the right: %q", width, row)
+		if !strings.Contains(row, "F1 help") {
+			t.Fatalf("width %d: footer dropped the pinned help hint: %q", width, row)
 		}
 		if !strings.Contains(row, "↑↓ move") {
 			t.Fatalf("width %d: footer dropped the leftmost hints: %q", width, row)
 		}
 	}
+	if narrow := sessionmgr.StripANSI(m.renderFooter(60)); strings.Contains(narrow, "yazi") {
+		t.Fatalf("width 60: footer kept a hint that drops from the right: %q", narrow)
+	}
 
 	narrow := sessionmgr.StripANSI(m.renderFooter(40))
-	if !strings.Contains(narrow, "↑↓ move") || strings.Contains(narrow, "zoxide") {
+	if !strings.Contains(narrow, "↑↓ move") || strings.Contains(narrow, "rename") {
 		t.Fatalf("narrow footer = %q, want the left hints only", narrow)
 	}
 	if !strings.HasSuffix(narrow, "esc quit") {
 		t.Fatalf("narrow footer = %q, want esc quit last", narrow)
+	}
+
+	// The pinned pair survives on its own when only it fits, and drops help
+	// before quit below that.
+	if got := sessionmgr.StripANSI(m.renderFooter(20)); got != "F1 help  esc quit" {
+		t.Fatalf("footer at 20 columns = %q, want just the pinned help and quit", got)
 	}
 
 	// The quit hint survives alone when nothing else fits, and a line too narrow
