@@ -1229,9 +1229,22 @@ type footerHint struct {
 // session.
 func (m Model) footerHints() []footerHint {
 	bindings := m.keys.footerBindings()
-	hints := make([]footerHint, len(bindings))
-	for i, binding := range bindings {
-		hints[i] = footerHint{key: keyHint(binding.keys), label: m.bindingLabel(binding)}
+	hints := make([]footerHint, 0, len(bindings))
+	for i := 0; i < len(bindings); i++ {
+		binding := bindings[i]
+		if binding.id == "up" && i+1 < len(bindings) && bindings[i+1].id == "down" {
+			// Up and down share one hint, "↑↓ move", as long as both are bound.
+			hints = append(hints, footerHint{
+				key:   keyHint(binding.keys) + keyHint(bindings[i+1].keys),
+				label: "move",
+			})
+			i++
+			continue
+		}
+		hints = append(
+			hints,
+			footerHint{key: keyHint(binding.keys), label: m.bindingLabel(binding)},
+		)
 	}
 	return hints
 }

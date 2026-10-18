@@ -150,8 +150,7 @@ func TestFooterAndHelpBindingsAreDisjoint(t *testing.T) {
 func TestFooterHintsAreTheCoreActions(t *testing.T) {
 	m := newTestModel(t)
 	want := []footerHint{
-		{"↑", "move up"},
-		{"↓", "move down"},
+		{"↑↓", "move"},
 		{"⏎", "open"},
 		{"^r", "rename"},
 		{"^x", "kill"},

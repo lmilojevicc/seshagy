@@ -124,63 +124,63 @@ func TestResolveKeysRejectsOverridesItCannotRead(t *testing.T) {
 		},
 		{
 			name: "reserved key", keys: keys("agents", "enter"),
-			want: `"enter" is reserved for enter`, action: "agents", keep: "",
+			want: `"enter" is reserved for enter`, action: "agents", keep: "ctrl+a",
 		},
 		{
 			name: "ctrl+m is enter", keys: keys("agents", "C-M"),
-			want: `"ctrl+m" is reserved for enter`, action: "agents", keep: "",
+			want: `"ctrl+m" is reserved for enter`, action: "agents", keep: "ctrl+a",
 		},
 		{
 			name: "ctrl+i is tab", keys: keys("agents", "^i"),
-			want: `"ctrl+i" is reserved for tab`, action: "agents", keep: "",
+			want: `"ctrl+i" is reserved for tab`, action: "agents", keep: "ctrl+a",
 		},
 		{
 			name: "ctrl+[ is esc", keys: keys("agents", "ctrl+["),
-			want: `"ctrl+[" is reserved for esc`, action: "agents", keep: "",
+			want: `"ctrl+[" is reserved for esc`, action: "agents", keep: "ctrl+a",
 		},
 		{
 			name: "ctrl+? is backspace", keys: keys("agents", "^?"),
-			want: `"ctrl+?" is reserved for backspace`, action: "agents", keep: "",
+			want: `"ctrl+?" is reserved for backspace`, action: "agents", keep: "ctrl+a",
 		},
 		{
 			name: "backspace is fixed", keys: keys("agents", "backspace"),
-			want: `"backspace" is reserved for backspace`, action: "agents", keep: "",
+			want: `"backspace" is reserved for backspace`, action: "agents", keep: "ctrl+a",
 		},
 		{
 			name: "ctrl+c is fixed", keys: keys("agents", "ctrl+c"),
-			want: `"ctrl+c" is reserved for ctrl+c`, action: "agents", keep: "",
+			want: `"ctrl+c" is reserved for ctrl+c`, action: "agents", keep: "ctrl+a",
 		},
 		{
 			name: "printable rune", keys: keys("agents", "a"),
-			want: `"a" would type into the query`, action: "agents", keep: "",
+			want: `"a" would type into the query`, action: "agents", keep: "ctrl+a",
 		},
 		{
 			name: "question mark", keys: keys("agents", "?"),
-			want: `"?" would type into the query`, action: "agents", keep: "",
+			want: `"?" would type into the query`, action: "agents", keep: "ctrl+a",
 		},
 		{
 			name: "slash", keys: keys("agents", "/"),
-			want: `"/" would type into the query`, action: "agents", keep: "",
+			want: `"/" would type into the query`, action: "agents", keep: "ctrl+a",
 		},
 		{
 			name: "space", keys: keys("agents", " "),
-			want: `" " would type into the query`, action: "agents", keep: "",
+			want: `" " would type into the query`, action: "agents", keep: "ctrl+a",
 		},
 		{
 			name: "unknown name", keys: keys("agents", "foo"),
-			want: `"foo" is not a key name`, action: "agents", keep: "",
+			want: `"foo" is not a key name`, action: "agents", keep: "ctrl+a",
 		},
 		{
 			name: "unknown chord", keys: keys("agents", "ctrl+alt+x"),
-			want: `"ctrl+alt+x" is not a key name`, action: "agents", keep: "",
+			want: `"ctrl+alt+x" is not a key name`, action: "agents", keep: "ctrl+a",
 		},
 		{
 			name: "shifted rune", keys: keys("agents", "shift+a"),
-			want: `"shift+a" is not a key name`, action: "agents", keep: "",
+			want: `"shift+a" is not a key name`, action: "agents", keep: "ctrl+a",
 		},
 		{
 			name: "no such function key", keys: keys("agents", "f21"),
-			want: `"f21" is not a key name`, action: "agents", keep: "",
+			want: `"f21" is not a key name`, action: "agents", keep: "ctrl+a",
 		},
 		{
 			name: "one bad key of a list", keys: keys("kill", "f9", "a", "delete"),
@@ -194,6 +194,12 @@ func TestResolveKeysRejectsOverridesItCannotRead(t *testing.T) {
 			issues := strings.Join(table.Issues(), "\n")
 			if !strings.Contains(issues, tt.want) {
 				t.Fatalf("issues = %q, want %q", issues, tt.want)
+			}
+			// An override whose every key was rejected keeps the action's
+			// defaults instead of unbinding it, and says so.
+			if tt.keep == "ctrl+a" && !strings.Contains(issues, "ignored") &&
+				!strings.Contains(issues, "no usable key; keeping the default") {
+				t.Fatalf("issues = %q, want the keep-the-default note", issues)
 			}
 			got := strings.Join(mappingKeys(t, table, tt.action), ",")
 			if got != tt.keep {
@@ -256,8 +262,8 @@ func TestResolveKeysLeavesTheOtherKeysOfTheActionItTookFrom(t *testing.T) {
 	}
 	m := remappedModel(t, keys("page_up", "ctrl+p"))
 	hints := m.footerHints()
-	if hints[0].key != "↑" || hints[0].label != "move up" {
-		t.Fatalf("the up hint = %+v, want the arrow", hints[0])
+	if hints[0].key != "↑↓" || hints[0].label != "move" {
+		t.Fatalf("the move hint = %+v, want the arrows", hints[0])
 	}
 	row := helpRowFor(t, openHelp(t, m), "ctrl+k")
 	if row.label != "move up" {
@@ -464,12 +470,12 @@ func TestFooterFallsBackToTheKeysThatRemain(t *testing.T) {
 		{
 			"defaults",
 			nil,
-			"↑ move up  ↓ move down  ⏎ open  ^r rename  ^x kill  ^o preview  ^y yazi  F1 help  esc quit",
+			"↑↓ move  ⏎ open  ^r rename  ^x kill  ^o preview  ^y yazi  F1 help  esc quit",
 		},
 		{
 			name:   "no yazi",
 			unbind: []string{"yazi"},
-			want:   "↑ move up  ↓ move down  ⏎ open  ^r rename  ^x kill  ^o preview  F1 help  esc quit",
+			want:   "↑↓ move  ⏎ open  ^r rename  ^x kill  ^o preview  F1 help  esc quit",
 		},
 		{
 			name:   "the droppable hints only",
@@ -573,7 +579,7 @@ func TestNewToastsTheKeyBindingIssues(t *testing.T) {
 		{"one issue", keys("bogus", "f2"), 1, "1 key binding issue — see `seshagy config keys`"},
 		{
 			name: "two issues",
-			keys: map[string]appconfig.KeyList{"bogus": {"f2"}, "agents": {"a"}},
+			keys: map[string]appconfig.KeyList{"bogus": {"f2"}, "agents": {"a", "f3"}},
 			want: "2 key binding issues — see `seshagy config keys`",
 		},
 	}
@@ -590,24 +596,26 @@ func TestNewToastsTheKeyBindingIssues(t *testing.T) {
 	}
 }
 
-// TestResolveKeysDropsEveryKeyOfAnEntryItCannotBind pins the edge of the drop
-// rule: a key the picker cannot bind is dropped from its entry, so an entry
-// whose every key is dropped leaves the action with none — the same state an
-// explicit [] asks for — and the issue names each dropped key.
-func TestResolveKeysDropsEveryKeyOfAnEntryItCannotBind(t *testing.T) {
+// TestResolveKeysKeepsTheDefaultsWhenEveryKeyIsRejected pins the edge of the
+// drop rule: an entry whose every key is rejected is a typo, not a request to
+// unbind, so the action keeps its default keys and the issues say so. Only an
+// explicit empty list unbinds.
+func TestResolveKeysKeepsTheDefaultsWhenEveryKeyIsRejected(t *testing.T) {
 	table := ResolveKeys(keys("agents", "a", "?"))
 	want := []string{
 		`tui.keys.agents: "a" would type into the query`,
 		`tui.keys.agents: "?" would type into the query`,
+		"tui.keys.agents: no usable key; keeping the default",
 	}
 	if got := table.Issues(); !slices.Equal(got, want) {
 		t.Fatalf("issues = %v, want %v", got, want)
 	}
-	if got := mappingKeys(t, table, "agents"); len(got) != 0 {
-		t.Fatalf("agents keys = %v, want none", got)
+	if got := strings.Join(mappingKeys(t, table, "agents"), ","); got != "ctrl+a" {
+		t.Fatalf("agents keys = %q, want the default ctrl+a", got)
 	}
-	if _, ok := table.bindingFor("ctrl+a"); ok {
-		t.Fatal("the replaced default key still dispatches")
+	unbound := ResolveKeys(map[string]appconfig.KeyList{"agents": {}})
+	if got := mappingKeys(t, unbound, "agents"); len(got) != 0 {
+		t.Fatalf("an explicit [] left agents with %v, want none", got)
 	}
 }
 
