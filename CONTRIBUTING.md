@@ -9,7 +9,7 @@ multiplexer backends. This guide covers the essentials; for the full picture
 
 ## Quick start
 
-Go 1.26.6 or newer is an explicit prerequisite; `mise.toml` does not install Go.
+Go 1.26.9 or newer is an explicit prerequisite; `mise.toml` does not install Go.
 
 ```sh
 git clone https://github.com/lmilojevicc/seshagy.git

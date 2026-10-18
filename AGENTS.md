@@ -53,7 +53,7 @@ Remote herdr servers live in `internal/remote/`:
 - `make build`: builds the local `./seshagy` binary from `./cmd/seshagy`.
 - `go run ./cmd/seshagy`: runs the TUI from the checkout.
 
-Go 1.26.6 or newer is required by `go.mod`. Runtime behavior expects a multiplexer (`tmux` or `herdr`); optional tools include `zoxide`, `fd`, `yazi`, and `eza`.
+Go 1.26.9 or newer is required by `go.mod`. Runtime behavior expects a multiplexer (`tmux` or `herdr`); optional tools include `zoxide`, `fd`, `yazi`, and `eza`.
 
 ## Coding Style & Naming Conventions
 
