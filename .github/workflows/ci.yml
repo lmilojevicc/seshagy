@@ -68,7 +68,7 @@ jobs:
         run: mise run build
 
       - name: Install Nix
-        uses: cachix/install-nix-action@v31.10.6
+        uses: cachix/install-nix-action@v31.11.1
 
       - name: Evaluate Nix flake
         run: nix flake check --all-systems --no-build --no-update-lock-file
