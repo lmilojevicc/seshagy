@@ -314,6 +314,7 @@ func (m Model) Init() tea.Cmd {
 		notificationTickCmd(),
 		refreshCatalogsCmd(m.config),
 		hostsCmd(m.config),
+		startupInstallMenuCmd(m.config),
 	}
 	for _, source := range tuiSources {
 		var cmd tea.Cmd

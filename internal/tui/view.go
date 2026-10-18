@@ -1322,11 +1322,12 @@ func (m Model) renderInstallMenu(height int) string {
 	width := max(54, min(88, m.width-4))
 	innerW := max(44, width-4)
 	names := integrations.Available()
-	innerH := max(11, len(names)+7)
+	innerH := max(12, len(names)+8)
 
 	lines := []string{
 		s.title.Render("Install agent integrations"),
 		s.muted.Render("Hooks/plugins report state to seshagy in real time."),
+		s.muted.Render(clampText(m.integrationsNote(), innerW)),
 		"",
 	}
 	for i, name := range names {
@@ -1369,6 +1370,16 @@ func (m Model) renderInstallMenu(height int) string {
 	content := trimHeight(strings.Join(lines, "\n"), innerH)
 	box := s.panePopup.Width(width - 2).Height(innerH).Render(content)
 	return lipgloss.Place(m.width, height, lipgloss.Center, lipgloss.Center, box)
+}
+
+// integrationsNote is the install menu's one-line caveat, drawn on every
+// backend: the hooks/plugins report agent state to tmux only, and under herdr
+// the backend detects agent state itself.
+func (m Model) integrationsNote() string {
+	if m.mux.Kind() == sessionmgr.BackendHerdr {
+		return "tmux only — herdr detects agent state itself"
+	}
+	return "tmux only — under herdr, herdr detects agent state itself"
 }
 
 // overlayNotifications floats the toast stack in the frame's bottom-right
