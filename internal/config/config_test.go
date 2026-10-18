@@ -1235,3 +1235,125 @@ func TestRemoteHostKeybindings(t *testing.T) {
 		})
 	}
 }
+
+// writeConfigFile writes a config.toml body under a fresh XDG_CONFIG_HOME.
+func writeConfigFile(t *testing.T, body string) {
+	t.Helper()
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	path := Path()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+}
+
+// TestLoadKeysAcceptsStringAndArrayForm pins the [tui.keys] entry grammar: a
+// bare key name and an array of names both load, and an empty array is a
+// present but empty list rather than a missing one.
+func TestLoadKeysAcceptsStringAndArrayForm(t *testing.T) {
+	writeConfigFile(t, `
+[tui.keys]
+agents = "f2"
+kill = ["ctrl+x", "delete"]
+yazi = []
+`)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	tests := []struct {
+		id   string
+		want KeyList
+	}{
+		{"agents", KeyList{"f2"}},
+		{"kill", KeyList{"ctrl+x", "delete"}},
+		{"yazi", KeyList{}},
+	}
+	for _, tt := range tests {
+		got, ok := cfg.TUI.Keys[tt.id]
+		if !ok {
+			t.Fatalf("keys[%q] missing from %#v", tt.id, cfg.TUI.Keys)
+		}
+		if got == nil {
+			t.Fatalf("keys[%q] = nil, want a readable list", tt.id)
+		}
+		if strings.Join(got, ",") != strings.Join(tt.want, ",") {
+			t.Fatalf("keys[%q] = %v, want %v", tt.id, got, tt.want)
+		}
+	}
+}
+
+// TestLoadToleratesUnreadableKeysEntry pins that a [tui.keys] entry of a type
+// the picker cannot read is reported as a nil list and ignored, instead of
+// failing the load — the rest of the config still applies.
+func TestLoadToleratesUnreadableKeysEntry(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{"number", "agents = 3"},
+		{"table", "agents = { key = \"f2\" }"},
+		{"number in array", "agents = [\"f2\", 3]"},
+		{"boolean", "agents = true"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			writeConfigFile(
+				t,
+				"[tui]\nlayout = \"vertical\"\n\n[tui.keys]\n"+tt.body+"\nkill = \"f9\"\n",
+			)
+			cfg, err := Load()
+			if err != nil {
+				t.Fatalf("Load() error = %v", err)
+			}
+			if list, ok := cfg.TUI.Keys["agents"]; !ok || list != nil {
+				t.Fatalf("keys = %#v, want agents present and nil", cfg.TUI.Keys)
+			}
+			if got := cfg.TUI.Keys["kill"]; len(got) != 1 || got[0] != "f9" {
+				t.Fatalf("the readable entry did not survive: %#v", cfg.TUI.Keys)
+			}
+			if cfg.TUILayout() != LayoutVertical {
+				t.Fatalf("the rest of the config did not load: %#v", cfg.TUI)
+			}
+		})
+	}
+}
+
+// TestSaveAndLoadKeysRoundTrip pins that the key map survives a show/save cycle
+// and that an unreadable entry is left out rather than written back as an empty
+// list, which would unbind the action it only meant to override.
+func TestSaveAndLoadKeysRoundTrip(t *testing.T) {
+	writeConfigFile(t, "[tui.keys]\nagents = \"f2\"\nkill = [\"ctrl+x\", \"delete\"]\nyazi = 3\n")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if err := Save(cfg); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	data, err := os.ReadFile(Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	if !strings.Contains(text, `[tui.keys]`) ||
+		!strings.Contains(text, `agents = ["f2"]`) ||
+		!strings.Contains(text, `kill = ["ctrl+x", "delete"]`) {
+		t.Fatalf("saved config missing key entries:\n%s", text)
+	}
+	if strings.Contains(text, "yazi") {
+		t.Fatalf("saved config kept the unreadable entry:\n%s", text)
+	}
+	loaded, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if got := loaded.TUI.Keys["agents"]; len(got) != 1 || got[0] != "f2" {
+		t.Fatalf("agents keys = %v, want [f2]", got)
+	}
+	if got, ok := loaded.TUI.Keys["yazi"]; ok {
+		t.Fatalf("yazi keys = %v, want the entry dropped", got)
+	}
+}

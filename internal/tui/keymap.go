@@ -19,21 +19,33 @@ const (
 // keyGroups is the order the help overlay draws its sections in.
 var keyGroups = []keyGroup{groupFilters, groupQueryTokens, groupNavigation, groupActions}
 
-// keyBinding is one row of the picker's key table. The key dispatch, the footer
-// and the help overlay all read it, so a key cannot exist in one of them and be
-// missing from another. Every entry is either a footer hint or a help row, never
-// both, and the entries carrying a run are the picker's dispatchable keys.
+// keyBinding is one action of the picker's key table. The key dispatch, the
+// footer and the help overlay all read the table, so a key cannot exist in one
+// of them and be missing from another. Every action carries all of its keys: the
+// footer draws an action's first key as its hint and the help overlay the keys
+// the footer leaves it, and the entries carrying a run are what dispatches.
 type keyBinding struct {
+	// id is the action's stable name. The ids of the remappable actions are what
+	// a [tui.keys] entry overrides (see ResolveKeys); the fixed keys carry an id
+	// too, so every row of the table has one. esc is the only id two rows share:
+	// the one key the footer's quit hint and the help row that spells out what
+	// esc clears both name.
+	id string
 	// keys are the bubbletea key names the binding answers, in the order the
 	// hints draw them. They are dispatch keys, not display text: keyHint turns
 	// them into the glyphs the footer and the help overlay draw.
 	keys []string
-	// label names the binding in the help overlay.
+	// label names the binding in the help overlay and beside a footer hint.
 	label string
 	// group is the help overlay's section for the binding.
 	group keyGroup
-	// footer marks the entry as a footer hint, which the help overlay skips.
+	// footer marks the entry as a footer hint, which draws the action's first
+	// key. The help overlay draws the action's remaining keys.
 	footer bool
+	// fixed marks a key a [tui.keys] entry cannot remap. The fixed rows are the
+	// picker's own keys and the query-token rows, whose keys are the token text
+	// the help overlay documents rather than a key that dispatches.
+	fixed bool
 	// terms marks a label that carries the backend's own word for a session
 	// ("sessions" under tmux, "workspaces" under herdr).
 	terms bool
@@ -44,261 +56,275 @@ type keyBinding struct {
 	// row names the agent state it is filtering on.
 	value func(Model) string
 	// run performs the binding. It is nil for a help row that documents the
-	// query grammar rather than a key, and those rows never dispatch.
-	run func(Model, string) (tea.Model, tea.Cmd)
+	// query grammar or what the esc key clears rather than binding a key, and
+	// those rows never dispatch.
+	run func(Model) (tea.Model, tea.Cmd)
 }
 
-// pickerKeyBindings is the picker's single key table. The footer hints come
-// first, in the order the footer draws them; the help rows follow, in table
-// order within each group.
+// pickerKeyBindings is the picker's default key table: the footer hints first,
+// in the order the footer draws them, the help rows after them in table order
+// within each group. ResolveKeys applies the configured [tui.keys] overrides to
+// a copy of it.
 var pickerKeyBindings = []keyBinding{
 	// Footer hints: the core actions, drawn in the frame's bottom line.
 	{
-		keys:   []string{"up", "down"},
-		label:  "move",
+		id:     "up",
+		keys:   []string{"up", "ctrl+p", "ctrl+k"},
+		label:  "move up",
 		group:  groupNavigation,
 		footer: true,
-		run: func(m Model, key string) (tea.Model, tea.Cmd) {
-			if key == "up" {
-				return m.moveUp()
-			}
-			return m.moveDown()
-		},
+		run:    Model.moveUp,
 	},
 	{
+		id:     "down",
+		keys:   []string{"down", "ctrl+n", "ctrl+j"},
+		label:  "move down",
+		group:  groupNavigation,
+		footer: true,
+		run:    Model.moveDown,
+	},
+	{
+		id:     "enter",
 		keys:   []string{"enter"},
 		label:  "open",
 		group:  groupActions,
 		footer: true,
-		run:    keyRun(Model.activateSelected),
+		fixed:  true,
+		run:    Model.activateSelected,
 	},
 	{
+		id:     "rename",
 		keys:   []string{"ctrl+r"},
 		label:  "rename",
 		group:  groupActions,
 		footer: true,
-		run:    keyRun(Model.startRename),
+		run:    Model.startRename,
 	},
 	{
-		keys:   []string{"ctrl+x"},
+		id:     "kill",
+		keys:   []string{"ctrl+x", "delete"},
 		label:  "kill",
 		group:  groupActions,
 		footer: true,
-		run:    keyRun(Model.armKill),
+		run:    Model.armKill,
 	},
 	{
+		id:     "preview",
 		keys:   []string{"ctrl+o"},
 		label:  "preview",
 		group:  groupActions,
 		footer: true,
-		run:    keyRun(Model.togglePreview),
+		run:    Model.togglePreview,
 	},
 	{
+		id:     "yazi",
 		keys:   []string{"ctrl+y"},
 		label:  "yazi",
 		group:  groupActions,
 		footer: true,
-		run:    keyRun(Model.startYazi),
+		run:    Model.startYazi,
 	},
 	{
+		id:     "help",
 		keys:   []string{"f1"},
 		label:  "help",
 		group:  groupActions,
 		footer: true,
-		run:    keyRun(Model.openHelp),
+		run:    Model.openHelp,
 	},
 	{
+		id:     "esc",
 		keys:   []string{"esc"},
 		label:  "quit",
 		group:  groupActions,
 		footer: true,
-		run:    keyRun(Model.escapeKey),
+		fixed:  true,
+		run:    Model.escapeKey,
 	},
 
 	// Filters: the scope keys and the agent-state cycle, narrowed by the query.
 	{
+		id:     "agents",
 		keys:   []string{"ctrl+a"},
 		label:  "agents",
 		group:  groupFilters,
 		active: activeScope(scopeAgents),
-		run:    keyRun(Model.toggleAgentsKey),
+		run:    Model.toggleAgentsKey,
 	},
 	{
+		id:     "state",
 		keys:   []string{"ctrl+s"},
 		label:  "agent state",
 		group:  groupFilters,
 		active: func(m Model) bool { return m.stateFilter != stateFilterNone },
 		value:  stateFilterValue,
-		run:    keyRun(Model.cycleStateFilterKey),
+		run:    Model.cycleStateFilterKey,
 	},
 	{
+		id:     "sessions",
 		keys:   []string{"ctrl+t"},
 		label:  "sessions",
 		group:  groupFilters,
 		terms:  true,
 		active: activeScope(scopeSessions),
-		run:    keyRun(Model.sessionsScopeKey),
+		run:    Model.sessionsScopeKey,
 	},
 	{
+		id:     "zoxide",
 		keys:   []string{"ctrl+z"},
 		label:  "zoxide",
 		group:  groupFilters,
 		active: activeScope(scopeZoxide),
-		run:    keyRun(Model.zoxideScopeKey),
+		run:    Model.zoxideScopeKey,
 	},
 	{
+		id:     "find",
 		keys:   []string{"ctrl+f"},
 		label:  "find",
 		group:  groupFilters,
 		active: activeScope(scopeFind),
-		run:    keyRun(Model.findScopeKey),
+		run:    Model.findScopeKey,
 	},
 	{
+		id:     "remotes",
 		keys:   []string{"ctrl+e"},
 		label:  "remotes",
 		group:  groupFilters,
 		active: activeScope(scopeHosts),
-		run:    keyRun(Model.hostsScopeKey),
+		run:    Model.hostsScopeKey,
 	},
 	{
+		id:    "next_filter",
 		keys:  []string{"tab"},
 		label: "next filter",
 		group: groupFilters,
-		run:   keyRun(Model.nextScopeKey),
+		run:   Model.nextScopeKey,
 	},
 	{
+		id:    "previous_filter",
 		keys:  []string{"shift+tab"},
 		label: "previous filter",
 		group: groupFilters,
-		run:   keyRun(Model.previousScopeKey),
+		run:   Model.previousScopeKey,
 	},
 	{
+		id:    "backspace",
 		keys:  []string{"backspace"},
 		label: "delete a character; clear filters",
 		group: groupFilters,
-		run:   keyRun(Model.backspaceKey),
+		fixed: true,
+		run:   Model.backspaceKey,
 	},
+	// The esc row documents what esc clears before it quits; the footer's esc
+	// entry above is the one that binds the key.
 	{
+		id:    "esc",
 		keys:  []string{"esc"},
 		label: "clear query → filters → quit",
 		group: groupFilters,
+		fixed: true,
 	},
 
 	// Query tokens: the prompt's prefix grammar, ANDed with the filters above.
-	{keys: []string{"!name"}, label: "agent name", group: groupQueryTokens},
-	{keys: []string{"@"}, label: "all agents", group: groupQueryTokens},
-	{keys: []string{"@ws"}, label: "agent workspace or state", group: groupQueryTokens},
-	{keys: []string{"#state"}, label: "agent state", group: groupQueryTokens},
-	{keys: []string{"/path"}, label: "path contains", group: groupQueryTokens},
-	{label: "fix @seshagy #idle", group: groupQueryTokens},
+	// The token text is what these rows draw, so the config cannot remap them.
+	{
+		id:    "!name",
+		keys:  []string{"!name"},
+		label: "agent name",
+		group: groupQueryTokens,
+		fixed: true,
+	},
+	{id: "@", keys: []string{"@"}, label: "all agents", group: groupQueryTokens, fixed: true},
+	{
+		id:    "@ws",
+		keys:  []string{"@ws"},
+		label: "agent workspace or state",
+		group: groupQueryTokens,
+		fixed: true,
+	},
+	{
+		id:    "#state",
+		keys:  []string{"#state"},
+		label: "agent state",
+		group: groupQueryTokens,
+		fixed: true,
+	},
+	{
+		id:    "/path",
+		keys:  []string{"/path"},
+		label: "path contains",
+		group: groupQueryTokens,
+		fixed: true,
+	},
+	{id: "example", label: "fix @seshagy #idle", group: groupQueryTokens},
 
-	// Navigation: the movement chords the footer's arrow hint does not name.
+	// Navigation: the movement chords the footer's arrow hints do not name.
 	{
-		keys:  []string{"ctrl+p", "ctrl+k"},
-		label: "move up",
+		id:    "page_up",
+		keys:  []string{"pgup"},
+		label: "page up",
 		group: groupNavigation,
-		run:   keyRun(Model.moveUp),
+		run:   Model.pageUp,
 	},
 	{
-		keys:  []string{"ctrl+n", "ctrl+j"},
-		label: "move down",
-		group: groupNavigation,
-		run:   keyRun(Model.moveDown),
-	},
-	{keys: []string{"pgup"}, label: "page up", group: groupNavigation, run: keyRun(Model.pageUp)},
-	{
+		id:    "page_down",
 		keys:  []string{"pgdown"},
 		label: "page down",
 		group: groupNavigation,
-		run:   keyRun(Model.pageDown),
+		run:   Model.pageDown,
 	},
 	{
+		id:    "first",
 		keys:  []string{"home"},
 		label: "first item",
 		group: groupNavigation,
-		run:   keyRun(Model.firstRow),
+		run:   Model.firstRow,
 	},
-	{keys: []string{"end"}, label: "last item", group: groupNavigation, run: keyRun(Model.lastRow)},
+	{
+		id:    "last",
+		keys:  []string{"end"},
+		label: "last item",
+		group: groupNavigation,
+		run:   Model.lastRow,
+	},
 
 	// Actions: everything the footer's hints do not name.
 	{
-		keys:  []string{"delete"},
-		label: "kill",
-		group: groupActions,
-		run:   keyRun(Model.armKill),
-	},
-	{
+		id:    "integrations",
 		keys:  []string{"ctrl+g"},
 		label: "integrations",
 		group: groupActions,
-		run:   keyRun(Model.openIntegrations),
+		run:   Model.openIntegrations,
 	},
 	{
+		id:    "refresh",
 		keys:  []string{"ctrl+l"},
 		label: "refresh",
 		group: groupActions,
-		run:   keyRun(Model.refreshAll),
+		run:   Model.refreshAll,
 	},
 	{
+		id:    "clear_query",
 		keys:  []string{"ctrl+u"},
 		label: "clear the query",
 		group: groupActions,
-		run:   keyRun(Model.clearQuery),
+		run:   Model.clearQuery,
 	},
 	{
+		id:    "delete_word",
 		keys:  []string{"ctrl+w"},
 		label: "delete a word",
 		group: groupActions,
-		run:   keyRun(Model.deleteQueryWord),
+		run:   Model.deleteQueryWord,
 	},
-	{keys: []string{"ctrl+c"}, label: "quit", group: groupActions, run: keyRun(Model.quitKey)},
-}
-
-// keyRun adapts a handler that answers the same way whatever key triggered it to
-// the table's handler signature.
-func keyRun(run func(Model) (tea.Model, tea.Cmd)) func(Model, string) (tea.Model, tea.Cmd) {
-	return func(m Model, _ string) (tea.Model, tea.Cmd) { return run(m) }
-}
-
-// keyBindingFor returns the binding a key triggers, or nil when no binding
-// answers it — a printable rune extends the query instead. Help rows that
-// document the query grammar carry no run and never dispatch.
-func keyBindingFor(key string) *keyBinding {
-	for i := range pickerKeyBindings {
-		binding := &pickerKeyBindings[i]
-		if binding.run == nil {
-			continue
-		}
-		for _, candidate := range binding.keys {
-			if candidate == key {
-				return binding
-			}
-		}
-	}
-	return nil
-}
-
-// footerBindings are the table's footer hints, in draw order.
-func footerBindings() []keyBinding {
-	hints := make([]keyBinding, 0, len(pickerKeyBindings))
-	for _, binding := range pickerKeyBindings {
-		if binding.footer {
-			hints = append(hints, binding)
-		}
-	}
-	return hints
-}
-
-// helpBindings are the table's help rows, in table order: every binding the
-// footer does not draw, plus the query-token rows.
-func helpBindings() []keyBinding {
-	rows := make([]keyBinding, 0, len(pickerKeyBindings))
-	for _, binding := range pickerKeyBindings {
-		if !binding.footer {
-			rows = append(rows, binding)
-		}
-	}
-	return rows
+	{
+		id:    "quit",
+		keys:  []string{"ctrl+c"},
+		label: "quit",
+		group: groupActions,
+		fixed: true,
+		run:   Model.quitKey,
+	},
 }
 
 // bindingLabel names a binding: the backend's own word for a session where the
@@ -360,13 +386,9 @@ func keyGlyph(key string) string {
 	return key
 }
 
-// keyHint draws a binding's keys as one hint: the arrow pair as the single ↑↓
-// run it reads as, a chord pair as ^n/^j, a lone key as itself. It is empty for
-// a row with no keys.
+// keyHint draws a run of keys as one hint: a chord pair as ^n/^j, a lone key as
+// itself. It is empty for a row with no keys.
 func keyHint(keys []string) string {
-	if len(keys) == 2 && keys[0] == "up" && keys[1] == "down" {
-		return "↑↓"
-	}
 	parts := make([]string, len(keys))
 	for i, key := range keys {
 		parts[i] = keyGlyph(key)

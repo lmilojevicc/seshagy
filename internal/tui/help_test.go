@@ -190,48 +190,57 @@ func TestHelpSwallowsEveryOtherKey(t *testing.T) {
 }
 
 // TestHelpBoxDrawsTheTableRowsTheFooterDoesNot pins the help box's contents
-// against the one table: every non-footer binding, in the table's row order for
-// its group, plus the query-token rows — and nothing the footer already draws.
+// against the one table: every row the table gives the overlay — each action's
+// remaining keys, the rows the footer draws none of, and the query-token rows —
+// in the table's row order within its group, and nothing the footer draws.
 func TestHelpBoxDrawsTheTableRowsTheFooterDoesNot(t *testing.T) {
 	m := helpModel(t, 120, 34)
 	_, _, _, box := helpBox(t, openHelp(t, m))
 	rendered := strings.Join(box, "\n")
 
-	var rows []helpRow
+	rows := 0
 	for _, block := range m.helpBlocks() {
 		if len(block.rows) == 0 {
 			t.Fatalf("the box drew the empty group %q", block.group)
 		}
-		rows = append(rows, block.rows...)
+		want := make([]keyBinding, 0, len(block.rows))
+		for _, binding := range m.keys.helpBindings() {
+			if binding.group == block.group {
+				want = append(want, binding)
+			}
+		}
+		if len(block.rows) != len(want) {
+			t.Fatalf("group %q drew %d rows, want %d", block.group, len(block.rows), len(want))
+		}
+		for i, binding := range want {
+			row := block.rows[i]
+			rows++
+			if row.key != keyHint(binding.keys) {
+				t.Fatalf("row %d hints %q, want %q", i, row.key, keyHint(binding.keys))
+			}
+			if row.label != m.bindingLabel(binding) {
+				t.Fatalf("row %d labels %q, want %q", i, row.label, m.bindingLabel(binding))
+			}
+			if row.value != bindingValue(m, binding) {
+				t.Fatalf("row %d value %q, want %q", i, row.value, bindingValue(m, binding))
+			}
+			if row.active != bindingActive(m, binding) {
+				t.Fatalf("row %d active = %v, want %v", i, row.active, bindingActive(m, binding))
+			}
+			if !strings.Contains(rendered, row.text()) {
+				t.Fatalf("the box does not draw the row %q:\n%s", row.text(), rendered)
+			}
+		}
 	}
-	bindings := helpBindings()
-	if len(rows) != len(bindings) {
-		t.Fatalf("the box drew %d rows, want the %d non-footer bindings", len(rows), len(bindings))
-	}
-	for i, binding := range bindings {
-		row := rows[i]
-		if row.key != keyHint(binding.keys) {
-			t.Fatalf("row %d hints %q, want %q", i, row.key, keyHint(binding.keys))
-		}
-		if row.label != m.bindingLabel(binding) {
-			t.Fatalf("row %d labels %q, want %q", i, row.label, m.bindingLabel(binding))
-		}
-		if row.value != bindingValue(m, binding) {
-			t.Fatalf("row %d value %q, want %q", i, row.value, bindingValue(m, binding))
-		}
-		if row.active != bindingActive(m, binding) {
-			t.Fatalf("row %d active = %v, want %v", i, row.active, bindingActive(m, binding))
-		}
-		if !strings.Contains(rendered, row.text()) {
-			t.Fatalf("the box does not draw the row %q:\n%s", row.text(), rendered)
-		}
+	if want := len(m.keys.helpBindings()); rows != want {
+		t.Fatalf("the box drew %d rows, want the table's %d", rows, want)
 	}
 	for _, token := range []string{"!name", "@ws", "#state", "/path", "fix @seshagy #idle"} {
 		if !strings.Contains(rendered, token) {
 			t.Fatalf("the box does not draw the token row %q:\n%s", token, rendered)
 		}
 	}
-	for _, binding := range footerBindings() {
+	for _, binding := range m.keys.footerBindings() {
 		hint := keyHint(binding.keys) + " " + m.bindingLabel(binding)
 		if strings.Contains(rendered, hint) {
 			t.Fatalf("the box repeats the footer hint %q:\n%s", hint, rendered)
@@ -500,7 +509,7 @@ func TestHelpBoxHighlightsTheActiveFilterAndNamesTheState(t *testing.T) {
 // box draws its rows from.
 func helpRowFor(t *testing.T, m Model, key string) helpRow {
 	t.Helper()
-	for _, binding := range helpBindings() {
+	for _, binding := range m.keys.helpBindings() {
 		names := false
 		for _, candidate := range binding.keys {
 			names = names || candidate == key
