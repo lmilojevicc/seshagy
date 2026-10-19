@@ -12,7 +12,7 @@ Navigating the terminal shouldn't break your flow, and managing AI coding agents
 
 `seshagy` is a lightning-fast dashboard that bridges the gap between your project directories, active multiplexer sessions, and terminal-based coding agents. It gives you a bird's-eye view of your entire workspace, letting you jump exactly where you need to be with a single keystroke.
 
-## ✨ Why use seshagy?
+## Why use seshagy?
 
 - **Navigate at the speed of thought:** Stop typing `cd` and `tmux attach`. Instantly jump to existing sessions or spin up new ones from your most used directories (powered by `zoxide` and `fd`).
 - **Never lose track of your AI agents:** Running Pi, Claude Code, Codex, or Opencode in the background? `seshagy` automatically tracks their states across all panes. Instantly see if an agent is _working_, _blocked_ (needs your input), _done_, or _idle_ — without hunting for windows.
@@ -20,7 +20,7 @@ Navigating the terminal shouldn't break your flow, and managing AI coding agents
 - **Universal multiplexer support:** Native, auto-detecting support for both **tmux** and **herdr**. It just works.
 - **Remote servers in reach:** Bring your homelab, edge box, or a Tailscale/iroh machine into the same picker and switch a herdr client to it with one key.
 
-## 🚀 Quick Start
+## Quick Start
 
 ### 1. Install
 
@@ -87,7 +87,7 @@ just start typing to fuzzy-search sessions, agents, directories, and hosts.
 
 ---
 
-## 🖥️ Remote Hosts
+## Remote Hosts
 
 seshagy can switch a full-screen [herdr](https://herdr.dev) client between servers, so you can
 jump from your laptop to a homelab box in one keystroke.
@@ -150,7 +150,7 @@ line and backs the file up once to `~/.ssh/config.seshagy.bak`). Hosts defined i
 
 ---
 
-## 🤖 Agent Tracking
+## Agent Tracking
 
 `seshagy` acts as a mission control for your terminal AI tools. It knows when your agents need attention and when they are busy crunching tokens.
 
@@ -158,12 +158,12 @@ Supported agents include: **Pi, OpenCode, Claude Code, Codex, Cursor Agent, Anti
 
 ### State Indicators
 
-| State          | Meaning                                                  |
-| -------------- | -------------------------------------------------------- |
-| 🟢 **working** | Agent is actively generating code or running commands.   |
-| 🔴 **blocked** | Agent is asking for permission or user input. Needs you! |
-| 🔵 **done**    | Agent finished a turn but you haven't checked on it yet. |
-| ⚪ **idle**    | Agent is sleeping or waiting for a prompt.               |
+| State           | Meaning                                                  |
+| --------------- | -------------------------------------------------------- |
+| `●` **working** | Agent is actively generating code or running commands.   |
+| `∅` **blocked** | Agent is asking for permission or user input. Needs you! |
+| `◉` **done**    | Agent finished a turn but you haven't checked on it yet. |
+| `○` **idle**    | Agent is sleeping or waiting for a prompt.               |
 
 _How does it work?_ `seshagy` supports both `tmux` and `herdr` backends with different behaviors:
 
@@ -172,15 +172,32 @@ _How does it work?_ `seshagy` supports both `tmux` and `herdr` backends with dif
 
 ### Agent logos
 
-Agent rows can show each vendor's mark from the **Herdr Agent Icons Max** font
-([herdr-radar](https://github.com/hhdebb/herdr-radar), MIT; the vendor marks belong to their owners).
-Install that font and seshagy uses it automatically; without it, rows fall back to the state glyph and
-the agent's name. `SESHAGY_AGENT_ICONS=auto|font|none` overrides the detection, and `[icons] mode =
-"text"` (or `"none"`) never prints private-use glyphs.
+Rows lead with each vendor's mark from the **Herdr Agent Icons Max** font
+([herdr-radar](https://github.com/hhdebb/herdr-radar), MIT; the vendor marks belong to their
+owners). Install it and point your terminal at its codepoints:
+
+```bash
+# macOS; on Linux write to ~/.local/share/fonts and run `fc-cache -f` afterwards
+curl -fsSL -o ~/Library/Fonts/HerdrAgentIconsMax-Regular.ttf \
+  https://raw.githubusercontent.com/hhdebb/herdr-radar/main/dist/HerdrAgentIconsMax-Regular.ttf
+```
+
+```ini
+# Ghostty
+font-codepoint-map = U+E1A0-U+E1B7=Herdr Agent Icons Max
+
+# kitty
+symbol_map U+E1A0-U+E1B7 Herdr Agent Icons Max
+```
+
+Open a new terminal window. With the font in place seshagy finds it; without it, rows fall back
+to the state glyph and the agent's name. `SESHAGY_AGENT_ICONS=auto|font|none` overrides the
+detection — `font` forces logos, for example when they are installed on the machine you ssh
+from — and `[icons] mode = "text"` (or `"none"`) never prints private-use glyphs.
 
 ---
 
-## ⌨️ TUI
+## TUI
 
 The picker is always type-first: printable keys filter the list, and every action is a chord.
 The footer names the core actions only; `F1` opens the overlay with the rest of the keymap.
@@ -265,7 +282,7 @@ and `esc` reach the same filters._
 
 ---
 
-## ⚙️ Requirements & Integrations
+## Requirements & Integrations
 
 - **Multiplexer:** [tmux](https://github.com/tmux/tmux) or [herdr](https://herdr.dev). seshagy auto-detects your environment!
 - **Optional (but highly recommended):**
@@ -276,7 +293,7 @@ and `esc` reach the same filters._
 
 ---
 
-## 🛠 Configuration & Customization
+## Configuration & Customization
 
 seshagy is highly customizable to match your workflow and aesthetic.
 
@@ -297,7 +314,7 @@ See the [configuration guide](docs/configuration.md) for every key.
 
 ---
 
-## 📖 Deep Dive & CLI
+## Deep Dive & CLI
 
 While the TUI is the main interface, seshagy provides a rich set of CLI commands for scripting, fzf-style menus, and agent integrations.
 
@@ -347,7 +364,7 @@ seshagy speaks your multiplexer's language seamlessly:
 
 </details>
 
-## 🛠 Development
+## Development
 
 - `mise run verify` runs the fast deterministic checks (fmt, lint, vet, test, build).
 - `mise run vuln` runs the vulnerability check independently.
