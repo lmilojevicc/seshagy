@@ -755,6 +755,8 @@ TUI keys:
   Query tokens: !agent-name  @workspace-or-state (@ = every agent)  #state  /path
   enter attach/create/focus   ctrl+r rename   ctrl+x kill   ctrl+o preview
   ctrl+y yazi                 ctrl+l reload   ctrl+g integrations   F1 help
+  alt+m switch herdr machine  (local, then each saved 'herdr machine' profile;
+                              the machine is named in the prompt window title)
   esc clear query then filter, quit when both are empty   ctrl+c quit
 
 Config:

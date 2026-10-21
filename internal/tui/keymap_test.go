@@ -18,7 +18,7 @@ var pickerKeys = []string{
 	"up", "down", "ctrl+p", "ctrl+k", "ctrl+n", "ctrl+j",
 	"pgup", "pgdown", "home", "end",
 	"tab", "shift+tab", "enter", "esc", "f1", "backspace", "delete",
-	"ctrl+a", "ctrl+s", "ctrl+t", "ctrl+z", "ctrl+f", "ctrl+e",
+	"ctrl+a", "ctrl+s", "ctrl+t", "ctrl+z", "ctrl+f", "ctrl+e", "alt+m",
 	"ctrl+r", "ctrl+x", "ctrl+o", "ctrl+y", "ctrl+g", "ctrl+l", "ctrl+u", "ctrl+w",
 	"ctrl+c",
 }
@@ -26,7 +26,7 @@ var pickerKeys = []string{
 // remappableKeys is the id of every action a [tui.keys] entry can override, in
 // table order.
 var remappableKeys = []string{
-	"up", "down", "rename", "kill", "preview", "yazi", "help",
+	"up", "down", "rename", "kill", "preview", "yazi", "machine", "help",
 	"agents", "state", "sessions", "zoxide", "find", "remotes",
 	"next_filter", "previous_filter",
 	"page_up", "page_down", "first", "last",
@@ -115,8 +115,9 @@ func TestKeyBindingsNameEachKeyOncePerList(t *testing.T) {
 
 // TestFooterAndHelpBindingsAreDisjoint pins the footer/help split: every key an
 // action answers is drawn once, either by the action's footer hint or by its
-// help row. esc is the one key both lists name — the footer calls it the quit
-// key, the help spells out what it clears first.
+// help row. Two keys are named by both lists: esc, which the footer calls the
+// quit key while the help spells out what it clears first, and alt+m, whose
+// footer hint cannot say which machine is selected (the help row can).
 func TestFooterAndHelpBindingsAreDisjoint(t *testing.T) {
 	table := defaultKeyTable()
 	footer := map[string]bool{}
@@ -125,7 +126,7 @@ func TestFooterAndHelpBindingsAreDisjoint(t *testing.T) {
 			footer[key] = true
 		}
 	}
-	shared := make([]string, 0, 1)
+	shared := make([]string, 0, 2)
 	for _, binding := range table.helpBindings() {
 		for _, key := range binding.keys {
 			if footer[key] {
@@ -134,13 +135,19 @@ func TestFooterAndHelpBindingsAreDisjoint(t *testing.T) {
 		}
 	}
 	sort.Strings(shared)
-	if len(shared) != 1 || shared[0] != "esc" {
-		t.Fatalf("footer and help share %v, want only esc", shared)
+	if want := []string{"alt+m", "esc"}; !slices.Equal(shared, want) {
+		t.Fatalf("footer and help share %v, want %v", shared, want)
 	}
 	// The help row that names esc documents it rather than binding it: the
 	// footer's row is the one the dispatch answers.
 	if binding, ok := table.bindingFor("esc"); !ok || !binding.footer {
 		t.Fatalf("esc dispatches to %+v, want the footer's quit binding", binding)
+	}
+	// alt+m is deliberately named in both lists, and the help row is the one
+	// carrying the selected machine's name.
+	row := helpRowFor(t, openHelp(t, newTestModelWith(t, newFakeMachineMux())), "alt+m")
+	if row.label != "machine" {
+		t.Fatalf("the alt+m help row = %+v, want the machine filter", row)
 	}
 }
 
@@ -148,7 +155,8 @@ func TestFooterAndHelpBindingsAreDisjoint(t *testing.T) {
 // core actions only, each drawn with the first key it answers, with the help and
 // quit hints last.
 func TestFooterHintsAreTheCoreActions(t *testing.T) {
-	m := newTestModel(t)
+	// A herdr model: the machine hint exists only where saved machines do.
+	m := newTestModelWith(t, newFakeMachineMux())
 	want := []footerHint{
 		{"↑↓", "move"},
 		{"⏎", "open"},
@@ -156,6 +164,7 @@ func TestFooterHintsAreTheCoreActions(t *testing.T) {
 		{"^x", "kill"},
 		{"^o", "preview"},
 		{"^y", "yazi"},
+		{"alt+m", "machine"},
 		{"F1", "help"},
 		{"esc", "quit"},
 	}
@@ -283,5 +292,42 @@ func TestDefaultKeyTableRowsAreUnchanged(t *testing.T) {
 	}
 	if !slices.Equal(got, want) {
 		t.Fatalf("help rows =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// TestMachineRowsAppearOnlyWithHerdrMachines pins the one backend-dependent part
+// of the frame: the machine filter is drawn by a herdr picker and nowhere else,
+// so tmux and noop keep the footer and the help overlay they always had.
+func TestMachineRowsAppearOnlyWithHerdrMachines(t *testing.T) {
+	shows := func(m Model) (footer, help bool) {
+		for _, hint := range m.footerHints() {
+			if hint.label == "machine" {
+				footer = true
+			}
+		}
+		for _, block := range m.helpBlocks() {
+			for _, row := range block.rows {
+				if row.label == "machine" {
+					help = true
+				}
+			}
+		}
+		return footer, help
+	}
+
+	tmux := newTestModel(t)
+	if footer, help := shows(tmux); footer || help {
+		t.Fatalf("a tmux picker draws the machine filter: footer %v help %v", footer, help)
+	}
+	herdr := newTestModelWith(t, newFakeMachineMux())
+	footer, help := shows(herdr)
+	if !footer || !help {
+		t.Fatalf("a herdr picker hides the machine filter: footer %v help %v", footer, help)
+	}
+	// The help row names the machine in effect once one is saved.
+	withCatalog, _ := machineModel(t)
+	withCatalog.machine = "dev-id"
+	if row := helpRowFor(t, openHelp(t, withCatalog), "alt+m"); row.value != "@devbox" {
+		t.Fatalf("the machine help row = %+v, want the selected machine", row)
 	}
 }

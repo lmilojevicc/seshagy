@@ -17,7 +17,12 @@ import (
 // inside a herdr-managed pane, so "attach" is a server-side workspace focus.
 // Agent state is READ-ONLY: herdr owns detection, so the report/release/visited
 // methods are no-ops.
-type herdrBackend struct{}
+type herdrBackend struct {
+	// machine is the saved SSH profile every API command is routed to
+	// ("herdr --machine <id>"). Empty means the local server, exactly as before
+	// machines existed. See MachineSelector / WithMachine.
+	machine string
+}
 
 func (herdrBackend) Kind() BackendKind { return BackendHerdr }
 func (herdrBackend) Terms() Terms      { return HerdrTerms() }
@@ -43,8 +48,8 @@ func (herdrBackend) CurrentSession(ctx context.Context) (string, error) {
 	return pane.WorkspaceID, nil
 }
 
-func (herdrBackend) ListSessions(ctx context.Context) ([]Item, error) {
-	out, err := herdrOutput(ctx, "workspace", "list")
+func (b herdrBackend) ListSessions(ctx context.Context) ([]Item, error) {
+	out, err := b.output(ctx, "workspace", "list")
 	if err != nil {
 		return nil, fmt.Errorf("herdr workspace list: %w", err)
 	}
@@ -56,12 +61,12 @@ func (herdrBackend) ListSessions(ctx context.Context) ([]Item, error) {
 	// workspaces — group it by workspace_id to populate tab counts without a
 	// per-workspace round-trip per refresh.
 	tabCounts := map[string]int{}
-	for _, t := range herdrTabs(ctx) {
+	for _, t := range b.herdrTabs(ctx) {
 		tabCounts[t.WorkspaceID]++
 	}
 	// Per-workspace representative path from panes: prefer the focused pane's
 	// cwd, else the first pane's cwd. `workspace list` exposes no cwd.
-	paths := herdrWorkspacePaths(ctx)
+	paths := b.herdrWorkspacePaths(ctx)
 	items := make([]Item, 0, len(workspaces))
 	for _, ws := range workspaces {
 		name := ws.Label
@@ -80,6 +85,7 @@ func (herdrBackend) ListSessions(ctx context.Context) ([]Item, error) {
 			Attached: ws.Focused,
 			Windows:  tabCounts[ws.WorkspaceID],
 			Panes:    ws.PaneCount,
+			Machine:  b.machine,
 		})
 	}
 	return items, nil
@@ -111,11 +117,17 @@ func (b herdrBackend) CreateSessionFromDir(
 	want := normalizePath(dir)
 	for _, s := range sessions {
 		if normalizePath(s.Path) == want {
-			return Item{Kind: KindSession, Name: s.Name, Target: s.Target}, true, nil
+			return Item{
+				Kind:    KindSession,
+				Name:    s.Name,
+				Target:  s.Target,
+				Path:    s.Path,
+				Machine: b.machine,
+			}, true, nil
 		}
 	}
 	label := SessionNameFromDir(dir)
-	out, err := herdrOutput(
+	out, err := b.output(
 		ctx,
 		"workspace",
 		"create",
@@ -133,15 +145,27 @@ func (b herdrBackend) CreateSessionFromDir(
 	if name == "" {
 		name = label
 	}
-	return Item{Kind: KindSession, Name: name, Target: ws.WorkspaceID}, false, nil
+	return Item{
+		Kind:    KindSession,
+		Name:    name,
+		Target:  ws.WorkspaceID,
+		Path:    dir,
+		Machine: b.machine,
+	}, false, nil
 }
 
-func (herdrBackend) KillSession(ctx context.Context, target string) error {
+func (b herdrBackend) KillSession(ctx context.Context, target string) error {
 	started := sessionKillStart(ctx)
-	if err := herdrRun(ctx, "workspace", "close", target); err != nil {
+	if err := b.run(ctx, "workspace", "close", target); err != nil {
 		wrapped := fmt.Errorf("herdr workspace close: %w", err)
 		logSessionKill(ctx, BackendHerdr, started, wrapped)
 		return wrapped
+	}
+	// A remote `workspace close` does not move this client: the focus-restore
+	// dance below is inherently about the local server, so skip it entirely.
+	if b.machine != "" {
+		logSessionKill(ctx, BackendHerdr, started, nil)
+		return nil
 	}
 	// herdr workspace close refocuses the client onto another workspace.
 	// Restore focus to the workspace seshagy runs in so the user isn't moved —
@@ -184,15 +208,15 @@ func (herdrBackend) KillSession(ctx context.Context, target string) error {
 	return nil
 }
 
-func (herdrBackend) KillPane(ctx context.Context, paneID string) error {
-	if err := herdrRun(ctx, "pane", "close", paneID); err != nil {
+func (b herdrBackend) KillPane(ctx context.Context, paneID string) error {
+	if err := b.run(ctx, "pane", "close", paneID); err != nil {
 		return fmt.Errorf("herdr pane close: %w", err)
 	}
 	return nil
 }
 
-func (herdrBackend) RenameSession(ctx context.Context, target, newName string) error {
-	if err := herdrRun(ctx, "workspace", "rename", target, newName); err != nil {
+func (b herdrBackend) RenameSession(ctx context.Context, target, newName string) error {
+	if err := b.run(ctx, "workspace", "rename", target, newName); err != nil {
 		return fmt.Errorf("herdr workspace rename: %w", err)
 	}
 	return nil
@@ -206,7 +230,7 @@ func (b herdrBackend) CaptureSession(
 	target string,
 	lines int,
 ) (string, error) {
-	out, _ := herdrOutput(
+	out, _ := b.output(
 		ctx,
 		"pane",
 		"list",
@@ -228,18 +252,19 @@ func (b herdrBackend) CaptureSession(
 	return b.CaptureAgentPane(ctx, paneID, lines)
 }
 
-func (herdrBackend) AttachOrSwitchCommand(item Item) *exec.Cmd {
-	return exec.Command("herdr", "workspace", "focus", item.ActionTarget())
+func (b herdrBackend) AttachOrSwitchCommand(item Item) *exec.Cmd {
+	b = b.forItem(item)
+	return herdrAttachCommand(b.scoped([]string{"workspace", "focus", item.ActionTarget()}))
 }
 
-func (herdrBackend) ListAgents(
+func (b herdrBackend) ListAgents(
 	ctx context.Context,
 	sessionFilter string,
 ) ([]Item, error) {
 	// `herdr agent list` returns only agent panes (no plain shells) and takes
 	// no flags. Workspace filtering is done in-memory since the CLI does not
 	// accept a --workspace flag for this command.
-	out, err := herdrOutput(ctx, "agent", "list")
+	out, err := b.output(ctx, "agent", "list")
 	if err != nil {
 		return nil, fmt.Errorf("herdr agent list: %w", err)
 	}
@@ -250,8 +275,8 @@ func (herdrBackend) ListAgents(
 	// Resolve workspace ids → labels and tab ids → labels once, via two cheap
 	// global CLI calls (`workspace list`, `tab list`), so the trailing location
 	// text and the detail panel show human-facing names, not opaque ids.
-	workspaceLabels := herdrWorkspaceLabels(ctx)
-	tabLabels := herdrTabLabels(ctx)
+	workspaceLabels := b.herdrWorkspaceLabels(ctx)
+	tabLabels := b.herdrTabLabels(ctx)
 	items := make([]Item, 0, len(agents))
 	for _, a := range agents {
 		if sessionFilter != "" && a.WorkspaceID != sessionFilter {
@@ -293,6 +318,7 @@ func (herdrBackend) ListAgents(
 			Path:             path,
 			Location:         location,
 			TabLabel:         tabLabels[a.TabID],
+			Machine:          b.machine,
 		})
 	}
 	// Do NOT apply local aliases under herdr — herdr labels are authoritative.
@@ -303,8 +329,8 @@ func (herdrBackend) ListAgents(
 // workspace_id → label. Labels fall back to the workspace id in ListAgents when
 // missing. Errors are swallowed (best-effort label resolution; the caller keeps
 // working with ids if the lookup fails).
-func herdrWorkspaceLabels(ctx context.Context) map[string]string {
-	out, err := herdrOutput(ctx, "workspace", "list")
+func (b herdrBackend) herdrWorkspaceLabels(ctx context.Context) map[string]string {
+	out, err := b.output(ctx, "workspace", "list")
 	if err != nil {
 		return nil
 	}
@@ -322,8 +348,8 @@ func herdrWorkspaceLabels(ctx context.Context) map[string]string {
 // herdrTabs fetches `herdr tab list` (all workspaces, single call) and returns
 // the slice of tabs. Errors are swallowed (best-effort; callers keep working
 // with zero counts / empty labels if the lookup fails).
-func herdrTabs(ctx context.Context) []tabInfo {
-	out, err := herdrOutput(ctx, "tab", "list")
+func (b herdrBackend) herdrTabs(ctx context.Context) []tabInfo {
+	out, err := b.output(ctx, "tab", "list")
 	if err != nil {
 		return nil
 	}
@@ -336,8 +362,8 @@ func herdrTabs(ctx context.Context) []tabInfo {
 
 // herdrPanes fetches `herdr pane list` (all panes, single call) and returns the
 // slice of panes. Errors are swallowed (best-effort, mirroring herdrTabs).
-func herdrPanes(ctx context.Context) []paneInfo {
-	out, err := herdrOutput(ctx, "pane", "list")
+func (b herdrBackend) herdrPanes(ctx context.Context) []paneInfo {
+	out, err := b.output(ctx, "pane", "list")
 	if err != nil {
 		return nil
 	}
@@ -352,8 +378,8 @@ func herdrPanes(ctx context.Context) []paneInfo {
 // pane list: the focused pane's foreground_cwd/cwd if one exists, else the
 // first pane's cwd. The workspace `cwd` field is usually empty under herdr, so
 // panes are the practical path source. Errors are swallowed (best-effort).
-func herdrWorkspacePaths(ctx context.Context) map[string]string {
-	panes := herdrPanes(ctx)
+func (b herdrBackend) herdrWorkspacePaths(ctx context.Context) map[string]string {
+	panes := b.herdrPanes(ctx)
 	paths := make(map[string]string, len(panes))
 	for _, p := range panes {
 		cwd := p.ForegroundCwd
@@ -374,8 +400,8 @@ func herdrWorkspacePaths(ctx context.Context) map[string]string {
 
 // herdrTabLabels returns a tab_id → label map for resolving opaque tab ids in
 // agent detail. Falls back to empty (caller then omits the line).
-func herdrTabLabels(ctx context.Context) map[string]string {
-	tabs := herdrTabs(ctx)
+func (b herdrBackend) herdrTabLabels(ctx context.Context) map[string]string {
+	tabs := b.herdrTabs(ctx)
 	labels := make(map[string]string, len(tabs))
 	for _, t := range tabs {
 		labels[t.TabID] = t.Label
@@ -385,8 +411,12 @@ func herdrTabLabels(ctx context.Context) map[string]string {
 
 // AgentPID resolves the pane's foreground process pid with
 // `herdr pane process-info`, which is how the picker reports agent uptime.
-func (herdrBackend) AgentPID(ctx context.Context, item Item) (int, error) {
-	out, err := herdrOutput(ctx, "pane", "process-info", "--pane", item.PaneID)
+// It routes through the item's machine so a remote pane id is never resolved
+// against the local server; the picker itself only asks for local panes today
+// (a remote agent shows no age, see pendingAgentStarts).
+func (b herdrBackend) AgentPID(ctx context.Context, item Item) (int, error) {
+	b = b.forItem(item)
+	out, err := b.output(ctx, "pane", "process-info", "--pane", item.PaneID)
 	if err != nil {
 		return 0, fmt.Errorf("herdr pane process-info: %w", err)
 	}
@@ -395,7 +425,7 @@ func (herdrBackend) AgentPID(ctx context.Context, item Item) (int, error) {
 
 // CaptureAgentPane reads recent pane output. herdr's "recent" source is
 // tail/bottom-anchored, matching seshagy's bottom-anchored preview rendering.
-func (herdrBackend) CaptureAgentPane(
+func (b herdrBackend) CaptureAgentPane(
 	ctx context.Context,
 	paneID string,
 	lines int,
@@ -404,25 +434,27 @@ func (herdrBackend) CaptureAgentPane(
 	if lines > 0 {
 		args = append(args, "--lines", fmt.Sprintf("%d", lines))
 	}
-	out, err := herdrOutput(ctx, args...)
+	out, err := b.output(ctx, args...)
 	if err != nil {
 		return "", fmt.Errorf("herdr pane read: %w", err)
 	}
 	return string(out), nil
 }
 
-func (herdrBackend) FocusAgentCommand(item Item) *exec.Cmd {
-	return exec.Command("herdr", "agent", "focus", item.PaneID)
+func (b herdrBackend) FocusAgentCommand(item Item) *exec.Cmd {
+	b = b.forItem(item)
+	return herdrAttachCommand(b.scoped([]string{"agent", "focus", item.PaneID}))
 }
 
-func (herdrBackend) RenameAgent(ctx context.Context, item Item, displayName string) error {
+func (b herdrBackend) RenameAgent(ctx context.Context, item Item, displayName string) error {
+	b = b.forItem(item)
 	args := []string{"agent", "rename", item.PaneID}
 	if displayName == "" {
 		args = append(args, "--clear")
 	} else {
 		args = append(args, displayName)
 	}
-	if err := herdrRun(ctx, args...); err != nil {
+	if err := b.run(ctx, args...); err != nil {
 		return fmt.Errorf("herdr agent rename: %w", err)
 	}
 	return nil
@@ -433,7 +465,7 @@ func (herdrBackend) ResolvePane(_ context.Context, pane string) (string, error) 
 	return pane, nil
 }
 
-func (herdrBackend) ResolvePaneByCwd(
+func (b herdrBackend) ResolvePaneByCwd(
 	ctx context.Context,
 	cwd string,
 ) (string, error) {
@@ -444,7 +476,7 @@ func (herdrBackend) ResolvePaneByCwd(
 	if resolved, err := filepath.EvalSymlinks(cwd); err == nil {
 		cwd = resolved
 	}
-	out, err := herdrOutput(ctx, "pane", "list")
+	out, err := b.output(ctx, "pane", "list")
 	if err != nil {
 		return "", err
 	}

@@ -42,6 +42,11 @@ type keyBinding struct {
 	// footer marks the entry as a footer hint, which draws the action's first
 	// key. The help overlay draws the action's remaining keys.
 	footer bool
+	// alsoHelp keeps a footer entry whose footer hint is its only key in the help
+	// overlay too. Without it a one-key footer action has no help row at all
+	// (the footer already names its one key); the machine filter needs both,
+	// because its footer hint cannot say which machine is selected.
+	alsoHelp bool
 	// fixed marks a key a [tui.keys] entry cannot remap. The fixed rows are the
 	// picker's own keys and the query-token rows, whose keys are the token text
 	// the help overlay documents rather than a key that dispatches.
@@ -123,6 +128,20 @@ var pickerKeyBindings = []keyBinding{
 		group:  groupActions,
 		footer: true,
 		run:    Model.startYazi,
+	},
+	// The machine filter: the last droppable footer hint, so a narrow frame
+	// drops it first and keeps the core actions. Machines only exist under
+	// herdr, where the hint names the machine it switches between.
+	{
+		id:       "machine",
+		keys:     []string{"alt+m"},
+		label:    "machine",
+		group:    groupFilters,
+		footer:   true,
+		alsoHelp: true,
+		active:   func(m Model) bool { return m.machine != "" },
+		value:    machineValue,
+		run:      Model.cycleMachineKey,
 	},
 	{
 		id:     "help",
@@ -364,6 +383,16 @@ func stateFilterValue(m Model) string {
 		return label
 	}
 	return "none"
+}
+
+// machineValue names the machine alt+m selected: "@devbox", or empty while the
+// picker has only the local server, where the row then draws its label alone.
+func machineValue(m Model) string {
+	label := m.machineTitleSuffix()
+	if label == "" {
+		return ""
+	}
+	return "@" + label
 }
 
 // keyGlyphs draw the keys that read better as a symbol than as their name.

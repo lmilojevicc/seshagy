@@ -148,13 +148,16 @@ func (t KeyTable) helpBindings() []keyBinding {
 	for _, binding := range t.bindings {
 		row := binding
 		row.footer = false
-		if binding.footer {
+		if binding.run != nil && len(binding.keys) == 0 {
+			// The config unbound the action: it draws no row at all. The
+			// query-token rows carry no run, so they are unaffected.
+			continue
+		}
+		if binding.footer && !binding.alsoHelp {
 			if len(binding.keys) < 2 {
 				continue
 			}
 			row.keys = binding.keys[1:]
-		} else if binding.run != nil && len(binding.keys) == 0 {
-			continue
 		}
 		rows = append(rows, row)
 	}

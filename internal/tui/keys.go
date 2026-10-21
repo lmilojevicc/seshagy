@@ -105,6 +105,28 @@ func (m Model) cycleStateFilterKey() (tea.Model, tea.Cmd) {
 	return m.afterSelectionChanged()
 }
 
+// cycleMachineKey is alt+m: it steps local → each enabled saved machine → local
+// and reloads every source against the server now selected. Machines only exist
+// under herdr, so under tmux/noop — and with a herdr that has no saved machines —
+// there is nothing to cycle and the binding only says so.
+//
+// It is alt+m, not ctrl+m: bubbletea v1 delivers ctrl+m as enter.
+func (m Model) cycleMachineKey() (tea.Model, tea.Cmd) {
+	if m.selector == nil {
+		m.notify("saved machines need herdr", sevInfo)
+		return m, nil
+	}
+	if len(m.machines) < 2 {
+		m.notify("no saved herdr machines (herdr machine add)", sevInfo)
+		return m, nil
+	}
+	m = m.switchMachine(m.nextMachine(m.machine).ID)
+	m.notify("machine @"+m.machineLabel(), sevInfo)
+	var reload tea.Cmd
+	m, reload = m.reloadCmd()
+	return m, reload
+}
+
 // backspaceKey edits the query, and clears the filters once there is nothing
 // left to delete.
 func (m Model) backspaceKey() (tea.Model, tea.Cmd) {
@@ -257,6 +279,7 @@ func (m Model) cancelRename() Model {
 	m.renameTarget = ""
 	m.renameSession = ""
 	m.renameAgentType = ""
+	m.renameMachine = ""
 	m.renameKind = ""
 	return m
 }
@@ -272,6 +295,7 @@ func (m Model) startRename() (tea.Model, tea.Cmd) {
 		m.renameKind = item.Kind
 		m.renameFrom = item.Name
 		m.renameTarget = item.ActionTarget()
+		m.renameMachine = item.Machine
 		m.renameText = item.Name
 		return m, nil
 	case sessionmgr.KindAgent:
@@ -281,6 +305,7 @@ func (m Model) startRename() (tea.Model, tea.Cmd) {
 		m.renameAgentType = item.AgentName
 		m.renameSession = item.Session
 		m.renameTarget = item.ActionTarget() // herdr rename targets the pane id
+		m.renameMachine = item.Machine
 		m.renameText = item.DisplayName()
 		return m, nil
 	default:
@@ -320,19 +345,23 @@ func (m Model) applyRename() (tea.Model, tea.Cmd) {
 	target := m.renameTarget
 	session := m.renameSession
 	agentType := m.renameAgentType
+	machine := m.renameMachine
 	m = m.cancelRename()
 	if newName == oldName {
 		return m, nil
 	}
+	// The action runs against the server the item was on when the rename
+	// started, not against whatever machine is selected now.
+	mux := m.muxFor(machine)
 	switch kind {
 	case sessionmgr.KindSession:
 		if newName == "" || oldName == "" {
 			return m, nil
 		}
-		return m, renameCmd(m.mux, target, oldName, newName)
+		return m, renameCmd(mux, machine, target, oldName, newName)
 	case sessionmgr.KindAgent:
 		// An empty alias clears the agent's display name.
-		return m, renameAgentCmd(m.mux, target, agentType, session, newName)
+		return m, renameAgentCmd(mux, machine, target, agentType, session, newName)
 	default:
 		return m, nil
 	}
@@ -377,10 +406,13 @@ func (m Model) handleKillConfirmKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.killInFlight = true
+		// The kill targets the server the item came from, captured when the kill
+		// was armed.
+		mux := m.itemMux(item)
 		if item.Kind == sessionmgr.KindAgent {
-			return m, deleteAgentCmd(m.mux, item)
+			return m, deleteAgentCmd(mux, item)
 		}
-		return m, deleteSessionCmd(m.mux, item)
+		return m, deleteSessionCmd(mux, item)
 	}
 	return m, nil
 }
@@ -392,21 +424,23 @@ func (m Model) activateSelected() (tea.Model, tea.Cmd) {
 	}
 	switch item.Kind {
 	case sessionmgr.KindSession:
-		return m, attachCmd(m.mux, item)
+		return m, attachCmd(m, item)
 	case sessionmgr.KindAgent:
 		if item.Session == "" || item.Window == "" || item.PaneID == "" {
 			m.notify("cannot focus agent (missing pane info)", sevInfo)
 			return m, nil
 		}
 		// Flip done→idle before focusing: the user is visiting the pane. Run
-		// synchronously because focusAgentCmd suspends the TUI (tea.ExecProcess),
-		// so the flip must persist first. Errors are non-fatal.
+		// synchronously because focusAgentCmd suspends the TUI (tea.ExecProcess)
+		// locally, so the flip must persist first. Errors are non-fatal.
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 		_, _ = m.mux.MarkAgentVisited(ctx, item.PaneID)
 		m.notify(fmt.Sprintf("focusing %s on %s", item.DisplayName(), item.Location), sevInfo)
-		return m, focusAgentCmd(m.mux, item)
+		return m, focusAgentCmd(m, item)
 	case sessionmgr.KindZoxide, sessionmgr.KindFD:
+		// zoxide/fd results are local directories: a workspace rooted at a local
+		// path on a remote server would be nonsense, so this stays local.
 		return m, createSessionCmd(m.mux, item.Path)
 	case sessionmgr.KindHost:
 		return m.activateHost(item)

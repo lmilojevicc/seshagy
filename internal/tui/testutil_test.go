@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"os/exec"
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -89,7 +90,9 @@ func (f *fakeMux) CaptureSession(context.Context, string, int) (string, error) {
 }
 
 func (f *fakeMux) AttachOrSwitchCommand(sessionmgr.Item) *exec.Cmd {
-	return exec.Command("/bin/true")
+	// "true" resolves through PATH: these commands are only ever run by a test
+	// that drives a remote focus, which must stay runnable on any host.
+	return exec.Command("true")
 }
 
 func (f *fakeMux) ListAgents(context.Context, string) ([]sessionmgr.Item, error) {
@@ -110,7 +113,7 @@ func (f *fakeMux) CaptureAgentPane(context.Context, string, int) (string, error)
 
 func (f *fakeMux) FocusAgentCommand(item sessionmgr.Item) *exec.Cmd {
 	f.focused = item
-	return exec.Command("/bin/true")
+	return exec.Command("true")
 }
 
 func (f *fakeMux) RenameAgent(_ context.Context, item sessionmgr.Item, displayName string) error {
@@ -250,6 +253,11 @@ func keyStringMsg(name string) tea.KeyMsg {
 	case "space":
 		return tea.KeyMsg{Type: tea.KeySpace, Runes: []rune{' '}}
 	default:
+		// An alt chord reaches bubbletea as a rune with Alt set, which is what
+		// keyBinding names look like (alt+m).
+		if char, ok := strings.CutPrefix(name, "alt+"); ok && len([]rune(char)) == 1 {
+			return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(char), Alt: true}
+		}
 		return runeMsg(name)
 	}
 }

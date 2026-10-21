@@ -618,12 +618,17 @@ func (m Model) promptCount() string {
 		m.styles.muted.Render(fmt.Sprintf("/%d", total))
 }
 
-// filterTitle names the active scope, plus the agent-state filter when one is
-// active: "agents · blocked".
+// filterTitle names the active filters: the scope, the agent-state filter when
+// one is active, and the machine the list is loaded from: "agents · blocked ·
+// @devbox". The machine part only appears once a saved machine exists, so a
+// picker without machines draws exactly the title it always has.
 func (m Model) filterTitle() string {
 	title := m.scopeLabel(m.scope)
 	if m.stateFilter != stateFilterNone {
 		title += " · " + m.stateFilter.label()
+	}
+	if machine := m.machineTitleSuffix(); machine != "" {
+		title += " · @" + machine
 	}
 	return title
 }
@@ -654,6 +659,13 @@ func (m Model) hasHosts() bool {
 		}
 	}
 	return false
+}
+
+// showsBinding reports whether the picker draws a binding at all. The machine
+// filter is the one binding that belongs to a single backend: no saved machines
+// exist outside herdr, so tmux and noop keep their frame exactly as it is.
+func (m Model) showsBinding(binding keyBinding) bool {
+	return binding.id != "machine" || m.selector != nil
 }
 
 // itemBadge is the run an item draws beside its name on the line the name sits
@@ -1125,6 +1137,11 @@ func shiftMatches(matches []int, offset, size int) []int {
 func (m Model) renderEmptyState(width, height int) []string {
 	var headline, hint string
 	switch {
+	case m.loadError != "":
+		// A saved machine that could not be loaded: the window says so and names
+		// the two ways out, instead of looking like an empty local list.
+		headline = m.styles.emphasis.Render("machine @" + m.machineLabel() + " unavailable")
+		hint = "alt+m switch machine · ^l retry"
 	case m.query != "":
 		headline = m.styles.emphasis.Render(`no matches for "` + m.query + `"`)
 		hint = "⌫ backspace clears the query"
@@ -1226,12 +1243,16 @@ type footerHint struct {
 
 // footerHints are the footer's hints: the table's footer entries, in the order
 // they draw, with the sessions hint named the way the active backend names a
-// session.
+// session. A hint the backend cannot honour is left out, so tmux and noop draw
+// the footer they always have.
 func (m Model) footerHints() []footerHint {
 	bindings := m.keys.footerBindings()
 	hints := make([]footerHint, 0, len(bindings))
 	for i := 0; i < len(bindings); i++ {
 		binding := bindings[i]
+		if !m.showsBinding(binding) {
+			continue
+		}
 		if binding.id == "up" && i+1 < len(bindings) && bindings[i+1].id == "down" {
 			// Up and down share one hint, "↑↓ move", as long as both are bound.
 			hints = append(hints, footerHint{

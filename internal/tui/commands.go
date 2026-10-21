@@ -2,8 +2,10 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -15,14 +17,44 @@ import (
 	"github.com/lmilojevicc/seshagy/internal/sessionmgr"
 )
 
+// Timeouts. A saved machine is reached over ssh, so a command that targets one
+// pays a round trip the local socket does not; the remote budgets are the same
+// shapes, a little larger. They stay small on purpose: herdr kills its own ssh
+// child when the budget runs out, but a forked ssh can outlive it for a moment,
+// so the picker never waits on a remote server for long.
+const (
+	localRefreshTimeout  = 8 * time.Second
+	remoteRefreshTimeout = 10 * time.Second
+	localPreviewTimeout  = 2 * time.Second
+	remotePreviewTimeout = 6 * time.Second
+	localActionTimeout   = 5 * time.Second
+	remoteActionTimeout  = 8 * time.Second
+	// machinesTimeout bounds the saved-machine catalog read: it is a local file
+	// read, and the budget only guards against a wedged herdr binary.
+	machinesTimeout = 2 * time.Second
+)
+
+// itemTimeout picks the budget for an item's server: a remote herdr command pays
+// an ssh round trip the local socket does not.
+func itemTimeout(local, remote time.Duration, machine string) time.Duration {
+	if machine == "" {
+		return local
+	}
+	return remote
+}
+
 func refreshCmd(
 	mux sessionmgr.Multiplexer,
 	source sessionmgr.SourceMode,
 	gen uint64,
+	machine string,
 	opts sessionmgr.LoadOptions,
 ) tea.Cmd {
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+		ctx, cancel := context.WithTimeout(
+			context.Background(),
+			itemTimeout(localRefreshTimeout, remoteRefreshTimeout, machine),
+		)
 		defer cancel()
 		result, err := sessionmgr.LoadWithBackend(ctx, mux, source, opts)
 		// Backstop: flip done→idle for agent panes the user has navigated to
@@ -34,11 +66,28 @@ func refreshCmd(
 		msg := refreshMsg{
 			source:  source,
 			gen:     gen,
+			machine: machine,
 			items:   result.Items,
 			warning: result.Warning,
 			err:     err,
 		}
 		return msg
+	}
+}
+
+// machinesCmd reads the saved herdr machines. It is a local file read (~2ms, no
+// server, no ssh), so it runs at startup and on every explicit reload; the
+// catalog only changes when the user runs `herdr machine add`.
+func machinesCmd(mux sessionmgr.Multiplexer) tea.Cmd {
+	return func() tea.Msg {
+		selector, ok := mux.(sessionmgr.MachineSelector)
+		if !ok {
+			return machinesMsg{}
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), machinesTimeout)
+		defer cancel()
+		machines, err := selector.Machines(ctx)
+		return machinesMsg{machines: machines, err: err}
 	}
 }
 
@@ -65,7 +114,7 @@ func agentStartTimesCmd(mux sessionmgr.Multiplexer, items []sessionmgr.Item) tea
 				}
 				pid = resolved
 			}
-			panePIDs[item.PaneID] = pid
+			panePIDs[agentStartKey(item)] = pid
 			pids = append(pids, pid)
 		}
 		if len(pids) == 0 {
@@ -231,7 +280,10 @@ func hostPreviewText(host remote.Host) string {
 func previewCmd(mux sessionmgr.Multiplexer, item sessionmgr.Item) tea.Cmd {
 	key := item.Key()
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		ctx, cancel := context.WithTimeout(
+			context.Background(),
+			itemTimeout(localPreviewTimeout, remotePreviewTimeout, item.Machine),
+		)
 		defer cancel()
 		var (
 			preview string
@@ -258,23 +310,65 @@ func attachExecCallback(err error) tea.Msg {
 	return attachDoneMsg{err: err}
 }
 
-func attachCmd(mux sessionmgr.Multiplexer, item sessionmgr.Item) tea.Cmd {
-	return tea.ExecProcess(mux.AttachOrSwitchCommand(item), attachExecCallback)
+// errCommandTimeout is what a remote action reports when its budget runs out.
+var errCommandTimeout = errors.New("timed out on the saved machine")
+
+// runBounded starts cmd and waits for it at most timeout, killing the child when
+// the budget runs out so a wedged ssh cannot pin a picker command forever.
+func runBounded(cmd *exec.Cmd, timeout time.Duration) error {
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case err := <-done:
+		return err
+	case <-timer.C:
+		_ = cmd.Process.Kill()
+		<-done
+		return errCommandTimeout
+	}
 }
 
-// focusAgentCmd focuses an agent pane in the user's already-attached session.
-// It runs switch-window + select-pane via tea.ExecProcess, mirroring attachCmd
-// (the TUI exits so the user lands on the focused pane).
-func focusAgentCmd(mux sessionmgr.Multiplexer, item sessionmgr.Item) tea.Cmd {
-	return tea.ExecProcess(
-		mux.FocusAgentCommand(item),
-		attachExecCallback,
-	)
+// attachCmd opens an item. A local item hands the terminal to the multiplexer
+// and the picker comes back when the user detaches; a remote item runs its
+// `herdr --machine <id> focus` as a bounded, non-interactive call, because that
+// command updates the remote server's focus and returns rather than moving this
+// client.
+func attachCmd(m Model, item sessionmgr.Item) tea.Cmd {
+	cmd := m.itemMux(item).AttachOrSwitchCommand(item)
+	if item.Machine != "" {
+		return remoteActionCmd(cmd, item)
+	}
+	return tea.ExecProcess(cmd, attachExecCallback)
+}
+
+// focusAgentCmd focuses an agent pane. Locally it suspends the picker (the user
+// lands on the focused pane); on a saved machine it is a plain bounded API call.
+func focusAgentCmd(m Model, item sessionmgr.Item) tea.Cmd {
+	cmd := m.itemMux(item).FocusAgentCommand(item)
+	if item.Machine != "" {
+		return remoteActionCmd(cmd, item)
+	}
+	return tea.ExecProcess(cmd, attachExecCallback)
+}
+
+// remoteActionCmd runs a herdr command against a saved machine without handing
+// the terminal over, and reports which server it targeted so the toast can say
+// that this client did not move.
+func remoteActionCmd(cmd *exec.Cmd, item sessionmgr.Item) tea.Cmd {
+	return func() tea.Msg {
+		err := runBounded(cmd, remoteActionTimeout)
+		return attachDoneMsg{err: err, machine: item.Machine, name: item.DisplayName()}
+	}
 }
 
 func createSessionCmd(mux sessionmgr.Multiplexer, dir string) tea.Cmd {
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), localActionTimeout)
 		defer cancel()
 		item, created, err := mux.CreateSessionFromDir(ctx, dir)
 		return createDoneMsg{item: item, created: created, err: err}
@@ -283,7 +377,10 @@ func createSessionCmd(mux sessionmgr.Multiplexer, dir string) tea.Cmd {
 
 func deleteSessionCmd(mux sessionmgr.Multiplexer, item sessionmgr.Item) tea.Cmd {
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(
+			context.Background(),
+			itemTimeout(localActionTimeout, remoteActionTimeout, item.Machine),
+		)
 		defer cancel()
 		err := mux.KillSession(ctx, item.ActionTarget())
 		verbPast := mux.Terms().KillVerbPast
@@ -298,7 +395,10 @@ func deleteSessionCmd(mux sessionmgr.Multiplexer, item sessionmgr.Item) tea.Cmd 
 
 func deleteAgentCmd(mux sessionmgr.Multiplexer, item sessionmgr.Item) tea.Cmd {
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(
+			context.Background(),
+			itemTimeout(localActionTimeout, remoteActionTimeout, item.Machine),
+		)
 		defer cancel()
 		err := mux.KillPane(ctx, item.PaneID)
 		terms := mux.Terms()
@@ -310,9 +410,15 @@ func deleteAgentCmd(mux sessionmgr.Multiplexer, item sessionmgr.Item) tea.Cmd {
 	}
 }
 
-func renameCmd(mux sessionmgr.Multiplexer, target, displayName, newName string) tea.Cmd {
+func renameCmd(
+	mux sessionmgr.Multiplexer,
+	machine, target, displayName, newName string,
+) tea.Cmd {
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(
+			context.Background(),
+			itemTimeout(localActionTimeout, remoteActionTimeout, machine),
+		)
 		defer cancel()
 		err := mux.RenameSession(ctx, target, newName)
 		return actionDoneMsg{
@@ -325,16 +431,20 @@ func renameCmd(mux sessionmgr.Multiplexer, target, displayName, newName string) 
 
 func renameAgentCmd(
 	mux sessionmgr.Multiplexer,
-	paneID, agentType, session, displayName string,
+	machine, paneID, agentType, session, displayName string,
 ) tea.Cmd {
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(
+			context.Background(),
+			itemTimeout(localActionTimeout, remoteActionTimeout, machine),
+		)
 		defer cancel()
 		item := sessionmgr.Item{
 			Kind:      sessionmgr.KindAgent,
 			PaneID:    paneID,
 			AgentName: agentType,
 			Session:   session,
+			Machine:   machine,
 		}
 		err := mux.RenameAgent(ctx, item, displayName)
 		verb := "renamed agent"
