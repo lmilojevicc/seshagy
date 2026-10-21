@@ -122,7 +122,10 @@ The picker is always type-first: printable keys fuzzy-filter the merged list of
 sessions, agents, directories, and hosts, and `ctrl` keys select a filter
 (`ctrl+a` agents, `ctrl+s` agent state, `ctrl+t` sessions, `ctrl+z` zoxide,
 `ctrl+f` find, `ctrl+e` remotes; the active filter's key returns to all, and
-`tab` / `shift+tab` cycle). The prompt also reads herdr-navigator style prefix
+`tab` / `shift+tab` cycle). Under herdr, `alt+m` steps the list between the local
+server and each enabled saved `herdr machine` profile; the machine in effect is
+named in the prompt window title (`seshagy · agents · blocked · @devbox`). The
+prompt also reads herdr-navigator style prefix
 tokens, ANDed with that filter: `!` agent name or kind, `@` workspace or state
 (`@` alone is every agent), `#` agent state, `/` path. `[tui] preview` and
 `[tui] layout` plus the `[tui.keys]` overrides are the only `[tui]` settings the
@@ -170,6 +173,7 @@ yazi    = []                # unbind
 | `zoxide`          | `ctrl+z`                   | Toggle the zoxide filter                          |
 | `find`            | `ctrl+f`                   | Toggle the find filter                            |
 | `remotes`         | `ctrl+e`                   | Toggle the remote-hosts filter                    |
+| `machine`         | `alt+m`                    | Cycle the herdr machine the list is loaded from   |
 | `next_filter`     | `tab`                      | Next filter                                       |
 | `previous_filter` | `shift+tab`                | Previous filter                                   |
 | `up`              | `up`, `ctrl+p`, `ctrl+k`   | Move the selection up                             |
@@ -189,7 +193,9 @@ yazi    = []                # unbind
 | `delete_word`     | `ctrl+w`                   | Delete the last word                              |
 
 The footer draws an action's first key and the help overlay the rest, so a
-remap reaches both automatically. `enter` (open), `esc` (clear the query, then
+remap reaches both automatically. `alt+m` is named in both lists on purpose: the
+footer hint cannot say which machine is selected, the help row can. It is `alt+m`
+and not `ctrl+m` because Bubble Tea delivers `ctrl+m` as `enter`. `enter` (open), `esc` (clear the query, then
 the filter, then quit), `ctrl+c` (quit), `backspace`, and the query-token rows
 are fixed: a `[tui.keys]` entry naming them is ignored.
 

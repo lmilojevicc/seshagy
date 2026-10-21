@@ -226,6 +226,70 @@ func parseHerdrWorkspaceCreated(raw []byte) (workspaceInfo, error) {
 	return workspaceInfo{}, fmt.Errorf("no workspace in herdr create response")
 }
 
+// machineListRow mirrors one `herdr machine list --json` array element. Unlike
+// the workspace/pane/agent responses this command prints a bare top-level JSON
+// array (no {"result":…} envelope), so unwrapResult must not be used.
+type machineListRow struct {
+	ID       string `json:"id"`
+	Label    string `json:"label"`
+	Target   string `json:"target"`
+	Session  string `json:"session"`
+	Enabled  bool   `json:"enabled"`
+	Selected bool   `json:"selected"`
+}
+
+// machineStatusRow mirrors one `herdr machine status --json` array element.
+// error is null when the probe succeeded.
+type machineStatusRow struct {
+	ID     string  `json:"id"`
+	Label  string  `json:"label"`
+	Status string  `json:"status"`
+	Error  *string `json:"error"`
+}
+
+// parseHerdrMachines parses `herdr machine list --json`. An empty catalog
+// prints `[]`, which yields an empty (non-nil) slice and no error.
+func parseHerdrMachines(raw []byte) ([]Machine, error) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 {
+		return nil, fmt.Errorf("empty herdr machine list response")
+	}
+	var rows []machineListRow
+	if err := json.Unmarshal(trimmed, &rows); err != nil {
+		return nil, fmt.Errorf("parse herdr machines: %w", err)
+	}
+	machines := make([]Machine, 0, len(rows))
+	for _, row := range rows {
+		// The row shape is exactly the public Machine shape.
+		machines = append(machines, Machine(row))
+	}
+	return machines, nil
+}
+
+// parseHerdrMachineStatuses parses `herdr machine status --json`. herdr exits
+// non-zero when a probed row failed, but stdout still carries the full array, so
+// callers must parse stdout before looking at the exit status.
+func parseHerdrMachineStatuses(raw []byte) ([]MachineStatus, error) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 {
+		return nil, fmt.Errorf("empty herdr machine status response")
+	}
+	var rows []machineStatusRow
+	if err := json.Unmarshal(trimmed, &rows); err != nil {
+		return nil, fmt.Errorf("parse herdr machine status: %w", err)
+	}
+	statuses := make([]MachineStatus, 0, len(rows))
+	for _, row := range rows {
+		statuses = append(statuses, MachineStatus{
+			ID:     row.ID,
+			Label:  row.Label,
+			Status: row.Status,
+			Error:  ptrStr(row.Error),
+		})
+	}
+	return statuses, nil
+}
+
 // mapHerdrStatusToAgentState maps a herdr agent_status wire value to the
 // internal AgentState enum. Unknown/empty values map to AgentUnknown (NOT idle)
 // — under herdr, "unknown" is a real wire value meaning "no detected agent

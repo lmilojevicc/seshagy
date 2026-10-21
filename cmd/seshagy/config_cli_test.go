@@ -166,8 +166,8 @@ func TestRunConfigKeysListsTheEffectiveKeyMap(t *testing.T) {
 		t.Fatalf("runConfig(keys) error = %v", err)
 	}
 	rows := strings.Count(strings.TrimRight(out, "\n"), "\n") + 1
-	if rows != 23 {
-		t.Fatalf("config keys printed %d rows, want the 23 remappable actions:\n%s", rows, out)
+	if rows != 24 {
+		t.Fatalf("config keys printed %d rows, want the 24 remappable actions:\n%s", rows, out)
 	}
 	for _, want := range []struct{ id, keys string }{
 		{"agents", "ctrl+a"},
@@ -270,8 +270,8 @@ func TestRunConfigKeysJSON(t *testing.T) {
 	if payload.SchemaVersion != 1 || !payload.Ok {
 		t.Fatalf("envelope = schema_version:%d ok:%v", payload.SchemaVersion, payload.Ok)
 	}
-	if len(payload.Keys) != 23 {
-		t.Fatalf("keys payload has %d rows, want 23", len(payload.Keys))
+	if len(payload.Keys) != 24 {
+		t.Fatalf("keys payload has %d rows, want 24", len(payload.Keys))
 	}
 	found := false
 	for _, mapping := range payload.Keys {

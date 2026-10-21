@@ -164,6 +164,8 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m = m.applyAgentStarts(msg)
 		m.syncCursor()
 		return m, nil
+	case machinesMsg:
+		return m.applyMachines(msg)
 	case hostsMsg:
 		m.hosts = msg.hosts
 		m.items = m.mergedItems()
@@ -212,11 +214,20 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			verb = "created"
 		}
 		m.notify(fmt.Sprintf("%s %s %s", verb, m.terms.SessionNoun, msg.item.Name), sevInfo)
-		return m, attachCmd(m.mux, msg.item)
+		return m, attachCmd(m, msg.item)
 	case attachDoneMsg:
-		if msg.err != nil {
+		switch {
+		case msg.err != nil:
 			m.notify(msg.err.Error(), sevError)
-		} else {
+		case msg.machine != "":
+			// A remote focus updates that server only: the local client did not
+			// move, so say where the pane was focused instead of pretending the
+			// picker was suspended.
+			m.notify(
+				fmt.Sprintf("focused %s on @%s", msg.name, m.labelForMachine(msg.machine)),
+				sevInfo,
+			)
+		default:
 			m.notify("returned from "+m.terms.BackendName, sevInfo)
 		}
 		m = m.invalidateAllCaches()
@@ -270,7 +281,7 @@ func (m Model) reloadCmd() (Model, tea.Cmd) {
 			cmds = append(cmds, cmd)
 		}
 	}
-	cmds = append(cmds, hostsCmd(m.config))
+	cmds = append(cmds, hostsCmd(m.config), machinesCmd(m.mux))
 	var preview tea.Cmd
 	m, preview = m.requestPreview()
 	if preview != nil {

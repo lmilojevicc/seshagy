@@ -79,6 +79,8 @@ just start typing to fuzzy-search sessions, agents, directories, and hosts.
 - Narrow the list with `ctrl` keys: `ctrl+a` agents, `ctrl+s` agent state, `ctrl+t` sessions,
   `ctrl+z` zoxide, `ctrl+f` find, `ctrl+e` remotes. Pressing the active filter's key returns to
   all, and `tab` / `shift+tab` cycle them.
+- Under herdr, `alt+m` steps the list between the local server and each saved
+  `herdr machine` profile; the machine in effect is named in the prompt window title.
 - Type prefix tokens on the prompt to narrow the query further: `!` agent name or kind,
   `@` agent workspace or state (`@` alone is every agent), `#` agent state, `/` path.
 - Press `enter` on a session/workspace to attach, on a directory to create or switch to a
@@ -150,6 +152,30 @@ line and backs the file up once to `~/.ssh/config.seshagy.bak`). Hosts defined i
 
 ---
 
+## Herdr Machines
+
+herdr can run one server per saved SSH machine (`herdr machine add`, `herdr machine list`), and
+`herdr --machine <label> <command>` runs any herdr command against that machine's server. Under
+herdr, seshagy's picker can do the same, so one dashboard covers every box you have saved:
+
+- `alt+m` steps between the local server and each enabled saved machine, and the machine in effect
+  is named in the prompt window title — `seshagy · agents · blocked · @devbox`. The title reads
+  exactly as before while no machine is saved.
+- Every action follows the machine the item came from: listing workspaces and agents, the preview
+  capture, focusing/attaching, rename, kill, and `enter` on a zoxide/fd directory (which still
+  creates a workspace from a **local** path).
+- A machine that cannot be reached shows an empty window with the reason instead of an empty list,
+  and the local server keeps working; `bounded` timeouts keep a dead ssh host from freezing the
+  picker.
+- Agent uptime (the age column) is resolved from local processes, so rows on a saved machine show
+  no age.
+
+Machines are orthogonal to the `# hosts` filter above: a host is a server `seshagy run` can switch
+the whole terminal to, a machine is a server the picker lists items from. Machines come from
+herdr's own catalog — seshagy has no machine config key.
+
+---
+
 ## Agent Tracking
 
 `seshagy` acts as a mission control for your terminal AI tools. It knows when your agents need attention and when they are busy crunching tokens.
@@ -212,6 +238,7 @@ The footer names the core actions only; `F1` opens the overlay with the rest of 
 | `ctrl+z`                      | Filter to zoxide directories                                                            |
 | `ctrl+f`                      | Filter to `fd` (or `find`) discoveries                                                  |
 | `ctrl+e`                      | Filter to remote hosts                                                                  |
+| `alt+m`                       | Switch the herdr machine the list is loaded from (local → saved profiles → local)       |
 | `↑`/`↓`, `ctrl+p`/`ctrl+n`    | Move the selection (wraps)                                                              |
 | `pgup`/`pgdown`, `home`/`end` | Page through the list / jump to its ends                                                |
 | `enter`                       | Attach to the session, focus the agent pane, open the directory, or switch to the host  |
@@ -245,6 +272,10 @@ same filters; the active ones are named in the prompt window title.
 | `ctrl+f` | `find`      | `fd` (or `find` when `fd` is not installed)                |
 | `ctrl+e` | `remotes`   | Remote herdr servers (see the Remote Hosts section above)  |
 
+Under herdr, `alt+m` switches the list between the local server and the saved `herdr machine`
+profiles; the machine in effect is named in the prompt window title (`seshagy · agents · @devbox`).
+It is `alt+m` because `ctrl+m` is `enter` in Bubble Tea.
+
 `ctrl+s` narrows the same list the agents filter shows: the first press lands on `blocked`, each
 later press steps one state on, and the press after `idle` clears the state filter while staying
 on agents. Switching to another filter, `esc`, or `backspace` on an empty prompt drops it.
@@ -270,9 +301,10 @@ with the text you typed.
 ### Help
 
 The footer stays down to the core actions: `↑↓ move`, `⏎ open`, `^r rename`, `^x kill`, `^o preview`,
-`^y yazi`, `F1 help`, `esc quit`. Hints drop from the right on a short line, but `F1 help` and
-`esc quit` stay as long as anything fits. Everything else lives in the overlay `F1` opens: the filter
-keys (with the one in effect highlighted and the state `ctrl+s` is on), the query tokens, and the
+`^y yazi`, `alt+m machine` (herdr only), `F1 help`, `esc quit`. Hints drop from the right on a short
+line, but `F1 help` and `esc quit` stay as long as anything fits. Everything else lives in the
+overlay `F1` opens: the filter keys (with the one in effect highlighted, the state `ctrl+s` is on,
+and the machine `alt+m` is on), the query tokens, and the
 remaining keys. It opens centered over the picker, scrolls with `↑`/`↓` when it is taller than the
 frame, and closes on `F1`, `esc`, or `q`; other keys are swallowed, so the query and filter behind it
 never change.

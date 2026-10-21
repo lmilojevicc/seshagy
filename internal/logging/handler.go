@@ -117,6 +117,14 @@ var eventRules = map[Event]eventRule{
 			"error_class":  errorClassRule(),
 		},
 	},
+	EventMachineCommandFailed: {
+		ComponentSession,
+		map[string]fieldRule{
+			"machine_id":  {kind: fieldDebugID},
+			"error_class": errorClassRule(),
+			"duration_ms": {kind: fieldInt},
+		},
+	},
 	EventAgentReport: {
 		ComponentAgents,
 		map[string]fieldRule{

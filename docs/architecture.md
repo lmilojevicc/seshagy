@@ -21,6 +21,34 @@ exposes it via the `agent_status` field (`idle`/`working`/`blocked`/`done`/
 `@seshagy_agent_*` options under herdr. The state-reporting hooks (shell,
 Pi extension, OpenCode plugin) early-exit when `$HERDR_ENV=1` is set.
 
+## Saved machines (herdr only)
+
+herdr can run a server per saved SSH profile (`herdr machine add`), and any herdr
+command can be routed to one with the global `--machine <label-or-id>` prefix.
+Under herdr the picker lists items from whichever machine is selected:
+
+- `internal/sessionmgr/machines.go` holds `Machine` (a saved profile; the empty
+  id is the local server), `MachineStatus`, the `MachineSelector` capability
+  interface (`Machines`, `MachineStatuses`, `WithMachine`), and the two JSON
+  parsers. The interface is **not** part of `Multiplexer`, so tmux, noop, and the
+  test fakes are untouched: a backend without it has exactly one machine.
+- `herdrBackend.machine` is the profile every API command is routed to. A bound
+  backend prefixes `--machine <id>` in front of the subcommand, and
+  `Item.Machine` carries the profile an item came from so an action armed before
+  a machine switch still reaches the right server. `CurrentSession`, the shell
+  completion snapshots, and the `--ephemeral` focus-loss poll stay local on
+  purpose: they are about *this* process's server. Agent uptime stays local for
+  the same reason: a remote pane's start time would need a remote probe, so
+  `pendingAgentStarts` skips remote rows and they show no age.
+- Machine management (`machine list`, `machine status`) never carries
+  `--machine`. `machine list` is a local file read, so the picker loads it at
+  startup and on an explicit reload; `machine status` is an SSH round trip and
+  is never on the refresh path.
+- Profile ids and labels are user-controlled: a failed scoped command logs only
+  `machine.command_failed` with the raw id at debug level, an error class, and a
+  duration. herdr's stderr (labels, hostnames, ssh text) is never read.
+
+
 Builds from source require Go 1.26.9 or newer, matching `go.mod`. Shell-hook integrations
 may use `bash` and `python3`; the OpenCode plugin runs on Bun/Node.
 

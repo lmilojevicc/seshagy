@@ -33,6 +33,7 @@ const (
 	EventSourceLoadDegraded   Event = "source.load_degraded"
 	EventSessionKill          Event = "session.kill"
 	EventSessionFocusRestore  Event = "session.focus_restore"
+	EventMachineCommandFailed Event = "machine.command_failed"
 	EventAgentReport          Event = "agent.report"
 	EventAgentReportFailed    Event = "agent.report_failed"
 	EventAgentRelease         Event = "agent.release"

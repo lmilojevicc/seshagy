@@ -94,6 +94,26 @@ type Multiplexer interface {
 	MarkActiveDoneAgentsIdle(ctx context.Context, items []Item)
 }
 
+// MachineSelector is implemented only by backends that can target saved
+// machines (herdr today). A backend that does not implement it has exactly one
+// machine — the local one — so tmux, noop and every test fake keep working
+// unchanged.
+type MachineSelector interface {
+	// Machines lists the saved profiles, including disabled ones so the caller
+	// can explain why they are missing. It is a local, cheap call
+	// (`herdr machine list --json`: a file read, no server, no SSH), safe on
+	// startup and reload but pointless on a refresh tick.
+	Machines(ctx context.Context) ([]Machine, error)
+	// MachineStatuses probes profiles without prompting for authentication.
+	// Every probe is an SSH round trip: call it only on an explicit user action.
+	// An empty selector list probes every saved profile.
+	MachineStatuses(ctx context.Context, selectors ...string) ([]MachineStatus, error)
+	// WithMachine returns the same backend bound to m, so every forwarded
+	// command carries `--machine <id>`. Passing the zero Machine (or the local
+	// machine) returns the local backend.
+	WithMachine(m Machine) Multiplexer
+}
+
 // Detect selects the active multiplexer from the process environment.
 func Detect() Multiplexer { return DetectFromEnv(os.Getenv) }
 

@@ -69,6 +69,21 @@ type Item struct {
 	// StartedAt is when the agent process started. It is not part of discovery:
 	// the caller resolves it with one batched ps call and stamps it on the item.
 	StartedAt time.Time
+
+	// Machine is the herdr saved profile the item lives on (opaque id); empty is
+	// the local server. Actions must route through it so an in-flight action
+	// never targets the wrong server after a machine switch. It is always empty
+	// under tmux/noop, where machines do not exist.
+	Machine string
+}
+
+// MachineKey names the server an item belongs to, for caches keyed by
+// multiplexer id — herdr pane/workspace ids are only unique within one server.
+func (i Item) MachineKey() string {
+	if i.Machine == "" {
+		return "local"
+	}
+	return i.Machine
 }
 
 // ActionTarget returns the multiplexer-actionable identifier for an item: the
@@ -87,7 +102,18 @@ func (i Item) ActionTarget() string {
 	}
 }
 
+// Key identifies an item within the picker. Local items keep their historical
+// key shape; an item on a saved herdr machine is namespaced by that machine
+// because two servers can both have `w1:p1`.
 func (i Item) Key() string {
+	key := i.localKey()
+	if i.Machine == "" {
+		return key
+	}
+	return "machine:" + i.Machine + ":" + key
+}
+
+func (i Item) localKey() string {
 	switch i.Kind {
 	case KindSession:
 		return string(i.Kind) + ":" + i.Name

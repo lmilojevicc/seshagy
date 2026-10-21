@@ -37,6 +37,15 @@ func herdrCommand(ctx context.Context, args ...string) *exec.Cmd {
 	return cmd
 }
 
+// herdrAttachCommand builds a plain (unbounded) herdr command for the two
+// builders that hand a *exec.Cmd to the caller (tea.ExecProcess / remote focus).
+// They carry the same locale environment as herdrCommand.
+func herdrAttachCommand(args []string) *exec.Cmd {
+	cmd := exec.Command("herdr", args...)
+	cmd.Env = withLocale(os.Environ())
+	return cmd
+}
+
 // herdrOutput and herdrRun are the single seam through which the herdr backend
 // invokes the herdr CLI. Tests override these to simulate a herdr server.
 var (

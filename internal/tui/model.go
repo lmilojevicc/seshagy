@@ -75,6 +75,25 @@ type Model struct {
 	// on an explicit reload instead of by the source poll.
 	hosts []remote.Host
 
+	// --- herdr saved machines ---
+	// selector is nil on every backend that cannot target saved machines (tmux,
+	// noop, a test fake), and then the whole machine axis is inert.
+	selector sessionmgr.MachineSelector
+	// machines is the cycle alt+m walks: the local server first, then herdr's
+	// enabled profiles. It is empty while the catalog has not been read, which
+	// draws exactly like a picker without machines.
+	machines []sessionmgr.Machine
+	// machine is the selected profile id; "" is the local server, exactly as
+	// before machines existed.
+	machine string
+	// machineErr is why the catalog could not be read (a herdr without machine
+	// support, a corrupt catalog). The selector stays inert in that case.
+	machineErr error
+	// loadError is the active machine's last source failure, drawn in the empty
+	// state. It is only ever set for a saved machine: a broken local source keeps
+	// its toast and makes no lasting change to the window.
+	loadError string
+
 	items     []sessionmgr.Item
 	cursor    int
 	cursorKey string
@@ -102,6 +121,9 @@ type Model struct {
 	renameKind      sessionmgr.Kind
 	renameSession   string
 	renameAgentType string
+	// renameMachine is the saved machine the rename targets, captured when the
+	// rename started so a machine switch mid-edit cannot retarget it.
+	renameMachine string
 
 	killArmed   bool
 	killPending sessionmgr.Item
@@ -160,11 +182,20 @@ type installMenuState struct {
 }
 
 type refreshMsg struct {
-	source  sessionmgr.SourceMode
-	gen     uint64
+	source sessionmgr.SourceMode
+	gen    uint64
+	// machine is the saved machine the load ran against ("" is local). A load
+	// whose machine no longer matches the selection is dropped.
+	machine string
 	items   []sessionmgr.Item
 	warning string
 	err     error
+}
+
+// machinesMsg carries the saved herdr machine catalog.
+type machinesMsg struct {
+	machines []sessionmgr.Machine
+	err      error
 }
 
 // agentStart is a resolved agent process start time plus the pid it came from.
@@ -215,8 +246,15 @@ type createDoneMsg struct {
 }
 
 type (
-	attachDoneMsg struct{ err error }
-	yaziDoneMsg   struct {
+	// attachDoneMsg reports the outcome of opening an item. machine is the saved
+	// machine a remote focus targeted; the local client does not follow it, so the
+	// toast says which server the pane was focused on.
+	attachDoneMsg struct {
+		err     error
+		machine string
+		name    string
+	}
+	yaziDoneMsg struct {
 		path string
 		err  error
 	}
@@ -284,6 +322,7 @@ func New(optionFns ...Option) Model {
 		showPreview = *cfg.TUI.Preview
 	}
 	m := Model{
+		selector:         machineSelector(mux),
 		styles:           stylesFromConfig(cfg),
 		config:           cfg,
 		layout:           cfg.TUILayout(),
@@ -323,6 +362,7 @@ func (m Model) Init() tea.Cmd {
 		notificationTickCmd(),
 		refreshCatalogsCmd(m.config),
 		hostsCmd(m.config),
+		machinesCmd(m.mux),
 		startupInstallMenuCmd(m.config),
 	}
 	for _, source := range tuiSources {
@@ -431,14 +471,104 @@ func (m Model) hostByName(name string) (remote.Host, bool) {
 }
 
 // previewCmdFor picks the source of a row's preview: hosts are rendered from
-// local config, every other kind is captured from the multiplexer.
+// local config, every other kind is captured from the multiplexer the item lives
+// on.
 func (m Model) previewCmdFor(item sessionmgr.Item) tea.Cmd {
 	if item.Kind == sessionmgr.KindHost {
 		if host, ok := m.hostByName(item.Name); ok {
 			return hostPreviewCmd(host)
 		}
 	}
-	return previewCmd(m.mux, item)
+	return previewCmd(m.itemMux(item), item)
+}
+
+// machineSelector returns mux as a MachineSelector, or nil when the backend has
+// no saved machines (tmux, noop, and every backend test fake).
+func machineSelector(mux sessionmgr.Multiplexer) sessionmgr.MachineSelector {
+	selector, _ := mux.(sessionmgr.MachineSelector)
+	return selector
+}
+
+// muxFor is the backend bound to a saved machine ("" is the local server). A
+// backend without saved machines has exactly one machine, so it is returned as
+// it is.
+func (m Model) muxFor(machine string) sessionmgr.Multiplexer {
+	if machine == "" || m.selector == nil {
+		return m.mux
+	}
+	return m.selector.WithMachine(sessionmgr.Machine{ID: machine})
+}
+
+// activeMux is the backend the selected machine's sources load through.
+func (m Model) activeMux() sessionmgr.Multiplexer { return m.muxFor(m.machine) }
+
+// itemMux is the backend an item's actions run through. Every item-scoped action
+// resolves its target from the item, never from the selection: an action armed
+// before a machine switch must still reach the server the item came from.
+func (m Model) itemMux(item sessionmgr.Item) sessionmgr.Multiplexer {
+	return m.muxFor(item.Machine)
+}
+
+// labelForMachine is the display label of a saved machine, sanitized for the
+// frame and for a toast: labels are user-controlled, so neither control
+// characters nor escape sequences ever reach either.
+func (m Model) labelForMachine(id string) string {
+	for _, machine := range m.machines {
+		if machine.ID == id {
+			return sanitizeLabelText(machine.DisplayLabel())
+		}
+	}
+	if id == "" {
+		return sessionmgr.LocalMachine().DisplayLabel()
+	}
+	return sanitizeLabelText(id)
+}
+
+// machineLabel is the label of the selected machine: "local" when the local
+// server is selected, the profile's own label otherwise.
+func (m Model) machineLabel() string { return m.labelForMachine(m.machine) }
+
+// machineTitleSuffix is the "@devbox" the prompt title carries, or "" while the
+// picker has only the local server. With no saved machine the title is then
+// byte-identical to the picker without machines.
+func (m Model) machineTitleSuffix() string {
+	if m.selector == nil || len(m.machines) < 2 {
+		return ""
+	}
+	return m.machineLabel()
+}
+
+// machineIndex is a machine's position in the alt+m cycle, or -1 when the cycle
+// does not carry it.
+func (m Model) machineIndex(id string) int {
+	for i, machine := range m.machines {
+		if machine.ID == id {
+			return i
+		}
+	}
+	return -1
+}
+
+// nextMachine is the machine one step along the cycle after id.
+func (m Model) nextMachine(id string) sessionmgr.Machine {
+	if len(m.machines) == 0 {
+		return sessionmgr.LocalMachine()
+	}
+	at := m.machineIndex(id)
+	if at < 0 {
+		at = 0
+	}
+	return m.machines[(at+1)%len(m.machines)]
+}
+
+// agentStartKey names a pane's entry in the agent start cache. herdr pane ids are
+// only unique within one server, so a remote pane's key carries its machine while
+// a local pane's stays the bare pane id.
+func agentStartKey(item sessionmgr.Item) string {
+	if item.Machine == "" {
+		return item.PaneID
+	}
+	return item.Machine + ":" + item.PaneID
 }
 
 // resolveAgentStarts schedules the background resolution of the agent start
@@ -464,7 +594,14 @@ func (m Model) pendingAgentStarts() []sessionmgr.Item {
 		if item.Kind != sessionmgr.KindAgent || item.PaneID == "" {
 			continue
 		}
-		if cached, ok := m.agentStarted[item.PaneID]; ok &&
+		if item.Machine != "" {
+			// A remote agent's start time lives on the remote host: there is no
+			// local /proc entry to read and herdr exposes no start time, so a
+			// remote row shows no age rather than a wrong one (documented under
+			// "Herdr Machines" in README.md).
+			continue
+		}
+		if cached, ok := m.agentStarted[agentStartKey(item)]; ok &&
 			(item.AgentPID == 0 || cached.pid == item.AgentPID) {
 			continue
 		}

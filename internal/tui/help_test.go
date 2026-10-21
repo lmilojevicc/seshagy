@@ -170,7 +170,7 @@ func TestHelpSwallowsEveryOtherKey(t *testing.T) {
 		"z", "space", "ctrl+a", "ctrl+s", "ctrl+t", "ctrl+z", "ctrl+f", "ctrl+e",
 		"ctrl+g", "ctrl+l", "ctrl+u", "ctrl+w", "ctrl+o", "ctrl+y", "ctrl+r",
 		"ctrl+x", "enter", "backspace", "delete", "tab", "shift+tab",
-		"pgup", "pgdown", "home", "end",
+		"pgup", "pgdown", "home", "end", "alt+m",
 	} {
 		got, cmd := press(t, m, key)
 		if !got.helpOpen {
@@ -205,7 +205,7 @@ func TestHelpBoxDrawsTheTableRowsTheFooterDoesNot(t *testing.T) {
 		}
 		want := make([]keyBinding, 0, len(block.rows))
 		for _, binding := range m.keys.helpBindings() {
-			if binding.group == block.group {
+			if binding.group == block.group && m.showsBinding(binding) {
 				want = append(want, binding)
 			}
 		}
@@ -232,7 +232,13 @@ func TestHelpBoxDrawsTheTableRowsTheFooterDoesNot(t *testing.T) {
 			}
 		}
 	}
-	if want := len(m.keys.helpBindings()); rows != want {
+	want := 0
+	for _, binding := range m.keys.helpBindings() {
+		if m.showsBinding(binding) {
+			want++
+		}
+	}
+	if rows != want {
 		t.Fatalf("the box drew %d rows, want the table's %d", rows, want)
 	}
 	for _, token := range []string{"!name", "@ws", "#state", "/path", "fix @seshagy #idle"} {
@@ -241,6 +247,11 @@ func TestHelpBoxDrawsTheTableRowsTheFooterDoesNot(t *testing.T) {
 		}
 	}
 	for _, binding := range m.keys.footerBindings() {
+		if binding.alsoHelp || !m.showsBinding(binding) {
+			// The machine hint is deliberately named in the box too: the footer
+			// cannot say which machine is selected, the help row can.
+			continue
+		}
 		hint := keyHint(binding.keys) + " " + m.bindingLabel(binding)
 		if strings.Contains(rendered, hint) {
 			t.Fatalf("the box repeats the footer hint %q:\n%s", hint, rendered)

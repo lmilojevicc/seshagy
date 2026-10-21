@@ -25,7 +25,7 @@ func TestAttachExecCallbackMapsErrors(t *testing.T) {
 func TestAttachCmdReturnsExecProcess(t *testing.T) {
 	mux := sessionmgr.NewTmuxBackend()
 	item := sessionmgr.Item{Kind: sessionmgr.KindSession, Name: "demo", Target: "demo"}
-	if attachCmd(mux, item) == nil {
+	if attachCmd(newTestModelWith(t, mux), item) == nil {
 		t.Fatal("attachCmd() returned nil")
 	}
 }
@@ -73,7 +73,7 @@ func TestCreateDeleteRenameCommandsUseTmuxHooks(t *testing.T) {
 		t.Fatalf("kill-session target = %q, want demo", killedSession)
 	}
 
-	renameMsg := renameCmd(sessionmgr.NewTmuxBackend(), "old", "old", "new")().(actionDoneMsg)
+	renameMsg := renameCmd(sessionmgr.NewTmuxBackend(), "", "old", "old", "new")().(actionDoneMsg)
 	if renameMsg.kind != actionRename || renameMsg.err != nil ||
 		renamedOld != "old" || renamedNew != "new" {
 		t.Fatalf("renameCmd() = %#v old=%q new=%q", renameMsg, renamedOld, renamedNew)
@@ -202,7 +202,7 @@ func TestRenameCmdReturnsTmuxError(t *testing.T) {
 		return nil
 	})
 
-	renameMsg := renameCmd(sessionmgr.NewTmuxBackend(), "old", "old", "new")().(actionDoneMsg)
+	renameMsg := renameCmd(sessionmgr.NewTmuxBackend(), "", "old", "old", "new")().(actionDoneMsg)
 	if renameMsg.kind != actionRename {
 		t.Fatalf("renameCmd() kind = %q, want %q", renameMsg.kind, actionRename)
 	}
@@ -279,7 +279,7 @@ func TestRefreshCmdLoadsItems(t *testing.T) {
 		return nil, nil
 	}, nil)
 
-	msg := refreshCmd(sessionmgr.NewTmuxBackend(), sessionmgr.ModeSessions, 1, cfg.LoadOptions())().(refreshMsg)
+	msg := refreshCmd(sessionmgr.NewTmuxBackend(), sessionmgr.ModeSessions, 1, "", cfg.LoadOptions())().(refreshMsg)
 	if msg.err != nil || len(msg.items) != 1 || msg.items[0].Name != "demo" {
 		t.Fatalf("refreshCmd() = %#v", msg)
 	}

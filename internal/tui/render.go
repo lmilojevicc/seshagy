@@ -245,6 +245,33 @@ func previewEscape(s string) (string, int) {
 	}
 }
 
+// sanitizeLabelText makes a user-controlled label safe to draw in a window title
+// or a toast. Unlike a preview line it keeps no styling at all: a machine label
+// is drawn inside text the picker owns, so a stray escape sequence there would
+// repaint the title it sits in rather than its own cell.
+func sanitizeLabelText(text string) string {
+	if text == "" {
+		return ""
+	}
+	var out strings.Builder
+	out.Grow(len(text))
+	for i := 0; i < len(text); {
+		switch b := text[i]; {
+		case b == escByte:
+			_, size := previewEscape(text[i:])
+			i += size
+		case b < 0x20 || b == 0x7f:
+			i++
+		default:
+			// Bytes >= 0x80 stay: they are UTF-8 continuation bytes, not C1
+			// controls.
+			out.WriteByte(b)
+			i++
+		}
+	}
+	return out.String()
+}
+
 // clampText truncates unstyled text to width columns, appending an ellipsis.
 func clampText(text string, width int) string {
 	if width <= 0 {

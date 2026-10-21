@@ -92,13 +92,14 @@ func (m Model) handleHelpKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 // helpBlocks is the help overlay's contents: the table's help rows, filed under
-// the group headings in the order the overlay draws them.
+// the group headings in the order the overlay draws them. A binding the backend
+// cannot honour is left out, so tmux and noop keep the overlay they always had.
 func (m Model) helpBlocks() []helpBlock {
 	blocks := make([]helpBlock, 0, len(keyGroups))
 	for _, group := range keyGroups {
 		var rows []helpRow
 		for _, binding := range m.keys.helpBindings() {
-			if binding.group != group {
+			if binding.group != group || !m.showsBinding(binding) {
 				continue
 			}
 			rows = append(rows, helpRow{

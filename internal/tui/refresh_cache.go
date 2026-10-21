@@ -79,7 +79,7 @@ func (m Model) stampAgentStarts(items []sessionmgr.Item) []sessionmgr.Item {
 		if items[i].Kind != sessionmgr.KindAgent {
 			continue
 		}
-		start, ok := m.agentStarted[items[i].PaneID]
+		start, ok := m.agentStarted[agentStartKey(items[i])]
 		if !ok || (items[i].AgentPID > 0 && start.pid != items[i].AgentPID) {
 			continue
 		}
@@ -101,6 +101,84 @@ func (m Model) invalidateAllCaches() Model {
 	m.cache = make(map[sessionmgr.SourceMode]modeCache)
 	m.reportedWarnings = make(map[sessionmgr.SourceMode]string)
 	return m
+}
+
+// switchMachine selects a saved machine ("" is the local server) and drops
+// everything that was loaded for the previous one: the caches, the in-flight
+// refreshes (the generation bump makes their results stale), the visible rows,
+// the preview, the resolved agent start times and the error state.
+func (m Model) switchMachine(id string) Model {
+	if m.machine == id {
+		return m
+	}
+	m.machine = id
+	m = m.invalidateAllCaches()
+	m.agentStarted = make(map[string]agentStart)
+	m.agentStartPending = false
+	m.preview, m.previewKey, m.previewPendingKey, m.previewError = "", "", "", ""
+	m.loadError = ""
+	m.loadedOnce = false
+	m.cursor, m.cursorKey = 0, ""
+	m.cursorMoved = false
+	m.listTop = 0
+	// The visible rows belong to the previous server too: its first refresh may
+	// be seconds away, or never arrive on an unreachable profile, and enter or
+	// ctrl+x on a leftover row would act on the server the user just left.
+	m.items = m.mergedItems()
+	m.syncCursor()
+	m.killArmed = false
+	m.killPending = sessionmgr.Item{}
+	return m
+}
+
+// applyMachines stores the saved-machine catalog: the local server first, then
+// every enabled profile in herdr's order. A disabled profile rejects every
+// forwarded command, so it is not offered; a selection that vanished falls back
+// to local. A catalog that cannot be read (a herdr without machine support, a
+// corrupt catalog) leaves the picker exactly as it is today; once a catalog was
+// read, a failed re-read keeps it and never moves the selection.
+func (m Model) applyMachines(msg machinesMsg) (Model, tea.Cmd) {
+	if m.selector == nil {
+		return m, nil
+	}
+	if msg.err != nil {
+		if m.machineErr == nil {
+			m.notify("cannot list herdr machines", sevWarning)
+		}
+		m.machineErr = msg.err
+		if len(m.machines) > 0 || m.machine == "" {
+			// A catalog that was read once stays, and the selection never moves on
+			// its own: this command also runs on every reload, so one slow or
+			// unparseable read must not drop the saved profiles and retarget the
+			// dashboard mid-work. Only a machine the picker has no catalog for
+			// falls back to local.
+			return m, nil
+		}
+		m = m.switchMachine("")
+		var reload tea.Cmd
+		m, reload = m.reloadCmd()
+		return m, reload
+	}
+	m.machineErr = nil
+	machines := make([]sessionmgr.Machine, 0, len(msg.machines)+1)
+	machines = append(machines, sessionmgr.LocalMachine())
+	for _, machine := range msg.machines {
+		if machine.IsLocal() || !machine.Enabled {
+			continue
+		}
+		machines = append(machines, machine)
+	}
+	m.machines = machines
+	if m.machineIndex(m.machine) >= 0 {
+		return m, nil
+	}
+	// The selected profile is gone (removed or disabled): fall back to local and
+	// load it, so the picker never shows a server it can no longer reach.
+	m.notify("machine removed — back to local", sevWarning)
+	m = m.switchMachine("")
+	var reload tea.Cmd
+	m, reload = m.reloadCmd()
+	return m, reload
 }
 
 func (m Model) storeCache(mode sessionmgr.SourceMode, items []sessionmgr.Item) Model {
@@ -127,7 +205,7 @@ func (m Model) beginRefresh(source sessionmgr.SourceMode, force bool) (Model, te
 	m.refreshGen[source]++
 	gen := m.refreshGen[source]
 	m.inflightRefresh[source] = gen
-	refresh := refreshCmd(m.mux, source, gen, m.config.LoadOptions())
+	refresh := refreshCmd(m.activeMux(), source, gen, m.machine, m.config.LoadOptions())
 	if m.spinnerActive {
 		return m, refresh
 	}
@@ -159,9 +237,10 @@ func (m Model) anyRefreshInflight() bool {
 	return false
 }
 
-// reportSourceFailure toasts a source failure once per distinct message so a
-// persistently broken source (missing fd, unreachable multiplexer) does not
-// re-toast every second.
+// reportSourceFailure toasts a source failure once per distinct message and
+// machine so a persistently broken source (missing fd, unreachable multiplexer, a
+// dead ssh host) does not re-toast every second — while the same failure on
+// another machine still speaks up when the user switches to it.
 func (m Model) reportSourceFailure(
 	source sessionmgr.SourceMode,
 	message string,
@@ -173,15 +252,21 @@ func (m Model) reportSourceFailure(
 	if m.reportedWarnings == nil {
 		m.reportedWarnings = make(map[sessionmgr.SourceMode]string)
 	}
-	if m.reportedWarnings[source] == message {
+	reported := m.machine + "\x00" + message
+	if m.reportedWarnings[source] == reported {
 		return m
 	}
-	m.reportedWarnings[source] = message
+	m.reportedWarnings[source] = reported
 	m.notify(message, sev)
 	return m
 }
 
 func (m Model) handleRefreshMsg(msg refreshMsg) (Model, tea.Cmd) {
+	if msg.machine != m.machine {
+		// The selection moved to another machine while this load ran: its items
+		// belong to a server the picker is no longer showing.
+		return m, nil
+	}
 	if m.inflightRefresh == nil || msg.gen != m.inflightRefresh[msg.source] {
 		ctx := context.Background()
 		if m.logger.Enabled(ctx, slog.LevelDebug) {
@@ -199,6 +284,16 @@ func (m Model) handleRefreshMsg(msg refreshMsg) (Model, tea.Cmd) {
 	m.items = m.mergedItems()
 	m.loadedOnce = true
 	m.syncCursor()
+	if m.machine != "" {
+		// Only a saved machine gets a lasting error state: a dead ssh host would
+		// otherwise leave an empty window with a toast that has already faded.
+		// The local machine keeps today's toast-only behaviour.
+		if msg.err != nil {
+			m.loadError = msg.err.Error()
+		} else {
+			m.loadError = ""
+		}
+	}
 	switch {
 	case msg.err != nil:
 		m = m.reportSourceFailure(msg.source, msg.err.Error(), sevError)
