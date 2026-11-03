@@ -122,7 +122,7 @@ jobs:
       - name: Install Nix
         uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
 
-      # flake.nix builds Go 1.26.9 from source, which no binary cache serves, so
+      # flake.nix builds Go 1.26.10 from source, which no binary cache serves, so
       # the store is cached here. Only main saves: pull request caches are
       # scoped to their own branch and could never seed the next one.
       - name: Restore Nix store
