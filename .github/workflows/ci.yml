@@ -23,21 +23,29 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  # Never cancel a tag run: it carries the release.
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
 jobs:
-  verify:
+  checks:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up Go
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
           cache: true
 
       - name: Set up mise tools
-        uses: jdx/mise-action@v5
+        uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
         with:
           install: true
           cache: true
@@ -66,23 +74,17 @@ jobs:
       - name: Build CLI
         run: mise run build
 
-      - name: Install Nix
-        uses: cachix/install-nix-action@v31.11.1
-
-      - name: Evaluate Nix flake
-        run: nix flake check --all-systems --no-build --no-update-lock-file
-
-      - name: Build Nix package
-        run: nix build --no-link --no-update-lock-file --print-build-logs
-
   completion-bash3:
     runs-on: macos-latest
+    timeout-minutes: 15
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up Go
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
           cache: true
@@ -92,26 +94,90 @@ jobs:
           /bin/bash --version | head -1 | grep 'version 3.2'
           go test ./cmd/seshagy -run 'TestGeneratedBashWorksStandaloneAndDoesNotExecuteInput|TestGeneratedShellSyntax/bash' -count=1
 
+  nix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Two commits: a pull request's merge commit and its base, to see what changed.
+          fetch-depth: 2
+          persist-credentials: false
+
+      - name: Decide whether the package must be built
+        id: scope
+        run: |
+          # main and tags always build. A pull request builds only when it touches
+          # what the Nix package depends on beyond the Go sources the checks job
+          # already builds and tests: modules, the vendor hash, the flake.
+          if [ "$GITHUB_EVENT_NAME" != pull_request ]; then
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          elif grep -qE '^(go\.mod|go\.sum|flake\.nix|flake\.lock|nix/)' <<< "$(git diff --name-only HEAD^1 HEAD)"; then
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
+
+      # flake.nix builds Go 1.26.9 from source, which no binary cache serves, so
+      # the store is cached here. Only main saves: pull request caches are
+      # scoped to their own branch and could never seed the next one.
+      - name: Restore Nix store
+        uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7
+        with:
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.nix', 'flake.lock', 'nix/**') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+          gc-max-store-size-linux: 2G
+          save: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+
+      - name: Evaluate Nix flake
+        run: nix flake check --all-systems --no-build --no-update-lock-file
+
+      - name: Build Nix package
+        if: steps.scope.outputs.build == 'true'
+        run: nix build --no-link --no-update-lock-file --print-build-logs
+
+  # The required check. One always-running job, so a failed, skipped or
+  # cancelled dependency can never report green.
+  verify:
+    if: always()
+    needs: [checks, completion-bash3, nix]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Require every check
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "results: $RESULTS"
+          for result in $RESULTS; do test "$result" = success; done
+
   release:
-    needs: [verify, completion-bash3]
+    needs: [verify]
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: write
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          filter: blob:none
+          persist-credentials: false
 
       - name: Set up Go
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
           cache: true
 
       - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v7
+        uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
         with:
           distribution: goreleaser
           version: "~> v2"
