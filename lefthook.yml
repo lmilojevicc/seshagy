@@ -1,0 +1,14 @@
+# Fast local checks before every push. lefthook comes from mise.toml;
+# install the hook once per clone: `lefthook install`.
+pre-push:
+  parallel: true
+  jobs:
+    - name: fmt
+      glob: "*.{go,yml,yaml}"
+      run: mise run fmt:check
+    - name: lint
+      glob: "*.go"
+      run: golangci-lint run --new-from-rev=origin/main ./...
+    - name: vet
+      glob: "*.go"
+      run: mise run vet
