@@ -42,7 +42,7 @@ jobs:
           ref: ${{ env.BRANCH }}
 
       - name: Install Nix
-        uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
+        uses: cachix/install-nix-action@382a9ed9481c7c1f94f68b72ef105b3417c73877 # v32.1.0
 
       - name: Recompute vendorHash
         run: ./nix/update-vendor-hash.sh
